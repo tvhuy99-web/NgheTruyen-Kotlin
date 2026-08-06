@@ -1,0 +1,77 @@
+name: Repository completeness audit
+
+on:
+  push:
+    paths:
+      - ".github/workflows/repository-audit.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Generate tracked-file manifests
+        shell: bash
+        run: |
+          set -uo pipefail
+          git ls-files | LC_ALL=C sort > REPOSITORY_FILE_LIST.txt
+          : > REPOSITORY_SHA256.txt
+          while IFS= read -r file; do
+            sha256sum -- "$file" >> REPOSITORY_SHA256.txt
+          done < REPOSITORY_FILE_LIST.txt
+
+      - name: Run source validation
+        shell: bash
+        run: |
+          set +e
+          {
+            echo "REPOSITORY_AUDIT_VERSION=1"
+            echo "COMMIT_SHA=${GITHUB_SHA}"
+            echo "TRACKED_FILE_COUNT=$(wc -l < REPOSITORY_FILE_LIST.txt)"
+            echo "AUDIT_WORKFLOW=.github/workflows/repository-audit.yml"
+            echo
+            if [[ -f scripts/validate_release.py ]]; then
+              python3 scripts/validate_release.py
+              echo "VALIDATE_RELEASE_EXIT=$?"
+            else
+              echo "VALIDATE_RELEASE_EXIT=127"
+              echo "MISSING=scripts/validate_release.py"
+            fi
+            echo
+            for path in \
+              settings.gradle.kts \
+              build.gradle.kts \
+              app/build.gradle.kts \
+              app/src/main/AndroidManifest.xml \
+              gradlew \
+              gradlew.bat \
+              gradle/wrapper/gradle-wrapper.properties \
+              scripts/bootstrap-wrapper.sh \
+              scripts/check_priority2_complete.py \
+              scripts/check_p2_android_wiring.py \
+              scripts/check_kotlin_static.py; do
+              if [[ -f "$path" ]]; then
+                echo "PRESENT=$path"
+              else
+                echo "MISSING=$path"
+              fi
+            done
+          } > REPOSITORY_AUDIT_REPORT.txt 2>&1
+          cat REPOSITORY_AUDIT_REPORT.txt
+
+      - name: Commit audit reports
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add REPOSITORY_AUDIT_REPORT.txt REPOSITORY_FILE_LIST.txt REPOSITORY_SHA256.txt
+          git commit -m "chore: record repository completeness audit"
+          git push

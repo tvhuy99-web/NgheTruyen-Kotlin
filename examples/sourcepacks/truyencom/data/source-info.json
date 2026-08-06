@@ -1,0 +1,39 @@
+{
+  "legacyId": "truyencom",
+  "categories": [
+    "Mới cập nhật",
+    "Truyện mới đăng",
+    "Truyện Hot",
+    "Truyện Full",
+    "Tiên Hiệp",
+    "Kiếm Hiệp",
+    "Ngôn Tình",
+    "Xuyên Không",
+    "Linh Dị",
+    "Huyền Huyễn",
+    "Đô Thị",
+    "Trọng Sinh",
+    "Đam Mỹ",
+    "Bách Hợp",
+    "Light Novel"
+  ],
+  "compatibilityTier": "FULL_BUILTIN_BRIDGE",
+  "preferSourcePack": true,
+  "selectionPriority": 220,
+  "delegateBuiltInId": "truyencom",
+  "parityEvidence": {
+    "adapter": "truyencom",
+    "actions": [
+      "home",
+      "genre",
+      "search",
+      "suggestions",
+      "detail",
+      "latestChapter",
+      "toc",
+      "tocPages",
+      "chapter"
+    ],
+    "fixturePolicy": "offline-replay-plus-builtin-parser-tests"
+  }
+}

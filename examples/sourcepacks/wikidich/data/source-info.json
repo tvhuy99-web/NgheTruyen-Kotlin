@@ -1,0 +1,40 @@
+{
+  "legacyId": "wikidich",
+  "categories": [
+    "Mới cập nhật",
+    "Truyện Full",
+    "Truyện Hot",
+    "Ngôn Tình Hay",
+    "Đam Mỹ Hay",
+    "Tiên Hiệp",
+    "Kiếm Hiệp",
+    "Ngôn Tình",
+    "Đam Mỹ",
+    "Bách Hợp",
+    "Huyền Huyễn",
+    "Đô Thị",
+    "Xuyên Không",
+    "Trọng Sinh",
+    "Linh Dị",
+    "Light Novel"
+  ],
+  "compatibilityTier": "FULL_BUILTIN_BRIDGE",
+  "preferSourcePack": true,
+  "selectionPriority": 220,
+  "delegateBuiltInId": "wikidich",
+  "parityEvidence": {
+    "adapter": "wikidich",
+    "actions": [
+      "home",
+      "genre",
+      "search",
+      "suggestions",
+      "detail",
+      "latestChapter",
+      "toc",
+      "tocPages",
+      "chapter"
+    ],
+    "fixturePolicy": "offline-replay-plus-builtin-parser-tests"
+  }
+}

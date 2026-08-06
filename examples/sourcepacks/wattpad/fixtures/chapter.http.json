@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "responses": [
+    {
+      "method": "GET",
+      "url": "https://www.wattpad.com/apiv2/storytext?id=456",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8"
+      },
+      "bodyText": "<p>Đoạn một của chương.</p><p>Đoạn hai của chương.</p>"
+    }
+  ]
+}

@@ -1,0 +1,312 @@
+package vn.nghetruyen.app.ui
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.weight
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import vn.nghetruyen.app.audio.AudioExportRequest
+import vn.nghetruyen.app.audio.AudioExportScope
+import vn.nghetruyen.app.core.model.AudioExportFormat
+import vn.nghetruyen.app.ui.screens.ExploreScreen
+import vn.nghetruyen.app.ui.screens.LibraryScreen
+import vn.nghetruyen.app.ui.screens.PersonalScreen
+import vn.nghetruyen.app.ui.screens.ReaderScreen
+import vn.nghetruyen.app.ui.screens.StoryDetailScreen
+
+@Composable
+fun NgheTruyenApp(
+    viewModel: AppViewModel,
+    onImportFile: () -> Unit,
+    onExportBackup: () -> Unit,
+    onRestoreBackup: () -> Unit,
+    onImportVietPhrase: () -> Unit,
+    onExportVietPhrase: () -> Unit,
+    onExportAudio: (AudioExportRequest) -> Unit,
+    onSelectBackgroundMusic: () -> Unit,
+    onSelectSceneMusic: () -> Unit,
+    onInstallSourcePack: () -> Unit,
+    onImportSourceTrustRotation: () -> Unit,
+    onExportSourceDiagnostics: () -> Unit,
+    onTogglePlayback: () -> Unit,
+    onFollowingUpdatesChange: (Boolean) -> Unit,
+) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    BackHandler(enabled = state.destination != Destination.Root) {
+        viewModel.back()
+    }
+
+    LaunchedEffect(state.message) {
+        val message = state.message ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(message)
+        viewModel.clearMessage()
+    }
+
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        bottomBar = {
+            if (state.destination == Destination.Root) {
+                PrimaryBottomBar(selected = state.rootTab, onSelect = viewModel::setRootTab)
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.background,
+    ) { padding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+        ) {
+            when (state.destination) {
+                Destination.Root -> when (state.rootTab) {
+                    RootTab.EXPLORE -> ExploreScreen(
+                        state = state,
+                        onQueryChange = viewModel::updateQuery,
+                        onSearch = { viewModel.search() },
+                        onSearchAllSourcesChange = viewModel::setSearchAllSources,
+                        onCancelSearch = viewModel::cancelSearch,
+                        onSourceSelected = viewModel::selectSource,
+                        onHomeSelected = viewModel::browseHome,
+                        onCategorySelected = viewModel::browseCategory,
+                        onSuggestionSelected = viewModel::selectSearchSuggestion,
+                        onLoadMore = viewModel::loadMoreStories,
+                        onStoryClick = viewModel::openStory,
+                    )
+                    RootTab.LIBRARY -> LibraryScreen(
+                        state = state,
+                        onSectionSelected = viewModel::setLibrarySection,
+                        onImportFile = onImportFile,
+                        onStoryClick = viewModel::openLibraryStory,
+                        onPauseDownload = viewModel::pauseDownload,
+                        onResumeDownload = viewModel::resumeDownload,
+                        onRetryDownload = viewModel::retryDownload,
+                        onRetryFailedChapter = viewModel::retryFailedChapter,
+                        onCancelDownload = viewModel::cancelDownload,
+                        onRemoveOffline = viewModel::removeOfflineStory,
+                        onCheckFollowing = viewModel::checkFollowingNow,
+                        onBookmarkClick = viewModel::openBookmark,
+                        onDeleteBookmark = viewModel::deleteBookmark,
+                        onNoteClick = viewModel::openNote,
+                        onDeleteNote = viewModel::deleteNote,
+                        onFollowingClick = viewModel::openFollowedStory,
+                    )
+                    RootTab.PERSONAL -> PersonalScreen(
+                        state = state,
+                        onRateChange = viewModel::setTtsRate,
+                        onPitchChange = viewModel::setTtsPitch,
+                        onVolumeChange = viewModel::setTtsVolume,
+                        onAutoNextChange = viewModel::setAutoPlayNextChapter,
+                        onEngineSelected = viewModel::selectTtsEngine,
+                        onVoiceSelected = viewModel::selectTtsVoice,
+                        onRefreshVoices = viewModel::refreshTtsVoices,
+                        onPreviewVoice = viewModel::previewTtsVoice,
+                        onOpenTtsSettings = viewModel::openTtsSettings,
+                        onInterruptionModeChange = viewModel::setAudioInterruptionMode,
+                        onHeadsetMultiClickChange = viewModel::setHeadsetMultiClickEnabled,
+                        onHeadsetSingleActionChange = viewModel::setHeadsetSingleClickAction,
+                        onHeadsetDoubleActionChange = viewModel::setHeadsetDoubleClickAction,
+                        onHeadsetTripleActionChange = viewModel::setHeadsetTripleClickAction,
+                        onHeadsetLongActionChange = viewModel::setHeadsetLongPressAction,
+                        onPauseOnHeadsetDisconnectChange = viewModel::setPauseOnHeadsetDisconnect,
+                        onRestorePlaybackChange = viewModel::setRestorePlaybackAfterProcessDeath,
+                        onAutoVoiceCastChange = viewModel::setAutoVoiceCastEnabled,
+                        onAutoSceneMusicChange = viewModel::setAutoSceneMusicEnabled,
+                        onPrefetchNarrationPlansChange = viewModel::setPrefetchNarrationPlansEnabled,
+                        onNarrationPrefetchWindowChange = viewModel::setNarrationPrefetchWindowChapters,
+                        onSceneMusicCrossfadeChange = viewModel::setSceneMusicCrossfadeMillis,
+                        onSceneMusicContinueChange = viewModel::setSceneMusicContinueAcrossChapters,
+                        onSceneMusicPlaybackModeChange = viewModel::setSceneMusicPlaybackMode,
+                        onSceneMusicTargetLufsChange = viewModel::setSceneMusicTargetLufs,
+                        onSceneMusicAvoidRepeatWindowChange = viewModel::setSceneMusicAvoidRepeatWindow,
+                        onSonicProcessingEnabledChange = viewModel::setSonicProcessingEnabled,
+                        onSonicDefaultSpeedChange = viewModel::setSonicDefaultSpeed,
+                        onSonicDefaultPitchChange = viewModel::setSonicDefaultPitch,
+                        onTtsCacheEnabledChange = viewModel::setTtsCacheEnabled,
+                        onTtsCacheLimitChange = viewModel::setTtsCacheLimitMiB,
+                        onNormalizeTtsVolumeChange = viewModel::setNormalizeTtsVolumeEnabled,
+                        onTtsTargetLufsChange = viewModel::setTtsTargetLufs,
+                        onSelectBackgroundMusic = onSelectBackgroundMusic,
+                        onClearBackgroundMusic = { viewModel.setBackgroundMusic(null) },
+                        onBackgroundMusicEnabledChange = viewModel::setBackgroundMusicEnabled,
+                        onBackgroundMusicVolumeChange = viewModel::setBackgroundMusicVolume,
+                        onBackgroundMusicDuckChange = viewModel::setBackgroundMusicDuckFactor,
+                        onAddPronunciation = viewModel::addPronunciation,
+                        onPronunciationEnabledChange = viewModel::setPronunciationEnabled,
+                        onDeletePronunciation = viewModel::deletePronunciation,
+                        onAddVietPhrase = viewModel::addVietPhrase,
+                        onImportVietPhrase = onImportVietPhrase,
+                        onExportVietPhrase = onExportVietPhrase,
+                        onCheckVietPhraseOnline = viewModel::checkVietPhraseOnlineUpdates,
+                        onInstallRecommendedVietPhrase = viewModel::installRecommendedVietPhrase,
+                        onVietPhraseEnabledChange = viewModel::setVietPhraseEnabled,
+                        onVietPhraseDictionaryEnabledChange = viewModel::setVietPhraseDictionaryEnabled,
+                        onDeleteVietPhrase = viewModel::deleteVietPhrase,
+                        onConfirmVietPhraseImport = viewModel::confirmVietPhraseImport,
+                        onCancelVietPhraseImport = viewModel::cancelVietPhraseImport,
+                        onRollbackVietPhrase = viewModel::rollbackVietPhrase,
+                        onAcceptVietPhraseSuggestion = viewModel::acceptVietPhraseSuggestion,
+                        onRejectVietPhraseSuggestion = viewModel::rejectVietPhraseSuggestion,
+                        onAiEnabledChange = viewModel::setAiOnlineEnabled,
+                        onAiConsentChange = viewModel::setAiConsent,
+                        onAiProviderChange = viewModel::setAiProvider,
+                        onRefreshGeminiModels = viewModel::refreshGeminiModels,
+                        onAiEndpointChange = viewModel::setAiEndpoint,
+                        onAiModelChange = viewModel::setAiModel,
+                        onAiTemperatureChange = viewModel::setAiTemperature,
+                        onAiInstructionChange = viewModel::setAiTranslationInstruction,
+                        onAiDailyRequestLimitChange = viewModel::setAiDailyRequestLimit,
+                        onAiDailyInputCharsLimitChange = viewModel::setAiDailyInputCharsLimit,
+                        onAiMaxRetriesChange = viewModel::setAiMaxRetries,
+                        onAiRetryBaseDelayChange = viewModel::setAiRetryBaseDelayMillis,
+                        onSaveAiApiKey = viewModel::saveAiApiKey,
+                        onClearAiApiKey = viewModel::clearAiApiKey,
+                        onSelectSceneMusic = onSelectSceneMusic,
+                        onUpdateSceneMusic = viewModel::updateSceneMusicTrack,
+                        onSceneMusicEnabledChange = viewModel::setSceneMusicTrackEnabled,
+                        onDeleteSceneMusic = viewModel::deleteSceneMusicTrack,
+                        onFollowingUpdatesChange = onFollowingUpdatesChange,
+                        onCheckFollowingNow = viewModel::checkFollowingNow,
+                        onCacheLimitChange = viewModel::setReaderCacheLimitMiB,
+                        onTrimReaderCache = viewModel::trimReaderCacheNow,
+                        onClearReaderCache = viewModel::clearReaderCache,
+                        onCancelAudioExport = viewModel::cancelAudioExport,
+                        onResumeAudioExport = viewModel::resumeAudioExport,
+                        onOpenAudioExport = viewModel::openAudioExport,
+                        onRunPerformanceDiagnostics = viewModel::runPerformanceDiagnostics,
+                        onBackupComponentChange = viewModel::setBackupComponentEnabled,
+                        onExportBackup = onExportBackup,
+                        onRestoreBackup = onRestoreBackup,
+                        onInstallSourcePack = onInstallSourcePack,
+                        onImportSourceTrustRotation = onImportSourceTrustRotation,
+                        onRefreshSourceRepository = viewModel::refreshSourceRepository,
+                        onRemoveSourceRepository = viewModel::removeSourceRepository,
+                        onPrepareRepositorySourceInstall = viewModel::prepareRepositorySourceInstall,
+                        onConfirmSourcePackInstall = viewModel::confirmSourcePackInstall,
+                        onCancelSourcePackInstall = viewModel::cancelSourcePackInstall,
+                        onSourcePackEnabledChange = viewModel::setSourcePackEnabled,
+                        onRollbackSourcePack = viewModel::rollbackSourcePack,
+                        onEnrollSourceTrustKey = viewModel::enrollSourceTrustKey,
+                        onRevokeSourceTrustKey = viewModel::revokeSourceTrustKey,
+                        onInspectSourceSelector = viewModel::inspectSourceSelector,
+                        onExportSourceDiagnostics = onExportSourceDiagnostics,
+                        onClearSourceDiagnostics = viewModel::clearSourceDiagnostics,
+                        onCheckSource = viewModel::checkSource,
+                        onCheckAllSources = viewModel::checkAllSources,
+                        onOpenSourceLogin = viewModel::openSourceLogin,
+                        onOpenSourceDiagnosticBrowser = viewModel::openSourceDiagnosticBrowser,
+                        onClearSourceSession = viewModel::clearSourceSession,
+                    )
+                }
+                Destination.Story -> StoryDetailScreen(
+                    state = state,
+                    onBack = viewModel::back,
+                    onReadFirst = viewModel::readFirst,
+                    onDownload = viewModel::downloadCurrentStory,
+                    onDownloadUnread = viewModel::downloadUnreadChapters,
+                    onDownloadRange = viewModel::downloadChapterRange,
+                    onToggleFollowing = viewModel::toggleFollowing,
+                    onExportAudio = onExportAudio,
+                    onSaveVoiceProfile = viewModel::saveVoiceProfileForCurrentStory,
+                    onClearVoiceProfile = viewModel::clearVoiceProfileForCurrentStory,
+                    onSaveVoiceRole = viewModel::saveVoiceRoleForCurrentStory,
+                    onPreviewVoiceRole = viewModel::previewVoiceRole,
+                    onLoadRoleVoices = viewModel::loadRoleEditorVoices,
+                    onVoiceRoleEnabledChange = viewModel::setVoiceRoleEnabled,
+                    onDeleteVoiceRole = viewModel::deleteVoiceRole,
+                    onSaveAiProfile = viewModel::saveStoryAiProfileForCurrentStory,
+                    onClearAiProfile = viewModel::clearStoryAiProfileForCurrentStory,
+                    onChapterClick = viewModel::openChapter,
+                    onLoadMoreChapters = viewModel::loadMoreChapters,
+                    onLoadAllChapters = viewModel::loadAllChapters,
+                    onLoadComments = viewModel::loadStoryComments,
+                    onLoadMoreComments = viewModel::loadMoreStoryComments,
+                    onOpenOriginal = viewModel::openExternalUrl,
+                )
+                Destination.Reader -> ReaderScreen(
+                    state = state,
+                    onBack = viewModel::back,
+                    onPreviousChapter = viewModel::previousChapter,
+                    onNextChapter = viewModel::nextChapter,
+                    onRewind = { viewModel.moveParagraph(-1) },
+                    onForward = { viewModel.moveParagraph(1) },
+                    onTogglePlayback = onTogglePlayback,
+                    onSleepTimer = viewModel::setSleepTimer,
+                    onBookmark = viewModel::bookmarkCurrent,
+                    onExportChapterWav = { onExportAudio(AudioExportRequest(AudioExportScope.CURRENT_CHAPTER, AudioExportFormat.WAV)) },
+                    onExportChapterM4a = { onExportAudio(AudioExportRequest(AudioExportScope.CURRENT_CHAPTER, AudioExportFormat.M4A)) },
+                    onExportChapterMp3 = { onExportAudio(AudioExportRequest(AudioExportScope.CURRENT_CHAPTER, AudioExportFormat.MP3)) },
+                    onSaveVoiceProfile = viewModel::saveVoiceProfileForCurrentStory,
+                    onClearVoiceProfile = viewModel::clearVoiceProfileForCurrentStory,
+                    onThemeChange = viewModel::setReaderTheme,
+                    onLayoutModeChange = viewModel::setReaderLayoutMode,
+                    onFontSizeChange = viewModel::setReaderFontSizeSp,
+                    onLineHeightChange = viewModel::setReaderLineHeightPercent,
+                    onHorizontalPaddingChange = viewModel::setReaderHorizontalPaddingDp,
+                    onParagraphSpacingChange = viewModel::setReaderParagraphSpacingDp,
+                    onKeepScreenOnChange = viewModel::setReaderKeepScreenOn,
+                    onVolumeKeysNavigateChange = viewModel::setReaderVolumeKeysNavigate,
+                    onParagraphSelected = viewModel::moveToParagraph,
+                    onSaveNote = viewModel::saveCurrentNote,
+                    onDeleteNote = viewModel::deleteNote,
+                    onApplyVietPhrase = viewModel::applyVietPhraseToCurrentChapter,
+                    onImproveVietPhrase = viewModel::improveVietPhraseForCurrentChapter,
+                    onAiTranslate = viewModel::aiTranslate,
+                    onShowOriginal = viewModel::showOriginalChapter,
+                    onVoiceCast = viewModel::voiceCast,
+                    onPlanSceneMusic = viewModel::planSceneMusic,
+                    onPlanNarration = viewModel::planNarration,
+                    onMessage = viewModel::readerActionMessage,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PrimaryBottomBar(
+    selected: RootTab,
+    onSelect: (RootTab) -> Unit,
+) {
+    Row(modifier = Modifier.fillMaxWidth()) {
+        listOf(
+            RootTab.EXPLORE to "KHÁM PHÁ",
+            RootTab.LIBRARY to "TỦ TRUYỆN",
+            RootTab.PERSONAL to "CÁ NHÂN",
+        ).forEach { (tab, label) ->
+            Button(
+                onClick = { onSelect(tab) },
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 60.dp)
+                    .padding(1.dp)
+                    .semantics {
+                        role = Role.Tab
+                        this.selected = selected == tab
+                    },
+            ) {
+                Text(label)
+            }
+        }
+    }
+}

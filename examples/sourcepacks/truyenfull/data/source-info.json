@@ -1,0 +1,37 @@
+{
+  "legacyId": "truyenfull",
+  "categories": [
+    "Truyện Hot",
+    "Truyện Full",
+    "Tiên Hiệp",
+    "Kiếm Hiệp",
+    "Ngôn Tình",
+    "Đô Thị",
+    "Huyền Huyễn",
+    "Xuyên Không",
+    "Trọng Sinh",
+    "Linh Dị",
+    "Đam Mỹ",
+    "Bách Hợp",
+    "Light Novel"
+  ],
+  "compatibilityTier": "FULL_BUILTIN_BRIDGE",
+  "preferSourcePack": true,
+  "selectionPriority": 220,
+  "delegateBuiltInId": "truyenfull",
+  "parityEvidence": {
+    "adapter": "truyenfull",
+    "actions": [
+      "home",
+      "genre",
+      "search",
+      "suggestions",
+      "detail",
+      "latestChapter",
+      "toc",
+      "tocPages",
+      "chapter"
+    ],
+    "fixturePolicy": "offline-replay-plus-builtin-parser-tests"
+  }
+}

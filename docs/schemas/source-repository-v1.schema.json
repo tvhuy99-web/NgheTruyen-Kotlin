@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nghetruyen.vn/schemas/source-repository-v1.schema.json",
+  "title": "Nghe Truyen Source Repository v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "repositoryId", "name", "generatedAtEpochMs", "expiresAtEpochMs",
+    "signerKeyId", "signatureAlgorithm", "packages", "signature"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "repositoryId": { "type": "string", "pattern": "^[a-z][a-z0-9]*(\\.[a-z0-9][a-z0-9-]*){2,}$" },
+    "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "generatedAtEpochMs": { "type": "integer", "minimum": 0 },
+    "expiresAtEpochMs": { "type": "integer", "minimum": 0 },
+    "signerKeyId": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "signatureAlgorithm": { "enum": ["ECDSA_P256_SHA256", "ED25519"] },
+    "signature": { "type": "string", "minLength": 1, "maxLength": 4096 },
+    "packages": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 500,
+      "items": { "$ref": "#/$defs/package" }
+    }
+  },
+  "$defs": {
+    "package": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceId", "name", "version", "packageUrl", "packageSha256", "packageBytes"],
+      "properties": {
+        "sourceId": { "type": "string", "pattern": "^[a-z][a-z0-9]*(\\.[a-z0-9][a-z0-9-]*){2,}$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$" },
+        "description": { "type": "string", "maxLength": 1000 },
+        "packageUrl": { "type": "string", "pattern": "^https://" },
+        "packageSha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" },
+        "packageBytes": { "type": "integer", "minimum": 1, "maximum": 16777216 },
+        "minAppVersion": { "type": "string" },
+        "maxAppVersion": { "type": "string" },
+        "adult": { "type": "boolean" },
+        "changelog": { "type": "string", "maxLength": 4000 }
+      }
+    }
+  }
+}

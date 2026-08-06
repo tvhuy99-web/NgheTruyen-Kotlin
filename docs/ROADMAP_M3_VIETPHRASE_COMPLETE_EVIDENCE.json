@@ -1,0 +1,114 @@
+{
+  "schemaVersion": 1,
+  "acceptedAt": "2026-08-06T07:02:00+07:00",
+  "scope": "Roadmap Milestone 3 VietPhrase source-side re-accepted after intentional M5 playback integration. Android runtime/device validation deferred by owner until after Milestone 9.",
+  "sourceStatus": "COMPLETE",
+  "xpkReference": {
+    "engineRevision": "vp-r9.4-ai-final-replace-20260725",
+    "importParserRevision": "vp-import-safe-dat-v1",
+    "vietPhraseLuaSha256": "74f8e442dfbbe5dc7120664f86a0c1a2ed7c09b24e042e238e74af351e21faab"
+  },
+  "performanceEvidence": {
+    "ruleCount": 100000,
+    "latestBuildAndLookupMs": 889,
+    "budgetMs": 20000
+  },
+  "gates": [
+    {
+      "gate": "check_roadmap_milestone3_vietphrase_complete.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_roadmap_m3_persistence_static.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_p4_transfer_static.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_p2_ui_static.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_p4_features.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_roadmap_milestone3_source_complete.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_milestone3_foundation.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_milestone3_ui_static.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_milestone4_complete.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_milestones_0_2_source_complete.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "validate_release.py",
+      "result": "PASS"
+    }
+  ],
+  "deferredChecks": [
+    "Gradle Android dependency resolution, Compose compiler, Room KSP/KAPT and Android Lint",
+    "APK/AAB, emulator, instrumentation and physical-device tests",
+    "Android SAF document-provider interoperability and on-device large-dictionary profiling"
+  ],
+  "trackedFiles": {
+    "MILESTONE_3_VIETPHRASE_COMPLETION_REPORT.md": "c5cd909edb87d2ebbd453b6aff97e44068568594475b2394d5665b4d0a273c2f",
+    "app/src/androidTest/java/vn/nghetruyen/app/data/local/AppDatabaseMigrationTest.kt": "9cedf46019f0e705749e48659cfef1e219488e0ad86d24643fe1eb4f295e76b2",
+    "app/src/main/java/vn/nghetruyen/app/MainActivity.kt": "23bf4e0917a5f8c7a66abef31028a2bd4cf22ca9ab637888b5a02443e74ad3f8",
+    "app/src/main/java/vn/nghetruyen/app/ai/VietPhraseProcessor.kt": "d4b43d200f55b10d92c76de91cc15a00bdcc10e520640f7b9cc3d409149e69e8",
+    "app/src/main/java/vn/nghetruyen/app/ai/vietphrase/VietPhraseArchiveCodec.kt": "e6aecccd440a8c66294f4ba6715fd33e4853aa35fc5ab301e88e56c848ff2b75",
+    "app/src/main/java/vn/nghetruyen/app/ai/vietphrase/VietPhraseAudit.kt": "ff45c3b45644d78d3cc33006e9ac4fd8c07f069e156237cdcdb643ac8dd8b018",
+    "app/src/main/java/vn/nghetruyen/app/ai/vietphrase/VietPhraseBinaryDictionaryCodec.kt": "e34af2a7d1111321882412cb101947ec14ec2ce01c6639f1ecdad877359ed0ef",
+    "app/src/main/java/vn/nghetruyen/app/ai/vietphrase/VietPhraseBundleCodec.kt": "313234eecbc587f2067d36fd24ac6339ef71583ae134c175216d317aade3979c",
+    "app/src/main/java/vn/nghetruyen/app/ai/vietphrase/VietPhraseDictionaryCodec.kt": "96281b1c5d0510be6f6497cc554798821f6bef960c65c020d0c22af04c049a17",
+    "app/src/main/java/vn/nghetruyen/app/ai/vietphrase/VietPhraseEngine.kt": "7ad72659a6d60e3a84ae89512c232ae1640e055b615d38fc1369376284d81181",
+    "app/src/main/java/vn/nghetruyen/app/ai/vietphrase/VietPhraseEntityMapper.kt": "a4b062f29722cecc7900ba0d0ee2d2a02d4c8230800accd008448099ffeb3658",
+    "app/src/main/java/vn/nghetruyen/app/ai/vietphrase/VietPhraseImportPlanner.kt": "23c3347aaec012ee3959bbab0fd55701083a1e69fbda4431e1eff793016cd5fe",
+    "app/src/main/java/vn/nghetruyen/app/ai/vietphrase/VietPhraseModels.kt": "f8fd7abefe686fcb6d57e4ca30df0bd1ecf18aa69629d271f69bc955e705f915",
+    "app/src/main/java/vn/nghetruyen/app/ai/vietphrase/VietPhrasePersistenceArchiveCodec.kt": "131cf78af168d28d2d4e49f1a2b83193c9c74d043fd97b46ad4d467ad7770c18",
+    "app/src/main/java/vn/nghetruyen/app/ai/vietphrase/VietPhraseProfiler.kt": "0cbd61ac9d7bbfe3094bca788e8c8d315cf67e6ec3a72ef2123e91a539ee97a0",
+    "app/src/main/java/vn/nghetruyen/app/data/local/AppDatabase.kt": "8c99f4c7cf4aa0d06ad32137ed04dca6264b2e9569f89d232b42be0b9008af3b",
+    "app/src/main/java/vn/nghetruyen/app/data/repository/LibraryRepository.kt": "73bd72c1dc0d83e650e840c6d5c2f73253dca16456fbf3dbb118964cd1876294",
+    "app/src/main/java/vn/nghetruyen/app/transfer/BackupTransferManager.kt": "2e0b2d8adce64ebf63a6da1604e81643bd722f2ac8bba55c1a439abb261f540b",
+    "app/src/main/java/vn/nghetruyen/app/transfer/VietPhraseTransferManager.kt": "f97d8de7a3109e5b751a27b3f486014f3ffae9b179429f0d22d206ae8e9451a7",
+    "app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt": "e52beed5b5847b44ffc6092552132cfe48d5acf0479e307106d5b1c269f8e967",
+    "app/src/main/java/vn/nghetruyen/app/ui/NgheTruyenApp.kt": "95b8492301b837ac9ba6c7230cf66520fdf9d3e1220eef6a6c3c48d95646c9ed",
+    "app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt": "f233d06d56e13b62b452f4a04f9bfcbc450dc79f65dddf6377fe1ed026068895",
+    "app/src/test/java/vn/nghetruyen/app/ai/vietphrase/VietPhraseArchiveCodecTest.kt": "11588691a51b12806c65591b18102fb7124bbaacc57cc0b9af2c67744d510d48",
+    "app/src/test/java/vn/nghetruyen/app/ai/vietphrase/VietPhraseBinaryDictionaryCodecTest.kt": "242c1cc33e39e94ba7cb7d4ccc38137e5218471a9d05c04b0c54eec47d7e4743",
+    "app/src/test/java/vn/nghetruyen/app/ai/vietphrase/VietPhraseBundleCodecTest.kt": "d241699d5a98d135b9e5ac074f25f3d12900ac703006f7b3718d05485c05c444",
+    "app/src/test/java/vn/nghetruyen/app/ai/vietphrase/VietPhraseEngineTest.kt": "358d90af43dd10cb223a2cad58b9023dac10cfa5e62233438431d351eaec6aaa",
+    "app/src/test/java/vn/nghetruyen/app/ai/vietphrase/VietPhrasePersistenceArchiveCodecTest.kt": "4d00971092f0942bd669b2e84cd407dfc5b73d8a2540df8fbfb5118937111034",
+    "app/src/test/resources/vietphrase/xpk_golden.tsv": "0bd5796251178628095f6f2fa75d565d40d1a3dbe06113a2f9709bd0eb54ffb8",
+    "docs/MILESTONE_3_VIETPHRASE_COMPLETION_REPORT.md": "c5cd909edb87d2ebbd453b6aff97e44068568594475b2394d5665b4d0a273c2f",
+    "docs/ROADMAP_MILESTONE_3_VIETPHRASE_STATUS.md": "5c919ecad2ea8b31a0b7e994971bd11e33416843c9ba4b4a06dfac9d2f464c35",
+    "docs/ROADMAP_MILESTONE_3_VIETPHRASE_VALIDATION.txt": "242dd0201259b69d25f587b6f0aa2639d3142d1bb9f24375bc79eb90b2a33295",
+    "docs/VIETPHRASE_PROFILER_BASELINE.md": "fe55d17c6f338cc7b9fa6c62deaaf8b39ef2db6ed48c87ad33892b48c946465a",
+    "docs/xpk_reference/vietphrase_v34_contract.json": "9c74db9c13b561e383a3ab2500783093febe936e329347667510804594dfce0c",
+    "scripts/check_milestone3_foundation.py": "1fd47d6da115b2d78c4e884012e2239f4a753f7e96ec581dbab7faaaac0db75f",
+    "scripts/check_p1_features.py": "dc31b919d178a39b597205fbc02a6c323f998de696726ee2a7dabaeb1ee447fa",
+    "scripts/check_p2_ui_static.py": "104e8091d04d5dd1f7856d1943e459a6b0fe4dc3bb0b1fef762ad886fea80e7a",
+    "scripts/check_p4_features.py": "7ee225baff531cf97377ddb425575b3d315957685bb60d4854c03023edeff20e",
+    "scripts/check_p4_transfer_static.py": "78b7cebae1c1da4a47adae48d0f53c830e6b8749b3e3655d2e5bf77ef5b15ccd",
+    "scripts/check_roadmap_m3_persistence_static.py": "0e25dcc75df03874c247653531eaf7a8dd5b2f00e3189278079512aa5d3070e8",
+    "scripts/check_roadmap_m3_vietphrase_complete_evidence.py": "25b8a8953217f4785defb4deebd514408894f4bd943ce40e29fceedf8114c4df",
+    "scripts/check_roadmap_m3_vietphrase_slice1.py": "d9529b4455d1c7032cdb91d8a6795d520ad19ed41ed526f44f452e379bb219a8",
+    "scripts/check_roadmap_milestone3_source_complete.py": "410632e4261530b0989fad1160a6c1e986cbe0a7d0083507c78f4a7780100300",
+    "scripts/check_roadmap_milestone3_vietphrase_complete.py": "c284fd38d0b04e5013cf954cc1d52bd56ad7fad1c2db0b03e3b2065dfa450d76",
+    "scripts/check_roadmap_milestone3_vietphrase_core.py": "4b35fb81c68fc63364801686ff15026f69de1e3680aedf5a9fbad4e66c92d143",
+    "scripts/validate_release.py": "3a9205d8b811206a83bbcfee3eb6a5f2eda3316337c2237415de6579e044f70b"
+  }
+}

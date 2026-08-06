@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "responses": [
+    {
+      "method": "GET",
+      "url": "https://www.wattpad.com/api/v3/stories/123?fields=id%2Ctitle%2Ccover%2Curl%2Cdescription%2Cuser(name%2Cusername)%2Ccompleted%2Ccategories%2Ctags%2CreadCount%2CvoteCount%2CnumParts%2CmodifyDate",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "bodyText": "{\"id\":123,\"title\":\"Gió Trên Đồi\",\"cover\":\"https://img.wattpad.com/cover/123.jpg\",\"url\":\"/story/123-gio-tren-doi\",\"description\":\"Mô tả truyện mẫu.\",\"user\":{\"name\":\"Tác giả mẫu\",\"username\":\"tacgiamau\"},\"completed\":false,\"tags\":[\"lãng mạn\",\"học đường\"],\"numParts\":2}"
+    }
+  ]
+}

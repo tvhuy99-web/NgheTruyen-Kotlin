@@ -1,0 +1,177 @@
+{
+  "schemaVersion": 1,
+  "acceptedAt": "2026-08-06T07:02:00+07:00",
+  "scope": "Roadmap Milestone 5 playback/TTS source-side acceptance. Android build, emulator, hardware, Bluetooth, live TTS engines and long-duration device certification deferred by owner until after Milestone 9.",
+  "sourceStatus": "COMPLETE",
+  "version": "2.1.0-milestone-5-playback-complete",
+  "databaseSchemaVersion": 16,
+  "backupFormatVersion": 12,
+  "runtimeEvidence": {
+    "playbackHealthEvents": 100000,
+    "boundedHealthLedger": 128,
+    "cacheLimitSmokeMiB": 8,
+    "persistentQueueMaxChapters": 5,
+    "watchdogInitMs": 12000,
+    "watchdogSpeechMinMs": 15000,
+    "watchdogSpeechMaxMs": 240000
+  },
+  "gates": [
+    {
+      "gate": "check_roadmap_milestone5_playback_complete.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "validate_release.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_milestone1_foundation.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_milestone1_reader_core.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_p1_ui_static.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_p1_features.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_milestone2_comments.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_comment_fixtures.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_legacy_source_audit.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_p2_sources.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_source_platform_android_static.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_source_platform_foundation.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_milestone2_source_platform.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_milestone2_complete.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_vbook_static.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_p3_features.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_p4_features.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_roadmap_milestone3_vietphrase_complete.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_roadmap_m3_persistence_static.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_p4_transfer_static.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_p2_ui_static.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_milestone3_foundation.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_milestone3_ui_static.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_milestone4_foundation.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_milestone4_complete.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_milestone5_foundation.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_milestones_0_2_source_complete.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_roadmap_m3_vietphrase_complete_evidence.py",
+      "result": "PASS"
+    }
+  ],
+  "deferredChecks": [
+    "Gradle Android dependency resolution, Compose compiler, Room KSP/KAPT and Android Lint",
+    "APK/AAB, emulator and instrumentation",
+    "Android 13-15 wired/Bluetooth headset, calls, alarms, audio routes and OEM TTS engines",
+    "multi-hour playback, battery, thermal, memory profiler and TalkBack on physical devices"
+  ],
+  "trackedFiles": {
+    "MILESTONE_5_PLAYBACK_COMPLETION_REPORT.md": "75c252dd71422d7573cff7a5d7186c752cd92b57c7dab6f0798bc6aae209c189",
+    "CHANGELOG.md": "9575e2553869d1a16c1ee5b0e1f948081d261ef68acdd172ce0b0cf10ebd2b8f",
+    "REWRITE_STATUS.json": "8053fc088c7bc0bad000781d12655e9e801dcacf0c2e5b9e64ed6ecd140dac4e",
+    "app/build.gradle.kts": "f757866e859a55516d43f62cb14e7f3b5d2d62a32b5807465283c6093317d881",
+    "app/src/main/AndroidManifest.xml": "492fd8dc92a2caa08f82b37d88fbe5fa88bd988538004b5dfb67666bd89087cc",
+    "app/src/main/java/vn/nghetruyen/app/data/local/AppDatabase.kt": "8c99f4c7cf4aa0d06ad32137ed04dca6264b2e9569f89d232b42be0b9008af3b",
+    "app/src/main/java/vn/nghetruyen/app/data/repository/LibraryRepository.kt": "73bd72c1dc0d83e650e840c6d5c2f73253dca16456fbf3dbb118964cd1876294",
+    "app/src/main/java/vn/nghetruyen/app/data/settings/SettingsRepository.kt": "e324164c7152e9156467784aa5f7cd76959813522e99b690835affaebeeef39a",
+    "app/src/main/java/vn/nghetruyen/app/playback/MediaButtonGestureInterpreter.kt": "3a3ce08e453e9ea79dea029981cc56c4a84a2d24a58693fc87d1911dff638290",
+    "app/src/main/java/vn/nghetruyen/app/playback/PlaybackHealthMonitor.kt": "56c370c7de6216e0046ec194bad09e96fa94a2ba09ec18ac01a25ac2a774dc16",
+    "app/src/main/java/vn/nghetruyen/app/playback/PlaybackQueueStore.kt": "a56ab45aa901cd421a20de9a21a0ae9fea333ec50e3b306c756743acdb37134b",
+    "app/src/main/java/vn/nghetruyen/app/playback/PlaybackRecoveryPolicy.kt": "ff2fbd761e055c552f96fcefa1c459723f7f64a931c0d6a62b34d711f22a94b2",
+    "app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt": "5a1c8a0a73c31f23c81dfd5d817f0cbb77a5957f8fc6375c141e200b82b86d03",
+    "app/src/main/java/vn/nghetruyen/app/playback/ReaderSleepTimerReceiver.kt": "ce8fd0052c7bffcbccac9994692de46158f5c7321130f3936503664f78340630",
+    "app/src/main/java/vn/nghetruyen/app/playback/SleepTimerPolicy.kt": "ad45af648daf128c9f8039c664dc71031a2f88c4746c0f11e32fb5e040d80eb6",
+    "app/src/main/java/vn/nghetruyen/app/playback/TtsAudioCache.kt": "ca1cfb46fee2059a40bc628ff567c8b8339dbbe79a2b9985bc460bca05fa605c",
+    "app/src/main/java/vn/nghetruyen/app/transfer/BackupTransferManager.kt": "2e0b2d8adce64ebf63a6da1604e81643bd722f2ac8bba55c1a439abb261f540b",
+    "app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt": "e52beed5b5847b44ffc6092552132cfe48d5acf0479e307106d5b1c269f8e967",
+    "app/src/main/java/vn/nghetruyen/app/ui/NgheTruyenApp.kt": "95b8492301b837ac9ba6c7230cf66520fdf9d3e1220eef6a6c3c48d95646c9ed",
+    "app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt": "f233d06d56e13b62b452f4a04f9bfcbc450dc79f65dddf6377fe1ed026068895",
+    "app/src/test/java/vn/nghetruyen/app/playback/MediaButtonGestureInterpreterTest.kt": "195941ecfd4fde224f3949fbf26564bc8768a0e6d362b1102e22251cdb69f7c0",
+    "app/src/test/java/vn/nghetruyen/app/playback/PlaybackRecoveryPolicyTest.kt": "1a17c6882b9fa53ae10fd8def70018637e5ab452a7eb88274c101d2a36ccc6e8",
+    "app/src/test/java/vn/nghetruyen/app/playback/SleepTimerPolicyTest.kt": "5eebb47241acb9577e5c3bcdcd027dc375034158371c8a4d9b9db3d2bb50dd7f",
+    "app/src/test/java/vn/nghetruyen/app/playback/TtsAudioCacheTest.kt": "4ac409d4afc2999d82660daaab9537129f7db9201cd966f24c5b233db9b7ea14",
+    "docs/MILESTONE_5_PLAYBACK_COMPLETION_REPORT.md": "75c252dd71422d7573cff7a5d7186c752cd92b57c7dab6f0798bc6aae209c189",
+    "docs/ROADMAP_MILESTONE_5_PLAYBACK_STATUS.md": "4af2bc9164b54de719d20876ee394f424a246d7ae8d61759e477c250e1083fa1",
+    "docs/ROADMAP_MILESTONE_5_PLAYBACK_VALIDATION.md": "3b31a39c2979449a851d70e77f0474a8bc5ab89c303a39fd70744ecbb6e4744e",
+    "scripts/build-milestone5.sh": "f0c5d7f22a7784b8f595bf7ab82759788d79f25d6b2f478bd6a8b5fac73ea59a",
+    "scripts/build-milestone5.ps1": "806c7cc4688c9b4c8bfffed6cedf82b92e60e9261f4d84e04c6592a71ecc209d",
+    "scripts/check_milestone1_foundation.py": "b67175ef96ff76d7b5021e6af26c584d4df113853f12d508ec70e9ef22f6112b",
+    "scripts/check_roadmap_milestone5_playback_complete.py": "809612727994dd34d89118ecf44b977e4d7844fa2be62354a09ba78305aea439",
+    "scripts/validate_release.py": "3a9205d8b811206a83bbcfee3eb6a5f2eda3316337c2237415de6579e044f70b",
+    "scripts/check_roadmap_m5_playback_complete_evidence.py": "bfaf28553e06cc36c00e527e48258769f3d3ac31957a09220ca526097275a57e",
+    "docs/MILESTONES_0_2_SOURCE_EVIDENCE.json": "0c517ece957f75b9c0d9eadec5bf258c7b2b38e33f61819ed34ad9cb04e4000b",
+    "docs/ROADMAP_M3_VIETPHRASE_COMPLETE_EVIDENCE.json": "7ac8a2027e6f762262d7413bbefe7b149917c59f77a44afe9c21ce06eac11fd0",
+    "scripts/check_milestones_0_2_source_complete.py": "b5e69ad0ec84cb4087acbf293bc3dc6d79b011b7a7c52b93b9df2b54901f3bed",
+    "scripts/check_roadmap_m3_vietphrase_complete_evidence.py": "25b8a8953217f4785defb4deebd514408894f4bd943ce40e29fceedf8114c4df"
+  }
+}

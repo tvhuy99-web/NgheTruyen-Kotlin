@@ -1,0 +1,8 @@
+M0 JVM fallback compile (not a substitute for Gradle/Android build)
+Compiler: kotlinc-jvm 1.9.0
+source-api: PASS
+source-diagnostics: PASS
+source-package: PASS
+source-store: PASS
+source-repository: PASS
+Android app/source-network/source-runtime/source-vbook: NOT VERIFIED by this fallback because external/Android dependencies are unavailable.

@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 1,
+  "acceptedAt": "2026-08-06T07:02:00+07:00",
+  "scope": "Milestones 0-2 source-side re-accepted after intentional M5 playback integration; Android runtime and live-site verification deferred by owner until after Milestone 9.",
+  "gates": [
+    {
+      "gate": "check_milestone1_foundation.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_milestone1_reader_core.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_p1_ui_static.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_p1_features.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_milestone2_comments.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_comment_fixtures.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_legacy_source_audit.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_p2_sources.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_source_platform_android_static.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_source_platform_foundation.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_milestone2_source_platform.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_milestone2_complete.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "check_vbook_static.py",
+      "result": "PASS"
+    },
+    {
+      "gate": "validate_release.py",
+      "result": "PASS"
+    }
+  ],
+  "compilerEvidence": {
+    "foundation": "Recompiled source-api, source-diagnostics, source-package, source-store and source-runtime as isolated JARs; signed-pack/rollback/runtime smoke PASS.",
+    "milestone2": "Recompiled source-network and source-repository as isolated JARs; network/repository/fixture/repository-signature smoke PASS."
+  },
+  "deferredChecks": [
+    "Gradle Android dependency resolution, Compose compiler, Room KSP/KAPT and Android Lint",
+    "APK/AAB, emulator, instrumentation and physical-device tests",
+    "Live-site checks for seven providers, cookies/login/WebView and third-party plugins"
+  ],
+  "trackedFiles": {
+    "app/src/main/java/vn/nghetruyen/app/MainActivity.kt": "23bf4e0917a5f8c7a66abef31028a2bd4cf22ca9ab637888b5a02443e74ad3f8",
+    "app/src/main/java/vn/nghetruyen/app/core/model/Models.kt": "6c31676fa06721d8006dbf8a2cfdeffec7b32244110c4f56eff862d9fce5951a",
+    "app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt": "5a1c8a0a73c31f23c81dfd5d817f0cbb77a5957f8fc6375c141e200b82b86d03",
+    "app/src/main/java/vn/nghetruyen/app/playback/ReaderPositionResolver.kt": "901a02d9fefe29c1bfb249903055b9f1340389fe778fa749cbdc6c36911fe537",
+    "app/src/main/java/vn/nghetruyen/app/playback/ReaderVolumeKeyPolicy.kt": "555c32776f23e0db6c1af84263f85bd310e6cd380e3ad5dc656befd71d7f077d",
+    "app/src/main/java/vn/nghetruyen/app/sourceplatform/SourcePackStorySource.kt": "3a2b73f5f1871bbf4dab0f1eda3a3487eca9a7013ff2bcfe636496c42984cec9",
+    "app/src/main/java/vn/nghetruyen/app/sourceplatform/StoryCommentCache.kt": "e06b694130e4739b101d146316fe8a5b00b624c4152cec0bc57ea57c9117183b",
+    "app/src/main/java/vn/nghetruyen/app/sourceplatform/StoryCommentPayloadParser.kt": "549c3973ea7b3cba57761c725acc9ee3eb83266db9d167eed9eee38d6d5abec1",
+    "app/src/main/java/vn/nghetruyen/app/sources/StorySource.kt": "ed1bc9158bfd93b7c3944b3fb80a896aa379fbe48da6205ce275a8b1fb9da28c",
+    "app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt": "e52beed5b5847b44ffc6092552132cfe48d5acf0479e307106d5b1c269f8e967",
+    "app/src/main/java/vn/nghetruyen/app/ui/NgheTruyenApp.kt": "95b8492301b837ac9ba6c7230cf66520fdf9d3e1220eef6a6c3c48d95646c9ed",
+    "app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt": "af5c92fd70a728b6ccb67f7ab31dd166a210baa22e1a0de99be37c2627f3575d",
+    "app/src/test/java/vn/nghetruyen/app/playback/ReaderPositionResolverTest.kt": "1fc7e1187796364cae1e9cd1aa136ef558a6d4ab886b5fb0565988a81bbcd35d",
+    "app/src/test/java/vn/nghetruyen/app/playback/ReaderVolumeKeyPolicyTest.kt": "a3a720112fdf1ebaffe25b1b22b0084c6bf0bd45ddcb8c3c3ff9cd5e2192f90e",
+    "app/src/test/java/vn/nghetruyen/app/sourceplatform/StoryCommentCacheTest.kt": "62b2859e95a62e337ff8b9c89be1726b7dcc0f444be9b73cfe6da3a44ae3fa3e",
+    "docs/MILESTONES_0_2_SOURCE_ACCEPTANCE.md": "ca2932a826dfdf99f80326724ea1a9ef9884f3266d33633bd315d923f9aec9c3",
+    "docs/XPK_V34_SOURCE_COMPATIBILITY.json": "3c63709b9c7c26dce854d9f3abd9141c403d717050a086841981124f33d3def0",
+    "docs/XPK_V34_SOURCE_COMPATIBILITY.md": "3f3d64e25660beac07544461bd0626bb0d8f9c1c6367dfa321136f26eddac8ef",
+    "examples/comment-fixtures/page1.json": "fc00c0f8a611393024c4c10ec1f3446237e5459bcee010e2f39d0efb42b26380",
+    "examples/comment-fixtures/page2.json": "a162ed07593f74951ff34e694b28ff920cb15a73e9de84f5dabe0f7b56883759",
+    "scripts/check_comment_fixtures.py": "e79c558a5bf46354c9615ad84532c11405a5500f4ba92840dd08123832c66fcd",
+    "scripts/check_legacy_source_audit.py": "1d69334f0882eed0dd82e85a56127e744e26867b7a578aef122cd7462af4c690",
+    "scripts/check_milestone1_foundation.py": "b67175ef96ff76d7b5021e6af26c584d4df113853f12d508ec70e9ef22f6112b",
+    "scripts/check_milestone1_reader_core.py": "cfb94d85830e16d8bf5725760e0ef5d55914abd4c1e4ccb2180ef2ef7f840802",
+    "scripts/check_milestone2_comments.py": "a49de8da7f9857ddabe26c0bc2dea0c14048243eca43ee50cdf57829f59db56d",
+    "scripts/check_milestone2_source_platform.py": "7598946211779c735d1bd3bbb0c81db3a026f933d73930930f4d48dd21401d95",
+    "scripts/check_milestones_0_2_source_complete.py": "b5e69ad0ec84cb4087acbf293bc3dc6d79b011b7a7c52b93b9df2b54901f3bed",
+    "scripts/check_p1_ui_static.py": "7075c0395d00d204cc28df07a702941d46fd5452d6aa1483b0fb0c1bd1993730",
+    "scripts/check_source_platform_foundation.py": "37df7581560d57226f0da892842ecad867bf7eb872eee7f41bad1070d116259f",
+    "scripts/xpk/audit_legacy_sources.py": "6beac2ffea4c4ba48ece99b7becdf9ad082c07192f72c091eb576d4af0927fc7",
+    "source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt": "093f9549b62b0afe94c4ddba8effc1b9ad02f80afd821f20b48d75470a5c0eca"
+  }
+}

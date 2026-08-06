@@ -1,0 +1,384 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nghetruyen.vn/schemas/source-pack-v2.schema.json",
+  "title": "Nghe Truyen Source Pack v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "name",
+    "version",
+    "apiVersion",
+    "runtime",
+    "origins",
+    "capabilities",
+    "actions"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 2
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(\\.[a-z0-9][a-z0-9-]*){2,}$",
+      "maxLength": 160
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 1000
+    },
+    "author": {
+      "type": "string",
+      "maxLength": 120
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$"
+    },
+    "apiVersion": {
+      "type": "integer",
+      "minimum": 2,
+      "maximum": 2
+    },
+    "minAppVersion": {
+      "type": "string"
+    },
+    "maxAppVersion": {
+      "type": "string"
+    },
+    "locale": {
+      "type": "string",
+      "pattern": "^[a-z]{2,3}(?:-[A-Z]{2})?$"
+    },
+    "contentType": {
+      "enum": [
+        "NOVEL",
+        "COMIC",
+        "AUDIO",
+        "MIXED"
+      ]
+    },
+    "adult": {
+      "type": "boolean",
+      "default": false
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "DECLARATIVE",
+            "VBOOK_JS_COMPAT"
+          ]
+        },
+        "entry": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "instructionBudget": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 1000000
+        },
+        "memoryBudgetBytes": {
+          "type": "integer",
+          "minimum": 1048576,
+          "maximum": 67108864
+        },
+        "actionTimeoutMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 120000
+        }
+      }
+    },
+    "urlPatterns": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "maxLength": 500
+      }
+    },
+    "origins": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^https://(?:\\*\\.)?[A-Za-z0-9.-]+(?::[0-9]{1,5})?$"
+      }
+    },
+    "redirectOrigins": {
+      "type": "array",
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^https://(?:\\*\\.)?[A-Za-z0-9.-]+(?::[0-9]{1,5})?$"
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "network": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "methods": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "GET",
+                  "HEAD",
+                  "POST",
+                  "PUT",
+                  "PATCH",
+                  "DELETE"
+                ]
+              }
+            },
+            "maxResponseBytes": {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 16777216
+            },
+            "maxRequestBytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4194304
+            },
+            "requestsPerMinute": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 600
+            },
+            "maxConcurrent": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 8
+            }
+          }
+        },
+        "cookies": {
+          "enum": [
+            "NONE",
+            "READ",
+            "WRITE",
+            "READ_WRITE",
+            "BROWSER_SHARED"
+          ]
+        },
+        "browser": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "navigate": {
+              "type": "boolean"
+            },
+            "domSnapshot": {
+              "type": "boolean"
+            },
+            "click": {
+              "type": "boolean"
+            },
+            "input": {
+              "type": "boolean"
+            },
+            "requestMetadata": {
+              "type": "boolean"
+            },
+            "serviceWorkerCapture": {
+              "type": "boolean"
+            },
+            "pageJavaScript": {
+              "type": "boolean"
+            }
+          }
+        },
+        "storageBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16777216
+        },
+        "crypto": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "SHA256",
+              "HMAC_SHA256",
+              "AES_GCM_SECRET"
+            ]
+          }
+        },
+        "websocket": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "maxMessageBytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1048576
+            },
+            "maxLifetimeMs": {
+              "type": "integer",
+              "minimum": 1000,
+              "maximum": 300000
+            }
+          }
+        }
+      }
+    },
+    "actions": {
+      "type": "object",
+      "minProperties": 3,
+      "additionalProperties": false,
+      "properties": {
+        "home": {
+          "$ref": "#/$defs/action"
+        },
+        "genre": {
+          "$ref": "#/$defs/action"
+        },
+        "search": {
+          "$ref": "#/$defs/action"
+        },
+        "detail": {
+          "$ref": "#/$defs/action"
+        },
+        "tocPages": {
+          "$ref": "#/$defs/action"
+        },
+        "toc": {
+          "$ref": "#/$defs/action"
+        },
+        "chapter": {
+          "$ref": "#/$defs/action"
+        },
+        "comments": {
+          "$ref": "#/$defs/action"
+        },
+        "suggestions": {
+          "$ref": "#/$defs/action"
+        },
+        "login": {
+          "$ref": "#/$defs/action"
+        }
+      },
+      "required": [
+        "detail",
+        "toc",
+        "chapter"
+      ]
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sendsContentToThirdParty": {
+          "type": "boolean"
+        },
+        "thirdParties": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "maxLength": 200
+          }
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 1000
+        }
+      }
+    },
+    "fixtures": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "action",
+          "input",
+          "expected"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "action": {
+            "enum": [
+              "HOME",
+              "GENRE",
+              "SEARCH",
+              "DETAIL",
+              "TOC_PAGES",
+              "TOC",
+              "CHAPTER",
+              "COMMENTS",
+              "SUGGESTIONS"
+            ]
+          },
+          "input": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "fixture": {
+            "type": "string",
+            "maxLength": 240
+          },
+          "expected": {
+            "type": "string",
+            "maxLength": 240
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entry"
+      ],
+      "properties": {
+        "entry": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 500,
+          "maximum": 120000
+        },
+        "maxOutputBytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 4194304
+        }
+      }
+    }
+  }
+}

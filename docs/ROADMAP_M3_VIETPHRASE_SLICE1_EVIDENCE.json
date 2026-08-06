@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "scope": "roadmap-m3-vietphrase-slice1",
+  "status": "SUPERSEDED",
+  "supersededBy": "ROADMAP_M3_VIETPHRASE_COMPLETE_EVIDENCE.json",
+  "note": "The first core slice was intentionally extended by schema 14 persistence, advanced UI, binary import, lossless dictionary-state archives and final source acceptance. Use the complete evidence manifest."
+}

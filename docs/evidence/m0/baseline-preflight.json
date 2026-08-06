@@ -1,0 +1,43 @@
+{
+  "milestone": 0,
+  "project": "NgheTruyen_Kotlin_Milestone4_Complete_v2.0.0",
+  "overall": "BLOCKED",
+  "checks": [
+    {
+      "id": "project-layout",
+      "status": "PASS",
+      "detail": "Đủ tệp build bắt buộc.",
+      "remediation": "Khôi phục các tệp build từ nguồn kiểm soát phiên bản."
+    },
+    {
+      "id": "jdk-17",
+      "status": "BLOCKED",
+      "detail": "openjdk version \"21.0.10\" 2026-01-20",
+      "remediation": "Cài Temurin/OpenJDK 17 và đặt JAVA_HOME trỏ đến JDK 17."
+    },
+    {
+      "id": "gradle-wrapper",
+      "status": "WARN",
+      "detail": "Chưa có wrapper JAR; gradlew sẽ tải và kiểm SHA-256 khi có mạng.",
+      "remediation": "Chạy ./gradlew --version trên máy có Internet hoặc bổ sung wrapper JAR đã xác minh."
+    },
+    {
+      "id": "android-sdk",
+      "status": "BLOCKED",
+      "detail": "Không tìm thấy Android SDK.",
+      "remediation": "Đặt ANDROID_SDK_ROOT hoặc sdk.dir trong local.properties."
+    },
+    {
+      "id": "python3",
+      "status": "PASS",
+      "detail": "/opt/pyvenv/bin/python3",
+      "remediation": "Cài Python 3.10+."
+    },
+    {
+      "id": "test-inventory",
+      "status": "PASS",
+      "detail": "Phát hiện 45 tệp test Kotlin.",
+      "remediation": "Bổ sung unit/instrumentation tests."
+    }
+  ]
+}

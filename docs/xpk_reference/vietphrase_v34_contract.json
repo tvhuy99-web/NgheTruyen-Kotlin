@@ -1,0 +1,32 @@
+{
+  "source_file": "app/reader/vietphrase.lua",
+  "source_sha256": "74f8e442dfbbe5dc7120664f86a0c1a2ed7c09b24e042e238e74af351e21faab",
+  "engine_revision": "vp-r9.4-ai-final-replace-20260725",
+  "import_parser_revision": "vp-import-safe-dat-v1",
+  "dictionary_order": [
+    "LUAT_NHAN",
+    "PRONOUNS",
+    "PHIEN_AM",
+    "LAC_VIET",
+    "VIET_PHRASE",
+    "NAMES",
+    "AI_REPLACE"
+  ],
+  "base_priorities": {
+    "LUAT_NHAN": 50,
+    "PRONOUNS": 45,
+    "PHIEN_AM": 10,
+    "LAC_VIET": 20,
+    "VIET_PHRASE": 30,
+    "NAMES": 40,
+    "AI_REPLACE": 70
+  },
+  "behaviour": [
+    "longest-match",
+    "layer-priority",
+    "luatnhan-capture",
+    "one-meaning",
+    "punctuation-normalization",
+    "ai-replace-final-single-pass"
+  ]
+}

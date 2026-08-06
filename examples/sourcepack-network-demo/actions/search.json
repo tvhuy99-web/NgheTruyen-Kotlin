@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "steps": [
+    {
+      "op": "fetch",
+      "url": "https://api.example.org/search?q={{input.query|urlencode}}",
+      "method": "GET",
+      "headers": { "Accept": "application/json" },
+      "response": "JSON",
+      "as": "http"
+    },
+    { "op": "path", "from": "http", "path": "body.items", "as": "items" },
+    {
+      "op": "projectArray",
+      "from": "items",
+      "fields": {
+        "id": "id",
+        "title": "title",
+        "author": "author",
+        "description": "description",
+        "url": "url",
+        "coverUrl": "coverUrl",
+        "latestChapter": "latestChapter"
+      },
+      "as": "result"
+    },
+    { "op": "emit", "from": "result" }
+  ]
+}

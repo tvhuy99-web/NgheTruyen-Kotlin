@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "responses": [
+    {
+      "method": "GET",
+      "url": "https://www.wattpad.com/v4/search/stories/?query=l%C3%A3ng%20m%E1%BA%A1n&language=19&fields=stories(id%2Ctitle%2Curl%2Ccover%2Cuser(name%2Cusername))%2CnextUrl&offset=0&limit=30",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "bodyText": "{\"stories\":[{\"id\":123,\"title\":\"Gió Trên Đồi\",\"url\":\"/story/123-gio-tren-doi\",\"cover\":\"https://img.wattpad.com/cover/123.jpg\",\"user\":{\"name\":\"Tác giả mẫu\",\"username\":\"tacgiamau\"}}],\"nextUrl\":\"https://www.wattpad.com/v4/search/stories/?offset=30\"}"
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "comments": [
+    {"user": "Độc giả A", "time": "2026-08-05", "text": "Bình luận trang đầu."},
+    {"author": "Độc giả B", "date": "2026-08-04", "content": "Tên trường thay thế vẫn được chuẩn hóa."}
+  ],
+  "nextPageUrl": "https://example.test/comments?page=2"
+}

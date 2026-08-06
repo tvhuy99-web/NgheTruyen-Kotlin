@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 2,
+  "id": "vn.nghetruyen.sources.demo",
+  "name": "Nguồn mẫu SourcePack",
+  "description": "Nguồn khai báo tích hợp sẵn để kiểm tra package, trust, runtime và diagnostics.",
+  "author": "Nghe Truyện",
+  "version": "1.0.0",
+  "apiVersion": 2,
+  "minAppVersion": "1.1.0",
+  "locale": "vi-VN",
+  "contentType": "NOVEL",
+  "adult": false,
+  "runtime": {
+    "mode": "DECLARATIVE",
+    "instructionBudget": 20000,
+    "memoryBudgetBytes": 4194304,
+    "actionTimeoutMs": 5000
+  },
+  "urlPatterns": ["^sourcepack://vn\\.nghetruyen\\.sources\\.demo/story/[0-9]+$"] ,
+  "origins": ["https://example.invalid"],
+  "redirectOrigins": [],
+  "capabilities": {
+    "cookies": "NONE",
+    "browser": {
+      "navigate": false,
+      "domSnapshot": false,
+      "click": false,
+      "input": false,
+      "requestMetadata": false,
+      "serviceWorkerCapture": false,
+      "pageJavaScript": false
+    },
+    "storageBytes": 0,
+    "crypto": []
+  },
+  "actions": {
+    "search": { "entry": "actions/search.json", "maxOutputBytes": 1048576 },
+    "genre": { "entry": "actions/genre.json", "maxOutputBytes": 1048576 },
+    "detail": { "entry": "actions/detail.json", "maxOutputBytes": 1048576 },
+    "toc": { "entry": "actions/toc.json", "maxOutputBytes": 1048576 },
+    "chapter": { "entry": "actions/chapter.json", "maxOutputBytes": 1048576 }
+  },
+  "privacy": {
+    "sendsContentToThirdParty": false,
+    "thirdParties": [],
+    "note": "Không sử dụng mạng; toàn bộ dữ liệu nằm trong gói nguồn đã ký."
+  },
+  "fixtures": [
+    {
+      "name": "Tìm truyện mẫu",
+      "action": "SEARCH",
+      "input": "gió",
+      "expected": "fixtures/search/gio.expected.json"
+    }
+  ]
+}

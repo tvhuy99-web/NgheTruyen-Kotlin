@@ -1,0 +1,21 @@
+NgheTruyen v2.8.0 APK build readiness report
+==============================================
+
+Checks completed successfully:
+- scripts/validate_release.py: PASS
+- scripts/check_priority2_complete.py: PASS
+- scripts/check_p2_android_wiring.py: PASS
+- scripts/check_kotlin_static.py: PASS
+
+Android configuration detected:
+- applicationId: vn.nghetruyen.app
+- debug applicationId: vn.nghetruyen.app.debug
+- minSdk: 26
+- targetSdk: 36
+- compileSdk: 36
+- versionCode: 28
+- versionName: 2.8.0-ai-narration-priority2-complete
+
+APK was not compiled in the ChatGPT sandbox because the sandbox does not contain
+Android SDK 36 and blocks downloading required binary ZIP/JAR packages. A dedicated
+GitHub Actions workflow has been added at .github/workflows/build-apk.yml.

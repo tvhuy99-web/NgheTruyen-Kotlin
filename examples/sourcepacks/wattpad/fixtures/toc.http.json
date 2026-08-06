@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "responses": [
+    {
+      "method": "GET",
+      "url": "https://www.wattpad.com/api/v3/stories/123?fields=id%2Cparts(id%2Ctitle%2Curl%2Cdeleted%2Cdraft)",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "bodyText": "{\"id\":123,\"parts\":[{\"id\":455,\"title\":\"Chương 1\",\"url\":\"/455-chuong-1\",\"deleted\":false,\"draft\":false},{\"id\":456,\"title\":\"Chương 2\",\"url\":\"/456-chuong-2\",\"deleted\":false,\"draft\":false}]}"
+    }
+  ]
+}

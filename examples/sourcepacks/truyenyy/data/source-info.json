@@ -1,0 +1,36 @@
+{
+  "legacyId": "truyenyy",
+  "categories": [
+    "Mới cập nhật",
+    "Truyện mới đăng",
+    "Truyện dịch YY",
+    "Ngôn tình",
+    "Huyền huyễn",
+    "Đô thị",
+    "Xuyên không",
+    "Tiên hiệp",
+    "Kiếm hiệp",
+    "Khoa huyễn",
+    "Linh dị",
+    "Lịch sử"
+  ],
+  "compatibilityTier": "FULL_BUILTIN_BRIDGE",
+  "preferSourcePack": true,
+  "selectionPriority": 220,
+  "delegateBuiltInId": "truyenyy",
+  "parityEvidence": {
+    "adapter": "truyenyy",
+    "actions": [
+      "home",
+      "genre",
+      "search",
+      "suggestions",
+      "detail",
+      "latestChapter",
+      "toc",
+      "tocPages",
+      "chapter"
+    ],
+    "fixturePolicy": "offline-replay-plus-builtin-parser-tests"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "chapters": [
+    {
+      "id":"demo-1-chapter-1","storyId":"demo-1","index":0,"title":"Chương 1: Cánh cửa gió","url":"sourcepack://vn.nghetruyen.sources.demo/chapter/1",
+      "paragraphs":["Đây là chương được nạp từ SourcePack đã ký.","Runtime khai báo chỉ được đọc tài nguyên nằm trong chính gói nguồn.","Mỗi thao tác đều tạo trace chẩn đoán có giới hạn và được che dữ liệu nhạy cảm."],
+      "previousChapterUrl":null,"nextChapterUrl":"sourcepack://vn.nghetruyen.sources.demo/chapter/2"
+    },
+    {
+      "id":"demo-1-chapter-2","storyId":"demo-1","index":1,"title":"Chương 2: Con đường mới","url":"sourcepack://vn.nghetruyen.sources.demo/chapter/2",
+      "paragraphs":["Gói nguồn có thể được cập nhật và rollback độc lập với APK.","Registry cũ vẫn được giữ làm fallback trong giai đoạn chuyển tiếp."],
+      "previousChapterUrl":"sourcepack://vn.nghetruyen.sources.demo/chapter/1","nextChapterUrl":null
+    },
+    {
+      "id":"demo-2-chapter-1","storyId":"demo-2","index":0,"title":"Chương 1: Người giữ sách","url":"sourcepack://vn.nghetruyen.sources.demo/chapter/3",
+      "paragraphs":["Nguồn mẫu thứ hai chứng minh tìm kiếm và gom dữ liệu không phụ thuộc lớp Kotlin hard-code."],
+      "previousChapterUrl":null,"nextChapterUrl":null
+    }
+  ]
+}

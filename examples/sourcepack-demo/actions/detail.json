@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "steps": [
+    {"op":"resourceJson","path":"data/catalog.json","as":"catalog"},
+    {"op":"path","from":"catalog","path":"stories","as":"stories"},
+    {"op":"find","from":"stories","fields":["url","id"],"input":"url","as":"result"},
+    {"op":"emit","from":"result"}
+  ]
+}

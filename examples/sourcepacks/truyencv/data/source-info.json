@@ -1,0 +1,36 @@
+{
+  "legacyId": "truyencv",
+  "categories": [
+    "Mới cập nhật",
+    "Truyện hay",
+    "Huyền Huyễn",
+    "Hệ Thống",
+    "Đô Thị",
+    "Xuyên Không",
+    "Tiên Hiệp",
+    "Ngôn Tình",
+    "Đồng Nhân",
+    "Dị Năng",
+    "Hậu Cung",
+    "Dị Giới"
+  ],
+  "compatibilityTier": "FULL_BUILTIN_BRIDGE",
+  "preferSourcePack": true,
+  "selectionPriority": 220,
+  "delegateBuiltInId": "truyencv",
+  "parityEvidence": {
+    "adapter": "truyencv",
+    "actions": [
+      "home",
+      "genre",
+      "search",
+      "suggestions",
+      "detail",
+      "latestChapter",
+      "toc",
+      "tocPages",
+      "chapter"
+    ],
+    "fixturePolicy": "offline-replay-plus-builtin-parser-tests"
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 2,
+  "id": "vn.nghetruyen.sources.networkdemo",
+  "name": "Nguồn mạng mẫu",
+  "description": "SourcePack dùng network broker và HTTP snapshot replay.",
+  "author": "Nghe Truyện",
+  "version": "1.0.0",
+  "apiVersion": 2,
+  "minAppVersion": "1.3.0",
+  "locale": "vi-VN",
+  "contentType": "NOVEL",
+  "adult": false,
+  "runtime": {
+    "mode": "DECLARATIVE",
+    "instructionBudget": 20000,
+    "memoryBudgetBytes": 4194304,
+    "actionTimeoutMs": 10000
+  },
+  "urlPatterns": ["^https://api\\.example\\.org/story/[0-9]+$"],
+  "origins": ["https://api.example.org"],
+  "redirectOrigins": ["https://cdn.example.org"],
+  "capabilities": {
+    "network": {
+      "methods": ["GET", "HEAD"],
+      "maxResponseBytes": 1048576,
+      "maxRequestBytes": 0,
+      "requestsPerMinute": 60,
+      "maxConcurrent": 2
+    },
+    "cookies": "NONE",
+    "browser": {
+      "navigate": false,
+      "domSnapshot": false,
+      "click": false,
+      "input": false,
+      "requestMetadata": false,
+      "serviceWorkerCapture": false,
+      "pageJavaScript": false
+    },
+    "storageBytes": 0,
+    "crypto": []
+  },
+  "actions": {
+    "search": { "entry": "actions/search.json" },
+    "detail": { "entry": "actions/detail.json" },
+    "toc": { "entry": "actions/toc.json" },
+    "chapter": { "entry": "actions/chapter.json" }
+  },
+  "privacy": {
+    "sendsContentToThirdParty": false,
+    "thirdParties": [],
+    "note": "Chỉ gọi origin đã khai báo; fixture dùng replay ngoại tuyến."
+  },
+  "fixtures": [
+    {
+      "name": "Tìm truyện qua HTTP replay",
+      "action": "SEARCH",
+      "input": "gió mùa",
+      "fixture": "fixtures/search/gio.http.json",
+      "expected": "fixtures/search/gio.expected.json"
+    }
+  ]
+}

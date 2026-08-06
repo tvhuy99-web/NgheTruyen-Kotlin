@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "repositoryId": "vn.example.repositories.main",
+  "name": "Example Sources",
+  "generatedAtEpochMs": 1785866400000,
+  "expiresAtEpochMs": 1786471200000,
+  "signerKeyId": "example-p256-v1",
+  "signatureAlgorithm": "ECDSA_P256_SHA256",
+  "packages": [
+    {
+      "sourceId": "vn.example.sources.story",
+      "name": "Example Story",
+      "version": "1.0.0",
+      "description": "Gói SourcePack mẫu trong repository ký số.",
+      "packageUrl": "https://downloads.example.vn/story-1.0.0.ntsource",
+      "packageSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "packageBytes": 8421,
+      "minAppVersion": "1.3.0",
+      "maxAppVersion": "2.0.0",
+      "adult": false,
+      "changelog": "Bản đầu tiên"
+    }
+  ]
+}

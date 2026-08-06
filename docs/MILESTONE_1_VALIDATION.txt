@@ -1,0 +1,24 @@
+Nghe Truyen Kotlin 1.2.0, Milestone 1 foundation
+Validation date: 2026-08-04
+
+PASSED IN THIS ENVIRONMENT
+- Clean rewrite and forbidden legacy artifact gates
+- TruyenFull, TruyenCV, TruyenCom and TruyenYY fixtures
+- Kotlin core static compile
+- Audio export static compile
+- Android database/following/voice stub compile
+- P1, P2, P3 and P4 static/fixture/security gates
+- Source Platform foundation and Android wiring gates
+- Room 5->6 SQL creates download_jobs
+- Room 6->7 SQL normalizes defaults and preserves sample data
+- Gradle wrapper downloader Java compilation and checksum contract
+- JSON/XML and critical wiring release validation
+
+NOT EXECUTED IN THIS ENVIRONMENT
+- Gradle Sync and dependency resolution
+- Room KAPT and Compose compiler through AGP
+- testDebugUnitTest, lintDebug, assembleDebug, bundleRelease
+- connectedDebugAndroidTest on an Android emulator/device
+
+The included GitHub Actions workflow is configured to execute the missing
+Gradle build and API-33 instrumentation steps in an Android SDK environment.

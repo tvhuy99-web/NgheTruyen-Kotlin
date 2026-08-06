@@ -1,0 +1,32 @@
+{
+  "legacyId": "sangtacviet",
+  "categories": [
+    "Mới cập nhật",
+    "Xem nhiều tuần",
+    "Hoàn thành",
+    "Huyền huyễn",
+    "Đô thị",
+    "Ngôn tình",
+    "Đồng nhân",
+    "Khoa học viễn tưởng"
+  ],
+  "compatibilityTier": "FULL_BUILTIN_BRIDGE",
+  "preferSourcePack": true,
+  "selectionPriority": 220,
+  "delegateBuiltInId": "sangtacviet",
+  "parityEvidence": {
+    "adapter": "sangtacviet",
+    "actions": [
+      "home",
+      "genre",
+      "search",
+      "suggestions",
+      "detail",
+      "latestChapter",
+      "toc",
+      "tocPages",
+      "chapter"
+    ],
+    "fixturePolicy": "offline-replay-plus-builtin-parser-tests"
+  }
+}

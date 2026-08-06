@@ -1,0 +1,24 @@
+{
+  "legacyId": "wattpad",
+  "categories": [
+    "Lãng mạn",
+    "Đam mỹ / BL",
+    "Bách hợp / GL",
+    "Ngôn tình",
+    "Học đường",
+    "Hành động",
+    "Hài hước",
+    "Kinh dị",
+    "Bí ẩn / Trinh thám",
+    "Phiêu lưu",
+    "Fanfiction",
+    "Tu tiên / Tu chân",
+    "Xuyên không",
+    "Trọng sinh",
+    "Hệ thống",
+    "Khoa học viễn tưởng"
+  ],
+  "compatibilityTier": "FULL",
+  "preferSourcePack": true,
+  "selectionPriority": 200
+}

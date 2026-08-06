@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "responses": [
+    {
+      "method": "GET",
+      "url": "https://truyenfull.live",
+      "status": 200,
+      "headers": {
+        "content-type": [
+          "text/html; charset=utf-8"
+        ]
+      },
+      "bodyText": "<html><body><article class=\"story-item\"><h3 class=\"truyen-title\"><a href=\"https://truyenfull.live/truyen/mau\">Gió Mùa</a></h3><span class=\"author\">Tác giả Mẫu</span><img src=\"https://truyenfull.live/cover.jpg\"><p class=\"description\">Mô tả mẫu</p></article></body></html>"
+    }
+  ]
+}

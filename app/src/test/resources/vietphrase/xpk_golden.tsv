@@ -1,0 +1,8 @@
+# Fixtures transcribed from the legacy XPK pipeline contract in app/reader/vietphrase.lua.
+# id<TAB>input<TAB>expected
+longest_and_layer	天道。	Đạo Trời.
+luat_nhan	叶凡看着他。	Diệp Phàm nhìn hắn.
+one_meaning	道	Đạo
+multi_meaning	道	Đạo / lối / con đường
+ai_replace_one_pass	天道	Đạo Trời
+punctuation	“叶凡”，他说！	“Diệp Phàm”, hắn nói!

@@ -1,0 +1,132 @@
+{
+  "schemaVersion": 1,
+  "input": "Nghe_20260804_sua_phan_trang_chuong_tu_truyen_v34 (1).xpk",
+  "sourceCount": 7,
+  "items": [
+    {
+      "file": "nguon_sangtacviet_native.lua",
+      "source_key": "sangtacviet",
+      "legacy_runtime": "NATIVE",
+      "detected_actions": [
+        "CHAPTER",
+        "DETAIL",
+        "GENRE",
+        "SEARCH",
+        "TOC"
+      ],
+      "detected_capabilities": [
+        "cookies",
+        "storage"
+      ],
+      "existing_port": "examples/sourcepacks/sangtacviet",
+      "status": "PORTED_SOURCE_PRESENT",
+      "notes": [
+        "Đã có SourcePack tương ứng; chỉ bổ sung capability còn thiếu khi fixture chứng minh cần thiết."
+      ]
+    },
+    {
+      "file": "nguon_truyencom_native.lua",
+      "source_key": "truyencom",
+      "legacy_runtime": "NATIVE",
+      "detected_actions": [
+        "CHAPTER",
+        "DETAIL",
+        "SEARCH"
+      ],
+      "detected_capabilities": [],
+      "existing_port": "examples/sourcepacks/truyencom",
+      "status": "PORTED_SOURCE_PRESENT",
+      "notes": [
+        "Đã có SourcePack tương ứng; chỉ bổ sung capability còn thiếu khi fixture chứng minh cần thiết."
+      ]
+    },
+    {
+      "file": "nguon_truyencv_native.lua",
+      "source_key": "truyencv",
+      "legacy_runtime": "NATIVE",
+      "detected_actions": [
+        "CHAPTER",
+        "DETAIL",
+        "SEARCH"
+      ],
+      "detected_capabilities": [
+        "storage"
+      ],
+      "existing_port": "examples/sourcepacks/truyencv",
+      "status": "PORTED_SOURCE_PRESENT",
+      "notes": [
+        "Đã có SourcePack tương ứng; chỉ bổ sung capability còn thiếu khi fixture chứng minh cần thiết."
+      ]
+    },
+    {
+      "file": "nguon_truyenfull_native.lua",
+      "source_key": "truyenfull",
+      "legacy_runtime": "NATIVE",
+      "detected_actions": [
+        "CHAPTER",
+        "DETAIL",
+        "GENRE",
+        "SEARCH"
+      ],
+      "detected_capabilities": [],
+      "existing_port": "examples/sourcepacks/truyenfull",
+      "status": "PORTED_SOURCE_PRESENT",
+      "notes": [
+        "Đã có SourcePack tương ứng; chỉ bổ sung capability còn thiếu khi fixture chứng minh cần thiết."
+      ]
+    },
+    {
+      "file": "nguon_truyenyy_native.lua",
+      "source_key": "truyenyy",
+      "legacy_runtime": "NATIVE",
+      "detected_actions": [
+        "CHAPTER",
+        "DETAIL",
+        "SEARCH",
+        "TOC"
+      ],
+      "detected_capabilities": [
+        "storage"
+      ],
+      "existing_port": "examples/sourcepacks/truyenyy",
+      "status": "PORTED_SOURCE_PRESENT",
+      "notes": [
+        "Đã có SourcePack tương ứng; chỉ bổ sung capability còn thiếu khi fixture chứng minh cần thiết."
+      ]
+    },
+    {
+      "file": "nguon_wattpad_vbook.lua",
+      "source_key": "wattpad",
+      "legacy_runtime": "VBOOK",
+      "detected_actions": [
+        "DETAIL",
+        "GENRE",
+        "HOME",
+        "SEARCH",
+        "TOC"
+      ],
+      "detected_capabilities": [],
+      "existing_port": "examples/sourcepacks/wattpad",
+      "status": "PORTED_SOURCE_PRESENT",
+      "notes": [
+        "Đã có SourcePack tương ứng; chỉ bổ sung capability còn thiếu khi fixture chứng minh cần thiết."
+      ]
+    },
+    {
+      "file": "nguon_wikidich_native.lua",
+      "source_key": "wikidich",
+      "legacy_runtime": "NATIVE",
+      "detected_actions": [
+        "CHAPTER",
+        "DETAIL",
+        "SEARCH"
+      ],
+      "detected_capabilities": [],
+      "existing_port": "examples/sourcepacks/wikidich",
+      "status": "PORTED_SOURCE_PRESENT",
+      "notes": [
+        "Đã có SourcePack tương ứng; chỉ bổ sung capability còn thiếu khi fixture chứng minh cần thiết."
+      ]
+    }
+  ]
+}

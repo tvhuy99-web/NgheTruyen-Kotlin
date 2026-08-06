@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "steps": [
+    {"op":"resourceJson","path":"data/chapters.json","as":"catalog"},
+    {"op":"path","from":"catalog","path":"chapters","as":"chapters"},
+    {"op":"find","from":"chapters","fields":["url","id"],"input":"url","as":"result"},
+    {"op":"emit","from":"result"}
+  ]
+}

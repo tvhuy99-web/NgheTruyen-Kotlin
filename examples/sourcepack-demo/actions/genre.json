@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "steps": [
+    {"op":"resourceJson","path":"data/catalog.json","as":"catalog"},
+    {"op":"path","from":"catalog","path":"stories","as":"stories"},
+    {"op":"filterArrayContains","from":"stories","field":"genres","queryInput":"category","as":"filtered"},
+    {"op":"paginate","from":"filtered","pageInput":"page","pageSize":20,"as":"result"},
+    {"op":"emit","from":"result"}
+  ]
+}

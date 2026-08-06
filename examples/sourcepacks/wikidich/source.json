@@ -1,0 +1,155 @@
+{
+  "schemaVersion": 2,
+  "id": "vn.nghetruyen.sources.wikidich",
+  "name": "WikiDich",
+  "description": "Nguồn tích hợp full-fidelity: SourcePack quản lý package/quyền, parser website dùng adapter Kotlin đã kiểm thử.",
+  "author": "Nghe Truyện Kotlin",
+  "version": "1.1.0",
+  "apiVersion": 2,
+  "minAppVersion": "1.4.0",
+  "locale": "vi-VN",
+  "contentType": "NOVEL",
+  "adult": false,
+  "runtime": {
+    "mode": "DECLARATIVE",
+    "instructionBudget": 300000,
+    "memoryBudgetBytes": 16777216,
+    "actionTimeoutMs": 45000
+  },
+  "urlPatterns": [
+    "https://wikidichvn\\.com.*"
+  ],
+  "origins": [
+    "https://wikidichvn.com"
+  ],
+  "redirectOrigins": [
+    "https://wikidichvn.com"
+  ],
+  "capabilities": {
+    "network": {
+      "methods": [
+        "GET",
+        "HEAD"
+      ],
+      "maxResponseBytes": 8388608,
+      "maxRequestBytes": 0,
+      "requestsPerMinute": 90,
+      "maxConcurrent": 2
+    },
+    "cookies": "READ_WRITE",
+    "browser": {},
+    "storageBytes": 524288,
+    "crypto": [
+      "SHA256"
+    ],
+    "websocket": {}
+  },
+  "actions": {
+    "home": {
+      "entry": "actions/home.json",
+      "maxOutputBytes": 2097152
+    },
+    "genre": {
+      "entry": "actions/genre.json",
+      "maxOutputBytes": 2097152
+    },
+    "search": {
+      "entry": "actions/search.json",
+      "maxOutputBytes": 2097152
+    },
+    "detail": {
+      "entry": "actions/detail.json",
+      "maxOutputBytes": 2097152
+    },
+    "toc": {
+      "entry": "actions/toc.json",
+      "maxOutputBytes": 4194304
+    },
+    "chapter": {
+      "entry": "actions/chapter.json",
+      "maxOutputBytes": 4194304
+    },
+    "latest_chapter": {
+      "entry": "actions/latest.json",
+      "maxOutputBytes": 4194304
+    },
+    "tocPages": {
+      "entry": "actions/toc-pages.json",
+      "maxOutputBytes": 4194304
+    },
+    "suggestions": {
+      "entry": "actions/suggestions.json",
+      "maxOutputBytes": 2097152
+    }
+  },
+  "privacy": {
+    "sendsContentToThirdParty": false,
+    "thirdParties": [],
+    "note": "Chỉ kết nối đến website nguồn được khai báo."
+  },
+  "fixtures": [
+    {
+      "name": "search html",
+      "action": "SEARCH",
+      "input": "fixtures/search.input.json",
+      "fixture": "fixtures/search.http.json",
+      "expected": "fixtures/search.expected.json"
+    },
+    {
+      "name": "detail html",
+      "action": "DETAIL",
+      "input": "fixtures/detail.input.json",
+      "fixture": "fixtures/detail.http.json",
+      "expected": "fixtures/detail.expected.json"
+    },
+    {
+      "name": "toc html",
+      "action": "TOC",
+      "input": "fixtures/toc.input.json",
+      "fixture": "fixtures/toc.http.json",
+      "expected": "fixtures/toc.expected.json"
+    },
+    {
+      "name": "chapter html",
+      "action": "CHAPTER",
+      "input": "fixtures/chapter.input.json",
+      "fixture": "fixtures/chapter.http.json",
+      "expected": "fixtures/chapter.expected.json"
+    },
+    {
+      "name": "home html",
+      "action": "HOME",
+      "input": "fixtures/home.input.json",
+      "fixture": "fixtures/home.http.json",
+      "expected": "fixtures/home.expected.json"
+    },
+    {
+      "name": "genre html",
+      "action": "GENRE",
+      "input": "fixtures/genre.input.json",
+      "fixture": "fixtures/genre.http.json",
+      "expected": "fixtures/genre.expected.json"
+    },
+    {
+      "name": "suggestions html",
+      "action": "SUGGESTIONS",
+      "input": "fixtures/search.input.json",
+      "fixture": "fixtures/search.http.json",
+      "expected": "fixtures/suggestions.expected.json"
+    },
+    {
+      "name": "latest chapter html",
+      "action": "LATEST_CHAPTER",
+      "input": "fixtures/toc.input.json",
+      "fixture": "fixtures/toc.http.json",
+      "expected": "fixtures/latest.expected.json"
+    },
+    {
+      "name": "toc page continuation html",
+      "action": "TOC_PAGES",
+      "input": "fixtures/toc-page.input.json",
+      "fixture": "fixtures/toc.http.json",
+      "expected": "fixtures/toc.expected.json"
+    }
+  ]
+}

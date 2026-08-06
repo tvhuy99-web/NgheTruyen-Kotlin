@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "responses": [
+    {
+      "method": "GET",
+      "url": "https://api.example.org/search?q=gi%C3%B3%20m%C3%B9a",
+      "status": 200,
+      "headers": { "content-type": "application/json; charset=utf-8" },
+      "bodyText": "{\"items\":[{\"id\":\"story-1\",\"title\":\"Gió Mùa\",\"author\":\"Tác giả mẫu\",\"description\":\"Dữ liệu phát lại ngoại tuyến\",\"url\":\"https://api.example.org/story/1\",\"coverUrl\":null,\"latestChapter\":\"Chương 12\"}]}"
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "items": [
+    {"name": "Độc giả C", "time": "2026-08-03", "description": "Bình luận trang tiếp theo."},
+    {"user": "Độc giả A", "time": "2026-08-05", "text": "Bình luận trang đầu."}
+  ],
+  "next": "NO_NEXT"
+}

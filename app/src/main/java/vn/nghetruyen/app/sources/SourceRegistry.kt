@@ -1,0 +1,185 @@
+package vn.nghetruyen.app.sources
+
+import vn.nghetruyen.app.core.common.AppResult
+import vn.nghetruyen.app.core.model.ChapterContent
+import vn.nghetruyen.app.core.model.ChapterSummary
+import vn.nghetruyen.app.core.model.SourceHealth
+import vn.nghetruyen.app.core.model.StoryDetail
+import vn.nghetruyen.app.core.model.StorySummary
+
+class SourceRegistry(
+    sources: List<StorySource>? = null,
+    sessionStore: SourceSessionStore = InMemorySourceSessionStore(),
+    sourcePackSources: List<StorySource> = emptyList(),
+) {
+    private val legacySources = sources ?: defaultSources(sessionStore)
+    @Volatile
+    private var byId: Map<String, StorySource> = merge(sourcePackSources)
+
+    fun descriptors(): List<SourceDescriptor> = byId.values.map { it.descriptor }
+    fun get(id: String): StorySource? = byId[id]
+    fun searchableSources(): List<StorySource> = byId.values.filter {
+        it.descriptor.health == SourceHealth.READY || it.descriptor.health == SourceHealth.DEGRADED
+    }
+
+    @Synchronized
+    fun refreshSourcePacks(sourcePackSources: List<StorySource>) {
+        byId = merge(sourcePackSources)
+    }
+
+    private fun merge(sourcePackSources: List<StorySource>): Map<String, StorySource> {
+        val selected = linkedMapOf<String, StorySource>()
+        val builtInsById = legacySources.associateBy { it.descriptor.id }
+
+        // Built-in adapters are considered first. A certified SourcePack may attach
+        // itself to the matching adapter, but only when source-info.json names the
+        // same stable legacy id. This gives the pack full website fidelity without
+        // letting an arbitrary package redirect to a different built-in source.
+        legacySources.forEach { selected[it.descriptor.id] = it }
+        sourcePackSources.forEach { rawCandidate ->
+            val candidate = if (rawCandidate is BuiltInSourcePackBridge) {
+                val delegateId = rawCandidate.builtInDelegateId
+                val delegate = delegateId?.let(builtInsById::get)
+                if (delegate != null && delegate.descriptor.id == rawCandidate.descriptor.id) {
+                    rawCandidate.attachBuiltInDelegate(delegate)
+                } else {
+                    rawCandidate
+                }
+            } else rawCandidate
+
+            val id = candidate.descriptor.id
+            val current = selected[id]
+            if (current == null || candidate.selectionPriority > current.selectionPriority) {
+                selected[id] = candidate
+            }
+        }
+        return selected
+    }
+
+    companion object {
+        private fun defaultSources(sessionStore: SourceSessionStore): List<StorySource> = listOf(
+            DemoStorySource(),
+            TruyenFullSource(),
+            TruyenCvSource(),
+            TruyenComSource(),
+            TruyenYySource(),
+            WikidichSource(),
+            SangTacVietSource(sessionStore),
+            NotPortedSource("wattpad", "Wattpad / vBook", "https://www.wattpad.com"),
+        )
+    }
+}
+
+private class NotPortedSource(
+    id: String,
+    name: String,
+    baseUrl: String,
+) : StorySource {
+    override val selectionPriority: Int = 0
+
+    override val descriptor = SourceDescriptor(
+        id = id,
+        displayName = name,
+        baseUrl = baseUrl,
+        health = SourceHealth.NOT_PORTED,
+        supportsHome = false,
+        implementationKind = SourceImplementationKind.PLACEHOLDER,
+    )
+
+    private fun <T> pending(): AppResult<T> = AppResult.Failure(
+        code = "SOURCE_NOT_PORTED",
+        message = "Nguồn ${descriptor.displayName} chưa được viết adapter Kotlin.",
+    )
+
+    override suspend fun search(query: String, page: Int) = pending<List<StorySummary>>()
+    override suspend fun category(category: String, page: Int) = pending<List<StorySummary>>()
+    override suspend fun story(url: String) = pending<StoryDetail>()
+    override suspend fun chapter(url: String) = pending<ChapterContent>()
+}
+
+private class DemoStorySource : StorySource {
+    override val descriptor = SourceDescriptor(
+        id = "vn.nghetruyen.sources.demo",
+        displayName = "Bản mẫu Kotlin",
+        baseUrl = "local://demo",
+        health = SourceHealth.READY,
+        categories = listOf("Tiên hiệp", "Kiếm hiệp", "Ngôn tình", "Khoa huyễn"),
+    )
+
+    private val stories = listOf(
+        StorySummary(
+            id = "demo-1",
+            sourceId = descriptor.id,
+            title = "Hành Trình Qua Miền Gió",
+            author = "Bản mẫu",
+            description = "Dữ liệu minh họa để kiểm tra giao diện và lõi Kotlin mới.",
+            url = "local://demo/story/1",
+        ),
+        StorySummary(
+            id = "demo-2",
+            sourceId = descriptor.id,
+            title = "Thư Viện Cuối Ánh Trăng",
+            author = "Bản mẫu",
+            description = "Một truyện ngắn dùng để thử tìm kiếm, đọc và TTS nền.",
+            url = "local://demo/story/2",
+        ),
+    )
+
+    override suspend fun search(query: String, page: Int): AppResult<List<StorySummary>> {
+        val needle = query.trim().lowercase()
+        return AppResult.Success(
+            if (needle.isBlank()) stories
+            else stories.filter { it.title.lowercase().contains(needle) || it.author.lowercase().contains(needle) },
+        )
+    }
+
+    override suspend fun category(category: String, page: Int): AppResult<List<StorySummary>> =
+        AppResult.Success(stories)
+
+    override suspend fun story(url: String): AppResult<StoryDetail> {
+        val story = stories.firstOrNull { it.url == url || it.id == url }
+            ?: return AppResult.Failure("NOT_FOUND", "Không tìm thấy truyện mẫu.")
+        val chapters = (1..5).map { index ->
+            ChapterSummary(
+                id = "${story.id}-chapter-$index",
+                storyId = story.id,
+                index = index - 1,
+                title = "Chương $index",
+                url = "local://demo/${story.id}/chapter/$index",
+            )
+        }
+        return AppResult.Success(
+            StoryDetail(
+                story = story,
+                genres = listOf("Phiêu lưu", "Đời thường"),
+                status = "Đang viết",
+                chapters = chapters,
+            ),
+        )
+    }
+
+    override suspend fun chapter(url: String): AppResult<ChapterContent> {
+        val chapterNumber = url.substringAfterLast('/').toIntOrNull() ?: 1
+        val storyId = if (url.contains("demo-2")) "demo-2" else "demo-1"
+        val chapter = ChapterSummary(
+            id = "$storyId-chapter-$chapterNumber",
+            storyId = storyId,
+            index = chapterNumber - 1,
+            title = "Chương $chapterNumber",
+            url = url,
+        )
+        return AppResult.Success(
+            ChapterContent(
+                chapter = chapter,
+                paragraphs = listOf(
+                    "Đây là nội dung minh họa của chương $chapterNumber trong lõi Kotlin mới.",
+                    "Mỗi đoạn văn được quản lý bằng dữ liệu có kiểu rõ ràng, không còn trạng thái toàn cục khó kiểm soát.",
+                    "Trình đọc có thể tiếp tục từ đúng đoạn, phát TTS nền và nhận lệnh từ thông báo hệ thống.",
+                    "Các nguồn truyện thật sẽ được viết thành adapter riêng, có kiểm thử parser và giới hạn miền truy cập.",
+                ),
+                previousChapterUrl = if (chapterNumber > 1) "local://demo/$storyId/chapter/${chapterNumber - 1}" else null,
+                nextChapterUrl = if (chapterNumber < 5) "local://demo/$storyId/chapter/${chapterNumber + 1}" else null,
+            ),
+        )
+    }
+}

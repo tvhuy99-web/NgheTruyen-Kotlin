@@ -1,0 +1,173 @@
+{
+  "schemaVersion": 2,
+  "id": "vn.nghetruyen.vbook.wattpad-default-vbook",
+  "name": "Wattpad",
+  "description": "Nguồn Wattpad full-parity có fixture offline cho toàn bộ action đọc truyện.",
+  "author": "Nghe Truyện + Meo",
+  "version": "25.0.0",
+  "apiVersion": 2,
+  "minAppVersion": "1.4.0",
+  "locale": "vi-VN",
+  "contentType": "NOVEL",
+  "adult": false,
+  "runtime": {
+    "mode": "VBOOK_JS_COMPAT",
+    "entry": "plugin.json",
+    "instructionBudget": 1000000,
+    "memoryBudgetBytes": 33554432,
+    "actionTimeoutMs": 60000
+  },
+  "urlPatterns": [
+    "(www\\.|m\\.)?wattpad\\.com/(story/)?\\d+"
+  ],
+  "origins": [
+    "https://www.wattpad.com"
+  ],
+  "redirectOrigins": [
+    "https://www.wattpad.com",
+    "https://img.wattpad.com",
+    "https://media.wattpad.com"
+  ],
+  "capabilities": {
+    "network": {
+      "methods": [
+        "GET",
+        "HEAD",
+        "POST"
+      ],
+      "maxResponseBytes": 8388608,
+      "maxRequestBytes": 524288,
+      "requestsPerMinute": 120,
+      "maxConcurrent": 3
+    },
+    "cookies": "BROWSER_SHARED",
+    "browser": {
+      "navigate": true,
+      "domSnapshot": true,
+      "click": true,
+      "input": true,
+      "requestMetadata": true,
+      "serviceWorkerCapture": true,
+      "pageJavaScript": true
+    },
+    "storageBytes": 2097152,
+    "crypto": [
+      "SHA256",
+      "HMAC_SHA256",
+      "AES_GCM_SECRET"
+    ],
+    "websocket": {
+      "enabled": true,
+      "maxMessageBytes": 65536,
+      "maxLifetimeMs": 60000
+    }
+  },
+  "actions": {
+    "home": {
+      "entry": "src/homecontent.js",
+      "maxOutputBytes": 4194304
+    },
+    "genre": {
+      "entry": "src/genrecontent.js",
+      "maxOutputBytes": 4194304
+    },
+    "search": {
+      "entry": "src/search.js",
+      "maxOutputBytes": 4194304
+    },
+    "detail": {
+      "entry": "src/detail.js",
+      "maxOutputBytes": 4194304
+    },
+    "suggestions": {
+      "entry": "src/suggest.js",
+      "maxOutputBytes": 4194304
+    },
+    "toc": {
+      "entry": "src/toc.js",
+      "maxOutputBytes": 4194304
+    },
+    "chapter": {
+      "entry": "src/chap.js",
+      "maxOutputBytes": 4194304
+    },
+    "latest_chapter": {
+      "entry": "src/latest.js",
+      "maxOutputBytes": 4194304
+    },
+    "tocPages": {
+      "entry": "src/toc.js",
+      "maxOutputBytes": 4194304
+    }
+  },
+  "privacy": {
+    "sendsContentToThirdParty": false,
+    "thirdParties": [],
+    "note": "Kết nối trực tiếp Wattpad; không dùng máy chủ trung gian."
+  },
+  "fixtures": [
+    {
+      "name": "wattpad home",
+      "action": "HOME",
+      "input": "fixtures/home.input.json",
+      "fixture": "fixtures/home.http.json",
+      "expected": "fixtures/home.expected.json"
+    },
+    {
+      "name": "wattpad genre",
+      "action": "GENRE",
+      "input": "fixtures/genre.input.json",
+      "fixture": "fixtures/genre.http.json",
+      "expected": "fixtures/genre.expected.json"
+    },
+    {
+      "name": "wattpad search",
+      "action": "SEARCH",
+      "input": "fixtures/search.input.json",
+      "fixture": "fixtures/search.http.json",
+      "expected": "fixtures/search.expected.json"
+    },
+    {
+      "name": "wattpad suggestions",
+      "action": "SUGGESTIONS",
+      "input": "fixtures/suggestions.input.json",
+      "fixture": "fixtures/suggestions.http.json",
+      "expected": "fixtures/suggestions.expected.json"
+    },
+    {
+      "name": "wattpad detail",
+      "action": "DETAIL",
+      "input": "fixtures/detail.input.json",
+      "fixture": "fixtures/detail.http.json",
+      "expected": "fixtures/detail.expected.json"
+    },
+    {
+      "name": "wattpad latest",
+      "action": "LATEST_CHAPTER",
+      "input": "fixtures/latest.input.json",
+      "fixture": "fixtures/latest.http.json",
+      "expected": "fixtures/latest.expected.json"
+    },
+    {
+      "name": "wattpad toc",
+      "action": "TOC",
+      "input": "fixtures/toc.input.json",
+      "fixture": "fixtures/toc.http.json",
+      "expected": "fixtures/toc.expected.json"
+    },
+    {
+      "name": "wattpad toc pages",
+      "action": "TOC_PAGES",
+      "input": "fixtures/toc-page.input.json",
+      "fixture": "fixtures/toc-page.http.json",
+      "expected": "fixtures/toc-page.expected.json"
+    },
+    {
+      "name": "wattpad chapter",
+      "action": "CHAPTER",
+      "input": "fixtures/chapter.input.json",
+      "fixture": "fixtures/chapter.http.json",
+      "expected": "fixtures/chapter.expected.json"
+    }
+  ]
+}

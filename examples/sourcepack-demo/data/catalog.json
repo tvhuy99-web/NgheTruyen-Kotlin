@@ -1,0 +1,29 @@
+{
+  "stories": [
+    {
+      "id": "demo-1",
+      "title": "Hành Trình Qua Miền Gió",
+      "author": "Bản mẫu SourcePack",
+      "description": "Dữ liệu được đọc từ một gói .ntsource đã ký và chạy bằng runtime khai báo.",
+      "url": "sourcepack://vn.nghetruyen.sources.demo/story/1",
+      "genres": ["Phiêu lưu", "Đời thường"],
+      "status": "Đang viết",
+      "chapters": [
+        {"id":"demo-1-chapter-1","storyId":"demo-1","index":0,"title":"Chương 1: Cánh cửa gió","url":"sourcepack://vn.nghetruyen.sources.demo/chapter/1"},
+        {"id":"demo-1-chapter-2","storyId":"demo-1","index":1,"title":"Chương 2: Con đường mới","url":"sourcepack://vn.nghetruyen.sources.demo/chapter/2"}
+      ]
+    },
+    {
+      "id": "demo-2",
+      "title": "Thư Viện Cuối Ánh Trăng",
+      "author": "Bản mẫu SourcePack",
+      "description": "Nguồn mẫu thứ hai để kiểm tra tìm kiếm bỏ dấu và phân trang.",
+      "url": "sourcepack://vn.nghetruyen.sources.demo/story/2",
+      "genres": ["Kỳ ảo", "Đời thường"],
+      "status": "Hoàn thành",
+      "chapters": [
+        {"id":"demo-2-chapter-1","storyId":"demo-2","index":0,"title":"Chương 1: Người giữ sách","url":"sourcepack://vn.nghetruyen.sources.demo/chapter/3"}
+      ]
+    }
+  ]
+}

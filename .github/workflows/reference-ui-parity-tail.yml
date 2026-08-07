@@ -1,0 +1,50 @@
+name: Reference UI parity tail
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - scripts/reference_ui_parity_tail.py
+      - .github/workflows/reference-ui-parity-tail.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'agent/reference-ui-position-parity'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout parity branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/reference-ui-position-parity
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Apply source and browser parity
+        run: python3 scripts/reference_ui_parity_tail.py
+
+      - name: Validate wiring
+        run: python3 scripts/validate_release.py --wiring-only
+
+      - name: Compile Kotlin UI
+        run: bash ./gradlew :app:compileDebugKotlin --no-daemon
+
+      - name: Commit product changes and clean build artifacts
+        run: |
+          rm -rf .gradle
+          rm -f app/schemas/vn.nghetruyen.app.data.local.AppDatabase/18.json
+          rm scripts/reference_ui_parity_tail.py .github/workflows/reference-ui-parity-tail.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "ui: align source actions and browser hierarchy"
+          git push origin HEAD:agent/reference-ui-position-parity

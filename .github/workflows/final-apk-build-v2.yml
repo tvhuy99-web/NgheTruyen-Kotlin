@@ -7,9 +7,15 @@ on:
       - main
     paths:
       - ".github/workflows/final-apk-build-v2.yml"
+      - "app/build.gradle.kts"
+      - "app/src/**"
 
 permissions:
   contents: write
+
+concurrency:
+  group: build-nghetruyen-apk-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   ARTIFACT_NAME: NgheTruyen-v2.8.0-debug-apk
@@ -72,10 +78,10 @@ jobs:
               echo "RUN_ID=${GITHUB_RUN_ID}"
               echo
               echo "=== COMPILER ERRORS ==="
-              grep -E "(^e: |^error: | error: |FAILURE:|What went wrong|Execution failed for task|Unresolved reference|Compilation error)" /tmp/gradle-build.log | tail -n 300 || true
+              grep -E "(^e: |^error: | error: |FAILURE:|What went wrong|Execution failed for task|Unresolved reference|Compilation error)" /tmp/gradle-build.log | tail -n 400 || true
               echo
               echo "=== LOG TAIL ==="
-              tail -n 240 /tmp/gradle-build.log
+              tail -n 280 /tmp/gradle-build.log
             } > BUILD_APK_ERROR.txt
             exit $status
           fi

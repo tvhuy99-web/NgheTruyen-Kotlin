@@ -19,14 +19,13 @@ jobs:
           ref: agent/reference-ui-position-parity
       - name: Inspect AI settings wiring
         run: |
-          echo '=== Personal AI card ==='
-          n=$(grep -n 'private fun AiOnlineCard' app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt | cut -d: -f1 | head -1)
-          sed -n "${n},$((n+260))p" app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt
-          echo '=== Settings AI methods ==='
-          grep -n 'setAi\|AiOnlineSettings\|aiOnline' app/src/main/java/vn/nghetruyen/app/data/settings/SettingsRepository.kt | tail -120
-          echo '=== ViewModel AI methods ==='
-          grep -n 'fun setAi\|fun saveAi\|aiUsageRecent\|refreshGemini' app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt | head -160
-          echo '=== App wiring ==='
-          grep -n 'onAiEnabledChange\|onAiConsentChange\|onAiProviderChange\|onAiDaily\|onAiMaxRetries\|onAiRetryBase\|onAiInstruction\|onAiTemperature' app/src/main/java/vn/nghetruyen/app/ui/NgheTruyenApp.kt
-          echo '=== Request governor usage ==='
-          grep -R -n 'requestGovernor\|dailyRequestLimit\|dailyInputCharsLimit\|maxRetries\|retryBaseDelayMillis' app/src/main/java/vn/nghetruyen/app/ai app/src/main/java/vn/nghetruyen/app/ui | head -200
+          echo '=== AI contracts ==='
+          grep -R -n 'data class TranslationRequest\|class TranslationRequest\|data class VietPhraseImprovementRequest' app/src/main/java/vn/nghetruyen/app/ai
+          echo '=== Settings read/write AI ==='
+          n=$(grep -n 'private fun JsonWriter.writeSettings' app/src/main/java/vn/nghetruyen/app/transfer/BackupTransferManager.kt | cut -d: -f1 | head -1)
+          sed -n "${n},$((n+230))p" app/src/main/java/vn/nghetruyen/app/transfer/BackupTransferManager.kt
+          echo '=== Personal settings dispatch ==='
+          n=$(grep -n 'if (showSettingsDialog)' app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt | cut -d: -f1 | head -1)
+          sed -n "$((n-20)),$((n+80))p" app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt
+          echo '=== App AI wiring ==='
+          sed -n '155,200p' app/src/main/java/vn/nghetruyen/app/ui/NgheTruyenApp.kt

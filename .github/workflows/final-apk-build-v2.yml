@@ -10,6 +10,7 @@ on:
       - "app/build.gradle.kts"
       - "app/src/**"
       - "source-vbook/**"
+      - "scripts/apply_android_build_fixes.py"
 
 permissions:
   contents: write
@@ -56,6 +57,10 @@ jobs:
               raise SystemExit("Rhino getIds patch did not apply")
           source.write_text(text, encoding="utf-8")
           PY
+
+      - name: Apply Android compiler fixes
+        shell: bash
+        run: python3 scripts/apply_android_build_fixes.py
 
       - name: Record build start
         shell: bash
@@ -125,10 +130,10 @@ jobs:
               echo "RUN_ID=${GITHUB_RUN_ID}"
               echo
               echo "=== COMPILER ERRORS ==="
-              grep -E "(^e: |^error: | error: |FAILURE:|What went wrong|Execution failed for task|Unresolved reference|Compilation error|requires libraries|requires Android Gradle plugin)" /tmp/gradle-build.log | tail -n 800 || true
+              grep -E "(^e: |^error: | error: |FAILURE:|What went wrong|Execution failed for task|Unresolved reference|Compilation error|requires libraries|requires Android Gradle plugin)" /tmp/gradle-build.log | tail -n 1000 || true
               echo
               echo "=== LOG TAIL ==="
-              tail -n 400 /tmp/gradle-build.log
+              tail -n 500 /tmp/gradle-build.log
             } > BUILD_APK_ERROR.txt
             exit $status
           fi
@@ -158,7 +163,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          mkdir -p /tmp/apk-result/source-vbook
+          mkdir -p /tmp/apk-result
           CHECKSUM_LINE=""
           if [[ -f app-debug.apk.sha256 ]]; then
             CHECKSUM_LINE="$(cat app-debug.apk.sha256)"
@@ -166,7 +171,7 @@ jobs:
           if [[ -f BUILD_APK_ERROR.txt ]]; then
             cp BUILD_APK_ERROR.txt /tmp/apk-result/BUILD_APK_ERROR.txt
           fi
-          cp "$VBOOK_RUNTIME_PATH" /tmp/apk-result/source-vbook/VBookJsRuntime.kt
+          git diff --binary -- "$VBOOK_RUNTIME_PATH" app/src/main/java > /tmp/apk-result/source.patch
 
           {
             echo "STATUS=${{ job.status }}"
@@ -186,8 +191,9 @@ jobs:
           git fetch origin main
           git reset --hard origin/main
           git clean -fdx
-          mkdir -p "$(dirname "$VBOOK_RUNTIME_PATH")"
-          cp /tmp/apk-result/source-vbook/VBookJsRuntime.kt "$VBOOK_RUNTIME_PATH"
+          if [[ -s /tmp/apk-result/source.patch ]]; then
+            git apply /tmp/apk-result/source.patch
+          fi
           cp /tmp/apk-result/BUILD_APK_RESULT.txt BUILD_APK_RESULT.txt
           if [[ -f /tmp/apk-result/BUILD_APK_ERROR.txt ]]; then
             cp /tmp/apk-result/BUILD_APK_ERROR.txt BUILD_APK_ERROR.txt
@@ -195,10 +201,10 @@ jobs:
             rm -f BUILD_APK_ERROR.txt
           fi
 
-          git add "$VBOOK_RUNTIME_PATH" BUILD_APK_RESULT.txt
+          git add "$VBOOK_RUNTIME_PATH" app/src/main/java BUILD_APK_RESULT.txt
           git add -A BUILD_APK_ERROR.txt 2>/dev/null || true
           if git diff --cached --quiet; then
             exit 0
           fi
-          git commit -m "fix: update Rhino API and record APK build result"
+          git commit -m "fix: resolve Android compiler errors and record APK build"
           git push origin HEAD:main

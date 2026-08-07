@@ -1,0 +1,78 @@
+name: Verify source-pack repair
+
+on:
+  push:
+    paths:
+      - ".github/workflows/verify-sourcepack-repair.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify all eight source packs
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' \
+            "efbaafa94c4c1472d86ea0b358200ed8a383437285514d3c988a95119d4a0138  app/src/main/assets/sourcepacks/demo.ntsource" \
+            "1b99700e6894de0181524a3127a0cf3d1954ba8268ff4d3f91b551ebdb582055  app/src/main/assets/sourcepacks/sangtacviet.ntsource" \
+            "043bc8ad6073fb1e47c52651fc724dc2c4308edb880bd28bc4eb489cff338d38  app/src/main/assets/sourcepacks/truyencom.ntsource" \
+            "7e6dea97ee79119a176b6818fd52634d64211c0a3a4895ef6e65b458700de33a  app/src/main/assets/sourcepacks/truyencv.ntsource" \
+            "0462ffb4aa939dbcd6ead955ba5c752538c9a2b72d6ff79bcc914e095764ba91  app/src/main/assets/sourcepacks/truyenfull.ntsource" \
+            "7abe52ec0873005956e50e5fcc9600b4333315826dd5d8e7719b1549da45daad  app/src/main/assets/sourcepacks/truyenyy.ntsource" \
+            "15a51dfc16813322fccf58acab792ce2d7173f898f7011fbcec28781baa678b5  app/src/main/assets/sourcepacks/wattpad.ntsource" \
+            "562b237cca67dae2791660ba617d159774b9f4f56ebed6dd5bb4ad8058531e56  app/src/main/assets/sourcepacks/wikidich.ntsource" \
+            > /tmp/sourcepacks.sha256
+          sha256sum --check /tmp/sourcepacks.sha256
+
+      - name: Record verification and clean temporary repair data
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > SOURCEPACK_REPAIR_VERIFIED.txt <<'EOF'
+          SOURCEPACK_REPAIR_VERIFIED=YES
+          VERIFIED_FILE_COUNT=8
+          demo.ntsource=efbaafa94c4c1472d86ea0b358200ed8a383437285514d3c988a95119d4a0138
+          sangtacviet.ntsource=1b99700e6894de0181524a3127a0cf3d1954ba8268ff4d3f91b551ebdb582055
+          truyencom.ntsource=043bc8ad6073fb1e47c52651fc724dc2c4308edb880bd28bc4eb489cff338d38
+          truyencv.ntsource=7e6dea97ee79119a176b6818fd52634d64211c0a3a4895ef6e65b458700de33a
+          truyenfull.ntsource=0462ffb4aa939dbcd6ead955ba5c752538c9a2b72d6ff79bcc914e095764ba91
+          truyenyy.ntsource=7abe52ec0873005956e50e5fcc9600b4333315826dd5d8e7719b1549da45daad
+          wattpad.ntsource=15a51dfc16813322fccf58acab792ce2d7173f898f7011fbcec28781baa678b5
+          wikidich.ntsource=562b237cca67dae2791660ba617d159774b9f4f56ebed6dd5bb4ad8058531e56
+          EOF
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -rf .github/sourcepack-repair
+          rm -f .github/workflows/repair-sourcepacks.yml
+          rm -f .github/workflows/finalize-sourcepack-repair.yml
+          rm -f .github/workflows/cleanup-sourcepack-repair.yml
+          rm -f .github/workflows/verify-sourcepack-repair.yml
+          git add -A
+          git commit -m "chore: record verified source-pack repair"
+          git push origin HEAD:main
+
+      - name: Remove temporary verification branch
+        if: always()
+        shell: bash
+        run: |
+          curl --silent --output /dev/null \
+            --request DELETE \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/refs/heads/verification/sourcepacks-byte-check" \
+            || true

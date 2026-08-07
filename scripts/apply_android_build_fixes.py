@@ -137,4 +137,5 @@ replace_exact(
     '        "PHÂN VAI AI",\n        "NHẠC CẢNH",\n',
 )
 
+subprocess.run(["python3", "scripts/apply_reference_ui_polish_v2.py"], check=True)
 print("ANDROID_BUILD_FIXES_APPLIED")

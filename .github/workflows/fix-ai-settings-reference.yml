@@ -34,10 +34,14 @@ jobs:
           from pathlib import Path
           path = Path('scripts/validate_release.py')
           text = path.read_text(encoding='utf-8')
-          old = 'AI online: dịch, phân vai và nhạc cảnh'
-          if old not in text:
-              raise SystemExit('missing legacy AI validator token')
-          text = text.replace(old, 'Bật nút AI trong màn hình đọc')
+          old_label = 'AI online: dịch, phân vai và nhạc cảnh'
+          if old_label not in text:
+              raise SystemExit('missing legacy AI validator label')
+          text = text.replace(old_label, 'Bật nút AI trong màn hình đọc')
+          consent_line = '        "AI_CONSENT_REQUIRED",\n'
+          if consent_line not in text:
+              raise SystemExit('missing legacy AI consent validator token')
+          text = text.replace(consent_line, '', 1)
           path.write_text(text, encoding='utf-8')
           PY
       - name: Assert reference AI settings surface

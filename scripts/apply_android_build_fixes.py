@@ -137,8 +137,12 @@ replace_exact(
     '        "PHÂN VAI AI",\n        "NHẠC CẢNH",\n',
 )
 
-subprocess.run(["python3", "scripts/finalize_reference_ui_polish_v2.py"], check=True)
-subprocess.run(["python3", "scripts/apply_navigation_audit_v3.py"], check=True)
+personal_text = Path("app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt").read_text(encoding="utf-8")
+if "NAVIGATION_AUDIT_V3_PERSONAL" not in personal_text:
+    subprocess.run(["python3", "scripts/finalize_reference_ui_polish_v2.py"], check=True)
+    subprocess.run(["python3", "scripts/apply_navigation_audit_v3.py"], check=True)
+else:
+    print("REFERENCE_UI_V2_V3_ALREADY_PERSISTED")
 
 v4_parts = sorted(Path("scripts").glob("reference_parity_v4.part*.b64"))
 if not v4_parts:

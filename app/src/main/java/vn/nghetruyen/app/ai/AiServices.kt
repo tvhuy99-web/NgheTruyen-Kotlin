@@ -7,6 +7,7 @@ data class TranslationRequest(
     val chapterId: String,
     val sourceText: String,
     val instruction: String,
+    val chapterTitle: String = "",
 )
 
 data class VietPhraseImprovementRequest(

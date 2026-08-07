@@ -575,12 +575,13 @@ class BackupTransferManager(
         name("aiProvider").value(value.aiOnline.provider.name)
         name("aiEndpoint").value(value.aiOnline.endpoint)
         name("aiModel").value(value.aiOnline.model)
+        name("aiGeminiModel").value(value.aiOnline.geminiModel)
+        name("aiOpenAiModel").value(value.aiOnline.openAiModel)
+        name("aiDefaultMode").value(value.aiOnline.mode)
+        name("aiTranslationPrompt").value(value.aiOnline.translationPrompt)
+        name("aiImprovePrompt").value(value.aiOnline.improvePrompt)
+        name("aiTimeoutMillis").value(value.aiOnline.timeoutMillis.toLong())
         name("aiTemperature").value(value.aiOnline.temperature.toDouble())
-        name("aiTranslationInstruction").value(value.aiOnline.translationInstruction)
-        name("aiDailyRequestLimit").value(value.aiOnline.dailyRequestLimit.toLong())
-        name("aiDailyInputCharsLimit").value(value.aiOnline.dailyInputCharsLimit.toLong())
-        name("aiMaxRetries").value(value.aiOnline.maxRetries.toLong())
-        name("aiRetryBaseDelayMillis").value(value.aiOnline.retryBaseDelayMillis.toLong())
         // Consent and API key are device/user-session specific and are never exported.
         name("aiOnlineEnabled").value(false)
         name("aiConsentGranted").value(false)
@@ -635,14 +636,20 @@ class BackupTransferManager(
         var ttsCacheLimitMiB = 64
         var normalizeTtsVolumeEnabled = true
         var ttsTargetLufs = -18f
-        var aiProvider = AiProvider.OPENAI_COMPATIBLE
-        var aiEndpoint = "https://api.openai.com/v1/chat/completions"
-        var aiModel = ""
+        var aiProvider = AiProvider.GEMINI
+        var aiEndpoint = "https://openrouter.ai/api/v1/chat/completions"
+        var aiModel = "gemini-3.6-flash"
+        var aiGeminiModel = "gemini-3.6-flash"
+        var aiOpenAiModel = ""
+        var aiDefaultMode = "translate"
+        var aiTranslationPrompt = vn.nghetruyen.app.data.settings.DEFAULT_AI_TRANSLATE_PROMPT
+        var aiImprovePrompt = vn.nghetruyen.app.data.settings.DEFAULT_AI_IMPROVE_PROMPT
+        var aiTimeoutMillis = 120_000
         var aiTemperature = 0.2f
         var aiTranslationInstruction = ""
         var aiDailyRequestLimit = 30
         var aiDailyInputCharsLimit = 500_000
-        var aiMaxRetries = 2
+        var aiMaxRetries = 0
         var aiRetryBaseDelayMillis = 1_500
         beginObject()
         while (hasNext()) {
@@ -696,11 +703,17 @@ class BackupTransferManager(
                 "ttsCacheLimitMiB" -> ttsCacheLimitMiB = SettingsRepository.normalizeTtsCacheLimit(nextLongSafe(64L).toInt())
                 "normalizeTtsVolumeEnabled" -> normalizeTtsVolumeEnabled = nextBooleanSafe(true)
                 "ttsTargetLufs" -> ttsTargetLufs = SettingsRepository.normalizeTtsTargetLufs(nextDoubleSafe(-18.0).toFloat())
-                "aiProvider" -> aiProvider = runCatching { AiProvider.valueOf(nextStringSafe(AiProvider.OPENAI_COMPATIBLE.name)) }
-                    .getOrDefault(AiProvider.OPENAI_COMPATIBLE)
+                "aiProvider" -> aiProvider = runCatching { AiProvider.valueOf(nextStringSafe(AiProvider.GEMINI.name)) }
+                    .getOrDefault(AiProvider.GEMINI)
                 "aiEndpoint" -> aiEndpoint = nextStringSafe(aiEndpoint).take(500)
-                "aiModel" -> aiModel = nextStringSafe("").take(200)
-                "aiTemperature" -> aiTemperature = nextDoubleSafe(0.2).toFloat().coerceIn(0f, 1f)
+                "aiModel" -> aiModel = nextStringSafe(aiModel).take(200)
+                "aiGeminiModel" -> aiGeminiModel = nextStringSafe(aiGeminiModel).take(200)
+                "aiOpenAiModel" -> aiOpenAiModel = nextStringSafe(aiOpenAiModel).take(200)
+                "aiDefaultMode" -> aiDefaultMode = nextStringSafe("translate").takeIf { it == "improve" } ?: "translate"
+                "aiTranslationPrompt" -> aiTranslationPrompt = nextStringSafe(aiTranslationPrompt)
+                "aiImprovePrompt" -> aiImprovePrompt = nextStringSafe(aiImprovePrompt)
+                "aiTimeoutMillis" -> aiTimeoutMillis = nextLongSafe(120_000L).toInt().coerceAtLeast(10_000)
+                "aiTemperature" -> aiTemperature = nextDoubleSafe(0.2).toFloat().coerceIn(0f, 2f)
                 "aiTranslationInstruction" -> aiTranslationInstruction = nextStringSafe("").take(2000)
                 "aiDailyRequestLimit" -> aiDailyRequestLimit = nextLongSafe(30L).toInt().coerceIn(1, 500)
                 "aiDailyInputCharsLimit" -> aiDailyInputCharsLimit = nextLongSafe(500_000L).toInt().coerceIn(10_000, 5_000_000)
@@ -767,6 +780,12 @@ class BackupTransferManager(
                 consentGranted = false,
                 endpoint = aiEndpoint,
                 model = aiModel,
+                geminiModel = aiGeminiModel,
+                openAiModel = aiOpenAiModel,
+                mode = aiDefaultMode,
+                translationPrompt = aiTranslationPrompt,
+                improvePrompt = aiImprovePrompt,
+                timeoutMillis = aiTimeoutMillis,
                 temperature = aiTemperature,
                 translationInstruction = aiTranslationInstruction,
                 dailyRequestLimit = aiDailyRequestLimit,

@@ -468,7 +468,7 @@ def main() -> None:
         "XÓA PHIÊN ĐÃ LƯU",
         "VietPhrase nâng cao",
         "NHẬP / XEM TRƯỚC",
-        "AI online: dịch, phân vai và nhạc cảnh",
+        "Bật nút AI trong màn hình đọc",
         "PasswordVisualTransformation",
         "Thư viện nhạc cảnh",
         "LƯU TÊN/TAG",
@@ -599,7 +599,6 @@ def main() -> None:
     )
     require_text(
         "app/src/main/java/vn/nghetruyen/app/ai/OnlineAiServices.kt",
-        "AI_CONSENT_REQUIRED",
         ".dns(AiPublicDns)",
         ".followRedirects(false)",
         "MAX_RESPONSE_CHARS",

@@ -221,8 +221,9 @@ data class MainUiState(
     val backupHistory: List<BackupHistoryEntry> = emptyList(),
     val sceneMusicTracks: List<SceneMusicTrackEntity> = emptyList(),
     val aiOnline: AiOnlineSettings = AiOnlineSettings(),
-    val aiUsageRecent: List<AiUsageDailyEntity> = emptyList(),
     val aiHasApiKey: Boolean = false,
+    val aiHasGeminiApiKey: Boolean = false,
+    val aiHasOpenAiApiKey: Boolean = false,
     val aiAvailableModels: List<String> = emptyList(),
     val aiModelDiscoveryBusy: Boolean = false,
     val readerCacheLimitMiB: Int = 64,
@@ -350,6 +351,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         readerDisplay = settings.readerDisplay,
                         aiOnline = settings.aiOnline,
                         aiHasApiKey = container.aiCredentialStore.hasApiKey(settings.aiOnline.provider),
+                        aiHasGeminiApiKey = container.aiCredentialStore.hasApiKey(AiProvider.GEMINI),
+                        aiHasOpenAiApiKey = container.aiCredentialStore.hasApiKey(AiProvider.OPENAI_COMPATIBLE),
                     )
                 }
                 if (scheduledFollowingUpdates != settings.followingUpdatesEnabled) {
@@ -462,11 +465,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             container.libraryRepository.observeAudioExports().collect { jobs ->
                 mutableState.update { it.copy(audioExports = jobs) }
-            }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeAiUsage().collect { usage ->
-                mutableState.update { it.copy(aiUsageRecent = usage) }
             }
         }
     }
@@ -3237,7 +3235,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshAiCredentialState() {
         val provider = mutableState.value.aiOnline.provider
-        mutableState.update { it.copy(aiHasApiKey = container.aiCredentialStore.hasApiKey(provider)) }
+        mutableState.update {
+            it.copy(
+                aiHasApiKey = container.aiCredentialStore.hasApiKey(provider),
+                aiHasGeminiApiKey = container.aiCredentialStore.hasApiKey(AiProvider.GEMINI),
+                aiHasOpenAiApiKey = container.aiCredentialStore.hasApiKey(AiProvider.OPENAI_COMPATIBLE),
+            )
+        }
     }
 
     fun setAiProvider(value: AiProvider) {
@@ -3250,6 +3254,44 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     aiModelDiscoveryBusy = false,
                 )
             }
+        }
+    }
+
+    fun refreshAiModels(provider: AiProvider, endpoint: String, apiKeyOverride: String) {
+        if (state.value.aiModelDiscoveryBusy) return
+        viewModelScope.launch {
+            mutableState.update { it.copy(aiModelDiscoveryBusy = true, aiAvailableModels = emptyList(), message = "Đang tải danh sách model…") }
+            when (val result = container.aiServices.listModels(provider, endpoint, apiKeyOverride.takeIf(String::isNotBlank))) {
+                is AppResult.Failure -> mutableState.update {
+                    it.copy(aiModelDiscoveryBusy = false, aiAvailableModels = emptyList(), message = result.message)
+                }
+                is AppResult.Success -> mutableState.update {
+                    it.copy(
+                        aiModelDiscoveryBusy = false,
+                        aiAvailableModels = result.value,
+                        message = "Đã tải ${result.value.size} model.",
+                    )
+                }
+            }
+        }
+    }
+
+    fun saveReferenceAiSettings(value: AiOnlineSettings, geminiApiKey: String?, openAiApiKey: String?) {
+        viewModelScope.launch {
+            runCatching {
+                container.settingsRepository.saveReferenceAiSettings(value)
+                fun saveKey(provider: AiProvider, candidate: String?) {
+                    if (candidate == null) return
+                    if (candidate.isBlank()) container.aiCredentialStore.clearApiKey(provider)
+                    else container.aiCredentialStore.saveApiKey(provider, candidate)
+                }
+                saveKey(AiProvider.GEMINI, geminiApiKey)
+                saveKey(AiProvider.OPENAI_COMPATIBLE, openAiApiKey)
+            }.onSuccess {
+                refreshAiCredentialState()
+                mutableState.update { it.copy(aiAvailableModels = emptyList(), aiModelDiscoveryBusy = false) }
+                showMessage("Đã lưu thiết lập AI.")
+            }.onFailure { showMessage(it.message ?: "Không lưu được thiết lập AI.") }
         }
     }
 

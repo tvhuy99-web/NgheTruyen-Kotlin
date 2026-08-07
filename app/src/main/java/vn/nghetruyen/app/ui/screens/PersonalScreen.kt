@@ -51,6 +51,7 @@ import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
 import vn.nghetruyen.app.data.local.VietPhraseEntity
 import vn.nghetruyen.app.data.settings.SettingsRepository
 import vn.nghetruyen.app.data.settings.AiProvider
+import vn.nghetruyen.app.data.settings.AiOnlineSettings
 import vn.nghetruyen.app.sources.SourceCheckStatus
 import vn.nghetruyen.app.transfer.BackupComponent
 import vn.nghetruyen.app.ui.MainUiState
@@ -127,20 +128,8 @@ fun PersonalScreen(
     onRollbackVietPhrase: (String) -> Unit,
     onAcceptVietPhraseSuggestion: (String, String) -> Unit,
     onRejectVietPhraseSuggestion: (String) -> Unit,
-    onAiEnabledChange: (Boolean) -> Unit,
-    onAiConsentChange: (Boolean) -> Unit,
-    onAiProviderChange: (AiProvider) -> Unit,
-    onRefreshGeminiModels: () -> Unit,
-    onAiEndpointChange: (String) -> Unit,
-    onAiModelChange: (String) -> Unit,
-    onAiTemperatureChange: (Float) -> Unit,
-    onAiInstructionChange: (String) -> Unit,
-    onAiDailyRequestLimitChange: (Int) -> Unit,
-    onAiDailyInputCharsLimitChange: (Int) -> Unit,
-    onAiMaxRetriesChange: (Int) -> Unit,
-    onAiRetryBaseDelayChange: (Int) -> Unit,
-    onSaveAiApiKey: (String) -> Unit,
-    onClearAiApiKey: () -> Unit,
+    onRefreshAiModels: (AiProvider, String, String) -> Unit,
+    onSaveAiSettings: (AiOnlineSettings, String?, String?) -> Unit,
     onSelectSceneMusic: () -> Unit,
     onUpdateSceneMusic: (String, String, String) -> Unit,
     onSceneMusicEnabledChange: (String, Boolean) -> Unit,
@@ -182,6 +171,7 @@ fun PersonalScreen(
     // NAVIGATION_AUDIT_V3_PERSONAL: reference-style hierarchical navigation.
     var personalPage by remember { mutableStateOf("home") }
     var showSettingsDialog by remember { mutableStateOf(false) }
+    var showAiSettingsDialog by remember { mutableStateOf(false) }
     var showOtherSettingsDialog by remember { mutableStateOf(false) }
     var showBackupLogDialog by remember { mutableStateOf(false) }
     var showClearDownloadsDialog by remember { mutableStateOf(false) }
@@ -280,25 +270,6 @@ fun PersonalScreen(
                 onRollback = onRollbackVietPhrase,
                 onAcceptSuggestion = onAcceptVietPhraseSuggestion,
                 onRejectSuggestion = onRejectVietPhraseSuggestion,
-            )
-        }
-        "settings_ai" -> PersonalSubPage("THIẾT LẬP AI", "QUAY LẠI CÀI ĐẶT", { returnToSettings() }) {
-            AiOnlineCard(
-                state = state,
-                onEnabledChange = onAiEnabledChange,
-                onConsentChange = onAiConsentChange,
-                onProviderChange = onAiProviderChange,
-                onRefreshGeminiModels = onRefreshGeminiModels,
-                onEndpointChange = onAiEndpointChange,
-                onModelChange = onAiModelChange,
-                onTemperatureChange = onAiTemperatureChange,
-                onInstructionChange = onAiInstructionChange,
-                onDailyRequestLimitChange = onAiDailyRequestLimitChange,
-                onDailyInputCharsLimitChange = onAiDailyInputCharsLimitChange,
-                onMaxRetriesChange = onAiMaxRetriesChange,
-                onRetryBaseDelayChange = onAiRetryBaseDelayChange,
-                onSaveApiKey = onSaveAiApiKey,
-                onClearApiKey = onClearAiApiKey,
             )
         }
         "settings_automation" -> PersonalSubPage("PHÂN VAI TTS BẰNG AI", "QUAY LẠI CÀI ĐẶT", { returnToSettings() }) {
@@ -519,6 +490,7 @@ fun PersonalScreen(
                     onSelect = { target ->
                         showSettingsDialog = false
                         when (target) {
+                            "settings_ai" -> showAiSettingsDialog = true
                             "settings_other" -> showOtherSettingsDialog = true
                             "settings_backup_log" -> showBackupLogDialog = true
                             "settings_clear_downloads" -> showClearDownloadsDialog = true
@@ -531,6 +503,16 @@ fun PersonalScreen(
                 )
             },
             confirmButton = { TextButton(onClick = { showSettingsDialog = false }) { Text("ĐÓNG") } },
+        )
+    }
+
+
+    if (showAiSettingsDialog) {
+        AiReferenceSettingsDialog(
+            state = state,
+            onDismiss = { showAiSettingsDialog = false; showSettingsDialog = true },
+            onSave = onSaveAiSettings,
+            onRefreshModels = onRefreshAiModels,
         )
     }
 
@@ -1888,119 +1870,251 @@ private fun VietPhraseCard(
 }
 
 @Composable
-private fun AiOnlineCard(
+private fun AiReferenceSettingsDialog(
     state: MainUiState,
-    onEnabledChange: (Boolean) -> Unit,
-    onConsentChange: (Boolean) -> Unit,
-    onProviderChange: (AiProvider) -> Unit,
-    onRefreshGeminiModels: () -> Unit,
-    onEndpointChange: (String) -> Unit,
-    onModelChange: (String) -> Unit,
-    onTemperatureChange: (Float) -> Unit,
-    onInstructionChange: (String) -> Unit,
-    onDailyRequestLimitChange: (Int) -> Unit,
-    onDailyInputCharsLimitChange: (Int) -> Unit,
-    onMaxRetriesChange: (Int) -> Unit,
-    onRetryBaseDelayChange: (Int) -> Unit,
-    onSaveApiKey: (String) -> Unit,
-    onClearApiKey: () -> Unit,
+    onDismiss: () -> Unit,
+    onSave: (AiOnlineSettings, String?, String?) -> Unit,
+    onRefreshModels: (AiProvider, String, String) -> Unit,
 ) {
+    var enabled by remember(state.aiOnline.enabled) { mutableStateOf(state.aiOnline.enabled) }
+    var provider by remember(state.aiOnline.provider) { mutableStateOf(state.aiOnline.provider) }
     var endpoint by remember(state.aiOnline.endpoint) { mutableStateOf(state.aiOnline.endpoint) }
-    var model by remember(state.aiOnline.model) { mutableStateOf(state.aiOnline.model) }
-    var instruction by remember(state.aiOnline.translationInstruction) { mutableStateOf(state.aiOnline.translationInstruction) }
-    var apiKey by remember(state.aiOnline.provider) { mutableStateOf("") }
-    Card(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 5.dp)) {
-        Column(Modifier.padding(16.dp)) {
-            Text("AI online: dịch, phân vai và nhạc cảnh", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text("Nội dung chỉ được gửi khi cả consent và công tắc AI đều bật. API key được mã hóa bằng Android Keystore và không nằm trong backup.", style = MaterialTheme.typography.bodySmall)
-            Row(Modifier.fillMaxWidth().padding(top = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Tôi đồng ý gửi chương tới nhà cung cấp đã chọn", Modifier.weight(1f))
-                Switch(state.aiOnline.consentGranted, onConsentChange)
-            }
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Bật AI online", Modifier.weight(1f))
-                Switch(state.aiOnline.enabled, onEnabledChange)
-            }
-            Text("Nhà cung cấp", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 6.dp))
-            Row(Modifier.fillMaxWidth()) {
-                Button(
-                    { onProviderChange(AiProvider.GEMINI) },
-                    Modifier.weight(1f).padding(2.dp),
-                ) { Text((if (state.aiOnline.provider == AiProvider.GEMINI) "✓ " else "") + "GEMINI NATIVE") }
-                Button(
-                    { onProviderChange(AiProvider.OPENAI_COMPATIBLE) },
-                    Modifier.weight(1f).padding(2.dp),
-                ) { Text((if (state.aiOnline.provider == AiProvider.OPENAI_COMPATIBLE) "✓ " else "") + "OPENAI-COMPATIBLE") }
-            }
-            if (state.aiOnline.provider == AiProvider.OPENAI_COMPATIBLE) {
-                OutlinedTextField(endpoint, { endpoint = it.take(500) }, label = { Text("HTTPS chat-completions endpoint") }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
-            } else {
-                Text("Gemini dùng trực tiếp generateContent tại generativelanguage.googleapis.com; không đi qua endpoint OpenAI-compatible.", style = MaterialTheme.typography.bodySmall)
-            }
-            OutlinedTextField(model, { model = it.take(200) }, label = { Text(if (state.aiOnline.provider == AiProvider.GEMINI) "Gemini model" else "Tên model") }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
-            if (state.aiOnline.provider == AiProvider.GEMINI) {
-                Button(
-                    onClick = onRefreshGeminiModels,
-                    enabled = state.aiHasApiKey && !state.aiModelDiscoveryBusy,
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                ) { Text(if (state.aiModelDiscoveryBusy) "ĐANG TẢI MODEL…" else "TẢI DANH SÁCH MODEL GEMINI") }
-                state.aiAvailableModels.take(12).forEach { availableModel ->
-                    Button(
-                        onClick = {
-                            model = availableModel
-                            onModelChange(availableModel)
-                        },
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
-                    ) { Text((if (state.aiOnline.model == availableModel) "✓ " else "") + availableModel) }
-                }
-                if (state.aiAvailableModels.size > 12) {
-                    Text("Đang hiển thị 12/${state.aiAvailableModels.size} model; có thể nhập tên model khác ở ô trên.", style = MaterialTheme.typography.bodySmall)
-                }
-            }
-            Row(Modifier.fillMaxWidth()) {
-                Button({ onTemperatureChange(state.aiOnline.temperature - 0.1f) }, Modifier.weight(1f).padding(2.dp)) { Text("ÍT SÁNG TẠO") }
-                Text("${"%.1f".format(state.aiOnline.temperature)}", Modifier.padding(vertical = 12.dp, horizontal = 4.dp))
-                Button({ onTemperatureChange(state.aiOnline.temperature + 0.1f) }, Modifier.weight(1f).padding(2.dp)) { Text("SÁNG TẠO") }
-            }
-            OutlinedTextField(instruction, { instruction = it.take(2000) }, label = { Text("Yêu cầu dịch bổ sung") }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
-            Button({ onEndpointChange(endpoint); onModelChange(model); onInstructionChange(instruction) }, Modifier.fillMaxWidth().padding(top = 5.dp)) { Text("LƯU CẤU HÌNH AI") }
-            HorizontalDivider(Modifier.padding(vertical = 8.dp))
-            val latestUsage = state.aiUsageRecent.firstOrNull()
-            Text("Hạn mức AI trên thiết bị", fontWeight = FontWeight.SemiBold)
-            Text("Hôm nay: ${latestUsage?.requestCount ?: 0}/${state.aiOnline.dailyRequestLimit} yêu cầu • ${latestUsage?.inputChars ?: 0}/${state.aiOnline.dailyInputCharsLimit} ký tự đầu vào • ${latestUsage?.retryCount ?: 0} lần thử lại", style = MaterialTheme.typography.bodySmall)
-            Row(Modifier.fillMaxWidth()) {
-                Button({ onDailyRequestLimitChange(state.aiOnline.dailyRequestLimit - 5) }, Modifier.weight(1f).padding(2.dp)) { Text("YÊU CẦU -") }
-                Button({ onDailyRequestLimitChange(state.aiOnline.dailyRequestLimit + 5) }, Modifier.weight(1f).padding(2.dp)) { Text("YÊU CẦU +") }
-            }
-            Row(Modifier.fillMaxWidth()) {
-                Button({ onDailyInputCharsLimitChange(state.aiOnline.dailyInputCharsLimit - 50_000) }, Modifier.weight(1f).padding(2.dp)) { Text("KÝ TỰ -") }
-                Button({ onDailyInputCharsLimitChange(state.aiOnline.dailyInputCharsLimit + 50_000) }, Modifier.weight(1f).padding(2.dp)) { Text("KÝ TỰ +") }
-            }
-            Text("Thử lại tối đa ${state.aiOnline.maxRetries} lần • chờ gốc ${state.aiOnline.retryBaseDelayMillis} ms")
-            Row(Modifier.fillMaxWidth()) {
-                Button({ onMaxRetriesChange(state.aiOnline.maxRetries - 1) }, Modifier.weight(1f).padding(2.dp)) { Text("RETRY -") }
-                Button({ onMaxRetriesChange(state.aiOnline.maxRetries + 1) }, Modifier.weight(1f).padding(2.dp)) { Text("RETRY +") }
-            }
-            Row(Modifier.fillMaxWidth()) {
-                Button({ onRetryBaseDelayChange(state.aiOnline.retryBaseDelayMillis - 250) }, Modifier.weight(1f).padding(2.dp)) { Text("BACKOFF -") }
-                Button({ onRetryBaseDelayChange(state.aiOnline.retryBaseDelayMillis + 250) }, Modifier.weight(1f).padding(2.dp)) { Text("BACKOFF +") }
-            }
-            OutlinedTextField(
-                value = apiKey,
-                onValueChange = { apiKey = it.take(4096) },
-                label = { Text((if (state.aiOnline.provider == AiProvider.GEMINI) "Gemini " else "OpenAI-compatible ") + if (state.aiHasApiKey) "key mới" else "API key") },
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-            )
-            Row(Modifier.fillMaxWidth()) {
-                Button({ onSaveApiKey(apiKey); apiKey = "" }, Modifier.weight(1f).padding(2.dp), enabled = apiKey.length >= 8) { Text(if (state.aiHasApiKey) "THAY KHÓA" else "LƯU KHÓA") }
-                Button(onClearApiKey, Modifier.weight(1f).padding(2.dp), enabled = state.aiHasApiKey) { Text("XÓA KHÓA") }
-            }
-            Text(if (state.aiHasApiKey) "Đã có API key mã hóa trên thiết bị." else "Chưa có API key.", style = MaterialTheme.typography.bodySmall)
+    var geminiModel by remember(state.aiOnline.geminiModel) { mutableStateOf(state.aiOnline.geminiModel) }
+    var proxyModel by remember(state.aiOnline.openAiModel) { mutableStateOf(state.aiOnline.openAiModel) }
+    var mode by remember(state.aiOnline.mode) { mutableStateOf(if (state.aiOnline.mode == "improve") "improve" else "translate") }
+    var translatePrompt by remember(state.aiOnline.translationPrompt) { mutableStateOf(state.aiOnline.translationPrompt) }
+    var improvePrompt by remember(state.aiOnline.improvePrompt) { mutableStateOf(state.aiOnline.improvePrompt) }
+    var timeoutText by remember(state.aiOnline.timeoutMillis) { mutableStateOf(state.aiOnline.timeoutMillis.toString()) }
+    var temperatureText by remember(state.aiOnline.temperature) { mutableStateOf(state.aiOnline.temperature.toString()) }
+    var geminiKey by remember { mutableStateOf("") }
+    var proxyKey by remember { mutableStateOf("") }
+    var geminiKeyTouched by remember { mutableStateOf(false) }
+    var proxyKeyTouched by remember { mutableStateOf(false) }
+    var providerMenu by remember { mutableStateOf(false) }
+    var modeMenu by remember { mutableStateOf(false) }
+    var modelPickerRequested by remember { mutableStateOf(false) }
+    var modelPickerOpen by remember { mutableStateOf(false) }
+    var validationMessage by remember { mutableStateOf("") }
+
+    LaunchedEffect(state.aiModelDiscoveryBusy, state.aiAvailableModels, modelPickerRequested) {
+        if (modelPickerRequested && !state.aiModelDiscoveryBusy && state.aiAvailableModels.isNotEmpty()) {
+            modelPickerRequested = false
+            modelPickerOpen = true
         }
     }
+
+    fun requestModels() {
+        validationMessage = ""
+        val key = if (provider == AiProvider.GEMINI) geminiKey else proxyKey
+        if (provider == AiProvider.OPENAI_COMPATIBLE && !endpoint.trim().startsWith("https://", ignoreCase = true)) {
+            validationMessage = "URL OpenAI-compatible phải dùng HTTPS."
+            return
+        }
+        modelPickerRequested = true
+        onRefreshModels(provider, endpoint, key)
+    }
+
+    fun saveSettings() {
+        val timeout = timeoutText.trim().toIntOrNull()
+        val temperature = temperatureText.trim().replace(',', '.').toFloatOrNull()
+        validationMessage = when {
+            provider == AiProvider.OPENAI_COMPATIBLE && !endpoint.trim().startsWith("https://", ignoreCase = true) -> "URL OpenAI-compatible phải dùng HTTPS."
+            !translatePrompt.contains("{{CHAPTER_TEXT}}") -> "Lời nhắc dịch phải giữ biến {{CHAPTER_TEXT}}."
+            !improvePrompt.contains("{{SOURCE_TEXT}}") || !improvePrompt.contains("{{VIETPHRASE_TEXT}}") -> "Lời nhắc cải thiện phải giữ {{SOURCE_TEXT}} và {{VIETPHRASE_TEXT}}."
+            timeout == null || timeout < 10_000 -> "Timeout AI phải từ 10000 ms trở lên."
+            temperature == null || temperature !in 0f..2f -> "Nhiệt độ AI phải trong khoảng 0.0 - 2.0."
+            geminiKeyTouched && geminiKey.isNotBlank() && geminiKey.length < 8 -> "Gemini API Key không hợp lệ."
+            proxyKeyTouched && proxyKey.isNotBlank() && proxyKey.length < 8 -> "OpenAI-compatible API Key không hợp lệ."
+            else -> ""
+        }
+        if (validationMessage.isNotEmpty()) return
+        val resolvedGemini = geminiModel.trim().ifBlank { "gemini-3.6-flash" }
+        val resolvedProxy = proxyModel.trim()
+        onSave(
+            state.aiOnline.copy(
+                enabled = enabled,
+                consentGranted = enabled,
+                provider = provider,
+                endpoint = endpoint.trim().ifBlank { "https://openrouter.ai/api/v1/chat/completions" },
+                geminiModel = resolvedGemini,
+                openAiModel = resolvedProxy,
+                model = if (provider == AiProvider.GEMINI) resolvedGemini else resolvedProxy,
+                mode = if (mode == "improve") "improve" else "translate",
+                translationPrompt = translatePrompt,
+                improvePrompt = improvePrompt,
+                timeoutMillis = timeout!!,
+                temperature = temperature!!,
+            ),
+            geminiKey.takeIf { geminiKeyTouched },
+            proxyKey.takeIf { proxyKeyTouched },
+        )
+        onDismiss()
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("THIẾT LẬP AI") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 640.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Bật nút AI trong màn hình đọc", Modifier.weight(1f))
+                    Switch(enabled, { enabled = it })
+                }
+
+                Text("Nhà cung cấp AI", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 10.dp))
+                Box(Modifier.fillMaxWidth()) {
+                    Button(onClick = { providerMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (provider == AiProvider.GEMINI) "Google Gemini" else "OpenAI-compatible / Proxy")
+                    }
+                    DropdownMenu(expanded = providerMenu, onDismissRequest = { providerMenu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Google Gemini") },
+                            onClick = { provider = AiProvider.GEMINI; providerMenu = false },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("OpenAI-compatible / Proxy") },
+                            onClick = { provider = AiProvider.OPENAI_COMPATIBLE; providerMenu = false },
+                        )
+                    }
+                }
+
+                if (provider == AiProvider.GEMINI) {
+                    Text("Gemini API Key", modifier = Modifier.padding(top = 10.dp))
+                    OutlinedTextField(
+                        value = geminiKey,
+                        onValueChange = { geminiKeyTouched = true; geminiKey = it.take(4096) },
+                        placeholder = { Text(if (state.aiHasGeminiApiKey) "Đã lưu Gemini API Key" else "Nhập Gemini API Key") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Model Gemini", Modifier.weight(1f))
+                        Button(onClick = ::requestModels, enabled = !state.aiModelDiscoveryBusy) {
+                            Text(if (state.aiModelDiscoveryBusy) "ĐANG TẢI" else "TẢI DS")
+                        }
+                    }
+                    OutlinedTextField(
+                        value = geminiModel,
+                        onValueChange = { geminiModel = it.take(200) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    Text("OpenAI-compatible URL", modifier = Modifier.padding(top = 10.dp))
+                    OutlinedTextField(
+                        value = endpoint,
+                        onValueChange = { endpoint = it.take(500) },
+                        placeholder = { Text(".../v1/chat/completions") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text("OpenAI-compatible API Key", modifier = Modifier.padding(top = 8.dp))
+                    OutlinedTextField(
+                        value = proxyKey,
+                        onValueChange = { proxyKeyTouched = true; proxyKey = it.take(4096) },
+                        placeholder = { Text(if (state.aiHasOpenAiApiKey) "Đã lưu API Key" else "Bearer key") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Model OpenAI-compatible", Modifier.weight(1f))
+                        Button(onClick = ::requestModels, enabled = !state.aiModelDiscoveryBusy) {
+                            Text(if (state.aiModelDiscoveryBusy) "ĐANG TẢI" else "TẢI DS")
+                        }
+                    }
+                    OutlinedTextField(
+                        value = proxyModel,
+                        onValueChange = { proxyModel = it.take(200) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+
+                Text("Chế độ xử lý mặc định", modifier = Modifier.padding(top = 10.dp))
+                Box(Modifier.fillMaxWidth()) {
+                    Button(onClick = { modeMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (mode == "improve") "Cải thiện bản VietPhrase" else "Dịch chương gốc")
+                    }
+                    DropdownMenu(expanded = modeMenu, onDismissRequest = { modeMenu = false }) {
+                        DropdownMenuItem(text = { Text("Dịch chương gốc") }, onClick = { mode = "translate"; modeMenu = false })
+                        DropdownMenuItem(text = { Text("Cải thiện bản VietPhrase") }, onClick = { mode = "improve"; modeMenu = false })
+                    }
+                }
+
+                Text("Lời nhắc mặc định: Dịch chương gốc", color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 12.dp))
+                Text("Biến: {{CHAPTER_TITLE}}, {{CHAPTER_TEXT}}. Phải giữ {{CHAPTER_TEXT}} để AI nhận nội dung chương.", style = MaterialTheme.typography.bodySmall)
+                OutlinedTextField(
+                    value = translatePrompt,
+                    onValueChange = { translatePrompt = it },
+                    minLines = 9,
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                )
+
+                Text("Lời nhắc mặc định: Cải thiện VietPhrase", color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 12.dp))
+                Text("Biến: {{SOURCE_TITLE}}, {{SOURCE_TEXT}}, {{VIETPHRASE_TITLE}}, {{VIETPHRASE_TEXT}}. Hai biến nội dung là bắt buộc.", style = MaterialTheme.typography.bodySmall)
+                OutlinedTextField(
+                    value = improvePrompt,
+                    onValueChange = { improvePrompt = it },
+                    minLines = 11,
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                )
+
+                Text("Timeout yêu cầu AI (ms)", modifier = Modifier.padding(top = 10.dp))
+                OutlinedTextField(
+                    value = timeoutText,
+                    onValueChange = { timeoutText = it.filter(Char::isDigit).take(9) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text("Nhiệt độ AI (0.0 - 2.0)", modifier = Modifier.padding(top = 8.dp))
+                OutlinedTextField(
+                    value = temperatureText,
+                    onValueChange = { temperatureText = it.take(8) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                if (validationMessage.isNotBlank()) {
+                    Text(
+                        validationMessage,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+            }
+        },
+        confirmButton = { Button(onClick = ::saveSettings) { Text("LƯU") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("HỦY") } },
+    )
+
+    if (modelPickerOpen && state.aiAvailableModels.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { modelPickerOpen = false },
+            title = { Text("CHỌN MODEL") },
+            text = {
+                Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())) {
+                    state.aiAvailableModels.forEach { model ->
+                        TextButton(
+                            onClick = {
+                                if (provider == AiProvider.GEMINI) geminiModel = model else proxyModel = model
+                                modelPickerOpen = false
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(model) }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { modelPickerOpen = false }) { Text("HỦY") } },
+        )
+    }
 }
+
 
 @Composable
 private fun SceneMusicLibraryCard(

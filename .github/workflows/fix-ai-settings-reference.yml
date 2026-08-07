@@ -28,6 +28,18 @@ jobs:
           cache: gradle
       - name: Apply reference AI settings fix
         run: python3 scripts/fix_ai_settings_reference.py
+      - name: Update release validator for reference AI UI
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/validate_release.py')
+          text = path.read_text(encoding='utf-8')
+          old = 'AI online: dịch, phân vai và nhạc cảnh'
+          if old not in text:
+              raise SystemExit('missing legacy AI validator token')
+          text = text.replace(old, 'Bật nút AI trong màn hình đọc')
+          path.write_text(text, encoding='utf-8')
+          PY
       - name: Assert reference AI settings surface
         run: |
           file=app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt

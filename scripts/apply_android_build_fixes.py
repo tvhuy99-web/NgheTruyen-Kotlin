@@ -103,6 +103,12 @@ for screen in (
         "",
     )
 
+replace_exact(
+    "scripts/validate_release.py",
+    '        "CHỈ PHÂN VAI",\n        "CHỈ NHẠC CẢNH",\n',
+    '        "PHÂN VAI AI",\n        "NHẠC CẢNH",\n',
+)
+
 
 def apply_reference_ui_patch() -> None:
     parts = sorted(Path("scripts").glob("reference_ui_v34.part*.patch"))

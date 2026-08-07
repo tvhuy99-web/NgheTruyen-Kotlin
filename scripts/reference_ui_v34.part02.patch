@@ -1,0 +1,142 @@
+-                .padding(horizontal = 8.dp),
++                .background(ReferencePanelBackground)
++                .padding(4.dp),
+         ) {
+-            Row(modifier = Modifier.fillMaxWidth()) {
+-                Button(
+-                    onClick = { sourceMenuOpen = true },
+-                    enabled = !state.searchAllSources,
+-                    modifier = Modifier.weight(1f).padding(end = 3.dp),
+-                ) {
+-                    Text("NGUỒN: ${selectedSource?.displayName ?: "Chưa chọn"}")
+-                }
+-                Button(
+-                    onClick = { onSearchAllSourcesChange(!state.searchAllSources) },
+-                    modifier = Modifier.weight(1f).padding(start = 3.dp),
+-                ) {
+-                    Text(if (state.searchAllSources) "✓ TẤT CẢ NGUỒN" else "TÌM MỘT NGUỒN")
+-                }
+-            }
++            ReferenceActionButton(
++                text = "NGUỒN: ${selectedSource?.displayName ?: "CHƯA CHỌN"}",
++                onClick = { sourceMenuOpen = true },
++                enabled = !state.searchAllSources,
++                normalColor = ReferenceDivider,
++                normalContentColor = ReferenceText,
++                accessibilityLabel = "Chọn nguồn truyện đang khám phá. Hiện tại ${selectedSource?.displayName ?: "chưa chọn"}",
++                modifier = Modifier.fillMaxWidth(),
++            )
+             DropdownMenu(
+                 expanded = sourceMenuOpen,
+                 onDismissRequest = { sourceMenuOpen = false },
+@@ -95,78 +122,145 @@
+                     modifier = Modifier
+                         .fillMaxWidth()
+                         .horizontalScroll(rememberScrollState())
+-                        .padding(vertical = 6.dp),
+-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
++                        .padding(top = 4.dp),
++                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                 ) {
+                     if (selectedSource?.supportsHome == true) {
+-                        Button(onClick = onHomeSelected) {
+-                            Text(if (state.exploreMode == ExploreMode.HOME) "✓ TRANG CHỦ" else "TRANG CHỦ")
+-                        }
++                        ReferenceTabButton(
++                            text = "TRANG CHỦ",
++                            selected = state.exploreMode == ExploreMode.HOME,
++                            onClick = onHomeSelected,
++                            accessibilityLabel = "Danh mục Trang chủ",
++                            minHeight = 54.dp,
++                            unselectedColor = ReferenceDivider,
++                            unselectedContentColor = ReferenceText,
++                        )
+                     }
+                     state.categories.forEach { category ->
+-                        Button(onClick = { onCategorySelected(category) }) {
+-                            Text(if (state.exploreMode == ExploreMode.CATEGORY && state.activeCategory == category) "✓ $category" else category)
+-                        }
++                        val selected = state.exploreMode == ExploreMode.CATEGORY && state.activeCategory == category
++                        ReferenceTabButton(
++                            text = category.uppercase(),
++                            selected = selected,
++                            onClick = { onCategorySelected(category) },
++                            accessibilityLabel = "Danh mục $category",
++                            minHeight = 54.dp,
++                            unselectedColor = ReferenceDivider,
++                            unselectedContentColor = ReferenceText,
++                        )
+                     }
+                 }
+             }
+-
+-            OutlinedTextField(
+-                value = state.query,
+-                onValueChange = onQueryChange,
+-                label = { Text("Tên truyện, tác giả hoặc URL") },
+-                singleLine = true,
+-                modifier = Modifier.fillMaxWidth(),
+-            )
+-            if (state.sourceSuggestions.isNotEmpty() && !state.searchAllSources) {
+-                Row(
+-                    modifier = Modifier
+-                        .fillMaxWidth()
+-                        .horizontalScroll(rememberScrollState())
+-                        .padding(top = 4.dp),
+-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+-                ) {
+-                    state.sourceSuggestions.forEach { suggestion ->
+-                        Button(onClick = { onSuggestionSelected(suggestion) }) {
+-                            Text(suggestion)
+-                        }
+-                    }
+-                }
+-            }
+-            Row(modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
+-                Button(onClick = onSearch, modifier = Modifier.weight(1f).padding(end = 2.dp)) {
+-                    Text("TÌM KIẾM")
+-                }
+-                if (state.loading && state.searchAllSources) {
+-                    Button(onClick = onCancelSearch, modifier = Modifier.weight(0.7f).padding(start = 2.dp)) {
+-                        Text("HỦY")
+-                    }
+-                }
+-            }
++        }
++
++        OutlinedTextField(
++            value = state.query,
++            onValueChange = onQueryChange,
++            label = { Text("Tên truyện, tác giả hoặc URL") },
++            singleLine = true,
++            modifier = Modifier
++                .fillMaxWidth()
++                .background(ReferencePanelBackground)
++                .padding(horizontal = 8.dp, vertical = 4.dp),
++        )
++
++        if (state.sourceSuggestions.isNotEmpty() && !state.searchAllSources) {
+             Row(
+-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 4.dp),
+-                horizontalArrangement = Arrangement.spacedBy(4.dp),
++                modifier = Modifier
++                    .fillMaxWidth()
++                    .horizontalScroll(rememberScrollState())
++                    .background(ReferencePanelBackground)
++                    .padding(horizontal = 4.dp, vertical = 2.dp),
++                horizontalArrangement = Arrangement.spacedBy(2.dp),
+             ) {
+-                listOf(
+-                    SearchSortMode.RELEVANCE to "LIÊN QUAN",
+-                    SearchSortMode.TITLE to "TÊN",
+-                    SearchSortMode.AUTHOR to "TÁC GIẢ",
+-                    SearchSortMode.SOURCE to "NGUỒN",
+-                ).forEach { (mode, label) ->
+-                    Button(onClick = { onSortModeChange(mode) }) {
+-                        Text(if (state.searchSortMode == mode) "✓ $label" else label)
+-                    }
+-                }
+-            }
+-        }
++                state.sourceSuggestions.forEach { suggestion ->
++                    ReferenceActionButton(

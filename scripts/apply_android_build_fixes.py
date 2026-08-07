@@ -139,4 +139,14 @@ replace_exact(
 
 subprocess.run(["python3", "scripts/finalize_reference_ui_polish_v2.py"], check=True)
 subprocess.run(["python3", "scripts/apply_navigation_audit_v3.py"], check=True)
+
+v4_parts = sorted(Path("scripts").glob("reference_parity_v4.part*.b64"))
+if not v4_parts:
+    raise SystemExit("Missing reference parity v4 payload")
+v4_payload = Path(".git/reference_parity_v4.py.gz.b64")
+v4_payload.write_text("".join(part.read_text(encoding="utf-8").strip() for part in v4_parts), encoding="utf-8")
+v4_script = Path(".git/apply_reference_parity_v4.py")
+subprocess.run(["bash", "-lc", f"base64 -d {v4_payload} | gzip -d > {v4_script}"], check=True)
+subprocess.run(["python3", str(v4_script)], check=True)
+
 print("ANDROID_BUILD_FIXES_APPLIED")

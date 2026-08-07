@@ -10,6 +10,12 @@ grep -R "class SourcePackStorySource\|SourcePackStorySource(" -n app/src/main/ja
 echo '=== source-info / manifest JSON parser hints ==='
 grep -R "schemaVersion\|runtime.*entry\|optJSONArray(\"actions\"\|getJSONObject(\"actions\"" -n source-package source-vbook source-lua app/src/main/java | head -120 || true
 
+echo '=== SourceActionRequest ==='
+grep -R "data class SourceActionRequest\|class SourceActionRequest" -n source-api source-runtime source-vbook source-lua app/src/main/java | head -40 || true
+
+echo '=== Runtime execute signatures ==='
+grep -R "request: SourceActionRequest\|SourceActionRequest" -n source-runtime/src/main source-vbook/src/main source-lua/src/main | head -120 || true
+
 echo '=== DB migration registration tail ==='
 grep -n "MIGRATION_1[4-9]_\|addMigrations\|version = 18" app/src/main/java/vn/nghetruyen/app/data/local/AppDatabase.kt | tail -80 || true
 

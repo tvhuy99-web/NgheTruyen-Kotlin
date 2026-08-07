@@ -345,7 +345,7 @@ fun PersonalScreen(
             onOpenDiagnosticBrowser = onOpenSourceDiagnosticBrowser,
             onClearSession = onClearSourceSession,
         )
-        SettingsCard("Kiến trúc ứng dụng", "Kotlin, Compose, Room, DataStore, WorkManager và foreground TTS service. Lua Native Source API 2 chạy trong LuaJ sandbox; không AndroLua, không luajava và không nạp DEX động.")
+        }
     }
 }
 

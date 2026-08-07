@@ -312,28 +312,6 @@ fun ReaderScreen(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
             )
             Row(modifier = Modifier.fillMaxWidth()) {
-                ReaderButton(
-                    when {
-                        state.aiBusy -> "AI ĐANG CHẠY…"
-                        state.chapterTextMode == ChapterTextMode.AI_TRANSLATION -> "DỊCH LẠI"
-                        else -> "DỊCH AI"
-                    },
-                    onAiTranslate,
-                    Modifier.weight(1f),
-                    enabled = !state.aiBusy,
-                    normalColor = ReferencePurple,
-                    accessibilityLabel = "Dịch chương bằng AI",
-                )
-                ReaderButton(
-                    "PHÂN VAI AI",
-                    onVoiceCast,
-                    Modifier.weight(1f),
-                    enabled = !state.aiBusy,
-                    normalColor = ReferencePurple,
-                    accessibilityLabel = "Phân vai giọng đọc bằng AI",
-                )
-            }
-            Row(modifier = Modifier.fillMaxWidth()) {
                 ReaderButton("TRƯỚC", onPreviousChapter, Modifier.weight(1.2f), minHeight = 64.dp, accessibilityLabel = "Chương trước")
                 ReaderButton("LÙI", onRewind, Modifier.weight(1f), minHeight = 64.dp, accessibilityLabel = "Tua lùi")
                 ReaderButton(
@@ -354,6 +332,35 @@ fun ReaderScreen(
                 )
                 ReaderButton("TỚI", onForward, Modifier.weight(1f), minHeight = 64.dp, accessibilityLabel = "Tua tới")
                 ReaderButton("SAU", onNextChapter, Modifier.weight(1.2f), minHeight = 64.dp, accessibilityLabel = "Chương sau")
+            }
+            if (state.playback.preparationState == PlaybackPreparationState.PREPARING) {
+                Text(
+                    "Đang chuẩn bị giọng đọc và nội dung tiếp theo…",
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                    color = palette.text,
+                )
+            }
+            Row(modifier = Modifier.fillMaxWidth()) {
+                ReaderButton(
+                    when {
+                        state.aiBusy -> "AI ĐANG CHẠY…"
+                        state.chapterTextMode == ChapterTextMode.AI_TRANSLATION -> "DỊCH LẠI"
+                        else -> "DỊCH AI"
+                    },
+                    onAiTranslate,
+                    Modifier.weight(1f),
+                    enabled = !state.aiBusy,
+                    normalColor = ReferencePurple,
+                    accessibilityLabel = "Dịch chương bằng AI",
+                )
+                ReaderButton(
+                    "PHÂN VAI AI",
+                    onVoiceCast,
+                    Modifier.weight(1f),
+                    enabled = !state.aiBusy,
+                    normalColor = Color(0xFFAF52DE),
+                    accessibilityLabel = "Phân vai giọng đọc bằng AI",
+                )
             }
             if (showReaderActions) {
                 Row(modifier = Modifier.fillMaxWidth()) {

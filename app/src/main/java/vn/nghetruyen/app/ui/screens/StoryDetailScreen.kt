@@ -334,40 +334,6 @@ fun StoryDetailScreen(
                 accessibilityLabel = "Đóng cấu hình giọng đọc và AI nâng cao",
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
             )
-            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
-                ReferenceActionButton(
-                    text = "TẢI CHƯA ĐỌC",
-                    onClick = onDownloadUnread,
-                    modifier = Modifier.weight(1f).padding(1.dp),
-                )
-                ReferenceActionButton(
-                    text = "TẢI KHOẢNG",
-                    onClick = { showRangeDialog = true },
-                    modifier = Modifier.weight(1f).padding(1.dp),
-                )
-                val following = state.following.any { it.storyId == detail.story.id }
-                ReferenceActionButton(
-                    text = if (following) "BỎ THEO DÕI" else "THEO DÕI",
-                    onClick = onToggleFollowing,
-                    selected = following,
-                    accessibilityLabel = if (following) "Bỏ theo dõi truyện" else "Theo dõi truyện",
-                    modifier = Modifier.weight(1f).padding(1.dp),
-                )
-            }
-        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
-            LargeActionButton(
-                "XUẤT SÁCH NÓI",
-                { showExportDialog = true },
-                Modifier.weight(1.2f).padding(1.dp),
-            )
-            val hasVoiceProfile = state.storyTtsProfiles.containsKey(detail.story.id)
-            LargeActionButton(
-                if (hasVoiceProfile) "CẬP NHẬT GIỌNG RIÊNG" else "LƯU GIỌNG RIÊNG",
-                onSaveVoiceProfile,
-                Modifier.weight(1.4f).padding(1.dp),
-            )
-            if (hasVoiceProfile) LargeActionButton("BỎ GIỌNG RIÊNG", onClearVoiceProfile, Modifier.weight(1.2f).padding(1.dp))
-        }
         Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
             Column(modifier = Modifier.padding(10.dp)) {
                 Text("Vai giọng thủ công", fontWeight = FontWeight.SemiBold)

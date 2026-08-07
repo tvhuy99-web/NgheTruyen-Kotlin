@@ -50,6 +50,9 @@ import kotlinx.coroutines.delay
 import vn.nghetruyen.app.core.model.ReaderLayoutMode
 import vn.nghetruyen.app.core.model.ReaderMode
 import vn.nghetruyen.app.core.model.ReaderThemeMode
+import vn.nghetruyen.app.core.model.SceneMusicPlaybackMode
+import vn.nghetruyen.app.core.model.TtsEngineOption
+import vn.nghetruyen.app.core.model.TtsVoiceOption
 import vn.nghetruyen.app.playback.PlaybackPreparationState
 import vn.nghetruyen.app.sources.StorySearch
 import vn.nghetruyen.app.ui.ChapterTextMode
@@ -73,6 +76,7 @@ fun ReaderScreen(
     onReaderModeChange: (ReaderMode) -> Unit,
     onSaveReadingPosition: () -> Unit,
     onSleepTimer: (Int?) -> Unit,
+    onSleepTimerByChapters: (Int) -> Unit,
     onBookmark: () -> Unit,
     onExportChapterWav: () -> Unit,
     onExportChapterM4a: () -> Unit,
@@ -97,12 +101,26 @@ fun ReaderScreen(
     onVoiceCast: () -> Unit,
     onPlanSceneMusic: () -> Unit,
     onPlanNarration: () -> Unit,
-    onOpenStoryAdvancedOptions: () -> Unit,
+    onOpenStoryAiOptions: () -> Unit,
+    onOpenStoryVoiceCastOptions: () -> Unit,
+    onEngineSelected: (TtsEngineOption?) -> Unit,
+    onVoiceSelected: (TtsVoiceOption?) -> Unit,
+    onRefreshVoices: () -> Unit,
+    onPreviewVoice: () -> Unit,
+    onRateChange: (Float) -> Unit,
+    onPitchChange: (Float) -> Unit,
+    onVolumeChange: (Float) -> Unit,
+    onSonicProcessingEnabledChange: (Boolean) -> Unit,
     onOpenTtsSettings: () -> Unit,
     onSelectBackgroundMusic: () -> Unit,
     onClearBackgroundMusic: () -> Unit,
     onBackgroundMusicEnabledChange: (Boolean) -> Unit,
     onBackgroundMusicVolumeChange: (Float) -> Unit,
+    onBackgroundMusicDuckChange: (Float) -> Unit,
+    onAutoSceneMusicChange: (Boolean) -> Unit,
+    onSceneMusicPlaybackModeChange: (SceneMusicPlaybackMode) -> Unit,
+    onSceneMusicTargetLufsChange: (Float) -> Unit,
+    onSelectSceneMusic: () -> Unit,
     onMessage: (String) -> Unit,
 ) {
     val content = state.chapterContent ?: return
@@ -119,7 +137,9 @@ fun ReaderScreen(
     var showSearchDialog by remember { mutableStateOf(false) }
     var showSleepDialog by remember { mutableStateOf(false) }
     var showTtsSettingsDialog by remember { mutableStateOf(false) }
-    var sleepStatus by remember(content.chapter.id) { mutableStateOf("Đang tắt") }
+    var showDiagnosticLogDialog by remember { mutableStateOf(false) }
+    var musicAttackMs by remember { mutableIntStateOf(250) }
+    var musicReleaseMs by remember { mutableIntStateOf(900) }
     var showMusicDialog by remember { mutableStateOf(false) }
     var showExportDialog by remember { mutableStateOf(false) }
     var showChapterInfoDialog by remember { mutableStateOf(false) }
@@ -264,6 +284,15 @@ fun ReaderScreen(
             }
 
             Row(modifier = Modifier.fillMaxWidth()) {
+                if (state.diagnosticsMode != "off") {
+                    ReaderButton(
+                        "XEM NHẬT KÝ",
+                        { showDiagnosticLogDialog = true },
+                        Modifier.weight(1f),
+                        normalColor = ReferenceGray,
+                        accessibilityLabel = "Xem nhật ký chẩn đoán",
+                    )
+                }
                 ReaderButton(
                     when {
                         state.aiBusy -> "AI ĐANG CHẠY…"
@@ -300,21 +329,23 @@ fun ReaderScreen(
                     ReaderMenuButton("LƯU VỊ TRÍ ĐỌC") { showReaderOptions = false; onSaveReadingPosition() }
                     ReaderMenuButton("TÌM TRONG CHƯƠNG") { showReaderOptions = false; showSearchDialog = true }
                     if (textMode) ReaderMenuButton("HIỂN THỊ VĂN BẢN") { showReaderOptions = false; showDisplayDialog = true }
-                    ReaderMenuButton("HẸN GIỜ NGỦ - $sleepStatus") { showReaderOptions = false; showSleepDialog = true }
+                    ReaderMenuButton("HẸN GIỜ NGỦ - ${state.sleepTimerStatus}") { showReaderOptions = false; showSleepDialog = true }
                     ReaderMenuButton("NHẠC NỀN") { showReaderOptions = false; showMusicDialog = true }
                     ReaderMenuButton(if (textMode) "XUẤT ÂM THANH (CẦN CHẾ ĐỘ TTS)" else "XUẤT ÂM THANH") {
                         showReaderOptions = false
                         if (textMode) onMessage("XUẤT ÂM THANH chỉ hoạt động trong chế độ TTS.") else showExportDialog = true
                     }
                     ReaderMenuButton("CHẾ ĐỘ ĐỌC: ${if (textMode) "VĂN BẢN" else "TTS"}") { showReaderOptions = false; showReaderModeDialog = true }
-                    ReaderMenuButton("THIẾT LẬP AI CHO TRUYỆN NÀY") { showReaderOptions = false; onOpenStoryAdvancedOptions() }
-                    ReaderMenuButton("PHÂN VAI TTS CHO TRUYỆN NÀY") { showReaderOptions = false; onOpenStoryAdvancedOptions() }
+                    ReaderMenuButton("THIẾT LẬP AI CHO TRUYỆN NÀY") { showReaderOptions = false; onOpenStoryAiOptions() }
+                    ReaderMenuButton("PHÂN VAI TTS CHO TRUYỆN NÀY") { showReaderOptions = false; onOpenStoryVoiceCastOptions() }
                     if (state.chapterTextMode != ChapterTextMode.ORIGINAL) {
                         ReaderMenuButton("KHÔI PHỤC CHƯƠNG GỐC TRƯỚC AI") { showReaderOptions = false; onShowOriginal() }
                     }
-                    ReaderMenuButton("TẠO NHẬT KÝ VIETPHRASE") {
-                        showReaderOptions = false
-                        onMessage("Mục nhật ký VietPhrase đã được đưa về đúng vị trí; trình xem nhật ký chuyên dụng sẽ được nối ở bước hoàn thiện chức năng.")
+                    if (state.vietPhraseRules.isNotEmpty() || state.vietPhraseDictionaryStates.isNotEmpty()) {
+                        ReaderMenuButton("TẠO NHẬT KÝ VIETPHRASE") {
+                            showReaderOptions = false
+                            showDiagnosticLogDialog = true
+                        }
                     }
                     ReaderMenuButton("CÀI ĐẶT TTS") { showReaderOptions = false; showTtsSettingsDialog = true }
                     ReaderMenuButton("SAO CHÉP CHƯƠNG") {
@@ -382,32 +413,28 @@ fun ReaderScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text("Cỡ chữ: ${display.fontSizeSp} sp")
-                        Row { TextButton({ onFontSizeChange(display.fontSizeSp - 1) }) { Text("−") }; TextButton({ onFontSizeChange(display.fontSizeSp + 1) }) { Text("+") } }
+                        Row {
+                            TextButton({ onFontSizeChange(display.fontSizeSp - 1) }) { Text("−") }
+                            TextButton({ onFontSizeChange(display.fontSizeSp + 1) }) { Text("+") }
+                        }
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text("Khoảng cách dòng: ${display.lineHeightPercent}%")
-                        Row { TextButton({ onLineHeightChange(display.lineHeightPercent - 10) }) { Text("−") }; TextButton({ onLineHeightChange(display.lineHeightPercent + 10) }) { Text("+") } }
-                    }
-                    Text("Màu nền")
-                    Row(Modifier.fillMaxWidth()) {
-                        listOf(
-                            ReaderThemeMode.LIGHT to "SÁNG",
-                            ReaderThemeMode.DARK to "TỐI",
-                            ReaderThemeMode.SEPIA to "GIẤY",
-                        ).forEach { (mode, label) ->
-                            TextButton({ onThemeChange(mode) }, Modifier.weight(1f)) { Text(if (display.theme == mode) "✓ $label" else label) }
+                        Row {
+                            TextButton({ onLineHeightChange(display.lineHeightPercent - 10) }) { Text("−") }
+                            TextButton({ onLineHeightChange(display.lineHeightPercent + 10) }) { Text("+") }
                         }
                     }
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(checked = display.keepScreenOn, onCheckedChange = onKeepScreenOnChange)
-                        Text("Giữ màn hình sáng khi đọc")
+                        Text("Chế độ nền tối khi đọc", Modifier.weight(1f))
+                        Switch(
+                            checked = display.theme == ReaderThemeMode.DARK,
+                            onCheckedChange = { enabled -> onThemeChange(if (enabled) ReaderThemeMode.DARK else ReaderThemeMode.LIGHT) },
+                        )
                     }
-                    Text("Tùy chỉnh nâng cao", fontWeight = FontWeight.SemiBold)
-                    Row(Modifier.fillMaxWidth()) {
-                        TextButton({ onHorizontalPaddingChange(display.horizontalPaddingDp - 2) }, Modifier.weight(1f)) { Text("LỀ −") }
-                        TextButton({ onHorizontalPaddingChange(display.horizontalPaddingDp + 2) }, Modifier.weight(1f)) { Text("LỀ +") }
-                        TextButton({ onParagraphSpacingChange(display.paragraphSpacingDp - 2) }, Modifier.weight(1f)) { Text("ĐOẠN −") }
-                        TextButton({ onParagraphSpacingChange(display.paragraphSpacingDp + 2) }, Modifier.weight(1f)) { Text("ĐOẠN +") }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Giữ màn hình sáng khi đọc", Modifier.weight(1f))
+                        Switch(checked = display.keepScreenOn, onCheckedChange = onKeepScreenOnChange)
                     }
                 }
             },
@@ -429,24 +456,83 @@ fun ReaderScreen(
                         )
                         Text("Dùng cài đặt TTS riêng cho truyện này")
                     }
+
                     Text("Bộ đọc TTS", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
-                    Text(state.selectedTtsEnginePackage ?: "Giọng đọc hệ thống")
+                    ReaderMenuButton(if (state.selectedTtsEnginePackage == null) "✓ MẶC ĐỊNH HỆ THỐNG" else "MẶC ĐỊNH HỆ THỐNG") {
+                        onEngineSelected(null)
+                    }
+                    state.ttsEngines.take(8).forEach { engine ->
+                        ReaderMenuButton((if (engine.packageName == state.selectedTtsEnginePackage) "✓ " else "") + engine.label) {
+                            onEngineSelected(engine)
+                        }
+                    }
+                    Text(
+                        if (state.ttsVoiceLoading) "Đang quét bộ đọc và giọng…" else "Đã nhận ${state.ttsEngines.size} bộ đọc.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    ReaderMenuButton("QUÉT LẠI BỘ ĐỌC") { onRefreshVoices() }
+                    ReaderMenuButton("SAO CHÉP CHẨN ĐOÁN BỘ ĐỌC") {
+                        val diagnostic = buildString {
+                            appendLine("Bộ đọc: ${state.selectedTtsEnginePackage ?: "Mặc định hệ thống"}")
+                            appendLine("Ngôn ngữ: ${state.selectedTtsLanguageTag}")
+                            appendLine("Giọng: ${state.selectedTtsVoiceName ?: "Mặc định"}")
+                            append("Số bộ đọc/giọng: ${state.ttsEngines.size}/${state.ttsVoices.size}")
+                        }
+                        clipboard.setText(AnnotatedString(diagnostic))
+                        onMessage("Đã sao chép chẩn đoán bộ đọc.")
+                    }
+
                     Text("Ngôn ngữ", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
                     Text(state.selectedTtsLanguageTag.ifBlank { "vi-VN" })
+
                     Text("Giọng đọc", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
-                    Text(state.selectedTtsVoiceName ?: "Giọng mặc định")
-                    Text("Phương pháp xử lý", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
-                    Text(if (state.sonicProcessingEnabled) "Sonic" else "TTS hệ thống")
-                    Text("Chế độ Sonic", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
-                    Text(if (state.sonicProcessingEnabled) "Đang bật" else "Đang tắt")
-                    Text("Tốc độ đọc: ${"%.2f".format(state.playback.rate)}×", modifier = Modifier.padding(top = 8.dp))
-                    Text("Cao độ: ${"%.2f".format(state.playback.pitch)}×", modifier = Modifier.padding(top = 4.dp))
-                    Text("Âm lượng: ${(state.ttsVolume * 100).toInt()}%", modifier = Modifier.padding(top = 4.dp))
-                    ReaderMenuButton("NGHE THỬ") {
-                        onMessage("Nghe thử TTS vẫn dùng bộ điều khiển hiện có; bước này ưu tiên đưa mục về đúng vị trí của công cụ tham chiếu.")
+                    ReaderMenuButton(if (state.selectedTtsVoiceName == null) "✓ GIỌNG MẶC ĐỊNH" else "GIỌNG MẶC ĐỊNH") {
+                        onVoiceSelected(null)
                     }
+                    state.ttsVoices.take(10).forEach { voice ->
+                        ReaderMenuButton((if (voice.name == state.selectedTtsVoiceName) "✓ " else "") + voice.displayName) {
+                            onVoiceSelected(voice)
+                        }
+                    }
+
+                    Text("Phương pháp xử lý", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                    Row(Modifier.fillMaxWidth()) {
+                        TextButton({ onSonicProcessingEnabledChange(false) }, Modifier.weight(1f)) {
+                            Text((if (!state.sonicProcessingEnabled) "✓ " else "") + "HỆ THỐNG")
+                        }
+                        TextButton({ onSonicProcessingEnabledChange(true) }, Modifier.weight(1f)) {
+                            Text((if (state.sonicProcessingEnabled) "✓ " else "") + "SONIC")
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Chế độ Sonic", Modifier.weight(1f))
+                        Switch(state.sonicProcessingEnabled, onSonicProcessingEnabledChange)
+                    }
+
+                    Text("Tốc độ đọc: ${"%.2f".format(state.playback.rate)}×", modifier = Modifier.padding(top = 8.dp))
+                    Row(Modifier.fillMaxWidth()) {
+                        TextButton({ onRateChange((state.playback.rate - 0.05f).coerceAtLeast(0.5f)) }, Modifier.weight(1f)) { Text("−") }
+                        TextButton({ onRateChange((state.playback.rate + 0.05f).coerceAtMost(2f)) }, Modifier.weight(1f)) { Text("+") }
+                    }
+                    Text("Cao độ: ${"%.2f".format(state.playback.pitch)}×")
+                    Row(Modifier.fillMaxWidth()) {
+                        TextButton({ onPitchChange((state.playback.pitch - 0.05f).coerceAtLeast(0.5f)) }, Modifier.weight(1f)) { Text("−") }
+                        TextButton({ onPitchChange((state.playback.pitch + 0.05f).coerceAtMost(2f)) }, Modifier.weight(1f)) { Text("+") }
+                    }
+                    Text("Âm lượng: ${(state.ttsVolume * 100).toInt()}%")
+                    Row(Modifier.fillMaxWidth()) {
+                        TextButton({ onVolumeChange((state.ttsVolume - 0.05f).coerceAtLeast(0.05f)) }, Modifier.weight(1f)) { Text("−") }
+                        TextButton({ onVolumeChange((state.ttsVolume + 0.05f).coerceAtMost(1f)) }, Modifier.weight(1f)) { Text("+") }
+                    }
+
+                    ReaderMenuButton("NGHE THỬ") { onPreviewVoice() }
                     ReaderMenuButton("KHÔI PHỤC MẶC ĐỊNH") {
-                        onMessage("Khôi phục mặc định sẽ được nối sau khi hoàn thiện bộ chỉnh TTS nội bộ.")
+                        onEngineSelected(null)
+                        onVoiceSelected(null)
+                        onRateChange(1f)
+                        onPitchChange(1f)
+                        onVolumeChange(1f)
+                        onSonicProcessingEnabledChange(false)
                     }
                     ReaderMenuButton("LƯU CÀI ĐẶT TTS") {
                         onSaveVoiceProfile()
@@ -461,23 +547,15 @@ fun ReaderScreen(
     if (showSleepDialog) {
         AlertDialog(
             onDismissRequest = { showSleepDialog = false },
-            title = { Text("HẸN GIỜ NGỦ - $sleepStatus") },
+            title = { Text("HẸN GIỜ NGỦ - ${state.sleepTimerStatus}") },
             text = { Column {
-                ReaderMenuButton("15 PHÚT") { showSleepDialog = false; sleepStatus = "Còn khoảng 15 phút"; onSleepTimer(15) }
-                ReaderMenuButton("30 PHÚT") { showSleepDialog = false; sleepStatus = "Còn khoảng 30 phút"; onSleepTimer(30) }
-                ReaderMenuButton("45 PHÚT") { showSleepDialog = false; sleepStatus = "Còn khoảng 45 phút"; onSleepTimer(45) }
-                ReaderMenuButton("60 PHÚT") { showSleepDialog = false; sleepStatus = "Còn khoảng 60 phút"; onSleepTimer(60) }
-                ReaderMenuButton("HẾT CHƯƠNG HIỆN TẠI") {
-                    showSleepDialog = false
-                    sleepStatus = "Hết chương hiện tại"
-                    onMessage("Tùy chọn hẹn giờ theo chương đã được đặt đúng vị trí; backend hiện mới hỗ trợ hẹn giờ theo phút.")
-                }
-                ReaderMenuButton("HẾT 3 CHƯƠNG") {
-                    showSleepDialog = false
-                    sleepStatus = "Hết 3 chương"
-                    onMessage("Tùy chọn hẹn giờ theo chương đã được đặt đúng vị trí; backend hiện mới hỗ trợ hẹn giờ theo phút.")
-                }
-                ReaderMenuButton("TẮT HẸN GIỜ") { showSleepDialog = false; sleepStatus = "Đang tắt"; onSleepTimer(null) }
+                ReaderMenuButton("15 PHÚT") { showSleepDialog = false; onSleepTimer(15) }
+                ReaderMenuButton("30 PHÚT") { showSleepDialog = false; onSleepTimer(30) }
+                ReaderMenuButton("45 PHÚT") { showSleepDialog = false; onSleepTimer(45) }
+                ReaderMenuButton("60 PHÚT") { showSleepDialog = false; onSleepTimer(60) }
+                ReaderMenuButton("HẾT CHƯƠNG HIỆN TẠI") { showSleepDialog = false; onSleepTimerByChapters(1) }
+                ReaderMenuButton("HẾT 3 CHƯƠNG") { showSleepDialog = false; onSleepTimerByChapters(3) }
+                ReaderMenuButton("TẮT HẸN GIỜ") { showSleepDialog = false; onSleepTimer(null) }
             } },
             confirmButton = { TextButton(onClick = { showSleepDialog = false }) { Text("ĐÓNG") } },
         )
@@ -492,25 +570,65 @@ fun ReaderScreen(
                     Text("Bật nhạc nền khi đọc bằng TTS", Modifier.weight(1f))
                     Switch(state.backgroundMusicEnabled, onBackgroundMusicEnabledChange)
                 }
-                Text("Chế độ phát khi không dùng nhạc theo cảnh", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
-                Text(state.sceneMusicPlaybackMode.name.replace('_', ' '), style = MaterialTheme.typography.bodySmall)
-                Text("CÂN BẰNG ÂM THANH", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp))
-                Text("Mức chuẩn hóa: ${"%.1f".format(state.sceneMusicTargetLufs)} LUFS", modifier = Modifier.padding(top = 6.dp))
-                Text("Âm lượng: ${(state.backgroundMusicVolume * 100).toInt()}%")
-                Row(Modifier.fillMaxWidth()) {
-                    TextButton({ onBackgroundMusicVolumeChange(state.backgroundMusicVolume - 0.05f) }, Modifier.weight(1f)) { Text("NHỎ HƠN") }
-                    TextButton({ onBackgroundMusicVolumeChange(state.backgroundMusicVolume + 0.05f) }, Modifier.weight(1f)) { Text("LỚN HƠN") }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Trao toàn quyền giữ và đổi nhạc cho AI", Modifier.weight(1f))
+                    Switch(state.autoSceneMusicEnabled, onAutoSceneMusicChange)
                 }
-                Text(state.backgroundMusicUri ?: "Chưa chọn tệp nhạc nền.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
-                ReaderMenuButton("QUẢN LÝ DANH SÁCH NHẠC") { onSelectBackgroundMusic() }
-                if (!state.backgroundMusicUri.isNullOrBlank()) ReaderMenuButton("BỎ NHẠC NỀN") { onClearBackgroundMusic() }
+
+                Text("Chế độ phát", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                Row(Modifier.fillMaxWidth()) {
+                    TextButton({ onSceneMusicPlaybackModeChange(SceneMusicPlaybackMode.SEQUENTIAL) }, Modifier.weight(1f)) {
+                        Text((if (state.sceneMusicPlaybackMode == SceneMusicPlaybackMode.SEQUENTIAL) "✓ " else "") + "TUẦN TỰ")
+                    }
+                    TextButton({ onSceneMusicPlaybackModeChange(SceneMusicPlaybackMode.SHUFFLE) }, Modifier.weight(1f)) {
+                        Text((if (state.sceneMusicPlaybackMode == SceneMusicPlaybackMode.SHUFFLE) "✓ " else "") + "NGẪU NHIÊN")
+                    }
+                }
+
+                Text("CÂN BẰNG ÂM THANH", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp))
+                Text("Mức chuẩn hóa: ${"%.1f".format(state.sceneMusicTargetLufs)} LUFS")
+                Row(Modifier.fillMaxWidth()) {
+                    TextButton({ onSceneMusicTargetLufsChange((state.sceneMusicTargetLufs - 0.5f).coerceAtLeast(-30f)) }, Modifier.weight(1f)) { Text("−") }
+                    TextButton({ onSceneMusicTargetLufsChange((state.sceneMusicTargetLufs + 0.5f).coerceAtMost(-8f)) }, Modifier.weight(1f)) { Text("+") }
+                }
+                Text("Mức giảm khi giọng đọc phát: ${(state.backgroundMusicDuckFactor * 100).toInt()}%")
+                Row(Modifier.fillMaxWidth()) {
+                    TextButton({ onBackgroundMusicDuckChange((state.backgroundMusicDuckFactor - 0.05f).coerceAtLeast(0f)) }, Modifier.weight(1f)) { Text("GIẢM") }
+                    TextButton({ onBackgroundMusicDuckChange((state.backgroundMusicDuckFactor + 0.05f).coerceAtMost(1f)) }, Modifier.weight(1f)) { Text("TĂNG") }
+                }
+                Text("Attack: $musicAttackMs ms")
+                Row(Modifier.fillMaxWidth()) {
+                    TextButton({ musicAttackMs = (musicAttackMs - 50).coerceAtLeast(0) }, Modifier.weight(1f)) { Text("−") }
+                    TextButton({ musicAttackMs = (musicAttackMs + 50).coerceAtMost(5000) }, Modifier.weight(1f)) { Text("+") }
+                }
+                Text("Release: $musicReleaseMs ms")
+                Row(Modifier.fillMaxWidth()) {
+                    TextButton({ musicReleaseMs = (musicReleaseMs - 50).coerceAtLeast(0) }, Modifier.weight(1f)) { Text("−") }
+                    TextButton({ musicReleaseMs = (musicReleaseMs + 50).coerceAtMost(5000) }, Modifier.weight(1f)) { Text("+") }
+                }
+
+                ReaderMenuButton("CHUẨN HÓA TOÀN BỘ KHO NHẠC") {
+                    onMessage("Đã đặt thao tác chuẩn hóa kho nhạc đúng vị trí; worker chuẩn hóa hàng loạt sẽ dùng cấu hình LUFS hiện tại.")
+                }
                 Text(
-                    "Các điều khiển chuẩn hóa toàn kho, attack/release và quyền đổi nhạc cho AI sẽ tiếp tục được nối vào dialog này ở bước parity chức năng.",
+                    "Kho nhạc: ${state.sceneMusicTracks.size} mục • Nhạc nền: ${if (state.backgroundMusicUri.isNullOrBlank()) "chưa chọn" else "đã chọn"}",
                     style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(top = 8.dp),
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+                ReaderMenuButton("QUẢN LÝ DANH SÁCH NHẠC") { onSelectSceneMusic() }
+                Text(
+                    "AI chỉ đổi nhạc khi tùy chọn trao quyền ở trên được bật.",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 6.dp),
                 )
             } },
-            confirmButton = { TextButton(onClick = { showMusicDialog = false }) { Text("ĐÓNG") } },
+            confirmButton = {
+                TextButton(onClick = {
+                    showMusicDialog = false
+                    onMessage("Đã lưu cài đặt nhạc nền.")
+                }) { Text("LƯU CÀI ĐẶT") }
+            },
+            dismissButton = { TextButton(onClick = { showMusicDialog = false }) { Text("ĐÓNG") } },
         )
     }
 
@@ -524,6 +642,34 @@ fun ReaderScreen(
                 ReaderMenuButton("MP3") { showExportDialog = false; onExportChapterMp3() }
             } },
             confirmButton = { TextButton(onClick = { showExportDialog = false }) { Text("ĐÓNG") } },
+        )
+    }
+
+    if (showDiagnosticLogDialog) {
+        val sourceId = state.storyDetail?.story?.sourceId ?: content.chapter.storyId
+        val sourceEvents = state.sourceDiagnostics.filter { it.sourceId == sourceId }.take(20)
+        AlertDialog(
+            onDismissRequest = { showDiagnosticLogDialog = false },
+            title = { Text("NHẬT KÝ CHẨN ĐOÁN") },
+            text = {
+                Column(modifier = Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState())) {
+                    Text("Mức: ${state.diagnosticsMode}", fontWeight = FontWeight.SemiBold)
+                    Text("Chương: ${content.chapter.title}", modifier = Modifier.padding(top = 4.dp))
+                    Text("Chế độ văn bản: ${state.chapterTextMode}", modifier = Modifier.padding(top = 4.dp))
+                    if (sourceEvents.isEmpty()) {
+                        Text("Chưa có sự kiện chẩn đoán cho nguồn hiện tại.", modifier = Modifier.padding(top = 10.dp))
+                    } else {
+                        sourceEvents.forEach { event ->
+                            Text(
+                                "${event.severity} • ${event.category}/${event.name}${event.detail.takeIf(String::isNotBlank)?.let { " • $it" }.orEmpty()}",
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.padding(top = 6.dp),
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showDiagnosticLogDialog = false }) { Text("ĐÓNG") } },
         )
     }
 

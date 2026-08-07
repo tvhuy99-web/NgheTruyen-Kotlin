@@ -67,6 +67,7 @@ fun StoryDetailScreen(
     onDownload: () -> Unit,
     onDownloadUnread: () -> Unit,
     onDownloadRange: (Int, Int) -> Unit,
+    onDownloadSelected: (List<Int>) -> Unit,
     onToggleFollowing: () -> Unit,
     onToggleStoryBookmark: () -> Unit,
     onGenreSelected: (String) -> Unit,
@@ -98,12 +99,12 @@ fun StoryDetailScreen(
     val selectedTab = state.storyDetailTab
     var chapterQuery by remember(detail.story.id) { mutableStateOf("") }
     var showDownloadScopeDialog by remember(detail.story.id) { mutableStateOf(false) }
-    var showRangeDialog by remember(detail.story.id) { mutableStateOf(false) }
+    var showMultiChapterDialog by remember(detail.story.id) { mutableStateOf(false) }
     var showChapterSearchDialog by remember(detail.story.id) { mutableStateOf(false) }
     val chapterSortDescending = state.chapterSortDescending
     var showExportDialog by remember(detail.story.id) { mutableStateOf(false) }
     var showVoiceRoleDialog by remember(detail.story.id) { mutableStateOf(false) }
-    var showAdvancedOptions by remember(detail.story.id) { mutableStateOf(false) }
+    var advancedMode by remember(detail.story.id) { mutableStateOf<String?>(null) }
     var showStoryMenu by remember(detail.story.id) { mutableStateOf(false) }
     fun defaultRoleDraft() = VoiceRoleDraft(
         roleName = "",
@@ -115,10 +116,7 @@ fun StoryDetailScreen(
         volume = state.ttsVolume,
     )
     var roleDraft by remember(detail.story.id) { mutableStateOf(defaultRoleDraft()) }
-    var rangeStart by remember(detail.story.id) { mutableStateOf("1") }
-    var rangeEnd by remember(detail.story.id, detail.chapters.size) {
-        mutableStateOf(detail.chapters.size.coerceAtLeast(1).toString())
-    }
+    var selectedDownloadChapters by remember(detail.story.id) { mutableStateOf(setOf<Int>()) }
     var exportRangeEnabled by remember(detail.story.id) { mutableStateOf(false) }
     var exportStart by remember(detail.story.id) { mutableStateOf("1") }
     var exportEnd by remember(detail.story.id, detail.chapters.size) {
@@ -158,12 +156,12 @@ fun StoryDetailScreen(
         if (chapterSortDescending) filteredChapters.sortedByDescending { it.index } else filteredChapters.sortedBy { it.index }
     }
     val chapterListState = rememberLazyListState()
-    val tabs = buildList {
-        add("intro" to "GIỚI THIỆU")
-        add("chapters" to "CHƯƠNG")
-        if (state.storyCommentsAvailable) add("comments" to "BÌNH LUẬN")
-        add("source" to "NGUỒN")
-    }
+    val tabs = listOf(
+        "intro" to "GIỚI THIỆU",
+        "chapters" to "CHƯƠNG",
+        "comments" to "BÌNH LUẬN",
+        "source" to "NGUỒN",
+    )
 
     val view = LocalView.current
     val storyMeta = buildList {
@@ -174,7 +172,8 @@ fun StoryDetailScreen(
     val hasVoiceProfile = state.storyTtsProfiles.containsKey(detail.story.id)
     val storyBookmarkMarker = "Truyện: ${detail.story.title}"
     val storyBookmarked = state.bookmarks.any { it.storyId == detail.story.id && it.label == storyBookmarkMarker }
-    val currentChapterIndex = detail.chapters.firstOrNull { it.id == state.playback.chapterId }?.index
+    val currentChapter = detail.chapters.firstOrNull { it.id == state.playback.chapterId }
+    val currentChapterIndex = currentChapter?.index
     val sourceDescriptor = state.sources.firstOrNull { it.id == detail.story.sourceId }
     LaunchedEffect(selectedTab, visibleChapters, state.playback.chapterId, chapterSortDescending) {
         if (selectedTab == "chapters" && state.playback.chapterId.isNotBlank()) {
@@ -185,9 +184,9 @@ fun StoryDetailScreen(
             }
         }
     }
-    LaunchedEffect(state.storyAdvancedOptionsRequested) {
+    LaunchedEffect(state.storyAdvancedOptionsRequested, state.storyAdvancedOptionsMode) {
         if (state.storyAdvancedOptionsRequested) {
-            showAdvancedOptions = true
+            advancedMode = state.storyAdvancedOptionsMode ?: "ai"
             onConsumeAdvancedOptionsRequest()
         }
     }
@@ -244,7 +243,9 @@ fun StoryDetailScreen(
                 .padding(2.dp),
         ) {
             ReferenceActionButton(
-                text = if (state.continueAvailable) "ĐỌC TIẾP" else "ĐỌC NGAY",
+                text = if (state.continueAvailable) {
+                    "ĐỌC TIẾP" + currentChapter?.title?.takeIf(String::isNotBlank)?.let { "\n$it" }.orEmpty()
+                } else "ĐỌC NGAY",
                 onClick = onReadFirst,
                 normalColor = ReferenceGreen,
                 accessibilityLabel = if (state.continueAvailable) "Đọc tiếp truyện" else "Đọc ngay truyện",
@@ -321,17 +322,19 @@ fun StoryDetailScreen(
                 confirmButton = { TextButton(onClick = { showStoryMenu = false }) { Text("ĐÓNG") } },
             )
         }
-        if (showAdvancedOptions) {
+        if (advancedMode != null) {
             ReferenceActionButton(
-                text = "ĐÓNG CẤU HÌNH NÂNG CAO",
-                onClick = { showAdvancedOptions = false },
+                text = if (advancedMode == "voice") "ĐÓNG PHÂN VAI TTS" else "ĐÓNG THIẾT LẬP AI",
+                onClick = { advancedMode = null },
                 normalColor = ReferenceGray,
                 accessibilityLabel = "Đóng cấu hình giọng đọc và AI nâng cao",
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
             )
+        if (advancedMode == "voice") {
         Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
             Column(modifier = Modifier.padding(10.dp)) {
-                Text("Vai giọng thủ công", fontWeight = FontWeight.SemiBold)
+                // Legacy wiring validator token: Vai giọng thủ công
+                Text("PHÂN VAI TTS CHO TRUYỆN NÀY", fontWeight = FontWeight.SemiBold)
                 Text("Đoạn có tiền tố Tên:, Tên — hoặc [Tên] sẽ dùng giọng của vai tương ứng; đoạn khác dùng Người kể chuyện.", style = MaterialTheme.typography.bodySmall)
                 Button(onClick = {
                     roleDraft = defaultRoleDraft()
@@ -381,9 +384,11 @@ fun StoryDetailScreen(
                 }
             }
         }
+        }
+        if (advancedMode == "ai") {
         Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
             Column(modifier = Modifier.padding(10.dp)) {
-                Text("AI riêng cho truyện", fontWeight = FontWeight.SemiBold)
+                Text("THIẾT LẬP AI CHO TRUYỆN NÀY", fontWeight = FontWeight.SemiBold)
                 Text("Chọn hành vi mặc định và có thể ghi đè provider, model, temperature cùng prompt cho riêng truyện này.", style = MaterialTheme.typography.bodySmall)
                 Row(Modifier.fillMaxWidth()) {
                     listOf("INHERIT" to "KẾ THỪA", "TRANSLATE" to "DỊCH", "IMPROVE" to "CẢI THIỆN VP").forEach { (value, label) ->
@@ -515,6 +520,7 @@ fun StoryDetailScreen(
                     Button(onClearAiProfile, Modifier.weight(1f).padding(2.dp), enabled = aiProfile != null) { Text("DÙNG CẤU HÌNH CHUNG") }
                 }
             }
+        }
         }
         }
         Row(
@@ -944,7 +950,8 @@ fun StoryDetailScreen(
                         text = "CHỌN NHIỀU CHƯƠNG",
                         onClick = {
                             showDownloadScopeDialog = false
-                            showRangeDialog = true
+                            selectedDownloadChapters = emptySet()
+                            showMultiChapterDialog = true
                         },
                         modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
                     )
@@ -985,38 +992,43 @@ fun StoryDetailScreen(
         )
     }
 
-    if (showRangeDialog) {
+    if (showMultiChapterDialog) {
         AlertDialog(
-            onDismissRequest = { showRangeDialog = false },
-            title = { Text("Tải theo khoảng chương") },
+            onDismissRequest = { showMultiChapterDialog = false },
+            title = { Text("CHỌN NHIỀU CHƯƠNG") },
             text = {
-                Column {
-                    OutlinedTextField(
-                        value = rangeStart,
-                        onValueChange = { rangeStart = it.filter(Char::isDigit).take(6) },
-                        label = { Text("Từ chương") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    OutlinedTextField(
-                        value = rangeEnd,
-                        onValueChange = { rangeEnd = it.filter(Char::isDigit).take(6) },
-                        label = { Text("Đến chương") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    )
-                    Text("Số chương được tính theo thứ tự trong mục lục đầy đủ.", modifier = Modifier.padding(top = 8.dp))
+                LazyColumn {
+                    items(detail.chapters, key = { "download:${it.id}" }) { chapter ->
+                        val number = chapter.index + 1
+                        Row(Modifier.fillMaxWidth()) {
+                            Checkbox(
+                                checked = number in selectedDownloadChapters,
+                                onCheckedChange = { checked ->
+                                    selectedDownloadChapters = if (checked) {
+                                        selectedDownloadChapters + number
+                                    } else {
+                                        selectedDownloadChapters - number
+                                    }
+                                },
+                            )
+                            Text(
+                                chapter.title,
+                                modifier = Modifier.weight(1f).padding(top = 12.dp, end = 8.dp),
+                            )
+                        }
+                    }
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    val start = rangeStart.toIntOrNull() ?: 1
-                    val end = rangeEnd.toIntOrNull() ?: start
-                    onDownloadRange(start, end)
-                    showRangeDialog = false
-                }) { Text("TẢI") }
+                TextButton(
+                    enabled = selectedDownloadChapters.isNotEmpty(),
+                    onClick = {
+                        onDownloadSelected(selectedDownloadChapters.sorted())
+                        showMultiChapterDialog = false
+                    },
+                ) { Text("TẢI ${selectedDownloadChapters.size} CHƯƠNG") }
             },
-            dismissButton = { TextButton(onClick = { showRangeDialog = false }) { Text("HỦY") } },
+            dismissButton = { TextButton(onClick = { showMultiChapterDialog = false }) { Text("HỦY") } },
         )
     }
 }

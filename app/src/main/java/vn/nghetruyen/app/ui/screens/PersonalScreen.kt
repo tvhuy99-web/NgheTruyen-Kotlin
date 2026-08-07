@@ -2,6 +2,7 @@ package vn.nghetruyen.app.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -11,6 +12,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -65,6 +68,7 @@ fun PersonalScreen(
     onPreviewVoice: () -> Unit,
     onOpenTtsSettings: () -> Unit,
     onInterruptionModeChange: (AudioInterruptionMode) -> Unit,
+    onDiagnosticsModeChange: (String) -> Unit,
     onHeadsetMultiClickChange: (Boolean) -> Unit,
     onHeadsetSingleActionChange: (String) -> Unit,
     onHeadsetDoubleActionChange: (String) -> Unit,
@@ -161,7 +165,6 @@ fun PersonalScreen(
 ) {
     // NAVIGATION_AUDIT_V3_PERSONAL: reference-style hierarchical navigation.
     var personalPage by remember { mutableStateOf("home") }
-    var diagnosticsMode by remember { mutableStateOf("off") }
     var repositoryUrl by remember { mutableStateOf("") }
     var trustKeyId by remember { mutableStateOf("") }
     var trustAlgorithm by remember { mutableStateOf("ECDSA_P256_SHA256") }
@@ -221,8 +224,8 @@ fun PersonalScreen(
             onSelect = { personalPage = it },
         )
         "settings_home" -> ReferenceSettingsHomePage(
-            diagnosticsMode = diagnosticsMode,
-            onDiagnosticsModeChange = { diagnosticsMode = it },
+            diagnosticsMode = state.diagnosticsMode,
+            onDiagnosticsModeChange = onDiagnosticsModeChange,
             onBack = { personalPage = "home" },
             onSelect = { personalPage = it },
             onExportBackup = onExportBackup,
@@ -274,31 +277,9 @@ fun PersonalScreen(
             )
         }
         "settings_automation" -> PersonalSubPage("PHÂN VAI TTS BẰNG AI", "QUAY LẠI CÀI ĐẶT", { personalPage = "settings_home" }) {
-            PlaybackAutomationCard(
+            ReferenceVoiceCastSettingsCard(
                 state = state,
-                onHeadsetMultiClickChange = onHeadsetMultiClickChange,
-                onHeadsetSingleActionChange = onHeadsetSingleActionChange,
-                onHeadsetDoubleActionChange = onHeadsetDoubleActionChange,
-                onHeadsetTripleActionChange = onHeadsetTripleActionChange,
-                onHeadsetLongActionChange = onHeadsetLongActionChange,
-                onPauseOnHeadsetDisconnectChange = onPauseOnHeadsetDisconnectChange,
-                onRestorePlaybackChange = onRestorePlaybackChange,
                 onAutoVoiceCastChange = onAutoVoiceCastChange,
-                onAutoSceneMusicChange = onAutoSceneMusicChange,
-                onPrefetchNarrationPlansChange = onPrefetchNarrationPlansChange,
-                onNarrationPrefetchWindowChange = onNarrationPrefetchWindowChange,
-                onSceneMusicCrossfadeChange = onSceneMusicCrossfadeChange,
-                onSceneMusicContinueChange = onSceneMusicContinueChange,
-                onSceneMusicPlaybackModeChange = onSceneMusicPlaybackModeChange,
-                onSceneMusicTargetLufsChange = onSceneMusicTargetLufsChange,
-                onSceneMusicAvoidRepeatWindowChange = onSceneMusicAvoidRepeatWindowChange,
-                onSonicProcessingEnabledChange = onSonicProcessingEnabledChange,
-                onSonicDefaultSpeedChange = onSonicDefaultSpeedChange,
-                onSonicDefaultPitchChange = onSonicDefaultPitchChange,
-                onTtsCacheEnabledChange = onTtsCacheEnabledChange,
-                onTtsCacheLimitChange = onTtsCacheLimitChange,
-                onNormalizeTtsVolumeChange = onNormalizeTtsVolumeChange,
-                onTtsTargetLufsChange = onTtsTargetLufsChange,
             )
         }
         "settings_other" -> PersonalSubPage("CÀI ĐẶT KHÁC", "QUAY LẠI CÀI ĐẶT", { personalPage = "settings_home" }) {
@@ -532,15 +513,31 @@ private fun ReferenceSettingsHomePage(
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.fillMaxWidth().padding(start = 10.dp, top = 14.dp, end = 10.dp, bottom = 4.dp),
         )
-        listOf(
-            "off" to "Tắt",
-            "basic" to "Gỡ lỗi cơ bản",
-            "advanced" to "Gỡ lỗi nâng cao",
-        ).forEach { (value, label) ->
-            Button(
-                onClick = { onDiagnosticsModeChange(value) },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
-            ) { Text((if (diagnosticsMode == value) "✓ " else "") + label) }
+        var diagnosticsExpanded by remember { mutableStateOf(false) }
+        val diagnosticsLabel = when (diagnosticsMode) {
+            "basic" -> "Gỡ lỗi cơ bản"
+            "advanced" -> "Gỡ lỗi nâng cao"
+            else -> "Tắt"
+        }
+        Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp)) {
+            Button(onClick = { diagnosticsExpanded = true }, modifier = Modifier.fillMaxWidth()) {
+                Text("$diagnosticsLabel ▼")
+            }
+            DropdownMenu(expanded = diagnosticsExpanded, onDismissRequest = { diagnosticsExpanded = false }) {
+                listOf(
+                    "off" to "Tắt",
+                    "basic" to "Gỡ lỗi cơ bản",
+                    "advanced" to "Gỡ lỗi nâng cao",
+                ).forEach { (value, label) ->
+                    DropdownMenuItem(
+                        text = { Text((if (diagnosticsMode == value) "✓ " else "") + label) },
+                        onClick = {
+                            diagnosticsExpanded = false
+                            onDiagnosticsModeChange(value)
+                        },
+                    )
+                }
+            }
         }
         ReferenceActionButton(
             text = "CÀI ĐẶT KHÁC",
@@ -919,6 +916,51 @@ private fun MediaMappingButton(label: String, value: String, onChange: (String) 
         onClick = { onChange(nextMediaAction(value)) },
         modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
     ) { Text("$label: ${mediaActionLabel(value)}") }
+}
+
+@Composable
+private fun ReferenceVoiceCastSettingsCard(
+    state: MainUiState,
+    onAutoVoiceCastChange: (Boolean) -> Unit,
+) {
+    Card(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 5.dp)) {
+        Column(Modifier.padding(16.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Bật mặc định cho truyện dùng cấu hình chung", Modifier.weight(1f))
+                Switch(checked = state.autoVoiceCastEnabled, onCheckedChange = onAutoVoiceCastChange)
+            }
+            Text(
+                "Bộ hồ sơ này là tiêu chuẩn dùng chung. Cấu hình vai riêng của từng truyện được mở từ TÙY CHỌN ĐỌC.",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
+            )
+            if (state.voiceRoles.isEmpty()) {
+                Text("Chưa có hồ sơ giọng chung hiển thị trong kho dữ liệu Kotlin hiện tại.", style = MaterialTheme.typography.bodySmall)
+            } else {
+                state.voiceRoles.take(10).forEach { role ->
+                    Text(
+                        (if (role.enabled) "✓ " else "○ ") + (if (role.isNarrator) "Người kể chuyện" else role.roleName),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp),
+                    )
+                }
+            }
+            Button(
+                onClick = { },
+                enabled = false,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            ) { Text("THÊM GIỌNG") }
+            Button(
+                onClick = { },
+                enabled = false,
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            ) { Text("KHÔI PHỤC 7 HỒ SƠ MẪU") }
+            Text(
+                "Hai nút quản lý hồ sơ được giữ đúng vị trí tham chiếu; backend hồ sơ giọng chung sẽ được nối với kho vai ở bước dữ liệu.",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
+    }
 }
 
 @Composable

@@ -139,6 +139,7 @@ data class MainUiState(
     val storyDetail: StoryDetail? = null,
     val storyDetailTab: String = "intro",
     val storyAdvancedOptionsRequested: Boolean = false,
+    val storyAdvancedOptionsMode: String? = null,
     val storyComments: List<StoryComment> = emptyList(),
     val storyCommentsAvailable: Boolean = false,
     val storyCommentsRefreshable: Boolean = false,
@@ -222,6 +223,8 @@ data class MainUiState(
     val readerCacheLimitMiB: Int = 64,
     val readerMode: ReaderMode = ReaderMode.TEXT,
     val chapterSortDescending: Boolean = false,
+    val diagnosticsMode: String = "off",
+    val sleepTimerStatus: String = "Đang tắt",
     val readerDisplay: ReaderDisplaySettings = ReaderDisplaySettings(),
     val storyTtsProfiles: Map<String, StoryTtsProfileEntity> = emptyMap(),
     val storyAiProfiles: Map<String, StoryAiProfileEntity> = emptyMap(),
@@ -270,6 +273,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var commentsLoadJob: Job? = null
     private val storyCommentCache = StoryCommentCache()
     private var sourceCheckAllJob: Job? = null
+    private var chapterSleepRemaining: Int? = null
+    private var chapterSleepLastChapterId: String = ""
 
     init {
         observeSettings()
@@ -462,38 +467,40 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun observePlayback() {
         viewModelScope.launch {
             PlaybackQueueStore.state.collect { playback ->
-                mutableState.update { it.copy(playback = playback) }
-            }
-        }
-        viewModelScope.launch {
-            PlaybackQueueStore.state
-                .map { Triple(it.storyId, it.chapterId, it.paragraphIndex) }
-                .filter { it.first.isNotBlank() && it.second.isNotBlank() }
-                .distinctUntilChanged()
-                .collect { (storyId, chapterId, paragraphIndex) ->
-                    container.libraryRepository.saveProgress(storyId, chapterId, paragraphIndex)
-                }
-        }
-        viewModelScope.launch {
-            PlaybackQueueStore.state
-                .map { it.chapterId }
-                .filter(String::isNotBlank)
-                .distinctUntilChanged()
-                .collect { chapterId ->
-                    val current = mutableState.value.chapterContent
-                    if (current?.chapter?.id == chapterId) return@collect
-                    val cached = container.libraryRepository.loadCachedChapter(chapterId) ?: return@collect
-                    val normalized = enrichNavigation(ReaderDocumentNormalizer.normalize(cached))
-                    mutableState.update {
-                        it.copy(
-                            destination = Destination.Reader,
-                            chapterContent = normalized,
-                            originalChapterContent = normalized,
-                            chapterTextMode = ChapterTextMode.ORIGINAL,
-                            continueAvailable = true,
-                        )
+                val previousChapterId = chapterSleepLastChapterId
+                val currentChapterId = playback.chapterId
+                val remaining = chapterSleepRemaining
+                if (
+                    remaining != null &&
+                    previousChapterId.isNotBlank() &&
+                    currentChapterId.isNotBlank() &&
+                    currentChapterId != previousChapterId
+                ) {
+                    val nextRemaining = remaining - 1
+                    if (nextRemaining <= 0) {
+                        chapterSleepRemaining = null
+                        ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_PAUSE)
+                        mutableState.update {
+                            it.copy(
+                                playback = playback,
+                                sleepTimerStatus = "Đang tắt",
+                                message = "Đã dừng đọc theo hẹn giờ chương.",
+                            )
+                        }
+                    } else {
+                        chapterSleepRemaining = nextRemaining
+                        mutableState.update {
+                            it.copy(
+                                playback = playback,
+                                sleepTimerStatus = "Còn $nextRemaining chương",
+                            )
+                        }
                     }
+                } else {
+                    mutableState.update { it.copy(playback = playback) }
                 }
+                if (currentChapterId.isNotBlank()) chapterSleepLastChapterId = currentChapterId
+            }
         }
     }
 
@@ -1171,16 +1178,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun consumeStoryAdvancedOptionsRequest() {
-        mutableState.update { it.copy(storyAdvancedOptionsRequested = false) }
+        mutableState.update { it.copy(storyAdvancedOptionsRequested = false, storyAdvancedOptionsMode = null) }
     }
 
-    fun openStoryAdvancedOptions() {
+    fun openStoryAiOptions() = openStoryAdvancedOptions("ai")
+
+    fun openStoryVoiceCastOptions() = openStoryAdvancedOptions("voice")
+
+    private fun openStoryAdvancedOptions(mode: String) {
         ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_PAUSE)
         mutableState.update {
             it.copy(
                 destination = Destination.Story,
-                storyDetailTab = "source",
                 storyAdvancedOptionsRequested = true,
+                storyAdvancedOptionsMode = mode,
                 loading = false,
             )
         }
@@ -1898,6 +1909,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun downloadSelectedChapters(chapterNumbers: List<Int>) {
+        val selected = chapterNumbers.filter { it > 0 }.distinct().sorted()
+        if (selected.isEmpty()) {
+            showMessage("Chưa chọn chương để tải.")
+            return
+        }
+        selected.forEach { chapterNumber -> downloadChapterRange(chapterNumber, chapterNumber) }
+        showMessage("Đã thêm ${selected.size} chương đã chọn vào hàng đợi tải.")
+    }
+
     fun downloadChapterRange(startChapterNumber: Int, endChapterNumber: Int) {
         val detail = state.value.storyDetail ?: return
         if (detail.story.sourceId == "offline") {
@@ -2015,8 +2036,30 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setSleepTimer(minutes: Int?) {
         if (state.value.chapterContent == null) return
+        chapterSleepRemaining = null
+        chapterSleepLastChapterId = state.value.playback.chapterId
         ReaderPlaybackService.setSleepTimer(getApplication(), minutes)
+        mutableState.update {
+            it.copy(sleepTimerStatus = if (minutes == null) "Đang tắt" else "Còn khoảng $minutes phút")
+        }
         showMessage(if (minutes == null) "Đã hủy hẹn giờ ngủ." else "Sẽ dừng đọc sau $minutes phút.")
+    }
+
+    fun setSleepTimerByChapters(chapterCount: Int) {
+        if (state.value.chapterContent == null) return
+        val count = chapterCount.coerceAtLeast(1)
+        ReaderPlaybackService.setSleepTimer(getApplication(), null)
+        chapterSleepRemaining = count
+        chapterSleepLastChapterId = state.value.playback.chapterId
+        mutableState.update {
+            it.copy(sleepTimerStatus = if (count == 1) "Hết chương hiện tại" else "Còn $count chương")
+        }
+        showMessage(if (count == 1) "Sẽ dừng khi hết chương hiện tại." else "Sẽ dừng sau $count chương.")
+    }
+
+    fun setDiagnosticsMode(mode: String) {
+        val normalized = mode.takeIf { it in setOf("off", "basic", "advanced") } ?: "off"
+        mutableState.update { it.copy(diagnosticsMode = normalized) }
     }
 
     fun moveParagraph(delta: Int) {

@@ -68,7 +68,7 @@ fun ExploreScreen(
     val view = LocalView.current
     val listTitle = when (state.exploreMode) {
         ExploreMode.HOME -> "TRANG CHỦ"
-        ExploreMode.CATEGORY -> state.activeCategory.ifBlank { "DANH SÁCH TRUYỆN" }.uppercase()
+        ExploreMode.CATEGORY -> state.activeCategory.orEmpty().ifBlank { "DANH SÁCH TRUYỆN" }.uppercase()
         ExploreMode.SEARCH -> "KẾT QUẢ TÌM KIẾM"
     }
 

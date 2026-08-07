@@ -5,6 +5,42 @@ import re
 path = Path(__file__).with_name("reference_ui_parity_all.py")
 text = path.read_text(encoding="utf-8")
 
+helper_marker = '''def regex_once(text, pattern, repl, label):
+    out, count = re.subn(pattern, repl, text, count=1, flags=re.S)
+    if count != 1:
+        raise SystemExit(f"regex {label} matched {count}")
+    return out
+'''
+helper = helper_marker + '''
+
+def replace_kotlin_function(text, signature, replacement, label):
+    start = text.find(signature)
+    if start < 0:
+        raise SystemExit(f"missing Kotlin function for {label}")
+    brace = text.find("{", start + len(signature))
+    if brace < 0:
+        raise SystemExit(f"missing opening brace for {label}")
+    depth = 0
+    end = None
+    for index in range(brace, len(text)):
+        ch = text[index]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                end = index + 1
+                break
+    if end is None:
+        raise SystemExit(f"missing closing brace for {label}")
+    if end < len(text) and text[end] == "\\n":
+        end += 1
+    return text[:start] + replacement + text[end:]
+'''
+if helper_marker not in text:
+    raise SystemExit("missing helper insertion marker")
+text = text.replace(helper_marker, helper, 1)
+
 pattern = re.compile(
     r'''t = replace_once\(\n'''
     r'''    t,\n'''
@@ -15,9 +51,9 @@ pattern = re.compile(
     re.S,
 )
 
-replacement = r'''t = regex_once(
+replacement = r'''t = replace_kotlin_function(
     t,
-    r''' + "'''" + r'''    private fun observePlayback\(\) \{.*?\n    \}\n(?=\n    private fun )''' + "'''" + r''',
+    "    private fun observePlayback()",
     ''' + "'''" + r'''    private fun observePlayback() {
         viewModelScope.launch {
             PlaybackQueueStore.state.collect { playback ->
@@ -66,4 +102,4 @@ new_text, count = pattern.subn(replacement, text, count=1)
 if count != 1:
     raise SystemExit(f"fixer matched observePlayback block {count} times")
 path.write_text(new_text, encoding="utf-8")
-print("reference patch script normalized")
+print("reference patch script normalized with balanced function replacement")

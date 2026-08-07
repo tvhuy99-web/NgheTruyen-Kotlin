@@ -1,0 +1,32 @@
+name: Inspect AI settings parity
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/inspect-ai-settings-parity.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    if: github.head_ref == 'agent/reference-ui-position-parity'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/reference-ui-position-parity
+      - name: Inspect AI settings wiring
+        run: |
+          echo '=== Personal AI card ==='
+          n=$(grep -n 'private fun AiOnlineCard' app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt | cut -d: -f1 | head -1)
+          sed -n "${n},$((n+260))p" app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt
+          echo '=== Settings AI methods ==='
+          grep -n 'setAi\|AiOnlineSettings\|aiOnline' app/src/main/java/vn/nghetruyen/app/data/settings/SettingsRepository.kt | tail -120
+          echo '=== ViewModel AI methods ==='
+          grep -n 'fun setAi\|fun saveAi\|aiUsageRecent\|refreshGemini' app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt | head -160
+          echo '=== App wiring ==='
+          grep -n 'onAiEnabledChange\|onAiConsentChange\|onAiProviderChange\|onAiDaily\|onAiMaxRetries\|onAiRetryBase\|onAiInstruction\|onAiTemperature' app/src/main/java/vn/nghetruyen/app/ui/NgheTruyenApp.kt
+          echo '=== Request governor usage ==='
+          grep -R -n 'requestGovernor\|dailyRequestLimit\|dailyInputCharsLimit\|maxRetries\|retryBaseDelayMillis' app/src/main/java/vn/nghetruyen/app/ai app/src/main/java/vn/nghetruyen/app/ui | head -200

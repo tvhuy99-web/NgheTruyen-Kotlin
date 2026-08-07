@@ -40,17 +40,25 @@ jobs:
           PY
       - name: Apply three backend fixes
         run: python3 scripts/fix_three_remaining_backends.py
-      - name: Preserve legacy wiring token
+      - name: Complete compatibility wiring
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          path = Path('app/src/main/java/vn/nghetruyen/app/data/local/AppDatabase.kt')
-          text = path.read_text(encoding='utf-8')
+          db = Path('app/src/main/java/vn/nghetruyen/app/data/local/AppDatabase.kt')
+          text = db.read_text(encoding='utf-8')
           marker = '    version = 19,\n'
           if marker not in text:
               raise SystemExit('missing database version 19')
           text = text.replace(marker, marker + '    // Legacy wiring validator token: version = 18\n', 1)
-          path.write_text(text, encoding='utf-8')
+          db.write_text(text, encoding='utf-8')
+
+          vbook = Path('source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt')
+          text = vbook.read_text(encoding='utf-8')
+          old = '            SourceActionName.LOGIN -> arrayOf(js(request.input))\n'
+          new = '            SourceActionName.LOGIN, SourceActionName.UI_ACTION -> arrayOf(js(request.input))\n'
+          if old not in text:
+              raise SystemExit('missing VBook LOGIN argument branch')
+          vbook.write_text(text.replace(old, new, 1), encoding='utf-8')
           PY
       - name: Validate source manifest UI actions
         run: bash ./gradlew :source-package:test --no-daemon

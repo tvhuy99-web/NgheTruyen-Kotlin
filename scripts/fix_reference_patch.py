@@ -17,7 +17,7 @@ pattern = re.compile(
 
 replacement = r'''t = regex_once(
     t,
-    r''' + "'''" + r'''    private fun observePlayback\(\) \{\n        viewModelScope\.launch \{\n            PlaybackQueueStore\.state\.collect \{ playback ->\n                mutableState\.update \{ it\.copy\(playback = playback\) \}\n            \}\n        \}\n    \}\n''' + "'''" + r''',
+    r''' + "'''" + r'''    private fun observePlayback\(\) \{.*?\n    \}\n(?=\n    private fun )''' + "'''" + r''',
     ''' + "'''" + r'''    private fun observePlayback() {
         viewModelScope.launch {
             PlaybackQueueStore.state.collect { playback ->

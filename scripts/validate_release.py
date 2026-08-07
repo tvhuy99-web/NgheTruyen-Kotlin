@@ -371,13 +371,15 @@ def main() -> None:
         "VIETPHRASE",
         "DỊCH LẠI",
         "DÀN DỰNG AI",
-        "CHỈ PHÂN VAI",
-        "CHỈ NHẠC CẢNH",
+        "PHÂN VAI AI",
+        "NHẠC CẢNH",
     )
     require_text(
         "app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt",
         "Tìm chương theo tên hoặc số",
-        "TẢI KHOẢNG",
+        "CHỌN PHẠM VI TẢI",
+        "CHỌN NHIỀU CHƯƠNG",
+        "TẢI TOÀN BỘ TRUYỆN",
         "NẠP TOÀN BỘ MỤC LỤC",
         "MỞ TRANG GỐC",
         "BÌNH LUẬN",

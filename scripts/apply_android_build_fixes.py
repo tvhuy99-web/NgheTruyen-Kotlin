@@ -137,6 +137,11 @@ replace_exact(
     '        "CHỈ PHÂN VAI",\n        "CHỈ NHẠC CẢNH",\n',
     '        "PHÂN VAI AI",\n        "NHẠC CẢNH",\n',
 )
+replace_exact(
+    "scripts/validate_release.py",
+    '        "TẢI KHOẢNG",\n',
+    '        "CHỌN PHẠM VI TẢI",\n        "CHỌN NHIỀU CHƯƠNG",\n        "TẢI TOÀN BỘ TRUYỆN",\n',
+)
 
 personal_text = Path("app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt").read_text(encoding="utf-8")
 if "NAVIGATION_AUDIT_V3_PERSONAL" not in personal_text:

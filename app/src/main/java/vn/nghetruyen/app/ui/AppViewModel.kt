@@ -221,6 +221,7 @@ data class MainUiState(
     val aiModelDiscoveryBusy: Boolean = false,
     val readerCacheLimitMiB: Int = 64,
     val readerMode: ReaderMode = ReaderMode.TEXT,
+    val chapterSortDescending: Boolean = false,
     val readerDisplay: ReaderDisplaySettings = ReaderDisplaySettings(),
     val storyTtsProfiles: Map<String, StoryTtsProfileEntity> = emptyMap(),
     val storyAiProfiles: Map<String, StoryAiProfileEntity> = emptyMap(),
@@ -333,6 +334,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         followingUpdatesEnabled = settings.followingUpdatesEnabled,
                         readerCacheLimitMiB = settings.readerCacheLimitMiB,
                         readerMode = settings.readerMode,
+                        chapterSortDescending = settings.chapterSortDescending,
                         readerDisplay = settings.readerDisplay,
                         aiOnline = settings.aiOnline,
                         aiHasApiKey = container.aiCredentialStore.hasApiKey(settings.aiOnline.provider),
@@ -587,6 +589,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         mutableState.update { it.copy(readerMode = mode) }
         viewModelScope.launch { container.settingsRepository.setReaderMode(mode) }
         showMessage(if (mode == ReaderMode.TTS) "Đã chuyển sang chế độ TTS." else "Đã chuyển sang chế độ Văn bản.")
+    }
+
+    fun setChapterSortDescending(descending: Boolean) {
+        mutableState.update { it.copy(chapterSortDescending = descending) }
+        viewModelScope.launch { container.settingsRepository.setChapterSortDescending(descending) }
     }
 
     fun saveReadingPositionNow() {

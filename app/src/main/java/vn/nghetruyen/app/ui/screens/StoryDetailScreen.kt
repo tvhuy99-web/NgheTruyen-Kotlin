@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -70,6 +71,7 @@ fun StoryDetailScreen(
     onToggleStoryBookmark: () -> Unit,
     onGenreSelected: (String) -> Unit,
     onTabSelected: (String) -> Unit,
+    onChapterSortDescendingChange: (Boolean) -> Unit,
     onConsumeAdvancedOptionsRequest: () -> Unit,
     onExportAudio: (AudioExportRequest) -> Unit,
     onSaveVoiceProfile: () -> Unit,
@@ -90,6 +92,7 @@ fun StoryDetailScreen(
     onLoadComments: (Boolean) -> Unit,
     onLoadMoreComments: () -> Unit,
     onOpenOriginal: (String) -> Unit,
+    onCheckSource: (String) -> Unit,
 ) {
     val detail = state.storyDetail ?: return
     val selectedTab = state.storyDetailTab
@@ -97,7 +100,7 @@ fun StoryDetailScreen(
     var showDownloadScopeDialog by remember(detail.story.id) { mutableStateOf(false) }
     var showRangeDialog by remember(detail.story.id) { mutableStateOf(false) }
     var showChapterSearchDialog by remember(detail.story.id) { mutableStateOf(false) }
-    var chapterSortDescending by remember(detail.story.id) { mutableStateOf(false) }
+    val chapterSortDescending = state.chapterSortDescending
     var showExportDialog by remember(detail.story.id) { mutableStateOf(false) }
     var showVoiceRoleDialog by remember(detail.story.id) { mutableStateOf(false) }
     var showAdvancedOptions by remember(detail.story.id) { mutableStateOf(false) }
@@ -154,6 +157,7 @@ fun StoryDetailScreen(
     val visibleChapters = remember(filteredChapters, chapterSortDescending) {
         if (chapterSortDescending) filteredChapters.sortedByDescending { it.index } else filteredChapters.sortedBy { it.index }
     }
+    val chapterListState = rememberLazyListState()
     val tabs = buildList {
         add("intro" to "GIỚI THIỆU")
         add("chapters" to "CHƯƠNG")
@@ -171,6 +175,16 @@ fun StoryDetailScreen(
     val storyBookmarkMarker = "Truyện: ${detail.story.title}"
     val storyBookmarked = state.bookmarks.any { it.storyId == detail.story.id && it.label == storyBookmarkMarker }
     val currentChapterIndex = detail.chapters.firstOrNull { it.id == state.playback.chapterId }?.index
+    val sourceDescriptor = state.sources.firstOrNull { it.id == detail.story.sourceId }
+    LaunchedEffect(selectedTab, visibleChapters, state.playback.chapterId, chapterSortDescending) {
+        if (selectedTab == "chapters" && state.playback.chapterId.isNotBlank()) {
+            val targetIndex = visibleChapters.indexOfFirst { it.id == state.playback.chapterId }
+            if (targetIndex >= 0) {
+                delay(100)
+                chapterListState.scrollToItem(targetIndex)
+            }
+        }
+    }
     LaunchedEffect(state.storyAdvancedOptionsRequested) {
         if (state.storyAdvancedOptionsRequested) {
             showAdvancedOptions = true
@@ -230,10 +244,10 @@ fun StoryDetailScreen(
                 .padding(2.dp),
         ) {
             ReferenceActionButton(
-                text = if (state.continueAvailable) "ĐỌC TIẾP" else "ĐỌC TỪ ĐẦU",
+                text = if (state.continueAvailable) "ĐỌC TIẾP" else "ĐỌC NGAY",
                 onClick = onReadFirst,
                 normalColor = ReferenceGreen,
-                accessibilityLabel = if (state.continueAvailable) "Đọc tiếp truyện" else "Đọc từ đầu truyện",
+                accessibilityLabel = if (state.continueAvailable) "Đọc tiếp truyện" else "Đọc ngay truyện",
                 minHeight = 64.dp,
                 modifier = Modifier.weight(1f).padding(1.dp),
             )
@@ -588,13 +602,13 @@ fun StoryDetailScreen(
                 }
                 ReferenceActionButton(
                     text = "SẮP XẾP: " + if (chapterSortDescending) "MỚI NHẤT TRƯỚC" else "CŨ NHẤT TRƯỚC",
-                    onClick = { chapterSortDescending = !chapterSortDescending },
+                    onClick = { onChapterSortDescendingChange(!chapterSortDescending) },
                     normalColor = ReferenceGray,
                     minHeight = 50.dp,
                     accessibilityLabel = "Đổi cách sắp xếp danh sách chương",
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 5.dp, vertical = 1.dp),
                 )
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                LazyColumn(state = chapterListState, modifier = Modifier.fillMaxSize()) {
                     items(visibleChapters, key = { it.id }) { chapter ->
                         val status = when {
                             chapter.id == state.playback.chapterId -> "\nĐang đọc"
@@ -689,32 +703,38 @@ fun StoryDetailScreen(
                     }
                 }
             }
-            "source" -> Column(modifier = Modifier.padding(16.dp)) {
-                Text("Nguồn: ${detail.story.sourceId}")
-                Text("Địa chỉ: ${detail.story.url}")
-                ReferenceActionButton(
-                    text = "CẤU HÌNH GIỌNG & AI",
-                    onClick = { showAdvancedOptions = true },
-                    normalColor = ReferenceGray,
-                    accessibilityLabel = "Mở cấu hình giọng đọc và AI nâng cao",
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            "source" -> Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+                Text(
+                    "NGUỒN",
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
                 )
-                if (detail.story.url.startsWith("https://")) {
-                    Button(onClick = { onOpenOriginal(detail.story.url) }, modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
-                        Text("MỞ TRANG GỐC")
-                    }
-                }
-                if (!detail.commentsUrl.isNullOrBlank()) {
-                    Button(onClick = { onOpenOriginal(detail.commentsUrl) }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
-                        Text("MỞ TRANG BÌNH LUẬN GỐC")
-                    }
-                }
-                if (!state.storyCommentsAvailable) {
-                    Text(
-                        "Nguồn này chưa khai báo khả năng lấy bình luận trong ứng dụng.",
-                        modifier = Modifier.padding(top = 12.dp),
-                    )
-                }
+                Text("Tên: ${sourceDescriptor?.displayName ?: detail.story.sourceId}")
+                Text("ID: ${detail.story.sourceId}", modifier = Modifier.padding(top = 6.dp))
+                Text(
+                    "Website: ${sourceDescriptor?.baseUrl ?: detail.story.url}",
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+                Text(
+                    "Truyện gốc: ${detail.story.url.ifBlank { "Không có địa chỉ gốc" }}",
+                    modifier = Modifier.padding(top = 6.dp, bottom = 8.dp),
+                )
+                ReferenceActionButton(
+                    text = "MỞ TRANG GỐC",
+                    onClick = { if (detail.story.url.startsWith("https://")) onOpenOriginal(detail.story.url) },
+                    enabled = detail.story.url.startsWith("https://"),
+                    normalColor = ReferenceGray,
+                    accessibilityLabel = "Mở trang gốc của truyện",
+                    modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                )
+                ReferenceActionButton(
+                    text = if (detail.story.sourceId in state.sourceHealthChecking) "ĐANG KIỂM TRA" else "KIỂM TRA",
+                    onClick = { onCheckSource(detail.story.sourceId) },
+                    enabled = detail.story.sourceId !in state.sourceHealthChecking,
+                    normalColor = ReferenceGray,
+                    accessibilityLabel = "Kiểm tra nguồn ${sourceDescriptor?.displayName ?: detail.story.sourceId}",
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                )
             }
         }
     }

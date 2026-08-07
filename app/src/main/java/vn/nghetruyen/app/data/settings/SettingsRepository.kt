@@ -54,6 +54,7 @@ data class AppSettings(
     val followingUpdatesEnabled: Boolean = false,
     val readerCacheLimitMiB: Int = 64,
     val readerMode: ReaderMode = ReaderMode.TEXT,
+    val chapterSortDescending: Boolean = false,
     val readerDisplay: ReaderDisplaySettings = ReaderDisplaySettings(),
     val headsetMultiClickEnabled: Boolean = true,
     val headsetSingleClickAction: String = "TOGGLE",
@@ -100,6 +101,7 @@ class SettingsRepository(private val context: Context) {
         val followingUpdates = booleanPreferencesKey("following_updates")
         val readerCacheLimitMiB = intPreferencesKey("reader_cache_limit_mib")
         val readerMode = stringPreferencesKey("reader_mode")
+        val chapterSortDescending = booleanPreferencesKey("chapter_sort_desc")
         val readerTheme = stringPreferencesKey("reader_theme")
         val readerLayoutMode = stringPreferencesKey("reader_layout_mode")
         val readerFontSize = intPreferencesKey("reader_font_size_sp")
@@ -185,6 +187,7 @@ class SettingsRepository(private val context: Context) {
             readerCacheLimitMiB = normalizeCacheLimit(prefs[Keys.readerCacheLimitMiB] ?: 64),
             readerMode = runCatching { ReaderMode.valueOf(prefs[Keys.readerMode] ?: ReaderMode.TEXT.name) }
                 .getOrDefault(ReaderMode.TEXT),
+            chapterSortDescending = prefs[Keys.chapterSortDescending] ?: false,
             readerDisplay = ReaderDisplaySettings(
                 theme = runCatching { ReaderThemeMode.valueOf(prefs[Keys.readerTheme] ?: "SYSTEM") }
                     .getOrDefault(ReaderThemeMode.SYSTEM),
@@ -288,6 +291,9 @@ class SettingsRepository(private val context: Context) {
     }
     suspend fun setReaderMode(value: ReaderMode) {
         context.dataStore.edit { it[Keys.readerMode] = value.name }
+    }
+    suspend fun setChapterSortDescending(value: Boolean) {
+        context.dataStore.edit { it[Keys.chapterSortDescending] = value }
     }
     suspend fun setReaderTheme(value: ReaderThemeMode) {
         context.dataStore.edit { it[Keys.readerTheme] = value.name }

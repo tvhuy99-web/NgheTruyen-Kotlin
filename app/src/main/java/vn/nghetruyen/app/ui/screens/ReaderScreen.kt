@@ -310,7 +310,6 @@ fun ReaderScreen(
                     if (state.chapterTextMode != ChapterTextMode.ORIGINAL) {
                         ReaderMenuButton("KHÔI PHỤC CHƯƠNG GỐC TRƯỚC AI") { showReaderOptions = false; onShowOriginal() }
                     }
-                    ReaderMenuButton("TẠO NHẬT KÝ VIETPHRASE") { showReaderOptions = false; showExtrasDialog = true }
                     ReaderMenuButton("CÀI ĐẶT TTS") { showReaderOptions = false; onOpenTtsSettings() }
                     ReaderMenuButton("SAO CHÉP CHƯƠNG") {
                         showReaderOptions = false
@@ -318,7 +317,6 @@ fun ReaderScreen(
                         onMessage("Đã sao chép chương hiện tại.")
                     }
                     ReaderMenuButton("THÔNG TIN CHƯƠNG") { showReaderOptions = false; showChapterInfoDialog = true }
-                    ReaderMenuButton("TIỆN ÍCH BỔ SUNG") { showReaderOptions = false; showExtrasDialog = true }
                 }
             },
             confirmButton = { TextButton(onClick = { showReaderOptions = false }) { Text("ĐÓNG") } },

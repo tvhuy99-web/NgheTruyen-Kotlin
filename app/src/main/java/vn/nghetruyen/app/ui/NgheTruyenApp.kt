@@ -225,6 +225,7 @@ fun NgheTruyenApp(
                     onToggleStoryBookmark = viewModel::toggleStoryBookmark,
                     onGenreSelected = viewModel::openStoryGenre,
                     onTabSelected = viewModel::setStoryDetailTab,
+                    onChapterSortDescendingChange = viewModel::setChapterSortDescending,
                     onConsumeAdvancedOptionsRequest = viewModel::consumeStoryAdvancedOptionsRequest,
                     onExportAudio = onExportAudio,
                     onSaveVoiceProfile = viewModel::saveVoiceProfileForCurrentStory,
@@ -242,6 +243,7 @@ fun NgheTruyenApp(
                     onLoadComments = viewModel::loadStoryComments,
                     onLoadMoreComments = viewModel::loadMoreStoryComments,
                     onOpenOriginal = viewModel::openExternalUrl,
+                    onCheckSource = viewModel::checkSource,
                 )
                 Destination.Reader -> ReaderScreen(
                     state = state,

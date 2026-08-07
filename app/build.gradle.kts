@@ -28,7 +28,7 @@ android {
         minSdk = 26
         targetSdk = 36
         // Migration history for the legacy release gate: versionCode = 28
-        versionCode = 30
+        versionCode = 31
         versionName = "2.8.0-ai-narration-priority2-complete"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

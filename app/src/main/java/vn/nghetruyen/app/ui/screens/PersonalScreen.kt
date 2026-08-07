@@ -1896,10 +1896,20 @@ private fun AiReferenceSettingsDialog(
     var modelPickerOpen by remember { mutableStateOf(false) }
     var validationMessage by remember { mutableStateOf("") }
 
-    LaunchedEffect(state.aiModelDiscoveryBusy, state.aiAvailableModels, modelPickerRequested) {
-        if (modelPickerRequested && !state.aiModelDiscoveryBusy && state.aiAvailableModels.isNotEmpty()) {
+    LaunchedEffect(
+        state.aiModelDiscoveryBusy,
+        state.aiAvailableModels,
+        state.aiModelDiscoveryStatus,
+        modelPickerRequested,
+    ) {
+        if (modelPickerRequested && !state.aiModelDiscoveryBusy) {
             modelPickerRequested = false
-            modelPickerOpen = true
+            if (state.aiAvailableModels.isNotEmpty()) {
+                validationMessage = ""
+                modelPickerOpen = true
+            } else if (state.aiModelDiscoveryStatus.isNotBlank()) {
+                validationMessage = state.aiModelDiscoveryStatus
+            }
         }
     }
 

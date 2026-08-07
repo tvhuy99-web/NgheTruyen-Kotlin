@@ -39,15 +39,18 @@ class OnlineAiServices(
         apiKeyOverride: String? = null,
     ): AppResult<List<String>> = withContext(Dispatchers.IO) {
         val apiKey = apiKeyOverride?.trim()?.takeIf(String::isNotBlank)
-            ?: credentialStore.apiKey(provider)
-            ?: return@withContext failure("AI_KEY_MISSING", "Chưa lưu API key cho ${providerLabel(provider)}.")
+            ?: credentialStore.apiKey(provider)?.trim()?.takeIf(String::isNotBlank)
         val request = when (provider) {
-            AiProvider.GEMINI -> Request.Builder()
-                .url("$GEMINI_API_BASE/models?pageSize=100")
-                .header("Accept", "application/json")
-                .header("x-goog-api-key", apiKey)
-                .get()
-                .build()
+            AiProvider.GEMINI -> {
+                val geminiKey = apiKey
+                    ?: return@withContext failure("AI_KEY_MISSING", "Chưa lưu API key cho ${providerLabel(provider)}.")
+                Request.Builder()
+                    .url("$GEMINI_API_BASE/models?pageSize=100")
+                    .header("Accept", "application/json")
+                    .header("x-goog-api-key", geminiKey)
+                    .get()
+                    .build()
+            }
             AiProvider.OPENAI_COMPATIBLE -> {
                 val chatEndpoint = endpoint.trim().ifBlank { settingsRepository.snapshot().aiOnline.endpoint }
                 AiEndpointPolicy.validate(chatEndpoint).exceptionOrNull()?.let {
@@ -60,7 +63,9 @@ class OnlineAiServices(
                 Request.Builder()
                     .url("$base/models")
                     .header("Accept", "application/json")
-                    .header("Authorization", "Bearer $apiKey")
+                    .apply {
+                        apiKey?.let { header("Authorization", "Bearer $it") }
+                    }
                     .get()
                     .build()
             }

@@ -226,6 +226,7 @@ data class MainUiState(
     val aiHasOpenAiApiKey: Boolean = false,
     val aiAvailableModels: List<String> = emptyList(),
     val aiModelDiscoveryBusy: Boolean = false,
+    val aiModelDiscoveryStatus: String = "",
     val readerCacheLimitMiB: Int = 64,
     val readerMode: ReaderMode = ReaderMode.TEXT,
     val chapterSortDescending: Boolean = false,
@@ -3260,15 +3261,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshAiModels(provider: AiProvider, endpoint: String, apiKeyOverride: String) {
         if (state.value.aiModelDiscoveryBusy) return
         viewModelScope.launch {
-            mutableState.update { it.copy(aiModelDiscoveryBusy = true, aiAvailableModels = emptyList(), message = "Đang tải danh sách model…") }
+            mutableState.update { it.copy(aiModelDiscoveryBusy = true, aiAvailableModels = emptyList(), aiModelDiscoveryStatus = "Đang tải danh sách model…", message = "Đang tải danh sách model…") }
             when (val result = container.aiServices.listModels(provider, endpoint, apiKeyOverride.takeIf(String::isNotBlank))) {
                 is AppResult.Failure -> mutableState.update {
-                    it.copy(aiModelDiscoveryBusy = false, aiAvailableModels = emptyList(), message = result.message)
+                    it.copy(aiModelDiscoveryBusy = false, aiAvailableModels = emptyList(), aiModelDiscoveryStatus = result.message, message = result.message)
                 }
                 is AppResult.Success -> mutableState.update {
                     it.copy(
                         aiModelDiscoveryBusy = false,
                         aiAvailableModels = result.value,
+                        aiModelDiscoveryStatus = "Đã tải ${result.value.size} model.",
                         message = "Đã tải ${result.value.size} model.",
                     )
                 }

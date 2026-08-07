@@ -23,6 +23,7 @@ import vn.nghetruyen.app.following.FollowingUpdateWorker
 import vn.nghetruyen.app.playback.ReaderVolumeKeyPolicy
 import vn.nghetruyen.app.ui.AppViewModel
 import vn.nghetruyen.app.ui.Destination
+import vn.nghetruyen.app.core.model.ReaderMode
 import vn.nghetruyen.app.ui.NgheTruyenApp
 import vn.nghetruyen.app.ui.theme.NgheTruyenTheme
 import java.text.SimpleDateFormat
@@ -41,7 +42,7 @@ class MainActivity : ComponentActivity() {
         }
         val delta = ReaderVolumeKeyPolicy.paragraphDelta(
             readerVisible = snapshot.destination == Destination.Reader,
-            navigationEnabled = snapshot.readerDisplay.volumeKeysNavigate,
+            navigationEnabled = snapshot.readerMode == ReaderMode.TTS && snapshot.readerDisplay.volumeKeysNavigate,
             actionDown = event.action == KeyEvent.ACTION_DOWN,
             repeatCount = event.repeatCount,
             key = key,

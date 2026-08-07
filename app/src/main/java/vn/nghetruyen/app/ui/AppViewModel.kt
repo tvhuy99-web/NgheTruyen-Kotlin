@@ -579,6 +579,29 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { container.settingsRepository.setReaderVolumeKeysNavigate(enabled) }
     }
 
+
+    fun setReaderMode(mode: ReaderMode) {
+        if (mode == ReaderMode.TEXT) {
+            ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_PAUSE)
+        }
+        mutableState.update { it.copy(readerMode = mode) }
+        viewModelScope.launch { container.settingsRepository.setReaderMode(mode) }
+        showMessage(if (mode == ReaderMode.TTS) "Đã chuyển sang chế độ TTS." else "Đã chuyển sang chế độ Văn bản.")
+    }
+
+    fun saveReadingPositionNow() {
+        val snapshot = state.value
+        val content = snapshot.chapterContent ?: return
+        viewModelScope.launch {
+            container.libraryRepository.saveProgress(
+                content.chapter.storyId,
+                content.chapter.id,
+                snapshot.playback.paragraphIndex,
+            )
+            showMessage("Đã lưu vị trí đọc tại đoạn ${snapshot.playback.paragraphIndex + 1}.")
+        }
+    }
+
     fun readerActionMessage(message: String) {
         showMessage(message)
     }
@@ -1610,6 +1633,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 it.copy(
                     destination = Destination.Story,
                     rootTab = RootTab.LIBRARY,
+                    storyDetailTab = "intro",
+                    storyAdvancedOptionsRequested = false,
                     storyDetail = StoryDetail(
                         story = StorySummary(
                             id = entity.id,
@@ -1974,6 +1999,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun togglePlayback() {
         if (state.value.chapterContent == null) return
+        if (state.value.readerMode != ReaderMode.TTS) {
+            showMessage("Chế độ Văn bản không phát TTS. Hãy chọn CHẾ ĐỘ ĐỌC: TTS.")
+            return
+        }
         ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_TOGGLE)
     }
 
@@ -2460,6 +2489,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 it.copy(
                     destination = Destination.Story,
                     rootTab = RootTab.LIBRARY,
+                    storyDetailTab = "intro",
+                    storyAdvancedOptionsRequested = false,
                     storyDetail = StoryDetail(
                         story = StorySummary(
                             id = story.id,
@@ -2480,6 +2511,31 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 ChapterSummary(chapter.id, chapter.storyId, chapter.chapterIndex, chapter.title, chapter.remoteUrl),
                 note.paragraphIndex,
             )
+        }
+    }
+
+    fun toggleStoryBookmark() {
+        val detail = state.value.storyDetail ?: return
+        val marker = "Truyện: ${detail.story.title}"
+        val existing = state.value.bookmarks.firstOrNull { it.storyId == detail.story.id && it.label == marker }
+        viewModelScope.launch {
+            if (existing != null) {
+                container.libraryRepository.deleteBookmark(existing.id)
+                showMessage("Đã bỏ đánh dấu truyện ${detail.story.title}.")
+            } else {
+                val first = detail.chapters.firstOrNull()
+                if (first == null) {
+                    showMessage("Truyện chưa có chương để tạo đánh dấu.")
+                    return@launch
+                }
+                container.libraryRepository.addBookmark(
+                    storyId = detail.story.id,
+                    chapterId = first.id,
+                    paragraphIndex = 0,
+                    label = marker,
+                )
+                showMessage("Đã đánh dấu truyện ${detail.story.title}.")
+            }
         }
     }
 

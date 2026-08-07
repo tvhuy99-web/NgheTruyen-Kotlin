@@ -162,7 +162,7 @@ fun ExploreScreen(
         }
 
         Text(
-            text = listTitle,
+            text = "$listTitle • ${state.stories.size}",
             color = ReferenceText,
             fontSize = 18.sp,
             fontWeight = FontWeight.SemiBold,

@@ -67,6 +67,10 @@ fun StoryDetailScreen(
     onDownloadUnread: () -> Unit,
     onDownloadRange: (Int, Int) -> Unit,
     onToggleFollowing: () -> Unit,
+    onToggleStoryBookmark: () -> Unit,
+    onGenreSelected: (String) -> Unit,
+    onTabSelected: (String) -> Unit,
+    onConsumeAdvancedOptionsRequest: () -> Unit,
     onExportAudio: (AudioExportRequest) -> Unit,
     onSaveVoiceProfile: () -> Unit,
     onClearVoiceProfile: () -> Unit,
@@ -88,9 +92,12 @@ fun StoryDetailScreen(
     onOpenOriginal: (String) -> Unit,
 ) {
     val detail = state.storyDetail ?: return
-    var selectedTab by remember(detail.story.id) { mutableStateOf("intro") }
+    val selectedTab = state.storyDetailTab
     var chapterQuery by remember(detail.story.id) { mutableStateOf("") }
+    var showDownloadScopeDialog by remember(detail.story.id) { mutableStateOf(false) }
     var showRangeDialog by remember(detail.story.id) { mutableStateOf(false) }
+    var showChapterSearchDialog by remember(detail.story.id) { mutableStateOf(false) }
+    var chapterSortDescending by remember(detail.story.id) { mutableStateOf(false) }
     var showExportDialog by remember(detail.story.id) { mutableStateOf(false) }
     var showVoiceRoleDialog by remember(detail.story.id) { mutableStateOf(false) }
     var showAdvancedOptions by remember(detail.story.id) { mutableStateOf(false) }
@@ -143,7 +150,10 @@ fun StoryDetailScreen(
     var aiExpressionVolumeLimit by remember(detail.story.id, aiProfile?.updatedAt) { mutableStateOf(aiProfile?.expressionVolumeLimitPct ?: 10) }
     val normalizedQuery = StorySearch.normalize(chapterQuery)
     val chapterCatalog = remember(detail.story.id, detail.chapters) { ChapterCatalogIndex(detail.chapters) }
-    val visibleChapters = remember(chapterCatalog, normalizedQuery) { chapterCatalog.search(normalizedQuery) }
+    val filteredChapters = remember(chapterCatalog, normalizedQuery) { chapterCatalog.search(normalizedQuery) }
+    val visibleChapters = remember(filteredChapters, chapterSortDescending) {
+        if (chapterSortDescending) filteredChapters.sortedByDescending { it.index } else filteredChapters.sortedBy { it.index }
+    }
     val tabs = buildList {
         add("intro" to "GIỚI THIỆU")
         add("chapters" to "CHƯƠNG")
@@ -158,6 +168,15 @@ fun StoryDetailScreen(
         add("${detail.chapters.size} chương")
     }.joinToString(" • ")
     val hasVoiceProfile = state.storyTtsProfiles.containsKey(detail.story.id)
+    val storyBookmarkMarker = "Truyện: ${detail.story.title}"
+    val storyBookmarked = state.bookmarks.any { it.storyId == detail.story.id && it.label == storyBookmarkMarker }
+    val currentChapterIndex = detail.chapters.firstOrNull { it.id == state.playback.chapterId }?.index
+    LaunchedEffect(state.storyAdvancedOptionsRequested) {
+        if (state.storyAdvancedOptionsRequested) {
+            showAdvancedOptions = true
+            onConsumeAdvancedOptionsRequest()
+        }
+    }
     LaunchedEffect(selectedTab, state.storyCommentsLoading) {
         delay(120)
         val announcement = when (selectedTab) {
@@ -220,7 +239,7 @@ fun StoryDetailScreen(
             )
             ReferenceActionButton(
                 text = "TẢI TRUYỆN",
-                onClick = onDownload,
+                onClick = { showDownloadScopeDialog = true },
                 normalColor = ReferencePurple,
                 accessibilityLabel = "Tải truyện để đọc ngoại tuyến",
                 minHeight = 64.dp,
@@ -238,12 +257,22 @@ fun StoryDetailScreen(
             )
         }
         if (showStoryMenu) {
-            val following = state.following.any { it.storyId == detail.story.id }
             AlertDialog(
                 onDismissRequest = { showStoryMenu = false },
                 title = { Text("TÙY CHỌN TRUYỆN") },
                 text = {
                     Column {
+                        ReferenceActionButton(
+                            text = if (storyBookmarked) "BỎ ĐÁNH DẤU" else "ĐÁNH DẤU",
+                            onClick = {
+                                showStoryMenu = false
+                                onToggleStoryBookmark()
+                            },
+                            selected = storyBookmarked,
+                            accessibilityLabel = if (storyBookmarked) "Bỏ đánh dấu truyện" else "Đánh dấu truyện",
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                        )
+                        val following = state.following.any { it.storyId == detail.story.id }
                         ReferenceActionButton(
                             text = if (following) "BỎ THEO DÕI" else "THEO DÕI",
                             onClick = {
@@ -255,75 +284,27 @@ fun StoryDetailScreen(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
                         )
                         ReferenceActionButton(
-                            text = "TẢI CHƯA ĐỌC",
+                            text = "MỞ TRANG GỐC",
                             onClick = {
                                 showStoryMenu = false
-                                onDownloadUnread()
+                                if (detail.story.url.startsWith("https://")) onOpenOriginal(detail.story.url)
                             },
+                            enabled = detail.story.url.startsWith("https://"),
+                            normalColor = ReferenceGray,
                             modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
                         )
                         ReferenceActionButton(
-                            text = "TẢI KHOẢNG",
+                            text = "THÔNG TIN NGUỒN",
                             onClick = {
                                 showStoryMenu = false
-                                showRangeDialog = true
-                            },
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                        )
-                        if (detail.story.url.startsWith("https://")) {
-                            ReferenceActionButton(
-                                text = "MỞ TRANG GỐC",
-                                onClick = {
-                                    showStoryMenu = false
-                                    onOpenOriginal(detail.story.url)
-                                },
-                                normalColor = ReferenceGray,
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                            )
-                        }
-                        ReferenceActionButton(
-                            text = "XUẤT SÁCH NÓI",
-                            onClick = {
-                                showStoryMenu = false
-                                showExportDialog = true
-                            },
-                            normalColor = ReferencePurple,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                        )
-                        ReferenceActionButton(
-                            text = if (hasVoiceProfile) "CẬP NHẬT GIỌNG RIÊNG" else "LƯU GIỌNG RIÊNG",
-                            onClick = {
-                                showStoryMenu = false
-                                onSaveVoiceProfile()
-                            },
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                        )
-                        if (hasVoiceProfile) {
-                            ReferenceActionButton(
-                                text = "BỎ GIỌNG RIÊNG",
-                                onClick = {
-                                    showStoryMenu = false
-                                    onClearVoiceProfile()
-                                },
-                                normalColor = ReferenceGray,
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                            )
-                        }
-                        ReferenceActionButton(
-                            text = "CẤU HÌNH GIỌNG & AI",
-                            onClick = {
-                                showStoryMenu = false
-                                showAdvancedOptions = true
+                                onTabSelected("source")
                             },
                             normalColor = ReferenceGray,
-                            accessibilityLabel = "Mở cấu hình giọng đọc và AI nâng cao",
                             modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
                         )
                     }
                 },
-                confirmButton = {
-                    TextButton(onClick = { showStoryMenu = false }) { Text("ĐÓNG") }
-                },
+                confirmButton = { TextButton(onClick = { showStoryMenu = false }) { Text("ĐÓNG") } },
             )
         }
         if (showAdvancedOptions) {
@@ -533,7 +514,7 @@ fun StoryDetailScreen(
                     text = label,
                     selected = selectedTab == tabId,
                     onClick = {
-                        selectedTab = tabId
+                        onTabSelected(tabId)
                         if (tabId == "comments") onLoadComments(false)
                     },
                     accessibilityLabel = "Tab ${label.lowercase()}",
@@ -547,26 +528,86 @@ fun StoryDetailScreen(
         HorizontalDivider()
         if (state.loading) LoadingRow()
         when (selectedTab) {
-            "intro" -> Text(detail.story.description.ifBlank { "Nguồn chưa cung cấp phần giới thiệu." }, modifier = Modifier.padding(16.dp))
-            "chapters" -> Column(modifier = Modifier.fillMaxSize()) {
-                OutlinedTextField(
-                    value = chapterQuery,
-                    onValueChange = { chapterQuery = it.take(120) },
-                    label = { Text("Tìm chương theo tên hoặc số") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-                )
-                if (normalizedQuery.isNotBlank()) {
-                    Text("${visibleChapters.size} kết quả trong ${detail.chapters.size} chương đã nạp", modifier = Modifier.padding(horizontal = 12.dp))
+            "intro" -> LazyColumn(modifier = Modifier.fillMaxSize()) {
+                if (detail.genres.isNotEmpty()) {
+                    item(key = "genre-heading") {
+                        Text(
+                            "THỂ LOẠI",
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                        )
+                    }
+                    items(detail.genres.distinct(), key = { "genre:$it" }) { genre ->
+                        ReferenceActionButton(
+                            text = genre,
+                            onClick = { onGenreSelected(genre) },
+                            normalColor = ReferenceDivider,
+                            normalContentColor = ReferenceText,
+                            accessibilityLabel = "Thể loại $genre",
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
+                        )
+                    }
                 }
+                item(key = "intro-heading") {
+                    Text(
+                        "GIỚI THIỆU",
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                    )
+                }
+                item(key = "intro-body") {
+                    Text(
+                        detail.story.description.ifBlank { "Nguồn chưa cung cấp phần giới thiệu." },
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                    )
+                }
+            }
+            "chapters" -> Column(modifier = Modifier.fillMaxSize()) {
+                Text(
+                    "DANH SÁCH CHƯƠNG\n${detail.story.title}\n${visibleChapters.size} chương",
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                )
+                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp)) {
+                    ReferenceActionButton(
+                        text = if (normalizedQuery.isBlank()) "TÌM CHƯƠNG" else "TÌM KIẾM: $chapterQuery",
+                        onClick = { showChapterSearchDialog = true },
+                        normalColor = ReferenceGray,
+                        minHeight = 50.dp,
+                        modifier = Modifier.weight(1f).padding(1.dp),
+                    )
+                    if (normalizedQuery.isNotBlank()) {
+                        ReferenceActionButton(
+                            text = "HIỆN TẤT CẢ CHƯƠNG",
+                            onClick = { chapterQuery = "" },
+                            normalColor = ReferenceGray,
+                            minHeight = 50.dp,
+                            modifier = Modifier.weight(1f).padding(1.dp),
+                        )
+                    }
+                }
+                ReferenceActionButton(
+                    text = "SẮP XẾP: " + if (chapterSortDescending) "MỚI NHẤT TRƯỚC" else "CŨ NHẤT TRƯỚC",
+                    onClick = { chapterSortDescending = !chapterSortDescending },
+                    normalColor = ReferenceGray,
+                    minHeight = 50.dp,
+                    accessibilityLabel = "Đổi cách sắp xếp danh sách chương",
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 5.dp, vertical = 1.dp),
+                )
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
                     items(visibleChapters, key = { it.id }) { chapter ->
+                        val status = when {
+                            chapter.id == state.playback.chapterId -> "\nĐang đọc"
+                            currentChapterIndex != null && chapter.index < currentChapterIndex -> "\nĐã đọc"
+                            else -> ""
+                        }
                         ReferenceActionButton(
-                            text = chapter.title,
+                            text = chapter.title + status,
                             onClick = { onChapterClick(chapter) },
                             normalColor = ReferencePanelBackground,
                             normalContentColor = ReferenceText,
-                            accessibilityLabel = chapter.title,
+                            selected = chapter.id == state.playback.chapterId,
+                            accessibilityLabel = chapter.title + status.replace("\n", ". "),
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
                         )
                     }
@@ -582,7 +623,7 @@ fun StoryDetailScreen(
                                     onClick = onLoadMoreChapters,
                                     enabled = !state.loading,
                                     modifier = Modifier.weight(1f).padding(2.dp),
-                                ) { Text("TẢI THÊM") }
+                                ) { Text(if (normalizedQuery.isBlank()) "TẢI THÊM" else "TẢI THÊM ĐỂ TÌM") }
                                 Button(
                                     onClick = onLoadAllChapters,
                                     enabled = !state.loading,
@@ -594,13 +635,13 @@ fun StoryDetailScreen(
                 }
             }
             "comments" -> Column(modifier = Modifier.fillMaxSize()) {
-                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
-                    Column(modifier = Modifier.weight(1f).padding(top = 6.dp)) {
-                        Text("${state.storyComments.size} bình luận", fontWeight = FontWeight.SemiBold)
-                        if (state.storyCommentsFromCache) {
-                            Text("Đang hiển thị bản lưu tạm", style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
+                Text(
+                    "BÌNH LUẬN",
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                )
+                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp)) {
+                    Text("${state.storyComments.size} bình luận", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f).padding(top = 12.dp))
                     Button(
                         onClick = { onLoadComments(true) },
                         enabled = state.storyCommentsRefreshable && !state.storyCommentsLoading,
@@ -615,12 +656,21 @@ fun StoryDetailScreen(
                         items = state.storyComments,
                         key = { comment -> "${comment.user}|${comment.time}|${comment.text.hashCode()}" },
                     ) { comment ->
-                        Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                .semantics(mergeDescendants = true) {
+                                    contentDescription = buildString {
+                                        append(comment.user.ifBlank { "Người đọc" })
+                                        if (comment.time.isNotBlank()) append(". ${comment.time}")
+                                        append(". ${comment.text}")
+                                    }
+                                },
+                        ) {
                             Column(modifier = Modifier.padding(12.dp)) {
                                 Text(comment.user.ifBlank { "Người đọc" }, fontWeight = FontWeight.SemiBold)
-                                if (comment.time.isNotBlank()) {
-                                    Text(comment.time, style = MaterialTheme.typography.bodySmall)
-                                }
+                                if (comment.time.isNotBlank()) Text(comment.time, style = MaterialTheme.typography.bodySmall)
                                 Text(comment.text, modifier = Modifier.padding(top = 6.dp))
                             }
                         }
@@ -635,15 +685,20 @@ fun StoryDetailScreen(
                         }
                     }
                     if (state.storyCommentsLoaded && state.storyComments.isEmpty() && state.storyCommentsMessage == null) {
-                        item(key = "empty-comments") {
-                            Text("Chưa tìm thấy bình luận trong trang này.", modifier = Modifier.padding(16.dp))
-                        }
+                        item(key = "empty-comments") { Text("Chưa tìm thấy bình luận trong trang này.", modifier = Modifier.padding(16.dp)) }
                     }
                 }
             }
             "source" -> Column(modifier = Modifier.padding(16.dp)) {
                 Text("Nguồn: ${detail.story.sourceId}")
                 Text("Địa chỉ: ${detail.story.url}")
+                ReferenceActionButton(
+                    text = "CẤU HÌNH GIỌNG & AI",
+                    onClick = { showAdvancedOptions = true },
+                    normalColor = ReferenceGray,
+                    accessibilityLabel = "Mở cấu hình giọng đọc và AI nâng cao",
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                )
                 if (detail.story.url.startsWith("https://")) {
                     Button(onClick = { onOpenOriginal(detail.story.url) }, modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
                         Text("MỞ TRANG GỐC")
@@ -848,6 +903,65 @@ fun StoryDetailScreen(
                 roleDraft = defaultRoleDraft()
             }, enabled = roleDraft.isNarrator || roleDraft.roleName.isNotBlank()) { Text("LƯU") } },
             dismissButton = { TextButton(onClick = { showVoiceRoleDialog = false }) { Text("HỦY") } },
+        )
+    }
+
+    if (showDownloadScopeDialog) {
+        AlertDialog(
+            onDismissRequest = { showDownloadScopeDialog = false },
+            title = { Text("CHỌN PHẠM VI TẢI") },
+            text = {
+                Column {
+                    ReferenceActionButton(
+                        text = "TẢI CHƯƠNG ĐẦU",
+                        onClick = {
+                            showDownloadScopeDialog = false
+                            onDownloadRange(1, 1)
+                        },
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                    )
+                    ReferenceActionButton(
+                        text = "CHỌN NHIỀU CHƯƠNG",
+                        onClick = {
+                            showDownloadScopeDialog = false
+                            showRangeDialog = true
+                        },
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                    )
+                    ReferenceActionButton(
+                        text = "TẢI TOÀN BỘ TRUYỆN",
+                        onClick = {
+                            showDownloadScopeDialog = false
+                            onDownload()
+                        },
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                    )
+                }
+            },
+            confirmButton = { TextButton(onClick = { showDownloadScopeDialog = false }) { Text("ĐÓNG") } },
+        )
+    }
+
+    if (showChapterSearchDialog) {
+        AlertDialog(
+            onDismissRequest = { showChapterSearchDialog = false },
+            title = { Text("TÌM CHƯƠNG") },
+            text = {
+                OutlinedTextField(
+                    value = chapterQuery,
+                    onValueChange = { chapterQuery = it.take(120) },
+                    label = { Text("Tìm chương theo tên hoặc số") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = { TextButton(onClick = { showChapterSearchDialog = false }) { Text("TÌM") } },
+            dismissButton = {
+                TextButton(onClick = {
+                    chapterQuery = ""
+                    showChapterSearchDialog = false
+                }) { Text("HIỆN TẤT CẢ") }
+            },
         )
     }
 

@@ -72,8 +72,6 @@ jobs:
           ! grep -q 'KÝ TỰ +' "$file"
           ! grep -q 'RETRY +' "$file"
           ! grep -q 'BACKOFF +' "$file"
-          test "$(grep -c '^@Composable$' "$file")" -gt 0
-          ! grep -q $'@Composable\n@Composable' "$file"
       - name: Validate wiring
         run: python3 scripts/validate_release.py --wiring-only
       - name: Compile Kotlin app

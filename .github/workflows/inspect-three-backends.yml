@@ -1,0 +1,23 @@
+name: Inspect remaining parity backends
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - scripts/inspect_three_backends.sh
+      - .github/workflows/inspect-three-backends.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    if: github.head_ref == 'agent/reference-ui-position-parity'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/reference-ui-position-parity
+          fetch-depth: 0
+      - name: Inspect
+        run: bash scripts/inspect_three_backends.sh

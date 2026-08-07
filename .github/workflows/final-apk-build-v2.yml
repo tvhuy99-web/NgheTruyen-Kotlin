@@ -1,149 +1,29 @@
-name: Build corrected verified APK
+name: Build NgheTruyen APK
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
     paths:
       - ".github/workflows/final-apk-build-v2.yml"
-  workflow_dispatch:
 
 permissions:
   contents: write
 
 env:
   ARTIFACT_NAME: NgheTruyen-v2.8.0-debug-apk
-  HISTORICAL_PAYLOAD_REF: 367002b60dd1da1ae2e698603c83f6aed9c38a8a
 
 jobs:
   build-apk:
     runs-on: ubuntu-latest
     timeout-minutes: 55
-    env:
-      GH_TOKEN: ${{ github.token }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Record build start
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          {
-            echo "STATUS=running"
-            echo "COMMIT_SHA=${GITHUB_SHA}"
-            echo "RUN_ID=${GITHUB_RUN_ID}"
-            echo "RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT}"
-            echo "ARTIFACT_ID="
-            echo "ARTIFACT_NAME=${ARTIFACT_NAME}"
-          } > BUILD_APK_RESULT.txt
-          git add BUILD_APK_RESULT.txt
-          git commit -m "build: record corrected APK build start"
-          git push origin HEAD:main
-
-      - name: Reconstruct and verify source packs
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          printf '%s  %s\n' \
-            bc923bc31410d94bbcfb47a9a241f45f2ddcd065 .github/apk-payload-fix/part02.00 \
-            2ee1e6e4978bdd60359ba7843323b5b484375b0b .github/apk-payload-fix/part02.01 \
-            3dd9beac62108d3105bf439b6f4d38510304af1c .github/apk-payload-fix/part02.02 \
-            24270bca69eff78d354a8578f220935a03bb3e35 .github/apk-payload-fix/part02.03 \
-            f3d3b5884737c7265817ff974ef8f5eaa755b262 .github/apk-payload-fix/part02.04 \
-            38a63d199f53c5ad2625862debc92a47cae23f96 .github/apk-payload-fix/part02.05 \
-            > /tmp/part02-segments.gitsha
-          while read -r expected path; do
-            actual="$(git hash-object "$path")"
-            test "$actual" = "$expected" || {
-              echo "Corrected segment mismatch: $path expected=$expected actual=$actual" >&2
-              exit 1
-            }
-          done < /tmp/part02-segments.gitsha
-
-          for index in 00 01 03 04 05 06; do
-            git show "${HISTORICAL_PAYLOAD_REF}:.github/apk-payload/part.${index}" > "/tmp/part.${index}"
-          done
-          cat .github/apk-payload-fix/part02.* > /tmp/part.02
-          test "$(git hash-object /tmp/part.02)" = "8a3fe7bd696547d545c6d5cfb1349561fb3a55ca"
-
-          printf '%s  %s\n' \
-            2a11e8f9df19d22d6037cab126e6f87bea789f58 /tmp/part.00 \
-            f936739293addbe010b02f2b322391aa65b60eb9 /tmp/part.01 \
-            8a3fe7bd696547d545c6d5cfb1349561fb3a55ca /tmp/part.02 \
-            1f68327f76b2ece6c84a997ee33d269e5f3bbb40 /tmp/part.03 \
-            6d9142b4c624bd76fca06c14f6102f9ef12b7291 /tmp/part.04 \
-            a1e4ec3be4f3097ecbfd674377823638aa013c6f /tmp/part.05 \
-            8d6d5bf48c2679e12bef5f04171ebff83aebd574 /tmp/part.06 \
-            > /tmp/payload-parts.gitsha
-          while read -r expected path; do
-            actual="$(git hash-object "$path")"
-            test "$actual" = "$expected" || {
-              echo "Payload part mismatch: $path expected=$expected actual=$actual" >&2
-              exit 1
-            }
-          done < /tmp/payload-parts.gitsha
-
-          cat /tmp/part.00 /tmp/part.01 /tmp/part.02 /tmp/part.03 /tmp/part.04 /tmp/part.05 /tmp/part.06 > /tmp/remaining3.b64
-          echo "66982b55f8778e6cede39083ba90222d70e89b83178047c9fa31e95c8d3a03ad  /tmp/remaining3.b64" | sha256sum --check -
-          base64 --decode /tmp/remaining3.b64 > /tmp/remaining3.tar.xz
-          echo "39459b7fa4ab00d9ae79739356422e42c3b97de46f130d59fd5286c263da7a0c  /tmp/remaining3.tar.xz" | sha256sum --check -
-
-          rm -rf /tmp/sourcepack-fixed
-          mkdir -p /tmp/sourcepack-fixed/app/src/main/assets/sourcepacks
-
-          python3 - <<'PY'
-          import base64
-          import json
-          import os
-          import pathlib
-          import urllib.request
-
-          repository = os.environ["GITHUB_REPOSITORY"]
-          token = os.environ["GH_TOKEN"]
-          output = pathlib.Path("/tmp/sourcepack-fixed/app/src/main/assets/sourcepacks")
-          blobs = {
-              "demo.ntsource": "699ff6986368131ae0cb7cc0576e9177d40cfe4f",
-              "sangtacviet.ntsource": "1751822e35dcfab5b9991137b215e660ca9044b5",
-              "truyencom.ntsource": "48b6fc4b3f0ebf4e3f62e18908bd005a4d874ae9",
-              "truyencv.ntsource": "0ce03d958246af2d2435276a6430286ca8e0b740",
-              "truyenfull.ntsource": "85021f0abc26991829098f2bc39909f44beae66c",
-          }
-          for name, sha in blobs.items():
-              request = urllib.request.Request(
-                  f"https://api.github.com/repos/{repository}/git/blobs/{sha}",
-                  headers={
-                      "Authorization": f"Bearer {token}",
-                      "Accept": "application/vnd.github+json",
-                      "X-GitHub-Api-Version": "2022-11-28",
-                  },
-              )
-              with urllib.request.urlopen(request) as response:
-                  payload = json.load(response)
-              (output / name).write_bytes(base64.b64decode(payload["content"]))
-          PY
-
-          tar -xJf /tmp/remaining3.tar.xz -C /tmp/sourcepack-fixed
-
-          cat > /tmp/sourcepacks.sha256 <<'EOF'
-          efbaafa94c4c1472d86ea0b358200ed8a383437285514d3c988a95119d4a0138  /tmp/sourcepack-fixed/app/src/main/assets/sourcepacks/demo.ntsource
-          1b99700e6894de0181524a3127a0cf3d1954ba8268ff4d3f91b551ebdb582055  /tmp/sourcepack-fixed/app/src/main/assets/sourcepacks/sangtacviet.ntsource
-          043bc8ad6073fb1e47c52651fc724dc2c4308edb880bd28bc4eb489cff338d38  /tmp/sourcepack-fixed/app/src/main/assets/sourcepacks/truyencom.ntsource
-          7e6dea97ee79119a176b6818fd52634d64211c0a3a4895ef6e65b458700de33a  /tmp/sourcepack-fixed/app/src/main/assets/sourcepacks/truyencv.ntsource
-          0462ffb4aa939dbcd6ead955ba5c752538c9a2b72d6ff79bcc914e095764ba91  /tmp/sourcepack-fixed/app/src/main/assets/sourcepacks/truyenfull.ntsource
-          7abe52ec0873005956e50e5fcc9600b4333315826dd5d8e7719b1549da45daad  /tmp/sourcepack-fixed/app/src/main/assets/sourcepacks/truyenyy.ntsource
-          15a51dfc16813322fccf58acab792ce2d7173f898f7011fbcec28781baa678b5  /tmp/sourcepack-fixed/app/src/main/assets/sourcepacks/wattpad.ntsource
-          562b237cca67dae2791660ba617d159774b9f4f56ebed6dd5bb4ad8058531e56  /tmp/sourcepack-fixed/app/src/main/assets/sourcepacks/wikidich.ntsource
-          EOF
-          sed -i 's/^          //' /tmp/sourcepacks.sha256
-          sha256sum --check /tmp/sourcepacks.sha256
-          cp -f /tmp/sourcepack-fixed/app/src/main/assets/sourcepacks/*.ntsource app/src/main/assets/sourcepacks/
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -181,10 +61,29 @@ jobs:
 
       - name: Build debug APK
         id: build
-        run: ./gradlew --no-daemon --stacktrace :app:assembleDebug
+        shell: bash
+        run: |
+          set +e
+          ./gradlew --no-daemon --stacktrace :app:assembleDebug 2>&1 | tee /tmp/gradle-build.log
+          status=${PIPESTATUS[0]}
+          if [[ $status -ne 0 ]]; then
+            {
+              echo "GRADLE_EXIT=$status"
+              echo "RUN_ID=${GITHUB_RUN_ID}"
+              echo
+              echo "=== COMPILER ERRORS ==="
+              grep -E "(^e: |^error: | error: |FAILURE:|What went wrong|Execution failed for task|Unresolved reference|Compilation error)" /tmp/gradle-build.log | tail -n 300 || true
+              echo
+              echo "=== LOG TAIL ==="
+              tail -n 240 /tmp/gradle-build.log
+            } > BUILD_APK_ERROR.txt
+            exit $status
+          fi
+          rm -f BUILD_APK_ERROR.txt
 
       - name: Create APK checksum
         id: checksum
+        shell: bash
         run: sha256sum app/build/outputs/apk/debug/app-debug.apk | tee app-debug.apk.sha256
 
       - name: Upload APK artifact
@@ -198,22 +97,18 @@ jobs:
             app/build/outputs/apk/debug/app-debug.apk
             app-debug.apk.sha256
 
-      - name: Record result and commit repaired source packs
+      - name: Record build result
         if: always()
         shell: bash
         run: |
           set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           CHECKSUM_LINE=""
           if [[ -f app-debug.apk.sha256 ]]; then
             CHECKSUM_LINE="$(cat app-debug.apk.sha256)"
           fi
-
-          if [[ "${{ job.status }}" = "success" ]]; then
-            rm -rf .github/apk-payload-fix
-            rm -f .github/workflows/final-apk-build-v2.yml
-          fi
-          rm -rf .gradle build app/build
-          rm -f app-debug.apk.sha256
 
           {
             echo "STATUS=${{ job.status }}"
@@ -230,9 +125,11 @@ jobs:
             fi
           } > BUILD_APK_RESULT.txt
 
-          git add -A
+          rm -rf .gradle build app/build
+          rm -f app-debug.apk.sha256
+          git add BUILD_APK_RESULT.txt BUILD_APK_ERROR.txt 2>/dev/null || true
           if git diff --cached --quiet; then
             exit 0
           fi
-          git commit -m "fix: restore source packs and record corrected APK build"
+          git commit -m "build: record Android APK build diagnostics"
           git push origin HEAD:main

@@ -24,6 +24,7 @@ import vn.nghetruyen.app.NgheTruyenApplication
 import vn.nghetruyen.app.audio.AudioExportPackaging
 import vn.nghetruyen.app.audio.AudioExportRequest
 import vn.nghetruyen.app.audio.AudioExportScope
+import vn.nghetruyen.app.audio.SceneMusicAnalysisWorker
 import vn.nghetruyen.app.ai.ChapterAiWorkflow
 import vn.nghetruyen.app.ai.TranslationRequest
 import vn.nghetruyen.app.ai.VietPhraseImprovementRequest

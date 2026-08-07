@@ -123,16 +123,16 @@ class MainActivity : ComponentActivity() {
             }
             val wavExportLauncher = rememberLauncherForActivityResult(
                 contract = ActivityResultContracts.CreateDocument(AudioExportFormat.WAV.mimeType),
-            )(::finishAudioExport)
+            ) { uri -> finishAudioExport(uri) }
             val m4aExportLauncher = rememberLauncherForActivityResult(
                 contract = ActivityResultContracts.CreateDocument(AudioExportFormat.M4A.mimeType),
-            )(::finishAudioExport)
+            ) { uri -> finishAudioExport(uri) }
             val mp3ExportLauncher = rememberLauncherForActivityResult(
                 contract = ActivityResultContracts.CreateDocument(AudioExportFormat.MP3.mimeType),
-            )(::finishAudioExport)
+            ) { uri -> finishAudioExport(uri) }
             val audioExportDirectoryLauncher = rememberLauncherForActivityResult(
                 contract = ActivityResultContracts.OpenDocumentTree(),
-            )(::finishAudioExport)
+            ) { uri -> finishAudioExport(uri) }
             val backgroundMusicLauncher = rememberLauncherForActivityResult(
                 contract = ActivityResultContracts.OpenDocument(),
             ) { uri ->

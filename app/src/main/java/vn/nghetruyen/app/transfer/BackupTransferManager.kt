@@ -1048,7 +1048,16 @@ class BackupTransferManager(
             endObject()
             require(id.isNotBlank() && storyId.isNotBlank() && source.isNotBlank()) { "Tác vụ tải không hợp lệ." }
             val restoredState = if (state == "RUNNING" || state == "QUEUED") "CANCELLED" else state
-            DownloadJobEntity(id, storyId, source, restoredState, completed, total, error, updated)
+            DownloadJobEntity(
+                id = id,
+                storyId = storyId,
+                sourceId = source,
+                state = restoredState,
+                completedChapters = completed,
+                totalChapters = total,
+                errorMessage = error,
+                updatedAt = updated,
+            )
         },
         saveBatch = save,
     )

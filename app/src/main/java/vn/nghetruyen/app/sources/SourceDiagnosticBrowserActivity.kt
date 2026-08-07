@@ -87,7 +87,7 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
             setPadding(20, 12, 20, 12)
         }
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100 }
-        urlField = EditText(this).apply { setSingleLine(true); text = initialUrl; hint = "URL HTTPS thuộc nguồn" }
+        urlField = EditText(this).apply { setSingleLine(true); setText(initialUrl); hint = "URL HTTPS thuộc nguồn" }
         root.addView(status, matchWrap())
         root.addView(progress, matchWrap())
         root.addView(urlField, matchWrap())
@@ -139,7 +139,7 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
                 setAcceptThirdPartyCookies(this@web, false)
             }
             webChromeClient = object : WebChromeClient() {
-                override fun onProgressChanged(view: WebView?, newProgress: Int) { progress.progress = newProgress }
+                override fun onProgressChanged(view: WebView?, newProgress: Int) { this@SourceDiagnosticBrowserActivity.progress.progress = newProgress }
                 override fun onConsoleMessage(message: ConsoleMessage): Boolean {
                     record("CONSOLE", "${message.messageLevel()}@${message.lineNumber()}", sanitize(message.message(), 800))
                     return true
@@ -182,12 +182,12 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
         }
 
         override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
-            urlField.text = url
+            urlField.setText(url)
             record("PAGE", "START", redactUrl(url))
         }
 
         override fun onPageFinished(view: WebView, url: String) {
-            urlField.text = url
+            urlField.setText(url)
             captureSession()
             record("PAGE", "FINISH", "${redactUrl(url)} title=${sanitize(view.title.orEmpty(), 200)}")
             setStatus("Trang đã tải. Có $requestCount request metadata trong phiên chẩn đoán.")

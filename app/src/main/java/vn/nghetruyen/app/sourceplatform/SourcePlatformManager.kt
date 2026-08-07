@@ -201,8 +201,10 @@ class SourcePlatformManager(
         val cached = repositories[repositoryId] ?: error("Repository chưa được tải hoặc đã hết hạn.")
         val entry = cached.repository.index.packages.firstOrNull { it.sourceId == sourceId }
             ?: error("Không tìm thấy gói nguồn trong repository.")
-        val compatible = (entry.minAppVersion == null || CURRENT_APP_VERSION >= entry.minAppVersion) &&
-            (entry.maxAppVersion == null || CURRENT_APP_VERSION <= entry.maxAppVersion)
+        val minAppVersion = entry.minAppVersion
+        val maxAppVersion = entry.maxAppVersion
+        val compatible = (minAppVersion == null || CURRENT_APP_VERSION >= minAppVersion) &&
+            (maxAppVersion == null || CURRENT_APP_VERSION <= maxAppVersion)
         require(compatible) { "Phiên bản nguồn không tương thích với ứng dụng hiện tại." }
         val bytes = repositoryHttpClient.fetchPackage(
             url = entry.packageUrl,

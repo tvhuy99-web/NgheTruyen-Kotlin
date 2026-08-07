@@ -58,7 +58,7 @@ object PerformanceDiagnostics {
         return Snapshot(
             createdAt = System.currentTimeMillis(),
             uptimeMillis = SystemClock.elapsedRealtime(),
-            pssKiB = Debug.getPss(),
+            pssKiB = Debug.getPss().coerceIn(0L, Int.MAX_VALUE.toLong()).toInt(),
             javaHeapUsedBytes = runtime.totalMemory() - runtime.freeMemory(),
             batteryPercent = batteryPercent,
             charging = chargingStatus == BatteryManager.BATTERY_STATUS_CHARGING ||

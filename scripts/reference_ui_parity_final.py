@@ -2,8 +2,8 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-reader = ROOT / "app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt"
-text = reader.read_text(encoding="utf-8")
+reader_path = ROOT / "app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt"
+reader_text = reader_path.read_text(encoding="utf-8")
 old = '''                if (state.diagnosticsMode != "off") {
                     ReaderButton(
                         "XEM NHẬT KÝ",
@@ -22,10 +22,10 @@ new = '''                ReaderButton(
                     accessibilityLabel = "Xem nhật ký chẩn đoán",
                 )
 '''
-if old not in text:
+if old not in reader_text:
     raise SystemExit("missing conditional diagnostic action")
-text = text.replace(old, new, 1)
-reader.write_text(text, encoding="utf-8")
+reader_text = reader_text.replace(old, new, 1)
+reader_path.write_text(reader_text, encoding="utf-8")
 
 # Structural assertions for the major reference-placement invariants.
 personal = (ROOT / "app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt").read_text(encoding="utf-8")
@@ -43,10 +43,10 @@ def assert_order(haystack, labels, name):
             raise SystemExit(f"{name}: wrong order at {label}")
         pos = nxt
 
-assert_order(reader, [
+assert_order(reader_text, [
     '"XEM NHẬT KÝ"', '"DỊCH AI"', '"PHÂN VAI AI"'
 ], "reader action row")
-assert_order(reader, [
+assert_order(reader_text, [
     '"TRỞ LẠI DANH SÁCH CHƯƠNG"', '"LƯU VỊ TRÍ ĐỌC"', '"TÌM TRONG CHƯƠNG"',
     '"HIỂN THỊ VĂN BẢN"', '"HẸN GIỜ NGỦ - ${state.sleepTimerStatus}"', '"NHẠC NỀN"',
     '"XUẤT ÂM THANH (CẦN CHẾ ĐỘ TTS)"', '"CHẾ ĐỘ ĐỌC:',

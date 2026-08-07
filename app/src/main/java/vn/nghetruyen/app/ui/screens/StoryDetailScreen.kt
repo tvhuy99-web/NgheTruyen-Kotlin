@@ -1,10 +1,13 @@
 package vn.nghetruyen.app.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -345,13 +348,13 @@ fun StoryDetailScreen(
             )
         }
         if (advancedMode != null) {
-            ReferenceActionButton(
-                text = if (advancedMode == "voice") "ĐÓNG PHÂN VAI TTS" else "ĐÓNG THIẾT LẬP AI",
-                onClick = { advancedMode = null },
-                normalColor = ReferenceGray,
-                accessibilityLabel = "Đóng cấu hình giọng đọc và AI nâng cao",
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
-            )
+            AlertDialog(
+                onDismissRequest = { advancedMode = null },
+                title = {
+                    Text(if (advancedMode == "voice") "PHÂN VAI TTS CHO TRUYỆN NÀY" else "THIẾT LẬP AI CHO TRUYỆN NÀY")
+                },
+                text = {
+                    Column(Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState())) {
         if (advancedMode == "voice") {
         Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
             Column(modifier = Modifier.padding(10.dp)) {
@@ -360,6 +363,7 @@ fun StoryDetailScreen(
                 Text("Đoạn có tiền tố Tên:, Tên — hoặc [Tên] sẽ dùng giọng của vai tương ứng; đoạn khác dùng Người kể chuyện.", style = MaterialTheme.typography.bodySmall)
                 Button(onClick = {
                     roleDraft = defaultRoleDraft()
+                    advancedMode = null
                     showVoiceRoleDialog = true
                     onLoadRoleVoices(roleDraft.enginePackage)
                 }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) { Text("THÊM HỒ SƠ VAI") }
@@ -393,6 +397,7 @@ fun StoryDetailScreen(
                                 Button(onClick = { onPreviewVoiceRole(draft) }, modifier = Modifier.padding(1.dp)) { Text("NGHE") }
                                 Button(onClick = {
                                     roleDraft = draft
+                                    advancedMode = null
                                     showVoiceRoleDialog = true
                                     onLoadRoleVoices(draft.enginePackage)
                                 }, modifier = Modifier.padding(1.dp)) { Text("SỬA") }
@@ -544,6 +549,11 @@ fun StoryDetailScreen(
             }
         }
         }
+        
+                    }
+                },
+                confirmButton = { TextButton(onClick = { advancedMode = null }) { Text("ĐÓNG") } },
+            )
         }
         Row(
             modifier = Modifier

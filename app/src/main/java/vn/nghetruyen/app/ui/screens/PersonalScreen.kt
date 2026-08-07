@@ -176,6 +176,8 @@ fun PersonalScreen(
     var showClearDownloadsDialog by remember { mutableStateOf(false) }
     var showFactoryResetFirst by remember { mutableStateOf(false) }
     var showFactoryResetFinal by remember { mutableStateOf(false) }
+    var showAddRepositoryDialog by remember { mutableStateOf(false) }
+    var repositoryName by remember { mutableStateOf("") }
     var repositoryUrl by remember { mutableStateOf("") }
     var trustKeyId by remember { mutableStateOf("") }
     var trustAlgorithm by remember { mutableStateOf("ECDSA_P256_SHA256") }
@@ -424,7 +426,11 @@ fun PersonalScreen(
                 "extensions_diagnostics" to "Chẩn đoán",
             ),
             onSelect = { target ->
-                if (target == "extensions_install") onInstallSourcePack() else personalPage = target
+                when (target) {
+                    "extensions_install" -> onInstallSourcePack()
+                    "extensions_add" -> showAddRepositoryDialog = true
+                    else -> personalPage = target
+                }
             },
             extraContent = {
                 if (state.pendingSourceInstall != null) {
@@ -443,6 +449,7 @@ fun PersonalScreen(
                 onRefresh = onRefreshSourceRepository,
                 onRemove = onRemoveSourceRepository,
                 onPrepareInstall = onPrepareRepositorySourceInstall,
+                onAddRepository = { showAddRepositoryDialog = true },
             )
         }
         "extensions_add" -> PersonalSubPage("THÊM KHO / LIÊN KẾT", "QUAY LẠI TIỆN ÍCH", { personalPage = "extensions_home" }) {
@@ -604,6 +611,41 @@ fun PersonalScreen(
             dismissButton = {
                 TextButton(onClick = { showFactoryResetFinal = false; showSettingsDialog = true }) { Text("HỦY") }
             },
+        )
+    }
+
+    if (showAddRepositoryDialog) {
+        AlertDialog(
+            onDismissRequest = { showAddRepositoryDialog = false },
+            title = { Text("THÊM KHO / CÀI TỪ LIÊN KẾT") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = repositoryUrl,
+                        onValueChange = { repositoryUrl = it.take(4096) },
+                        label = { Text("Liên kết HTTPS của kho hoặc plugin.zip") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = repositoryName,
+                        onValueChange = { repositoryName = it.take(120) },
+                        label = { Text("Tên kho, không bắt buộc") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = repositoryUrl.startsWith("https://"),
+                    onClick = {
+                        onRefreshSourceRepository(repositoryUrl)
+                        showAddRepositoryDialog = false
+                    },
+                ) { Text("KIỂM TRA") }
+            },
+            dismissButton = { TextButton(onClick = { showAddRepositoryDialog = false }) { Text("HỦY") } },
         )
     }
 }
@@ -792,26 +834,96 @@ private fun InstalledSourcesSection(
     onEnabledChange: (String, Boolean) -> Unit,
     onRollback: (String) -> Unit,
 ) {
+    var query by remember { mutableStateOf("") }
+    var showSearch by remember { mutableStateOf(false) }
+    var selectedPackId by remember { mutableStateOf<String?>(null) }
+    val filtered = state.sourcePacks.filter { pack ->
+        query.isBlank() || pack.name.contains(query, ignoreCase = true) || pack.id.contains(query, ignoreCase = true)
+    }
+
+    ReferenceActionButton(
+        text = if (query.isBlank()) "TÌM TIỆN ÍCH" else "TÌM: $query ✓",
+        onClick = { showSearch = true },
+        normalColor = ReferenceGray,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+    )
+    if (query.isNotBlank()) {
+        ReferenceActionButton(
+            text = "HIỆN TẤT CẢ",
+            onClick = { query = "" },
+            normalColor = ReferenceGray,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
+        )
+    }
+
     if (state.sourcePacks.isEmpty()) {
         Text("Chưa cài tiện ích nguồn nào.", modifier = Modifier.padding(16.dp))
-        return
+    } else if (filtered.isEmpty()) {
+        Text("Không tìm thấy tiện ích phù hợp.", modifier = Modifier.padding(16.dp))
+    } else {
+        filtered.forEach { pack ->
+            ReferenceActionButton(
+                text = buildString {
+                    append(pack.name)
+                    append("\n").append(pack.version)
+                    if (!pack.enabled) append(" • Đã tắt")
+                },
+                onClick = { selectedPackId = pack.id },
+                normalColor = ReferencePanelBackground,
+                normalContentColor = ReferenceText,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
+            )
+        }
     }
-    state.sourcePacks.forEach { pack ->
-        Card(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
-            Column(Modifier.padding(14.dp)) {
-                Text(pack.name, fontWeight = FontWeight.SemiBold)
-                Text("${pack.id} • ${pack.version} • ${pack.runtimeMode}", style = MaterialTheme.typography.bodySmall)
-                Text("Ký bởi ${pack.signerKeyId} • giữ ${pack.installedVersions.size} phiên bản", style = MaterialTheme.typography.bodySmall)
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (pack.enabled) "Đang bật" else "Đang tắt", Modifier.weight(1f))
-                    Switch(checked = pack.enabled, onCheckedChange = { onEnabledChange(pack.id, it) })
-                }
-                Button(
-                    onClick = { onRollback(pack.id) },
-                    enabled = pack.canRollback,
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                ) { Text("ROLLBACK PHIÊN BẢN NGUỒN") }
-            }
+
+    if (showSearch) {
+        AlertDialog(
+            onDismissRequest = { showSearch = false },
+            title = { Text("TÌM TIỆN ÍCH") },
+            text = {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it.take(120) },
+                    label = { Text("Tên hoặc ID tiện ích") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = { TextButton(onClick = { showSearch = false }) { Text("TÌM") } },
+            dismissButton = { TextButton(onClick = { query = ""; showSearch = false }) { Text("HIỆN TẤT CẢ") } },
+        )
+    }
+
+    selectedPackId?.let { selectedId ->
+        state.sourcePacks.firstOrNull { it.id == selectedId }?.let { pack ->
+            AlertDialog(
+                onDismissRequest = { selectedPackId = null },
+                title = { Text(pack.name) },
+                text = {
+                    Column {
+                        Text("${pack.id} • ${pack.version}", style = MaterialTheme.typography.bodySmall)
+                        ReferenceActionButton(
+                            text = if (pack.enabled) "TẮT" else "BẬT",
+                            onClick = {
+                                onEnabledChange(pack.id, !pack.enabled)
+                                selectedPackId = null
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                        )
+                        if (pack.canRollback) {
+                            ReferenceActionButton(
+                                text = "ROLLBACK PHIÊN BẢN NGUỒN",
+                                onClick = {
+                                    onRollback(pack.id)
+                                    selectedPackId = null
+                                },
+                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                            )
+                        }
+                    }
+                },
+                confirmButton = { TextButton(onClick = { selectedPackId = null }) { Text("ĐÓNG") } },
+            )
         }
     }
 }
@@ -822,38 +934,119 @@ private fun SourceRepositorySection(
     onRefresh: (String) -> Unit,
     onRemove: (String) -> Unit,
     onPrepareInstall: (String, String) -> Unit,
+    onAddRepository: () -> Unit,
 ) {
-    if (state.sourceRepositories.isEmpty()) {
-        Text("Chưa có kho tiện ích. Mở mục Thêm kho / liên kết để thêm repository HTTPS.", modifier = Modifier.padding(16.dp))
-        return
+    var repositoryQuery by remember { mutableStateOf("") }
+    var showRepositorySearch by remember { mutableStateOf(false) }
+    var packageQuery by remember { mutableStateOf("") }
+    var packageFilter by remember { mutableStateOf("ALL") }
+
+    Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 3.dp)) {
+        ReferenceActionButton(
+            text = if (repositoryQuery.isBlank()) "TÌM KHO" else "TÌM: $repositoryQuery ✓",
+            onClick = { showRepositorySearch = true },
+            normalColor = ReferenceGray,
+            modifier = Modifier.weight(1f).padding(1.dp),
+        )
+        ReferenceActionButton(
+            text = "THÊM KHO MỚI",
+            onClick = onAddRepository,
+            normalColor = ReferenceGray,
+            modifier = Modifier.weight(1f).padding(1.dp),
+        )
     }
-    state.sourceRepositories.forEach { repository ->
+    if (repositoryQuery.isNotBlank()) {
+        ReferenceActionButton(
+            text = "HIỆN TẤT CẢ",
+            onClick = { repositoryQuery = "" },
+            normalColor = ReferenceGray,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
+        )
+    }
+
+    val repositories = state.sourceRepositories.filter { repository ->
+        repositoryQuery.isBlank() || repository.name.contains(repositoryQuery, ignoreCase = true) ||
+            repository.url.contains(repositoryQuery, ignoreCase = true)
+    }
+    if (repositories.isEmpty()) {
+        Text("Chưa có kho tiện ích phù hợp.", modifier = Modifier.padding(16.dp))
+    }
+    repositories.forEach { repository ->
         Card(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
             Column(Modifier.padding(14.dp)) {
                 Text(repository.name, fontWeight = FontWeight.SemiBold)
                 Text("${repository.packageCount} gói • ký bởi ${repository.signerKeyId}", style = MaterialTheme.typography.bodySmall)
                 Text(repository.url, style = MaterialTheme.typography.bodySmall)
                 Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                    Button({ showRepositorySearch = true }, Modifier.weight(1f).padding(1.dp)) { Text("TÌM KIẾM") }
+                    Button({ packageFilter = "ALL" }, Modifier.weight(1f).padding(1.dp)) { Text((if (packageFilter == "ALL") "✓ " else "") + "TẤT CẢ") }
+                    Button({ packageFilter = "INSTALLED" }, Modifier.weight(1f).padding(1.dp)) { Text((if (packageFilter == "INSTALLED") "✓ " else "") + "ĐÃ CÀI") }
+                    Button({ packageFilter = "UPDATE" }, Modifier.weight(1f).padding(1.dp)) { Text((if (packageFilter == "UPDATE") "✓ " else "") + "CẬP NHẬT") }
+                }
+                Row(Modifier.fillMaxWidth()) {
                     Button(
                         onClick = { onRefresh(repository.url) },
                         enabled = !state.sourceRepositoryRefreshing,
                         modifier = Modifier.weight(1f).padding(2.dp),
                     ) { Text("LÀM MỚI") }
-                    Button(onClick = { onRemove(repository.id) }, modifier = Modifier.weight(1f).padding(2.dp)) { Text("GỠ KHO") }
+                    Button(onClick = { onRemove(repository.id) }, modifier = Modifier.weight(1f).padding(2.dp)) { Text("XÓA KHO") }
                 }
-                state.sourceRepositoryPackages.filter { it.repositoryId == repository.id }.forEach { item ->
-                    HorizontalDivider(Modifier.padding(vertical = 7.dp))
-                    Text("${item.name} ${item.version}", fontWeight = FontWeight.SemiBold)
-                    Text("${item.sourceId} • ${item.status}${item.installedVersion?.let { " • đang cài $it" }.orEmpty()}", style = MaterialTheme.typography.bodySmall)
-                    item.description.takeIf(String::isNotBlank)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-                    Button(
-                        onClick = { onPrepareInstall(item.repositoryId, item.sourceId) },
-                        enabled = item.canInstall && !state.sourceRepositoryRefreshing,
-                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                    ) { Text(if (item.status == "UPDATE_AVAILABLE") "TẢI BẢN CẬP NHẬT" else "TẢI & KIỂM TRA GÓI") }
-                }
+                state.sourceRepositoryPackages
+                    .filter { it.repositoryId == repository.id }
+                    .filter { item -> packageQuery.isBlank() || item.name.contains(packageQuery, true) || item.sourceId.contains(packageQuery, true) }
+                    .filter { item ->
+                        when (packageFilter) {
+                            "INSTALLED" -> item.installedVersion != null
+                            "UPDATE" -> item.status == "UPDATE_AVAILABLE"
+                            else -> true
+                        }
+                    }
+                    .forEach { item ->
+                        HorizontalDivider(Modifier.padding(vertical = 7.dp))
+                        Text("${item.name} ${item.version}", fontWeight = FontWeight.SemiBold)
+                        Text("${item.sourceId} • ${item.status}${item.installedVersion?.let { " • đang cài $it" }.orEmpty()}", style = MaterialTheme.typography.bodySmall)
+                        item.description.takeIf(String::isNotBlank)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                        Button(
+                            onClick = { onPrepareInstall(item.repositoryId, item.sourceId) },
+                            enabled = item.canInstall && !state.sourceRepositoryRefreshing,
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        ) { Text(if (item.status == "UPDATE_AVAILABLE") "TẢI BẢN CẬP NHẬT" else "TẢI & KIỂM TRA GÓI") }
+                    }
             }
         }
+    }
+
+    if (showRepositorySearch) {
+        AlertDialog(
+            onDismissRequest = { showRepositorySearch = false },
+            title = { Text("TÌM KIẾM") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = repositoryQuery,
+                        onValueChange = { repositoryQuery = it.take(120) },
+                        label = { Text("Tên hoặc URL kho") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = packageQuery,
+                        onValueChange = { packageQuery = it.take(120) },
+                        label = { Text("Tên hoặc ID tiện ích trong kho") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                    )
+                }
+            },
+            confirmButton = { TextButton(onClick = { showRepositorySearch = false }) { Text("TÌM") } },
+            dismissButton = {
+                TextButton(onClick = {
+                    repositoryQuery = ""
+                    packageQuery = ""
+                    showRepositorySearch = false
+                }) { Text("HIỆN TẤT CẢ") }
+            },
+        )
     }
 }
 

@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import subprocess
 
 
 def replace_exact(path: str, old: str, new: str, expected: int = 1) -> None:
     file = Path(path)
     text = file.read_text(encoding="utf-8")
     count = text.count(old)
-    if count == 0 and new in text:
+    if new:
+        if new in text:
+            return
+    elif count == 0:
         return
     if count != expected:
         raise SystemExit(f"{path}: expected {expected} occurrence(s), found {count}: {old!r}")
@@ -99,4 +103,27 @@ for screen in (
         "",
     )
 
+
+def apply_reference_ui_patch() -> None:
+    parts = sorted(Path("scripts").glob("reference_ui_v34.part*.patch"))
+    if not parts:
+        raise SystemExit("Missing reference UI patch parts")
+    patch = Path(".git/reference_ui_v34.patch")
+    patch.write_bytes(b"".join(part.read_bytes() for part in parts))
+
+    quiet = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+    already = subprocess.run(
+        ["git", "apply", "--reverse", "--check", str(patch)],
+        **quiet,
+    )
+    if already.returncode == 0:
+        print("REFERENCE_UI_V34_ALREADY_APPLIED")
+        return
+
+    subprocess.run(["git", "apply", "--check", str(patch)], check=True)
+    subprocess.run(["git", "apply", str(patch)], check=True)
+    print("REFERENCE_UI_V34_APPLIED")
+
+
+apply_reference_ui_patch()
 print("ANDROID_BUILD_FIXES_APPLIED")

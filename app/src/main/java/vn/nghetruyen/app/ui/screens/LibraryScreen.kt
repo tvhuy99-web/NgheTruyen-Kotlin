@@ -63,15 +63,15 @@ fun LibraryScreen(
     val itemCount = when (state.librarySection) {
         LibrarySection.READING -> state.readingStories.size
         LibrarySection.DOWNLOADED -> state.downloadedStories.size + state.downloads.size
-        LibrarySection.BOOKMARKS -> state.bookmarks.size
-        LibrarySection.NOTES -> state.notes.size
+        LibrarySection.BOOKMARKS -> state.bookmarks.size + state.notes.size
+        LibrarySection.NOTES -> state.bookmarks.size + state.notes.size
         LibrarySection.FOLLOWING -> state.following.size
     }
     val sectionName = when (state.librarySection) {
         LibrarySection.READING -> "Đang đọc"
         LibrarySection.DOWNLOADED -> "Đã tải"
         LibrarySection.BOOKMARKS -> "Đánh dấu"
-        LibrarySection.NOTES -> "Ghi chú"
+        LibrarySection.NOTES -> "Đánh dấu"
         LibrarySection.FOLLOWING -> "Theo dõi"
     }
     LaunchedEffect(state.librarySection, itemCount) {
@@ -113,30 +113,6 @@ fun LibraryScreen(
                 )
             }
         }
-        if (state.librarySection == LibrarySection.BOOKMARKS || state.librarySection == LibrarySection.NOTES) {
-            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp)) {
-                ReferenceTabButton(
-                    text = "ĐÁNH DẤU",
-                    selected = state.librarySection == LibrarySection.BOOKMARKS,
-                    onClick = { onSectionSelected(LibrarySection.BOOKMARKS) },
-                    accessibilityLabel = "Đánh dấu",
-                    minHeight = 48.dp,
-                    unselectedColor = ReferenceDivider,
-                    unselectedContentColor = ReferenceText,
-                    modifier = Modifier.weight(1f).padding(1.dp),
-                )
-                ReferenceTabButton(
-                    text = "GHI CHÚ",
-                    selected = state.librarySection == LibrarySection.NOTES,
-                    onClick = { onSectionSelected(LibrarySection.NOTES) },
-                    accessibilityLabel = "Ghi chú",
-                    minHeight = 48.dp,
-                    unselectedColor = ReferenceDivider,
-                    unselectedContentColor = ReferenceText,
-                    modifier = Modifier.weight(1f).padding(1.dp),
-                )
-            }
-        }
         if (state.librarySection == LibrarySection.DOWNLOADED) {
             ReferenceActionButton(
                 text = "NHẬP TỆP",
@@ -161,17 +137,91 @@ fun LibraryScreen(
                 onCancelDownload = onCancelDownload,
                 onRemoveOffline = onRemoveOffline,
             )
-            LibrarySection.BOOKMARKS -> BookmarkList(
-                items = state.bookmarks,
-                onOpen = onBookmarkClick,
-                onDelete = onDeleteBookmark,
-            )
-            LibrarySection.NOTES -> NoteList(
-                items = state.notes,
-                onOpen = onNoteClick,
-                onDelete = onDeleteNote,
+            LibrarySection.BOOKMARKS, LibrarySection.NOTES -> BookmarkAndNoteList(
+                bookmarks = state.bookmarks,
+                notes = state.notes,
+                onBookmarkOpen = onBookmarkClick,
+                onBookmarkDelete = onDeleteBookmark,
+                onNoteOpen = onNoteClick,
+                onNoteDelete = onDeleteNote,
             )
             LibrarySection.FOLLOWING -> FollowingList(state.following, onFollowingClick, onCheckFollowing)
+        }
+    }
+}
+
+
+// NAVIGATION_AUDIT_V3_LIBRARY: the reference tool exposes exactly four library tabs.
+// Notes remain available inside the ĐÁNH DẤU tab instead of creating a fifth navigation level.
+@Composable
+private fun BookmarkAndNoteList(
+    bookmarks: List<BookmarkEntity>,
+    notes: List<ChapterNoteEntity>,
+    onBookmarkOpen: (BookmarkEntity) -> Unit,
+    onBookmarkDelete: (String) -> Unit,
+    onNoteOpen: (ChapterNoteEntity) -> Unit,
+    onNoteDelete: (String) -> Unit,
+) {
+    if (bookmarks.isEmpty() && notes.isEmpty()) {
+        Text("Chưa có đánh dấu hoặc ghi chú.", modifier = Modifier.padding(16.dp))
+        return
+    }
+    LazyColumn(modifier = Modifier.fillMaxSize()) {
+        if (bookmarks.isNotEmpty()) {
+            item(key = "bookmark-heading") {
+                Text(
+                    "ĐÁNH DẤU • ${bookmarks.size}",
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                )
+            }
+            items(bookmarks, key = { "bookmark:${it.id}" }) { item ->
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                        .clickable { onBookmarkOpen(item) },
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text(item.label.ifBlank { "Đánh dấu đoạn ${item.paragraphIndex + 1}" }, fontWeight = FontWeight.SemiBold)
+                        Text("Đoạn ${item.paragraphIndex + 1}")
+                        ReferenceActionButton(
+                            text = "XÓA ĐÁNH DẤU",
+                            onClick = { onBookmarkDelete(item.id) },
+                            accessibilityLabel = "Xóa ${item.label.ifBlank { "đánh dấu đoạn ${item.paragraphIndex + 1}" }}",
+                            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                        )
+                    }
+                }
+            }
+        }
+        if (notes.isNotEmpty()) {
+            item(key = "note-heading") {
+                Text(
+                    "GHI CHÚ • ${notes.size}",
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                )
+            }
+            items(notes, key = { "note:${it.id}" }) { item ->
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                        .clickable { onNoteOpen(item) },
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text("Ghi chú đoạn ${item.paragraphIndex + 1}", fontWeight = FontWeight.SemiBold)
+                        Text(item.text)
+                        ReferenceActionButton(
+                            text = "XÓA GHI CHÚ",
+                            onClick = { onNoteDelete(item.id) },
+                            accessibilityLabel = "Xóa ghi chú đoạn ${item.paragraphIndex + 1}",
+                            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                        )
+                    }
+                }
+            }
         }
     }
 }

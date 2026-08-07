@@ -18,7 +18,8 @@ def balanced_block(text, start_marker):
     start = text.find(start_marker)
     if start < 0:
         raise SystemExit(f"missing block start: {start_marker}")
-    brace = text.find("{", start + len(start_marker))
+    marker_brace = start_marker.find("{")
+    brace = start + marker_brace if marker_brace >= 0 else text.find("{", start + len(start_marker))
     if brace < 0:
         raise SystemExit("missing block brace")
     depth = 0
@@ -46,7 +47,6 @@ voice_start = block.find('        if (advancedMode == "voice") {')
 if voice_start < 0:
     raise SystemExit("missing voice advanced block")
 inner = block[voice_start:block.rfind('}')]
-# Prevent nested voice editor from stacking on top of the parent settings dialog.
 inner = inner.replace(
     '                    roleDraft = defaultRoleDraft()\n                    showVoiceRoleDialog = true\n',
     '                    roleDraft = defaultRoleDraft()\n                    advancedMode = null\n                    showVoiceRoleDialog = true\n',
@@ -117,7 +117,6 @@ t = replace_once(
 ''',
     "repository add callback wiring",
 )
-# Insert repository dialog before PersonalScreen closes, after factory reset dialogs.
 marker = '''    if (showFactoryResetFinal) {
         AlertDialog(
             onDismissRequest = { showFactoryResetFinal = false; showSettingsDialog = true },
@@ -173,9 +172,7 @@ addition = marker + '''
 '''
 t = replace_once(t, marker, addition, "repository add dialog")
 
-# Replace installed extension list with reference-style search + action dialog.
 start, end = balanced_block(t, '@Composable\nprivate fun InstalledSourcesSection(')
-old = t[start:end]
 new = '''@Composable
 private fun InstalledSourcesSection(
     state: MainUiState,
@@ -277,7 +274,6 @@ private fun InstalledSourcesSection(
 }'''
 t = t[:start] + new + t[end:]
 
-# Replace repository section with top search/add and per-repository package filters.
 start, end = balanced_block(t, '@Composable\nprivate fun SourceRepositorySection(')
 new = '''@Composable
 private fun SourceRepositorySection(

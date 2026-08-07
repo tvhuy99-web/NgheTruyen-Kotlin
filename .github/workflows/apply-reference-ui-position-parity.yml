@@ -1,0 +1,46 @@
+name: Apply Reference UI Position Parity
+
+on:
+  push:
+    branches:
+      - agent/reference-ui-position-parity
+    paths:
+      - ".github/workflows/apply-reference-ui-position-parity.yml"
+      - "scripts/apply_reference_ui_position_parity.py"
+
+permissions:
+  contents: write
+
+jobs:
+  apply-reference-position-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: agent/reference-ui-position-parity
+
+      - name: Apply UI position parity patch
+        run: python3 scripts/apply_reference_ui_position_parity.py
+
+      - name: Run wiring validation
+        run: python3 scripts/validate_release.py --wiring-only
+
+      - name: Persist UI changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f scripts/apply_reference_ui_position_parity.py
+          rm -f .github/workflows/apply-reference-ui-position-parity.yml
+          git add app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt
+          git add app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt
+          git add -A scripts/apply_reference_ui_position_parity.py .github/workflows/apply-reference-ui-position-parity.yml
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "ui: align reference menu positions"
+          git push origin HEAD:agent/reference-ui-position-parity

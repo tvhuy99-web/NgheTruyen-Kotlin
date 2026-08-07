@@ -134,6 +134,8 @@ enum class SearchSortMode { RELEVANCE, TITLE, AUTHOR, SOURCE }
 enum class SourceHealth { READY, NEEDS_LOGIN, DEGRADED, DISABLED, NOT_PORTED }
 
 
+enum class ReaderMode { TEXT, TTS }
+
 enum class ReaderThemeMode { SYSTEM, LIGHT, DARK, SEPIA }
 
 enum class ReaderLayoutMode { SCROLL, PAGED }

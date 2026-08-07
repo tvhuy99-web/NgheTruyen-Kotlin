@@ -42,6 +42,7 @@ import vn.nghetruyen.app.core.model.DownloadSelectionMode
 import vn.nghetruyen.app.core.model.DownloadState
 import vn.nghetruyen.app.core.model.ReaderDisplaySettings
 import vn.nghetruyen.app.core.model.ReaderLayoutMode
+import vn.nghetruyen.app.core.model.ReaderMode
 import vn.nghetruyen.app.core.model.ReaderThemeMode
 import vn.nghetruyen.app.core.model.SearchSortMode
 import vn.nghetruyen.app.core.model.StoryComment
@@ -136,6 +137,8 @@ data class MainUiState(
     val searchedSourceCount: Int = 0,
     val totalSearchSourceCount: Int = 0,
     val storyDetail: StoryDetail? = null,
+    val storyDetailTab: String = "intro",
+    val storyAdvancedOptionsRequested: Boolean = false,
     val storyComments: List<StoryComment> = emptyList(),
     val storyCommentsAvailable: Boolean = false,
     val storyCommentsRefreshable: Boolean = false,
@@ -217,6 +220,7 @@ data class MainUiState(
     val aiAvailableModels: List<String> = emptyList(),
     val aiModelDiscoveryBusy: Boolean = false,
     val readerCacheLimitMiB: Int = 64,
+    val readerMode: ReaderMode = ReaderMode.TEXT,
     val readerDisplay: ReaderDisplaySettings = ReaderDisplaySettings(),
     val storyTtsProfiles: Map<String, StoryTtsProfileEntity> = emptyMap(),
     val storyAiProfiles: Map<String, StoryAiProfileEntity> = emptyMap(),
@@ -328,6 +332,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         ttsTargetLufs = settings.ttsTargetLufs,
                         followingUpdatesEnabled = settings.followingUpdatesEnabled,
                         readerCacheLimitMiB = settings.readerCacheLimitMiB,
+                        readerMode = settings.readerMode,
                         readerDisplay = settings.readerDisplay,
                         aiOnline = settings.aiOnline,
                         aiHasApiKey = container.aiCredentialStore.hasApiKey(settings.aiOnline.provider),
@@ -1129,6 +1134,72 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         mutableState.update { it.copy(librarySection = section) }
     }
 
+
+    fun setStoryDetailTab(tab: String) {
+        if (tab !in setOf("intro", "chapters", "comments", "source")) return
+        mutableState.update { it.copy(storyDetailTab = tab) }
+    }
+
+    fun consumeStoryAdvancedOptionsRequest() {
+        mutableState.update { it.copy(storyAdvancedOptionsRequested = false) }
+    }
+
+    fun openStoryAdvancedOptions() {
+        ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_PAUSE)
+        mutableState.update {
+            it.copy(
+                destination = Destination.Story,
+                storyDetailTab = "source",
+                storyAdvancedOptionsRequested = true,
+                loading = false,
+            )
+        }
+    }
+
+    fun backToChapterList() {
+        chapterLoadJob?.cancel()
+        mutableState.update {
+            it.copy(
+                destination = Destination.Story,
+                storyDetailTab = "chapters",
+                loading = false,
+                chapterContent = null,
+                originalChapterContent = null,
+                chapterTextMode = ChapterTextMode.ORIGINAL,
+            )
+        }
+    }
+
+    fun openStoryGenre(genre: String) {
+        val detail = state.value.storyDetail ?: return
+        val clean = genre.trim()
+        if (clean.isBlank() || detail.story.sourceId == "offline") return
+        val sourceId = detail.story.sourceId
+        val source = container.sourceRegistry.get(sourceId) ?: return
+        val matched = source.descriptor.categories.firstOrNull {
+            StorySearch.normalize(it) == StorySearch.normalize(clean)
+        }
+        mutableState.update { current ->
+            current.copy(
+                destination = Destination.Root,
+                rootTab = RootTab.EXPLORE,
+                selectedSourceId = sourceId,
+                categories = source.descriptor.categories,
+                searchAllSources = false,
+                query = if (matched == null) clean else "",
+                stories = emptyList(),
+                explorePage = 1,
+                activeCategory = null,
+                sourceSuggestions = emptyList(),
+                storyAdvancedOptionsRequested = false,
+            )
+        }
+        viewModelScope.launch {
+            container.settingsRepository.selectSource(sourceId)
+            if (matched != null) browseCategory(matched) else search(clean)
+        }
+    }
+
     fun updateQuery(value: String) {
         val normalized = value.take(240)
         mutableState.update { it.copy(query = normalized) }
@@ -1483,6 +1554,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             destination = Destination.Story,
                             loading = false,
                             storyDetail = result.value,
+                            storyDetailTab = "intro",
+                            storyAdvancedOptionsRequested = false,
                             storyComments = initialComments,
                             storyCommentsAvailable = source.descriptor.supportsComments || initialComments.isNotEmpty(),
                             storyCommentsRefreshable = source.descriptor.supportsComments,

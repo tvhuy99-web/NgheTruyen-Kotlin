@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.map
 import vn.nghetruyen.app.core.model.AudioInterruptionMode
 import vn.nghetruyen.app.core.model.ReaderDisplaySettings
 import vn.nghetruyen.app.core.model.ReaderLayoutMode
+import vn.nghetruyen.app.core.model.ReaderMode
 import vn.nghetruyen.app.core.model.ReaderThemeMode
 import vn.nghetruyen.app.core.model.SceneMusicPlaybackMode
 
@@ -52,6 +53,7 @@ data class AppSettings(
     val backgroundMusicDuckFactor: Float = 0.25f,
     val followingUpdatesEnabled: Boolean = false,
     val readerCacheLimitMiB: Int = 64,
+    val readerMode: ReaderMode = ReaderMode.TEXT,
     val readerDisplay: ReaderDisplaySettings = ReaderDisplaySettings(),
     val headsetMultiClickEnabled: Boolean = true,
     val headsetSingleClickAction: String = "TOGGLE",
@@ -97,6 +99,7 @@ class SettingsRepository(private val context: Context) {
         val backgroundMusicDuckFactor = floatPreferencesKey("background_music_duck_factor")
         val followingUpdates = booleanPreferencesKey("following_updates")
         val readerCacheLimitMiB = intPreferencesKey("reader_cache_limit_mib")
+        val readerMode = stringPreferencesKey("reader_mode")
         val readerTheme = stringPreferencesKey("reader_theme")
         val readerLayoutMode = stringPreferencesKey("reader_layout_mode")
         val readerFontSize = intPreferencesKey("reader_font_size_sp")
@@ -180,6 +183,8 @@ class SettingsRepository(private val context: Context) {
             backgroundMusicDuckFactor = normalizeDuckFactor(prefs[Keys.backgroundMusicDuckFactor] ?: 0.25f),
             followingUpdatesEnabled = prefs[Keys.followingUpdates] ?: false,
             readerCacheLimitMiB = normalizeCacheLimit(prefs[Keys.readerCacheLimitMiB] ?: 64),
+            readerMode = runCatching { ReaderMode.valueOf(prefs[Keys.readerMode] ?: ReaderMode.TEXT.name) }
+                .getOrDefault(ReaderMode.TEXT),
             readerDisplay = ReaderDisplaySettings(
                 theme = runCatching { ReaderThemeMode.valueOf(prefs[Keys.readerTheme] ?: "SYSTEM") }
                     .getOrDefault(ReaderThemeMode.SYSTEM),
@@ -281,6 +286,9 @@ class SettingsRepository(private val context: Context) {
     suspend fun setReaderCacheLimitMiB(value: Int) {
         context.dataStore.edit { it[Keys.readerCacheLimitMiB] = normalizeCacheLimit(value) }
     }
+    suspend fun setReaderMode(value: ReaderMode) {
+        context.dataStore.edit { it[Keys.readerMode] = value.name }
+    }
     suspend fun setReaderTheme(value: ReaderThemeMode) {
         context.dataStore.edit { it[Keys.readerTheme] = value.name }
     }
@@ -376,6 +384,7 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.backgroundMusicDuckFactor] = normalizeDuckFactor(settings.backgroundMusicDuckFactor)
             prefs[Keys.followingUpdates] = settings.followingUpdatesEnabled
             prefs[Keys.readerCacheLimitMiB] = normalizeCacheLimit(settings.readerCacheLimitMiB)
+            prefs[Keys.readerMode] = settings.readerMode.name
             prefs[Keys.readerTheme] = settings.readerDisplay.theme.name
             prefs[Keys.readerLayoutMode] = settings.readerDisplay.layoutMode.name
             prefs[Keys.readerFontSize] = normalizeFontSize(settings.readerDisplay.fontSizeSp)

@@ -1,0 +1,46 @@
+name: Fix remaining parity backends
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - scripts/fix_three_remaining_backends.py
+      - .github/workflows/fix-three-remaining-backends.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'agent/reference-ui-position-parity'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout parity branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/reference-ui-position-parity
+          fetch-depth: 0
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Apply three backend fixes
+        run: python3 scripts/fix_three_remaining_backends.py
+      - name: Validate source manifest UI actions
+        run: bash ./gradlew :source-package:test --no-daemon
+      - name: Validate wiring
+        run: python3 scripts/validate_release.py --wiring-only
+      - name: Compile Kotlin app
+        run: bash ./gradlew :app:compileDebugKotlin --no-daemon
+      - name: Commit product changes and clean temporary tooling
+        run: |
+          rm -rf .gradle
+          rm -f scripts/fix_three_remaining_backends.py .github/workflows/fix-three-remaining-backends.yml
+          rm -f scripts/inspect_three_backends.sh .github/workflows/inspect-three-backends.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: complete remaining reference parity backends"
+          git push origin HEAD:agent/reference-ui-position-parity

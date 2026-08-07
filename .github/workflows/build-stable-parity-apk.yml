@@ -1,0 +1,43 @@
+name: Build stable-signed parity APK
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/build-stable-parity-apk.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.head_ref == 'agent/reference-ui-position-parity'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/reference-ui-position-parity
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Compile and assemble
+        run: |
+          bash ./gradlew :app:compileDebugKotlin :app:assembleDebug --no-daemon
+      - name: Verify stable certificate and version
+        run: |
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          BUILD_TOOLS=$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)
+          APKSIGNER="$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner"
+          AAPT="$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt"
+          "$APKSIGNER" verify --print-certs "$APK" | tee /tmp/certs.txt
+          grep -qi '534bf882c96a59ccf4310d18d02b14b62aa68e2beff3b6d05bf308e9909eb2f4' /tmp/certs.txt
+          "$AAPT" dump badging "$APK" | head -1 | tee /tmp/badging.txt
+          grep -q "versionCode='30'" /tmp/badging.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NgheTruyen-parity-stable-signed-v30
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7

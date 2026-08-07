@@ -44,7 +44,7 @@ jobs:
           git push origin HEAD:main
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -54,6 +54,8 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - name: Install required Android SDK packages
         shell: bash
@@ -63,6 +65,10 @@ jobs:
             "platform-tools" \
             "platforms;android-36" \
             "build-tools;36.0.0"
+
+      - name: Install validation dependencies
+        shell: bash
+        run: python3 -m pip install --disable-pip-version-check beautifulsoup4 cryptography
 
       - name: Bootstrap verified Gradle Wrapper
         shell: bash
@@ -98,6 +104,12 @@ jobs:
         if: always()
         shell: bash
         run: |
+          CHECKSUM_LINE=""
+          if [[ -f app-debug.apk.sha256 ]]; then
+            CHECKSUM_LINE="$(cat app-debug.apk.sha256)"
+          fi
+          git reset --hard HEAD
+          git clean -fd
           git fetch origin main
           git rebase origin/main
           {
@@ -110,8 +122,8 @@ jobs:
             echo "UPLOAD_OUTCOME=${{ steps.upload_apk.outcome }}"
             echo "ARTIFACT_ID=${{ steps.upload_apk.outputs.artifact-id }}"
             echo "ARTIFACT_NAME=NgheTruyen-v2.8.0-debug-apk"
-            if [[ -f app-debug.apk.sha256 ]]; then
-              cat app-debug.apk.sha256
+            if [[ -n "${CHECKSUM_LINE}" ]]; then
+              echo "${CHECKSUM_LINE}"
             fi
           } > BUILD_APK_RESULT.txt
           git add BUILD_APK_RESULT.txt

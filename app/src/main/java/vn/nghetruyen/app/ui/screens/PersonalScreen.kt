@@ -1,5 +1,6 @@
 package vn.nghetruyen.app.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -41,7 +42,7 @@ import vn.nghetruyen.app.data.settings.AiProvider
 import vn.nghetruyen.app.sources.SourceCheckStatus
 import vn.nghetruyen.app.transfer.BackupComponent
 import vn.nghetruyen.app.ui.MainUiState
-import vn.nghetruyen.app.ui.components.ScreenHeading
+import vn.nghetruyen.app.ui.components.ReferenceScreenBackground
 
 @Composable
 fun PersonalScreen(
@@ -150,8 +151,7 @@ fun PersonalScreen(
     onOpenSourceDiagnosticBrowser: (String) -> Unit,
     onClearSourceSession: (String) -> Unit,
 ) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        ScreenHeading("CÁ NHÂN")
+    Column(Modifier.fillMaxSize().background(ReferenceScreenBackground).verticalScroll(rememberScrollState())) {
         VoiceSettingsCard(
             rate = state.playback.rate,
             pitch = state.playback.pitch,

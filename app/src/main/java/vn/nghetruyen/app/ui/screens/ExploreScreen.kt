@@ -1,5 +1,6 @@
 package vn.nghetruyen.app.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -10,26 +11,41 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 import vn.nghetruyen.app.core.model.SearchSortMode
 import vn.nghetruyen.app.core.model.SourceHealth
 import vn.nghetruyen.app.core.model.StorySummary
 import vn.nghetruyen.app.ui.ExploreMode
 import vn.nghetruyen.app.ui.MainUiState
 import vn.nghetruyen.app.ui.components.LoadingRow
-import vn.nghetruyen.app.ui.components.ScreenHeading
+import vn.nghetruyen.app.ui.components.ReferenceActionButton
+import vn.nghetruyen.app.ui.components.ReferenceDivider
+import vn.nghetruyen.app.ui.components.ReferencePanelBackground
+import vn.nghetruyen.app.ui.components.ReferencePurple
+import vn.nghetruyen.app.ui.components.ReferenceScreenBackground
+import vn.nghetruyen.app.ui.components.ReferenceSecondaryText
+import vn.nghetruyen.app.ui.components.ReferenceTabButton
+import vn.nghetruyen.app.ui.components.ReferenceText
 import vn.nghetruyen.app.ui.components.StoryCard
 
 @Composable
@@ -49,29 +65,40 @@ fun ExploreScreen(
 ) {
     var sourceMenuOpen by remember { mutableStateOf(false) }
     val selectedSource = state.sources.firstOrNull { it.id == state.selectedSourceId }
+    val view = LocalView.current
+    val listTitle = when (state.exploreMode) {
+        ExploreMode.HOME -> "TRANG CHỦ"
+        ExploreMode.CATEGORY -> state.activeCategory.ifBlank { "DANH SÁCH TRUYỆN" }.uppercase()
+        ExploreMode.SEARCH -> "KẾT QUẢ TÌM KIẾM"
+    }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        ScreenHeading("KHÁM PHÁ")
+    LaunchedEffect(state.exploreMode, state.activeCategory, state.stories.size, state.loading) {
+        if (!state.loading) {
+            delay(120)
+            view.announceForAccessibility("$listTitle, ${state.stories.size} truyện")
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(ReferenceScreenBackground),
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp),
+                .background(ReferencePanelBackground)
+                .padding(4.dp),
         ) {
-            Row(modifier = Modifier.fillMaxWidth()) {
-                Button(
-                    onClick = { sourceMenuOpen = true },
-                    enabled = !state.searchAllSources,
-                    modifier = Modifier.weight(1f).padding(end = 3.dp),
-                ) {
-                    Text("NGUỒN: ${selectedSource?.displayName ?: "Chưa chọn"}")
-                }
-                Button(
-                    onClick = { onSearchAllSourcesChange(!state.searchAllSources) },
-                    modifier = Modifier.weight(1f).padding(start = 3.dp),
-                ) {
-                    Text(if (state.searchAllSources) "✓ TẤT CẢ NGUỒN" else "TÌM MỘT NGUỒN")
-                }
-            }
+            ReferenceActionButton(
+                text = "NGUỒN: ${selectedSource?.displayName ?: "CHƯA CHỌN"}",
+                onClick = { sourceMenuOpen = true },
+                enabled = !state.searchAllSources,
+                normalColor = ReferenceDivider,
+                normalContentColor = ReferenceText,
+                accessibilityLabel = "Chọn nguồn truyện đang khám phá. Hiện tại ${selectedSource?.displayName ?: "chưa chọn"}",
+                modifier = Modifier.fillMaxWidth(),
+            )
             DropdownMenu(
                 expanded = sourceMenuOpen,
                 onDismissRequest = { sourceMenuOpen = false },
@@ -95,78 +122,145 @@ fun ExploreScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState())
-                        .padding(vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        .padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     if (selectedSource?.supportsHome == true) {
-                        Button(onClick = onHomeSelected) {
-                            Text(if (state.exploreMode == ExploreMode.HOME) "✓ TRANG CHỦ" else "TRANG CHỦ")
-                        }
+                        ReferenceTabButton(
+                            text = "TRANG CHỦ",
+                            selected = state.exploreMode == ExploreMode.HOME,
+                            onClick = onHomeSelected,
+                            accessibilityLabel = "Danh mục Trang chủ",
+                            minHeight = 54.dp,
+                            unselectedColor = ReferenceDivider,
+                            unselectedContentColor = ReferenceText,
+                        )
                     }
                     state.categories.forEach { category ->
-                        Button(onClick = { onCategorySelected(category) }) {
-                            Text(if (state.exploreMode == ExploreMode.CATEGORY && state.activeCategory == category) "✓ $category" else category)
-                        }
-                    }
-                }
-            }
-
-            OutlinedTextField(
-                value = state.query,
-                onValueChange = onQueryChange,
-                label = { Text("Tên truyện, tác giả hoặc URL") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            if (state.sourceSuggestions.isNotEmpty() && !state.searchAllSources) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(top = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    state.sourceSuggestions.forEach { suggestion ->
-                        Button(onClick = { onSuggestionSelected(suggestion) }) {
-                            Text(suggestion)
-                        }
-                    }
-                }
-            }
-            Row(modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
-                Button(onClick = onSearch, modifier = Modifier.weight(1f).padding(end = 2.dp)) {
-                    Text("TÌM KIẾM")
-                }
-                if (state.loading && state.searchAllSources) {
-                    Button(onClick = onCancelSearch, modifier = Modifier.weight(0.7f).padding(start = 2.dp)) {
-                        Text("HỦY")
-                    }
-                }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                listOf(
-                    SearchSortMode.RELEVANCE to "LIÊN QUAN",
-                    SearchSortMode.TITLE to "TÊN",
-                    SearchSortMode.AUTHOR to "TÁC GIẢ",
-                    SearchSortMode.SOURCE to "NGUỒN",
-                ).forEach { (mode, label) ->
-                    Button(onClick = { onSortModeChange(mode) }) {
-                        Text(if (state.searchSortMode == mode) "✓ $label" else label)
+                        val selected = state.exploreMode == ExploreMode.CATEGORY && state.activeCategory == category
+                        ReferenceTabButton(
+                            text = category.uppercase(),
+                            selected = selected,
+                            onClick = { onCategorySelected(category) },
+                            accessibilityLabel = "Danh mục $category",
+                            minHeight = 54.dp,
+                            unselectedColor = ReferenceDivider,
+                            unselectedContentColor = ReferenceText,
+                        )
                     }
                 }
             }
         }
+
+        OutlinedTextField(
+            value = state.query,
+            onValueChange = onQueryChange,
+            label = { Text("Tên truyện, tác giả hoặc URL") },
+            singleLine = true,
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(ReferencePanelBackground)
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+        )
+
+        if (state.sourceSuggestions.isNotEmpty() && !state.searchAllSources) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .background(ReferencePanelBackground)
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                state.sourceSuggestions.forEach { suggestion ->
+                    ReferenceActionButton(
+                        text = suggestion,
+                        onClick = { onSuggestionSelected(suggestion) },
+                        normalColor = ReferenceDivider,
+                        normalContentColor = ReferenceText,
+                        minHeight = 48.dp,
+                        accessibilityLabel = "Gợi ý tìm kiếm $suggestion",
+                    )
+                }
+            }
+        }
+
+        ReferenceActionButton(
+            text = if (state.loading && state.searchAllSources) "ĐANG TÌM KIẾM" else "TÌM KIẾM",
+            onClick = onSearch,
+            enabled = !state.loading || !state.searchAllSources,
+            normalColor = ReferencePurple,
+            accessibilityLabel = "Tìm kiếm truyện",
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
+        )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 4.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            ReferenceActionButton(
+                text = if (state.searchAllSources) "TẤT CẢ NGUỒN" else "MỘT NGUỒN",
+                onClick = { onSearchAllSourcesChange(!state.searchAllSources) },
+                selected = state.searchAllSources,
+                normalColor = ReferenceDivider,
+                normalContentColor = ReferenceText,
+                accessibilityLabel = if (state.searchAllSources) "Tìm trên tất cả nguồn" else "Tìm trên một nguồn",
+                minHeight = 48.dp,
+            )
+            listOf(
+                SearchSortMode.RELEVANCE to "LIÊN QUAN",
+                SearchSortMode.TITLE to "TÊN",
+                SearchSortMode.AUTHOR to "TÁC GIẢ",
+                SearchSortMode.SOURCE to "NGUỒN",
+            ).forEach { (mode, label) ->
+                ReferenceTabButton(
+                    text = label,
+                    selected = state.searchSortMode == mode,
+                    onClick = { onSortModeChange(mode) },
+                    accessibilityLabel = "Sắp xếp theo ${label.lowercase()}",
+                    minHeight = 48.dp,
+                    unselectedColor = ReferenceDivider,
+                    unselectedContentColor = ReferenceText,
+                )
+            }
+            if (state.loading && state.searchAllSources) {
+                ReferenceActionButton(
+                    text = "HỦY",
+                    onClick = onCancelSearch,
+                    normalColor = Color(0xFFB42318),
+                    accessibilityLabel = "Hủy tìm kiếm trên tất cả nguồn",
+                    minHeight = 48.dp,
+                )
+            }
+        }
+
+        Text(
+            text = listTitle,
+            color = ReferenceText,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(ReferencePanelBackground)
+                .semantics {
+                    heading()
+                    contentDescription = "$listTitle, ${state.stories.size} truyện"
+                }
+                .padding(8.dp),
+        )
 
         if (state.loading) LoadingRow()
         if (state.searchAllSources && state.totalSearchSourceCount > 0) {
             Text(
                 "Đã nhận phản hồi ${state.searchedSourceCount}/${state.totalSearchSourceCount} nguồn",
+                color = ReferenceSecondaryText,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
             )
         }
+
         if (state.stories.isEmpty() && !state.loading) {
             Text(
                 text = when (state.exploreMode) {
@@ -175,6 +269,7 @@ fun ExploreScreen(
                     ExploreMode.SEARCH -> "Chưa có kết quả từ nguồn đang chọn."
                 },
                 style = MaterialTheme.typography.bodyMedium,
+                color = ReferenceSecondaryText,
                 modifier = Modifier.padding(16.dp),
             )
         } else {
@@ -184,15 +279,13 @@ fun ExploreScreen(
                 }
                 if (state.canLoadMoreStories) {
                     item(key = "load-more-stories") {
-                        Button(
+                        ReferenceActionButton(
+                            text = "TẢI THÊM • TRANG ${state.explorePage + 1}",
                             onClick = onLoadMore,
                             enabled = !state.loading,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                        ) {
-                            Text("TẢI THÊM • TRANG ${state.explorePage + 1}")
-                        }
+                            accessibilityLabel = "Tải thêm truyện, trang ${state.explorePage + 1}",
+                            modifier = Modifier.fillMaxWidth().padding(8.dp),
+                        )
                     }
                 }
             }

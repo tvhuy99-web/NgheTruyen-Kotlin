@@ -1,27 +1,20 @@
 package vn.nghetruyen.app.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import vn.nghetruyen.app.audio.AudioExportRequest
@@ -32,6 +25,9 @@ import vn.nghetruyen.app.ui.screens.LibraryScreen
 import vn.nghetruyen.app.ui.screens.PersonalScreen
 import vn.nghetruyen.app.ui.screens.ReaderScreen
 import vn.nghetruyen.app.ui.screens.StoryDetailScreen
+import vn.nghetruyen.app.ui.components.ReferenceDivider
+import vn.nghetruyen.app.ui.components.ReferenceScreenBackground
+import vn.nghetruyen.app.ui.components.ReferenceTabButton
 
 @Composable
 fun NgheTruyenApp(
@@ -70,7 +66,7 @@ fun NgheTruyenApp(
                 PrimaryBottomBar(selected = state.rootTab, onSelect = viewModel::setRootTab)
             }
         },
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = ReferenceScreenBackground,
     ) { padding ->
         Box(
             modifier = Modifier
@@ -288,25 +284,26 @@ private fun PrimaryBottomBar(
     selected: RootTab,
     onSelect: (RootTab) -> Unit,
 ) {
-    Row(modifier = Modifier.fillMaxWidth()) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(ReferenceDivider)
+            .padding(2.dp),
+    ) {
         listOf(
             RootTab.EXPLORE to "KHÁM PHÁ",
             RootTab.LIBRARY to "TỦ TRUYỆN",
             RootTab.PERSONAL to "CÁ NHÂN",
         ).forEach { (tab, label) ->
-            Button(
+            ReferenceTabButton(
+                text = label,
+                selected = selected == tab,
                 onClick = { onSelect(tab) },
+                accessibilityLabel = "Tab ${label.lowercase()}",
                 modifier = Modifier
                     .weight(1f)
-                    .heightIn(min = 60.dp)
-                    .padding(1.dp)
-                    .semantics {
-                        role = Role.Tab
-                        this.selected = selected == tab
-                    },
-            ) {
-                Text(label)
-            }
+                    .padding(1.dp),
+            )
         }
     }
 }

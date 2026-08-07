@@ -1,5 +1,6 @@
 package vn.nghetruyen.app.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,15 +19,21 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Switch
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 import vn.nghetruyen.app.audio.AudioExportPackaging
 import vn.nghetruyen.app.audio.AudioExportRequest
 import vn.nghetruyen.app.audio.AudioExportScope
@@ -40,6 +47,16 @@ import vn.nghetruyen.app.sources.StorySearch
 import vn.nghetruyen.app.ui.MainUiState
 import vn.nghetruyen.app.ui.components.LargeActionButton
 import vn.nghetruyen.app.ui.components.LoadingRow
+import vn.nghetruyen.app.ui.components.ReferenceActionButton
+import vn.nghetruyen.app.ui.components.ReferenceDivider
+import vn.nghetruyen.app.ui.components.ReferenceGray
+import vn.nghetruyen.app.ui.components.ReferenceGreen
+import vn.nghetruyen.app.ui.components.ReferencePanelBackground
+import vn.nghetruyen.app.ui.components.ReferencePurple
+import vn.nghetruyen.app.ui.components.ReferenceScreenBackground
+import vn.nghetruyen.app.ui.components.ReferenceSecondaryText
+import vn.nghetruyen.app.ui.components.ReferenceTabButton
+import vn.nghetruyen.app.ui.components.ReferenceText
 
 @Composable
 fun StoryDetailScreen(
@@ -71,11 +88,12 @@ fun StoryDetailScreen(
     onOpenOriginal: (String) -> Unit,
 ) {
     val detail = state.storyDetail ?: return
-    var selectedTab by remember(detail.story.id) { mutableStateOf("chapters") }
+    var selectedTab by remember(detail.story.id) { mutableStateOf("intro") }
     var chapterQuery by remember(detail.story.id) { mutableStateOf("") }
     var showRangeDialog by remember(detail.story.id) { mutableStateOf(false) }
     var showExportDialog by remember(detail.story.id) { mutableStateOf(false) }
     var showVoiceRoleDialog by remember(detail.story.id) { mutableStateOf(false) }
+    var showAdvancedOptions by remember(detail.story.id) { mutableStateOf(false) }
     fun defaultRoleDraft() = VoiceRoleDraft(
         roleName = "",
         enginePackage = state.selectedTtsEnginePackage,
@@ -132,30 +150,112 @@ fun StoryDetailScreen(
         add("source" to "NGUỒN")
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        Button(onClick = onBack, modifier = Modifier.fillMaxWidth().padding(4.dp)) { Text("QUAY LẠI") }
-        Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                Text(
-                    detail.story.title,
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.semantics { heading() },
+    val view = LocalView.current
+    val storyMeta = buildList {
+        if (detail.story.author.isNotBlank()) add(detail.story.author)
+        if (detail.status.isNotBlank()) add(detail.status)
+        add("${detail.chapters.size} chương")
+    }.joinToString(" • ")
+    LaunchedEffect(selectedTab, visibleChapters.size, state.storyComments.size) {
+        delay(120)
+        val announcement = when (selectedTab) {
+            "intro" -> "Giới thiệu truyện ${detail.story.title}"
+            "chapters" -> "Danh sách chương, ${visibleChapters.size} mục"
+            "comments" -> "Bình luận, ${state.storyComments.size} mục"
+            else -> "Thông tin nguồn truyện ${detail.story.title}"
+        }
+        view.announceForAccessibility(announcement)
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(ReferenceScreenBackground),
+    ) {
+        ReferenceActionButton(
+            text = "QUAY LẠI",
+            onClick = onBack,
+            normalColor = ReferenceGray,
+            accessibilityLabel = "Quay lại màn hình trước",
+            modifier = Modifier.fillMaxWidth().padding(4.dp),
+        )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(ReferencePanelBackground)
+                .padding(10.dp),
+        ) {
+            Text(
+                detail.story.title,
+                color = ReferenceText,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.semantics {
+                    heading()
+                    contentDescription = detail.story.title + if (storyMeta.isNotBlank()) ". " + storyMeta.replace(" • ", ". ") else ""
+                },
+            )
+            Text(
+                storyMeta,
+                color = ReferenceSecondaryText,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.clearAndSetSemantics { },
+            )
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(ReferenceDivider)
+                .padding(2.dp),
+        ) {
+            ReferenceActionButton(
+                text = if (state.continueAvailable) "ĐỌC TIẾP" else "ĐỌC TỪ ĐẦU",
+                onClick = onReadFirst,
+                normalColor = ReferenceGreen,
+                accessibilityLabel = if (state.continueAvailable) "Đọc tiếp truyện" else "Đọc từ đầu truyện",
+                minHeight = 64.dp,
+                modifier = Modifier.weight(1f).padding(1.dp),
+            )
+            ReferenceActionButton(
+                text = "TẢI TRUYỆN",
+                onClick = onDownload,
+                normalColor = ReferencePurple,
+                accessibilityLabel = "Tải truyện để đọc ngoại tuyến",
+                minHeight = 64.dp,
+                modifier = Modifier.weight(1f).padding(1.dp),
+            )
+            ReferenceActionButton(
+                text = "TÙY CHỌN",
+                onClick = { showAdvancedOptions = !showAdvancedOptions },
+                selected = showAdvancedOptions,
+                selectedColor = ReferenceGray,
+                normalColor = ReferenceGray,
+                accessibilityLabel = if (showAdvancedOptions) "Đóng tùy chọn truyện" else "Mở tùy chọn truyện",
+                minHeight = 64.dp,
+                modifier = Modifier.weight(1f).padding(1.dp),
+            )
+        }
+        if (showAdvancedOptions) {
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+                ReferenceActionButton(
+                    text = "TẢI CHƯA ĐỌC",
+                    onClick = onDownloadUnread,
+                    modifier = Modifier.weight(1f).padding(1.dp),
                 )
-                if (detail.story.author.isNotBlank()) Text("Tác giả: ${detail.story.author}")
-                if (detail.status.isNotBlank()) Text("Trạng thái: ${detail.status}")
-                if (detail.genres.isNotEmpty()) Text("Thể loại: ${detail.genres.joinToString()}")
-                Text("Đã nạp ${detail.chapters.size} chương")
+                ReferenceActionButton(
+                    text = "TẢI KHOẢNG",
+                    onClick = { showRangeDialog = true },
+                    modifier = Modifier.weight(1f).padding(1.dp),
+                )
+                val following = state.following.any { it.storyId == detail.story.id }
+                ReferenceActionButton(
+                    text = if (following) "BỎ THEO DÕI" else "THEO DÕI",
+                    onClick = onToggleFollowing,
+                    selected = following,
+                    accessibilityLabel = if (following) "Bỏ theo dõi truyện" else "Theo dõi truyện",
+                    modifier = Modifier.weight(1f).padding(1.dp),
+                )
             }
-        }
-        Row(modifier = Modifier.fillMaxWidth().padding(4.dp)) {
-            LargeActionButton(if (state.continueAvailable) "ĐỌC TIẾP" else "ĐỌC TỪ ĐẦU", onReadFirst, Modifier.weight(1f).padding(1.dp))
-            LargeActionButton("TẢI TRUYỆN", onDownload, Modifier.weight(1f).padding(1.dp))
-            LargeActionButton("TẢI CHƯA ĐỌC", onDownloadUnread, Modifier.weight(1f).padding(1.dp))
-            LargeActionButton("TẢI KHOẢNG", { showRangeDialog = true }, Modifier.weight(1f).padding(1.dp))
-            val following = state.following.any { it.storyId == detail.story.id }
-            LargeActionButton(if (following) "BỎ THEO DÕI" else "THEO DÕI", onToggleFollowing, Modifier.weight(1f).padding(1.dp))
-        }
         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
             LargeActionButton(
                 "XUẤT SÁCH NÓI",
@@ -357,17 +457,27 @@ fun StoryDetailScreen(
                 }
             }
         }
-        Row(modifier = Modifier.fillMaxWidth()) {
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(ReferenceDivider)
+                .padding(2.dp),
+        ) {
             tabs.forEach { (tabId, label) ->
-                Button(
+                ReferenceTabButton(
+                    text = label,
+                    selected = selectedTab == tabId,
                     onClick = {
                         selectedTab = tabId
                         if (tabId == "comments") onLoadComments(false)
                     },
+                    accessibilityLabel = "Tab ${label.lowercase()}",
+                    minHeight = 60.dp,
+                    unselectedColor = ReferenceDivider,
+                    unselectedContentColor = ReferenceText,
                     modifier = Modifier.weight(1f).padding(1.dp),
-                ) {
-                    Text((if (selectedTab == tabId) "✓ " else "") + label, style = MaterialTheme.typography.labelSmall)
-                }
+                )
             }
         }
         HorizontalDivider()
@@ -387,10 +497,14 @@ fun StoryDetailScreen(
                 }
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
                     items(visibleChapters, key = { it.id }) { chapter ->
-                        Button(
+                        ReferenceActionButton(
+                            text = chapter.title,
                             onClick = { onChapterClick(chapter) },
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 3.dp),
-                        ) { Text(chapter.title, modifier = Modifier.fillMaxWidth()) }
+                            normalColor = ReferencePanelBackground,
+                            normalContentColor = ReferenceText,
+                            accessibilityLabel = chapter.title,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
+                        )
                     }
                     if (visibleChapters.isEmpty()) {
                         item(key = "empty-chapter-search") {

@@ -1,11 +1,11 @@
 package vn.nghetruyen.app.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -16,17 +16,16 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import vn.nghetruyen.app.data.local.BookmarkEntity
 import vn.nghetruyen.app.data.local.ChapterDownloadFailureEntity
 import vn.nghetruyen.app.data.local.ChapterNoteEntity
@@ -35,7 +34,11 @@ import vn.nghetruyen.app.data.local.FollowedStoryEntity
 import vn.nghetruyen.app.data.local.StoryEntity
 import vn.nghetruyen.app.ui.LibrarySection
 import vn.nghetruyen.app.ui.MainUiState
-import vn.nghetruyen.app.ui.components.ScreenHeading
+import vn.nghetruyen.app.ui.components.ReferenceActionButton
+import vn.nghetruyen.app.ui.components.ReferenceDivider
+import vn.nghetruyen.app.ui.components.ReferenceScreenBackground
+import vn.nghetruyen.app.ui.components.ReferenceTabButton
+import vn.nghetruyen.app.ui.components.ReferenceText
 
 @Composable
 fun LibraryScreen(
@@ -56,40 +59,91 @@ fun LibraryScreen(
     onDeleteNote: (String) -> Unit,
     onFollowingClick: (FollowedStoryEntity) -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxSize()) {
-        ScreenHeading("TỦ TRUYỆN")
-        listOf(
+    val view = LocalView.current
+    val itemCount = when (state.librarySection) {
+        LibrarySection.READING -> state.readingStories.size
+        LibrarySection.DOWNLOADED -> state.downloadedStories.size + state.downloads.size
+        LibrarySection.BOOKMARKS -> state.bookmarks.size
+        LibrarySection.NOTES -> state.notes.size
+        LibrarySection.FOLLOWING -> state.following.size
+    }
+    val sectionName = when (state.librarySection) {
+        LibrarySection.READING -> "Đang đọc"
+        LibrarySection.DOWNLOADED -> "Đã tải"
+        LibrarySection.BOOKMARKS -> "Đánh dấu"
+        LibrarySection.NOTES -> "Ghi chú"
+        LibrarySection.FOLLOWING -> "Theo dõi"
+    }
+    LaunchedEffect(state.librarySection, itemCount) {
+        delay(120)
+        view.announceForAccessibility("Tủ truyện, $sectionName, $itemCount mục")
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(ReferenceScreenBackground),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(ReferenceDivider)
+                .padding(2.dp),
+        ) {
             listOf(
                 LibrarySection.READING to "ĐANG ĐỌC",
                 LibrarySection.DOWNLOADED to "ĐÃ TẢI",
                 LibrarySection.BOOKMARKS to "ĐÁNH DẤU",
-            ),
-            listOf(
-                LibrarySection.NOTES to "GHI CHÚ",
                 LibrarySection.FOLLOWING to "THEO DÕI",
-            ),
-        ).forEach { rowItems ->
-            Row(modifier = Modifier.fillMaxWidth()) {
-                rowItems.forEach { (section, label) ->
-                    Button(
-                        onClick = { onSectionSelected(section) },
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 54.dp)
-                            .padding(1.dp)
-                            .semantics {
-                                role = Role.Tab
-                                selected = state.librarySection == section
-                            },
-                    ) { Text(label, style = MaterialTheme.typography.labelSmall) }
+            ).forEach { (section, label) ->
+                val selected = if (section == LibrarySection.BOOKMARKS) {
+                    state.librarySection == LibrarySection.BOOKMARKS || state.librarySection == LibrarySection.NOTES
+                } else {
+                    state.librarySection == section
                 }
+                ReferenceTabButton(
+                    text = label,
+                    selected = selected,
+                    onClick = { onSectionSelected(section) },
+                    accessibilityLabel = "Tủ truyện, ${label.lowercase()}",
+                    minHeight = 58.dp,
+                    unselectedColor = ReferenceDivider,
+                    unselectedContentColor = ReferenceText,
+                    modifier = Modifier.weight(1f).padding(1.dp),
+                )
             }
         }
-        Button(
-            onClick = onImportFile,
-            modifier = Modifier.fillMaxWidth().padding(6.dp),
-        ) {
-            Text("NHẬP TỆP")
+        if (state.librarySection == LibrarySection.BOOKMARKS || state.librarySection == LibrarySection.NOTES) {
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp)) {
+                ReferenceTabButton(
+                    text = "ĐÁNH DẤU",
+                    selected = state.librarySection == LibrarySection.BOOKMARKS,
+                    onClick = { onSectionSelected(LibrarySection.BOOKMARKS) },
+                    accessibilityLabel = "Đánh dấu",
+                    minHeight = 48.dp,
+                    unselectedColor = ReferenceDivider,
+                    unselectedContentColor = ReferenceText,
+                    modifier = Modifier.weight(1f).padding(1.dp),
+                )
+                ReferenceTabButton(
+                    text = "GHI CHÚ",
+                    selected = state.librarySection == LibrarySection.NOTES,
+                    onClick = { onSectionSelected(LibrarySection.NOTES) },
+                    accessibilityLabel = "Ghi chú",
+                    minHeight = 48.dp,
+                    unselectedColor = ReferenceDivider,
+                    unselectedContentColor = ReferenceText,
+                    modifier = Modifier.weight(1f).padding(1.dp),
+                )
+            }
+        }
+        if (state.librarySection == LibrarySection.DOWNLOADED) {
+            ReferenceActionButton(
+                text = "NHẬP TỆP",
+                onClick = onImportFile,
+                accessibilityLabel = "Nhập tệp truyện từ thiết bị để đọc",
+                modifier = Modifier.fillMaxWidth().padding(4.dp),
+            )
         }
 
         when (state.librarySection) {

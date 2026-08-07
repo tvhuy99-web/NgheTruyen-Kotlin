@@ -32,10 +32,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -45,6 +50,10 @@ import vn.nghetruyen.app.sources.StorySearch
 import vn.nghetruyen.app.ui.MainUiState
 import vn.nghetruyen.app.playback.PlaybackPreparationState
 import vn.nghetruyen.app.ui.ChapterTextMode
+import vn.nghetruyen.app.ui.components.ReferenceActionButton
+import vn.nghetruyen.app.ui.components.ReferenceGray
+import vn.nghetruyen.app.ui.components.ReferenceGreen
+import vn.nghetruyen.app.ui.components.ReferencePurple
 
 @Composable
 fun ReaderScreen(
@@ -91,6 +100,7 @@ fun ReaderScreen(
     var showDisplayDialog by remember { mutableStateOf(false) }
     var showSearchDialog by remember { mutableStateOf(false) }
     var showNoteDialog by remember { mutableStateOf(false) }
+    var showReaderActions by remember(content.chapter.id) { mutableStateOf(false) }
     var noteDraft by remember(content.chapter.id, activeIndex) { mutableStateOf("") }
     var searchQuery by remember(content.chapter.id) { mutableStateOf("") }
     var searchResultPosition by remember(content.chapter.id) { mutableIntStateOf(0) }
@@ -139,35 +149,44 @@ fun ReaderScreen(
         selectedSearchIndex?.let { listState.animateScrollToItem(it) }
     }
 
+    LaunchedEffect(content.chapter.id) {
+        delay(120)
+        view.announceForAccessibility("${content.chapter.title}. ${content.paragraphs.size} đoạn")
+    }
+
     val palette = readerPalette(display.theme)
     Surface(modifier = Modifier.fillMaxSize(), color = palette.background, contentColor = palette.text) {
         Column(modifier = Modifier.fillMaxSize()) {
             Row(modifier = Modifier.fillMaxWidth()) {
-                ReaderButton("QUAY LẠI", onBack, Modifier.weight(1.1f))
-                ReaderButton("TÌM", { showSearchDialog = true }, Modifier.weight(0.8f))
-                ReaderButton("HIỂN THỊ", { showDisplayDialog = true }, Modifier.weight(1f))
-            }
-            Row(modifier = Modifier.fillMaxWidth()) {
-                ReaderButton("BẢN GỐC", onShowOriginal, Modifier.weight(1f))
-                ReaderButton("VIETPHRASE", onApplyVietPhrase, Modifier.weight(1f))
                 ReaderButton(
-                    when {
-                        state.aiBusy -> "AI ĐANG CHẠY…"
-                        state.chapterTextMode == ChapterTextMode.AI_TRANSLATION -> "DỊCH LẠI"
-                        else -> "DỊCH AI"
-                    },
-                    onAiTranslate,
+                    "QUAY LẠI",
+                    onBack,
+                    Modifier.weight(1.1f),
+                    normalColor = ReferenceGray,
+                    accessibilityLabel = "Quay lại màn hình trước",
+                )
+                ReaderButton("TÌM", { showSearchDialog = true }, Modifier.weight(0.8f), accessibilityLabel = "Tìm trong chương")
+                ReaderButton(
+                    "TÙY CHỌN",
+                    { showReaderActions = !showReaderActions },
                     Modifier.weight(1f),
-                    enabled = !state.aiBusy,
+                    normalColor = ReferenceGray,
+                    selectedColor = ReferenceGray,
+                    selected = showReaderActions,
+                    accessibilityLabel = if (showReaderActions) "Đóng tùy chọn đọc" else "Mở tùy chọn đọc",
                 )
             }
-            Row(modifier = Modifier.fillMaxWidth()) {
-                ReaderButton("CẢI THIỆN VP", onImproveVietPhrase, Modifier.weight(1f), enabled = !state.aiBusy)
-                ReaderButton("DÀN DỰNG AI", onPlanNarration, Modifier.weight(1.2f), enabled = !state.aiBusy)
-            }
-            Row(modifier = Modifier.fillMaxWidth()) {
-                ReaderButton("CHỈ PHÂN VAI", onVoiceCast, Modifier.weight(1f), enabled = !state.aiBusy)
-                ReaderButton("CHỈ NHẠC CẢNH", onPlanSceneMusic, Modifier.weight(1f), enabled = !state.aiBusy)
+            if (showReaderActions) {
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    ReaderButton("HIỂN THỊ", { showDisplayDialog = true }, Modifier.weight(1f))
+                    ReaderButton("BẢN GỐC", onShowOriginal, Modifier.weight(1f))
+                    ReaderButton("VIETPHRASE", onApplyVietPhrase, Modifier.weight(1f))
+                }
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    ReaderButton("CẢI THIỆN VP", onImproveVietPhrase, Modifier.weight(1f), enabled = !state.aiBusy)
+                    ReaderButton("DÀN DỰNG AI", onPlanNarration, Modifier.weight(1.1f), enabled = !state.aiBusy)
+                    ReaderButton("NHẠC CẢNH", onPlanSceneMusic, Modifier.weight(1f), enabled = !state.aiBusy)
+                }
             }
             Row(modifier = Modifier.fillMaxWidth()) {
                 Text(
@@ -233,6 +252,11 @@ fun ReaderScreen(
                                     horizontal = display.horizontalPaddingDp.dp,
                                     vertical = (display.paragraphSpacingDp / 2f).dp,
                                 )
+                                .semantics(mergeDescendants = true) {
+                                    role = Role.Button
+                                    this.selected = active
+                                    contentDescription = "Đoạn ${index + 1}" + (if (active) ", đang đọc. " else ". ") + content.paragraphs[index]
+                                }
                                 .clickable { onParagraphSelected(index) },
                         ) {
                             Text(
@@ -286,8 +310,30 @@ fun ReaderScreen(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
             )
             Row(modifier = Modifier.fillMaxWidth()) {
-                ReaderButton("TRƯỚC", onPreviousChapter, Modifier.weight(1.2f))
-                ReaderButton("LÙI", onRewind, Modifier.weight(1f))
+                ReaderButton(
+                    when {
+                        state.aiBusy -> "AI ĐANG CHẠY…"
+                        state.chapterTextMode == ChapterTextMode.AI_TRANSLATION -> "DỊCH LẠI"
+                        else -> "DỊCH AI"
+                    },
+                    onAiTranslate,
+                    Modifier.weight(1f),
+                    enabled = !state.aiBusy,
+                    normalColor = ReferencePurple,
+                    accessibilityLabel = "Dịch chương bằng AI",
+                )
+                ReaderButton(
+                    "PHÂN VAI AI",
+                    onVoiceCast,
+                    Modifier.weight(1f),
+                    enabled = !state.aiBusy,
+                    normalColor = ReferencePurple,
+                    accessibilityLabel = "Phân vai giọng đọc bằng AI",
+                )
+            }
+            Row(modifier = Modifier.fillMaxWidth()) {
+                ReaderButton("TRƯỚC", onPreviousChapter, Modifier.weight(1.2f), minHeight = 64.dp, accessibilityLabel = "Chương trước")
+                ReaderButton("LÙI", onRewind, Modifier.weight(1f), minHeight = 64.dp, accessibilityLabel = "Tua lùi")
                 ReaderButton(
                     when {
                         state.playback.preparationState == PlaybackPreparationState.PREPARING -> "ĐANG CHUẨN BỊ"
@@ -298,53 +344,60 @@ fun ReaderScreen(
                     onTogglePlayback,
                     Modifier.weight(1.4f),
                     enabled = state.playback.preparationState == PlaybackPreparationState.READY,
+                    minHeight = 64.dp,
+                    normalColor = ReferenceGreen,
+                    selectedColor = ReferenceGreen,
+                    selected = state.playback.isPlaying,
+                    accessibilityLabel = if (state.playback.isPlaying) "Tạm dừng đọc truyện" else "Phát tiếp truyện",
                 )
-                ReaderButton("TỚI", onForward, Modifier.weight(1f))
-                ReaderButton("SAU", onNextChapter, Modifier.weight(1.2f))
+                ReaderButton("TỚI", onForward, Modifier.weight(1f), minHeight = 64.dp, accessibilityLabel = "Tua tới")
+                ReaderButton("SAU", onNextChapter, Modifier.weight(1.2f), minHeight = 64.dp, accessibilityLabel = "Chương sau")
             }
-            Row(modifier = Modifier.fillMaxWidth()) {
-                ReaderButton("ĐÁNH DẤU", onBookmark, Modifier.weight(1f))
-                ReaderButton("SAO CHÉP ĐOẠN", {
-                    clipboard.setText(AnnotatedString(content.paragraphs.getOrNull(activeIndex).orEmpty()))
-                    onMessage("Đã sao chép đoạn đang đọc.")
-                }, Modifier.weight(1.2f))
-                ReaderButton("SAO CHÉP CHƯƠNG", {
-                    clipboard.setText(AnnotatedString(content.paragraphs.joinToString("\n\n")))
-                    onMessage("Đã sao chép toàn bộ chương.")
-                }, Modifier.weight(1.2f))
-                ReaderButton("XUẤT WAV", onExportChapterWav, Modifier.weight(1f))
-                ReaderButton("XUẤT M4A", onExportChapterM4a, Modifier.weight(1f))
-                ReaderButton("XUẤT MP3", onExportChapterMp3, Modifier.weight(1f))
-            }
-            Row(modifier = Modifier.fillMaxWidth()) {
-                ReaderButton(
-                    if (activeNote == null) "GHI CHÚ" else "SỬA GHI CHÚ",
-                    {
-                        noteDraft = activeNote?.text.orEmpty()
-                        showNoteDialog = true
-                    },
-                    Modifier.weight(1f),
-                )
-                Text(
-                    if (activeNote == null) "Đoạn này chưa có ghi chú" else "Đã lưu ghi chú cho đoạn ${activeIndex + 1}",
-                    modifier = Modifier.weight(2f).padding(12.dp),
-                    color = palette.text,
-                )
-            }
-            Row(modifier = Modifier.fillMaxWidth()) {
-                ReaderButton("HẸN 15'", { onSleepTimer(15) }, Modifier.weight(1f))
-                ReaderButton("HẸN 30'", { onSleepTimer(30) }, Modifier.weight(1f))
-                ReaderButton("HẸN 60'", { onSleepTimer(60) }, Modifier.weight(1f))
-                ReaderButton("HỦY HẸN", { onSleepTimer(null) }, Modifier.weight(1f))
-            }
-            val hasVoiceProfile = state.storyTtsProfiles.containsKey(content.chapter.storyId)
-            Row(modifier = Modifier.fillMaxWidth()) {
-                ReaderButton(
-                    if (hasVoiceProfile) "CẬP NHẬT GIỌNG RIÊNG" else "LƯU GIỌNG RIÊNG",
-                    onSaveVoiceProfile,
-                    Modifier.weight(1f),
-                )
-                if (hasVoiceProfile) ReaderButton("BỎ GIỌNG RIÊNG", onClearVoiceProfile, Modifier.weight(1f))
+            if (showReaderActions) {
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    ReaderButton("ĐÁNH DẤU", onBookmark, Modifier.weight(1f))
+                    ReaderButton("SAO CHÉP ĐOẠN", {
+                        clipboard.setText(AnnotatedString(content.paragraphs.getOrNull(activeIndex).orEmpty()))
+                        onMessage("Đã sao chép đoạn đang đọc.")
+                    }, Modifier.weight(1.2f))
+                    ReaderButton("SAO CHÉP CHƯƠNG", {
+                        clipboard.setText(AnnotatedString(content.paragraphs.joinToString("\n\n")))
+                        onMessage("Đã sao chép toàn bộ chương.")
+                    }, Modifier.weight(1.2f))
+                    ReaderButton("XUẤT WAV", onExportChapterWav, Modifier.weight(1f))
+                    ReaderButton("XUẤT M4A", onExportChapterM4a, Modifier.weight(1f))
+                    ReaderButton("XUẤT MP3", onExportChapterMp3, Modifier.weight(1f))
+                }
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    ReaderButton(
+                        if (activeNote == null) "GHI CHÚ" else "SỬA GHI CHÚ",
+                        {
+                            noteDraft = activeNote?.text.orEmpty()
+                            showNoteDialog = true
+                        },
+                        Modifier.weight(1f),
+                    )
+                    Text(
+                        if (activeNote == null) "Đoạn này chưa có ghi chú" else "Đã lưu ghi chú cho đoạn ${activeIndex + 1}",
+                        modifier = Modifier.weight(2f).padding(12.dp),
+                        color = palette.text,
+                    )
+                }
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    ReaderButton("HẸN 15'", { onSleepTimer(15) }, Modifier.weight(1f))
+                    ReaderButton("HẸN 30'", { onSleepTimer(30) }, Modifier.weight(1f))
+                    ReaderButton("HẸN 60'", { onSleepTimer(60) }, Modifier.weight(1f))
+                    ReaderButton("HỦY HẸN", { onSleepTimer(null) }, Modifier.weight(1f))
+                }
+                val hasVoiceProfile = state.storyTtsProfiles.containsKey(content.chapter.storyId)
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    ReaderButton(
+                        if (hasVoiceProfile) "CẬP NHẬT GIỌNG RIÊNG" else "LƯU GIỌNG RIÊNG",
+                        onSaveVoiceProfile,
+                        Modifier.weight(1f),
+                    )
+                    if (hasVoiceProfile) ReaderButton("BỎ GIỌNG RIÊNG", onClearVoiceProfile, Modifier.weight(1f))
+                }
             }
         }
     }
@@ -514,8 +567,26 @@ private fun readerPalette(mode: ReaderThemeMode): ReaderPalette = when (mode) {
 }
 
 @Composable
-private fun ReaderButton(text: String, onClick: () -> Unit, modifier: Modifier, enabled: Boolean = true) {
-    Button(onClick = onClick, modifier = modifier.padding(1.dp), enabled = enabled) {
-        Text(text, style = MaterialTheme.typography.labelSmall)
-    }
+private fun ReaderButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier,
+    enabled: Boolean = true,
+    minHeight: Dp = 54.dp,
+    normalColor: Color = vn.nghetruyen.app.ui.components.ReferenceBlue,
+    selectedColor: Color = ReferenceGreen,
+    selected: Boolean = false,
+    accessibilityLabel: String = text,
+) {
+    ReferenceActionButton(
+        text = text,
+        onClick = onClick,
+        modifier = modifier.padding(1.dp),
+        accessibilityLabel = accessibilityLabel,
+        selected = selected,
+        enabled = enabled,
+        minHeight = minHeight,
+        selectedColor = selectedColor,
+        normalColor = normalColor,
+    )
 }

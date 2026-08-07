@@ -1049,7 +1049,7 @@ private class SandboxedContextFactory(private val budget: SandboxBudget) : Conte
         optimizationLevel = -1
         languageVersion = Context.VERSION_ES6
         instructionObserverThreshold = 1_000
-        classShutter = ClassShutter { false }
+        setClassShutter(ClassShutter { false })
     }
     override fun observeInstructionCount(cx: Context, instructionCount: Int) = budget.charge(instructionCount)
 }
@@ -1137,7 +1137,7 @@ private class JsoupDocumentObject(private val document: Document, private val ow
 private class JsoupElementsObject(private val elements: Elements, private val ownerScope: Scriptable) : ScriptableObject() {
     init { parentScope = ownerScope; prototype = ScriptableObject.getObjectPrototype(ownerScope) }
     override fun getClassName() = "VBookElements"
-    override val ids: Array<Any> get() = Array(elements.size + 1) { index -> if (index < elements.size) index else "length" }
+    override fun getIds(): Array<Any> = Array(elements.size + 1) { index -> if (index < elements.size) index else "length" }
     override fun get(index: Int, start: Scriptable): Any = elements.getOrNull(index)?.let { JsoupElementObject(it, ownerScope) } ?: Scriptable.NOT_FOUND
     override fun get(name: String, start: Scriptable): Any = when (name) {
         "length" -> elements.size

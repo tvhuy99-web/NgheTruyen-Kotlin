@@ -1,14 +1,42 @@
 GRADLE_EXIT=1
-RUN_ID=31138544121
+RUN_ID=31138963035
 
 === COMPILER ERRORS ===
-e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt:1052:9 Cannot access 'field classShutter: ClassShutter!': it is private in 'org.mozilla.javascript.Context'.
-e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt:1140:5 'ids' overrides nothing.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/MainActivity.kt:124:37 Unresolved reference 'invoke'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/MainActivity.kt:125:17 No value passed for parameter 'onResult'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/MainActivity.kt:127:37 Unresolved reference 'invoke'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/MainActivity.kt:128:17 No value passed for parameter 'onResult'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/MainActivity.kt:130:37 Unresolved reference 'invoke'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/MainActivity.kt:131:17 No value passed for parameter 'onResult'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/MainActivity.kt:133:48 Unresolved reference 'invoke'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/MainActivity.kt:134:17 No value passed for parameter 'onResult'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/diagnostics/PerformanceDiagnostics.kt:61:22 Argument type mismatch: actual type is 'Long', but 'Int' was expected.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sourceplatform/SourcePlatformManager.kt:204:81 Smart cast to 'SemanticVersion' is impossible, because 'minAppVersion' is a public API property declared in different module.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sourceplatform/SourcePlatformManager.kt:205:68 Smart cast to 'SemanticVersion' is impossible, because 'maxAppVersion' is a public API property declared in different module.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sources/SourceDiagnosticBrowserActivity.kt:90:69 Assignment type mismatch: actual type is 'String', but 'Editable!' was expected.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sources/SourceDiagnosticBrowserActivity.kt:142:93 Unresolved reference 'progress'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sources/SourceDiagnosticBrowserActivity.kt:185:27 Assignment type mismatch: actual type is 'String', but 'Editable!' was expected.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sources/SourceDiagnosticBrowserActivity.kt:190:27 Assignment type mismatch: actual type is 'String', but 'Editable!' was expected.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/transfer/BackupTransferManager.kt:1051:85 Argument type mismatch: actual type is 'String?', but 'Boolean' was expected.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/transfer/BackupTransferManager.kt:1051:92 Argument type mismatch: actual type is 'Long', but 'Boolean' was expected.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/transfer/BackupTransferManager.kt:1051:92 No value passed for parameter 'state'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/transfer/BackupTransferManager.kt:1051:92 No value passed for parameter 'completedChapters'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/transfer/BackupTransferManager.kt:1051:92 No value passed for parameter 'totalChapters'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/transfer/BackupTransferManager.kt:1051:92 No value passed for parameter 'errorMessage'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/transfer/BackupTransferManager.kt:1051:92 No value passed for parameter 'updatedAt'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt:3087:21 Unresolved reference 'SceneMusicAnalysisWorker'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt:3087:54 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/NgheTruyenApp.kt:10:43 Cannot access 'val RowColumnParentData?.weight: Float': it is internal in file.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/NgheTruyenApp.kt:94:25 No value passed for parameter 'onSortModeChange'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/screens/LibraryScreen.kt:10:43 Cannot access 'val RowColumnParentData?.weight: Float': it is internal in file.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt:8:43 Cannot access 'val RowColumnParentData?.weight: Float': it is internal in file.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt:11:43 Cannot access 'val RowColumnParentData?.weight: Float': it is internal in file.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt:8:43 Cannot access 'val RowColumnParentData?.weight: Float': it is internal in file.
 FAILURE: Build failed with an exception.
 * What went wrong:
-Execution failed for task ':source-vbook:compileKotlin'.
+Execution failed for task ':app:compileDebugKotlin'.
    > Compilation error. See log for more details
-org.gradle.api.tasks.TaskExecutionException: Execution failed for task ':source-vbook:compileKotlin'.
+org.gradle.api.tasks.TaskExecutionException: Execution failed for task ':app:compileDebugKotlin'.
 Caused by: org.jetbrains.kotlin.gradle.tasks.CompilationErrorException: Compilation error. See log for more details
 
 === LOG TAIL ===
@@ -46,21 +74,21 @@ Daemon will be stopped at the end of the build
 > Task :app:packageDebugResources
 > Task :app:createDebugCompatibleScreenManifests
 > Task :app:extractDeepLinksDebug
-> Task :app:parseDebugLocalResources
 > Task :app:mergeDebugResources
+> Task :app:parseDebugLocalResources
 > Task :app:processDebugMainManifest
 > Task :app:processDebugManifest
-> Task :app:processDebugManifestForPackage
 > Task :app:javaPreCompileDebug
 > Task :app:mergeDebugShaders
 > Task :app:compileDebugShaders NO-SOURCE
 > Task :app:generateDebugAssets UP-TO-DATE
 > Task :app:mergeDebugAssets
 > Task :app:compressDebugAssets
-> Task :app:processDebugResources
 > Task :app:desugarDebugFileDependencies
-> Task :app:mergeDebugJniLibFolders
+> Task :app:processDebugManifestForPackage
 > Task :app:checkDebugDuplicateClasses
+> Task :app:processDebugResources
+> Task :app:mergeDebugJniLibFolders
 > Task :app:validateSigningDebug
 > Task :app:writeDebugAppMetadata
 > Task :app:writeDebugSigningConfigVersions
@@ -92,24 +120,77 @@ w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/source-runtime/s
 > Task :source-repository:compileKotlin
 > Task :source-repository:compileJava NO-SOURCE
 > Task :source-repository:classes UP-TO-DATE
-> Task :source-repository:jar
-> Task :source-runtime:compileJava NO-SOURCE
-> Task :source-runtime:classes UP-TO-DATE
-> Task :source-runtime:jar
 > Task :source-store:compileKotlin
+> Task :source-repository:jar
 > Task :source-store:compileJava NO-SOURCE
 > Task :source-store:classes UP-TO-DATE
 > Task :source-store:jar
+> Task :source-runtime:compileJava NO-SOURCE
+> Task :source-runtime:classes UP-TO-DATE
+> Task :source-runtime:jar
 
-> Task :source-vbook:compileKotlin FAILED
-e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt:1052:9 Cannot access 'field classShutter: ClassShutter!': it is private in 'org.mozilla.javascript.Context'.
-e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt:1140:5 'ids' overrides nothing.
-gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/build-1786066656787.json
+> Task :source-vbook:compileKotlin
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt:766:70 No cast needed.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt:1049:9 'var optimizationLevel: Int' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt:1123:117 Type annotation class 'org.jspecify.annotations.Nullable' of the inferred type is inaccessible. Check the module classpath for missing or conflicting dependencies. This will become an error in language version 2.4. See https://youtrack.jetbrains.com/issue/KT-80247.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt:1129:39 Unnecessary safe call on a non-null receiver of type 'Element'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt:1166:107 Type annotation class 'org.jspecify.annotations.Nullable' of the inferred type is inaccessible. Check the module classpath for missing or conflicting dependencies. This will become an error in language version 2.4. See https://youtrack.jetbrains.com/issue/KT-80247.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt:1177:48 Type annotation class 'org.jspecify.annotations.Nullable' of the inferred type is inaccessible. Check the module classpath for missing or conflicting dependencies. This will become an error in language version 2.4. See https://youtrack.jetbrains.com/issue/KT-80247.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt:1534:105 Unnecessary safe call on a non-null receiver of type 'Scriptable'.
+
+> Task :source-vbook:compileJava NO-SOURCE
+> Task :source-vbook:classes UP-TO-DATE
+> Task :source-vbook:jar
+> Task :source-lua:compileKotlin
+> Task :source-lua:compileJava NO-SOURCE
+> Task :source-lua:classes
+> Task :source-lua:jar
+> Task :app:mergeLibDexDebug
+> Task :app:mergeDebugNativeLibs
+
+> Task :app:stripDebugDebugSymbols
+Unable to strip the following libraries, packaging them as they are: libandroidx.graphics.path.so, libdatastore_shared_counter.so. Run with --info option to learn more.
+
+> Task :app:kaptGenerateStubsDebugKotlin
+> Task :app:kaptDebugKotlin
+
+> Task :app:compileDebugKotlin FAILED
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/MainActivity.kt:124:37 Unresolved reference 'invoke'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/MainActivity.kt:125:17 No value passed for parameter 'onResult'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/MainActivity.kt:127:37 Unresolved reference 'invoke'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/MainActivity.kt:128:17 No value passed for parameter 'onResult'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/MainActivity.kt:130:37 Unresolved reference 'invoke'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/MainActivity.kt:131:17 No value passed for parameter 'onResult'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/MainActivity.kt:133:48 Unresolved reference 'invoke'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/MainActivity.kt:134:17 No value passed for parameter 'onResult'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/diagnostics/PerformanceDiagnostics.kt:61:22 Argument type mismatch: actual type is 'Long', but 'Int' was expected.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sourceplatform/SourcePlatformManager.kt:204:81 Smart cast to 'SemanticVersion' is impossible, because 'minAppVersion' is a public API property declared in different module.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sourceplatform/SourcePlatformManager.kt:205:68 Smart cast to 'SemanticVersion' is impossible, because 'maxAppVersion' is a public API property declared in different module.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sources/SourceDiagnosticBrowserActivity.kt:90:69 Assignment type mismatch: actual type is 'String', but 'Editable!' was expected.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sources/SourceDiagnosticBrowserActivity.kt:142:93 Unresolved reference 'progress'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sources/SourceDiagnosticBrowserActivity.kt:185:27 Assignment type mismatch: actual type is 'String', but 'Editable!' was expected.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sources/SourceDiagnosticBrowserActivity.kt:190:27 Assignment type mismatch: actual type is 'String', but 'Editable!' was expected.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/transfer/BackupTransferManager.kt:1051:85 Argument type mismatch: actual type is 'String?', but 'Boolean' was expected.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/transfer/BackupTransferManager.kt:1051:92 Argument type mismatch: actual type is 'Long', but 'Boolean' was expected.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/transfer/BackupTransferManager.kt:1051:92 No value passed for parameter 'state'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/transfer/BackupTransferManager.kt:1051:92 No value passed for parameter 'completedChapters'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/transfer/BackupTransferManager.kt:1051:92 No value passed for parameter 'totalChapters'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/transfer/BackupTransferManager.kt:1051:92 No value passed for parameter 'errorMessage'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/transfer/BackupTransferManager.kt:1051:92 No value passed for parameter 'updatedAt'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt:3087:21 Unresolved reference 'SceneMusicAnalysisWorker'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt:3087:54 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/NgheTruyenApp.kt:10:43 Cannot access 'val RowColumnParentData?.weight: Float': it is internal in file.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/NgheTruyenApp.kt:94:25 No value passed for parameter 'onSortModeChange'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/screens/LibraryScreen.kt:10:43 Cannot access 'val RowColumnParentData?.weight: Float': it is internal in file.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt:8:43 Cannot access 'val RowColumnParentData?.weight: Float': it is internal in file.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt:11:43 Cannot access 'val RowColumnParentData?.weight: Float': it is internal in file.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt:8:43 Cannot access 'val RowColumnParentData?.weight: Float': it is internal in file.
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/build-1786067135238.json
 
 FAILURE: Build failed with an exception.
 
 * What went wrong:
-Execution failed for task ':source-vbook:compileKotlin'.
+Execution failed for task ':app:compileDebugKotlin'.
 > A failure occurred while executing org.jetbrains.kotlin.compilerRunner.btapi.BuildToolsApiCompilationWork
    > Compilation error. See log for more details
 
@@ -119,7 +200,7 @@ Execution failed for task ':source-vbook:compileKotlin'.
 > Get more help at https://help.gradle.org.
 
 * Exception is:
-org.gradle.api.tasks.TaskExecutionException: Execution failed for task ':source-vbook:compileKotlin'.
+org.gradle.api.tasks.TaskExecutionException: Execution failed for task ':app:compileDebugKotlin'.
 	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.lambda$executeIfValid$1(ExecuteActionsTaskExecuter.java:130)
 	at org.gradle.internal.Try$Failure.ifSuccessfulOrElse(Try.java:293)
 	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.executeIfValid(ExecuteActionsTaskExecuter.java:128)
@@ -309,5 +390,5 @@ Caused by: org.jetbrains.kotlin.gradle.tasks.CompilationErrorException: Compilat
 	... 2 more
 
 
-BUILD FAILED in 1m 15s
-43 actionable tasks: 43 executed
+BUILD FAILED in 2m 27s
+52 actionable tasks: 52 executed

@@ -1,0 +1,126 @@
++                text = "TÙY CHỌN",
++                onClick = { showAdvancedOptions = !showAdvancedOptions },
++                selected = showAdvancedOptions,
++                selectedColor = ReferenceGray,
++                normalColor = ReferenceGray,
++                accessibilityLabel = if (showAdvancedOptions) "Đóng tùy chọn truyện" else "Mở tùy chọn truyện",
++                minHeight = 64.dp,
++                modifier = Modifier.weight(1f).padding(1.dp),
++            )
++        }
++        if (showAdvancedOptions) {
++            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
++                ReferenceActionButton(
++                    text = "TẢI CHƯA ĐỌC",
++                    onClick = onDownloadUnread,
++                    modifier = Modifier.weight(1f).padding(1.dp),
+                 )
+-                if (detail.story.author.isNotBlank()) Text("Tác giả: ${detail.story.author}")
+-                if (detail.status.isNotBlank()) Text("Trạng thái: ${detail.status}")
+-                if (detail.genres.isNotEmpty()) Text("Thể loại: ${detail.genres.joinToString()}")
+-                Text("Đã nạp ${detail.chapters.size} chương")
++                ReferenceActionButton(
++                    text = "TẢI KHOẢNG",
++                    onClick = { showRangeDialog = true },
++                    modifier = Modifier.weight(1f).padding(1.dp),
++                )
++                val following = state.following.any { it.storyId == detail.story.id }
++                ReferenceActionButton(
++                    text = if (following) "BỎ THEO DÕI" else "THEO DÕI",
++                    onClick = onToggleFollowing,
++                    selected = following,
++                    accessibilityLabel = if (following) "Bỏ theo dõi truyện" else "Theo dõi truyện",
++                    modifier = Modifier.weight(1f).padding(1.dp),
++                )
+             }
+-        }
+-        Row(modifier = Modifier.fillMaxWidth().padding(4.dp)) {
+-            LargeActionButton(if (state.continueAvailable) "ĐỌC TIẾP" else "ĐỌC TỪ ĐẦU", onReadFirst, Modifier.weight(1f).padding(1.dp))
+-            LargeActionButton("TẢI TRUYỆN", onDownload, Modifier.weight(1f).padding(1.dp))
+-            LargeActionButton("TẢI CHƯA ĐỌC", onDownloadUnread, Modifier.weight(1f).padding(1.dp))
+-            LargeActionButton("TẢI KHOẢNG", { showRangeDialog = true }, Modifier.weight(1f).padding(1.dp))
+-            val following = state.following.any { it.storyId == detail.story.id }
+-            LargeActionButton(if (following) "BỎ THEO DÕI" else "THEO DÕI", onToggleFollowing, Modifier.weight(1f).padding(1.dp))
+-        }
+         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+             LargeActionButton(
+                 "XUẤT SÁCH NÓI",
+@@ -357,17 +457,27 @@
+                 }
+             }
+         }
+-        Row(modifier = Modifier.fillMaxWidth()) {
++        }
++        Row(
++            modifier = Modifier
++                .fillMaxWidth()
++                .background(ReferenceDivider)
++                .padding(2.dp),
++        ) {
+             tabs.forEach { (tabId, label) ->
+-                Button(
++                ReferenceTabButton(
++                    text = label,
++                    selected = selectedTab == tabId,
+                     onClick = {
+                         selectedTab = tabId
+                         if (tabId == "comments") onLoadComments(false)
+                     },
++                    accessibilityLabel = "Tab ${label.lowercase()}",
++                    minHeight = 60.dp,
++                    unselectedColor = ReferenceDivider,
++                    unselectedContentColor = ReferenceText,
+                     modifier = Modifier.weight(1f).padding(1.dp),
+-                ) {
+-                    Text((if (selectedTab == tabId) "✓ " else "") + label, style = MaterialTheme.typography.labelSmall)
+-                }
++                )
+             }
+         }
+         HorizontalDivider()
+@@ -387,10 +497,14 @@
+                 }
+                 LazyColumn(modifier = Modifier.fillMaxSize()) {
+                     items(visibleChapters, key = { it.id }) { chapter ->
+-                        Button(
++                        ReferenceActionButton(
++                            text = chapter.title,
+                             onClick = { onChapterClick(chapter) },
+-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 3.dp),
+-                        ) { Text(chapter.title, modifier = Modifier.fillMaxWidth()) }
++                            normalColor = ReferencePanelBackground,
++                            normalContentColor = ReferenceText,
++                            accessibilityLabel = chapter.title,
++                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
++                        )
+                     }
+                     if (visibleChapters.isEmpty()) {
+                         item(key = "empty-chapter-search") {
+--- a/app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt
++++ b/app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt
+@@ -1,5 +1,6 @@
+ package vn.nghetruyen.app.ui.screens
+ 
++import androidx.compose.foundation.background
+ import androidx.compose.foundation.layout.Column
+ import androidx.compose.foundation.layout.Row
+ import androidx.compose.foundation.layout.fillMaxSize
+@@ -41,7 +42,7 @@
+ import vn.nghetruyen.app.sources.SourceCheckStatus
+ import vn.nghetruyen.app.transfer.BackupComponent
+ import vn.nghetruyen.app.ui.MainUiState
+-import vn.nghetruyen.app.ui.components.ScreenHeading
++import vn.nghetruyen.app.ui.components.ReferenceScreenBackground
+ 
+ @Composable
+ fun PersonalScreen(
+@@ -150,8 +151,7 @@
+     onOpenSourceDiagnosticBrowser: (String) -> Unit,
+     onClearSourceSession: (String) -> Unit,
+ ) {
+-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+-        ScreenHeading("CÁ NHÂN")
++    Column(Modifier.fillMaxSize().background(ReferenceScreenBackground).verticalScroll(rememberScrollState())) {
+         VoiceSettingsCard(
+             rate = state.playback.rate,
+             pitch = state.playback.pitch,

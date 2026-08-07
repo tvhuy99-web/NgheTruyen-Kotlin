@@ -104,6 +104,12 @@ for screen in (
     )
 
 replace_exact(
+    "app/src/main/java/vn/nghetruyen/app/ui/screens/ExploreScreen.kt",
+    '        ExploreMode.CATEGORY -> state.activeCategory.ifBlank { "DANH SÁCH TRUYỆN" }.uppercase()\n',
+    '        ExploreMode.CATEGORY -> state.activeCategory.orEmpty().ifBlank { "DANH SÁCH TRUYỆN" }.uppercase()\n',
+)
+
+replace_exact(
     "scripts/validate_release.py",
     '        "CHỈ PHÂN VAI",\n        "CHỈ NHẠC CẢNH",\n',
     '        "PHÂN VAI AI",\n        "NHẠC CẢNH",\n',

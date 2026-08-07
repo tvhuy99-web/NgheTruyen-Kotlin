@@ -161,6 +161,7 @@ fun PersonalScreen(
 ) {
     // NAVIGATION_AUDIT_V3_PERSONAL: reference-style hierarchical navigation.
     var personalPage by remember { mutableStateOf("home") }
+    var diagnosticsMode by remember { mutableStateOf("off") }
     var repositoryUrl by remember { mutableStateOf("") }
     var trustKeyId by remember { mutableStateOf("") }
     var trustAlgorithm by remember { mutableStateOf("ECDSA_P256_SHA256") }
@@ -183,7 +184,11 @@ fun PersonalScreen(
         "settings_pronunciation" -> "Từ điển phát âm TTS"
         "settings_vietphrase" -> "VietPhrase / Chuyển ngữ"
         "settings_ai" -> "Thiết lập AI"
-        "settings_automation" -> "Phân vai TTS và tự động hóa"
+        "settings_automation" -> "Phân vai TTS bằng AI"
+        "settings_other" -> "Cài đặt khác"
+        "settings_backup_log" -> "Nhật ký sao lưu và khôi phục"
+        "settings_clear_downloads" -> "Xóa truyện đã tải"
+        "settings_factory_reset" -> "Đặt lại ứng dụng như mới"
         "settings_tts" -> "Cài đặt TTS"
         "settings_music" -> "Nhạc nền và nhạc cảnh"
         "settings_following" -> "Theo dõi chương mới"
@@ -215,24 +220,13 @@ fun PersonalScreen(
             ),
             onSelect = { personalPage = it },
         )
-        "settings_home" -> PersonalMenuPage(
-            title = "CÀI ĐẶT ỨNG DỤNG",
-            backLabel = "QUAY LẠI CÁ NHÂN",
+        "settings_home" -> ReferenceSettingsHomePage(
+            diagnosticsMode = diagnosticsMode,
+            onDiagnosticsModeChange = { diagnosticsMode = it },
             onBack = { personalPage = "home" },
-            items = listOf(
-                "settings_pronunciation" to "TỪ ĐIỂN PHÁT ÂM TTS",
-                "settings_vietphrase" to "VIETPHRASE / CHUYỂN NGỮ",
-                "settings_ai" to "THIẾT LẬP AI",
-                "settings_automation" to "PHÂN VAI TTS & TỰ ĐỘNG HÓA",
-                "settings_tts" to "CÀI ĐẶT TTS",
-                "settings_music" to "NHẠC NỀN & NHẠC CẢNH",
-                "settings_following" to "THEO DÕI CHƯƠNG MỚI",
-                "settings_storage" to "DUNG LƯỢNG NGOẠI TUYẾN",
-                "settings_export" to "XUẤT SÁCH NÓI",
-                "settings_backup" to "SAO LƯU & KHÔI PHỤC",
-                "settings_diagnostics" to "CHẨN ĐOÁN & HIỆU NĂNG",
-            ),
             onSelect = { personalPage = it },
+            onExportBackup = onExportBackup,
+            onRestoreBackup = onRestoreBackup,
         )
         "settings_pronunciation" -> PersonalSubPage("TỪ ĐIỂN PHÁT ÂM TTS", "QUAY LẠI CÀI ĐẶT", { personalPage = "settings_home" }) {
             PronunciationCard(
@@ -279,7 +273,7 @@ fun PersonalScreen(
                 onClearApiKey = onClearAiApiKey,
             )
         }
-        "settings_automation" -> PersonalSubPage("PHÂN VAI TTS & TỰ ĐỘNG HÓA", "QUAY LẠI CÀI ĐẶT", { personalPage = "settings_home" }) {
+        "settings_automation" -> PersonalSubPage("PHÂN VAI TTS BẰNG AI", "QUAY LẠI CÀI ĐẶT", { personalPage = "settings_home" }) {
             PlaybackAutomationCard(
                 state = state,
                 onHeadsetMultiClickChange = onHeadsetMultiClickChange,
@@ -306,6 +300,50 @@ fun PersonalScreen(
                 onNormalizeTtsVolumeChange = onNormalizeTtsVolumeChange,
                 onTtsTargetLufsChange = onTtsTargetLufsChange,
             )
+        }
+        "settings_other" -> PersonalSubPage("CÀI ĐẶT KHÁC", "QUAY LẠI CÀI ĐẶT", { personalPage = "settings_home" }) {
+            Card(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 5.dp)) {
+                Column(Modifier.padding(16.dp)) {
+                    SettingSwitch(
+                        "Đọc liên tục khi có cuộc gọi hoặc tin nhắn",
+                        state.audioInterruptionMode == AudioInterruptionMode.CONTINUE_DUCKED,
+                    ) { enabled ->
+                        onInterruptionModeChange(if (enabled) AudioInterruptionMode.CONTINUE_DUCKED else AudioInterruptionMode.PAUSE)
+                    }
+                    Text(
+                        "Mặc định tắt. Khi bật, TTS tiếp tục ở mức âm lượng giảm khi Android báo gián đoạn âm thanh tạm thời.",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+            }
+        }
+        "settings_backup_log" -> PersonalSubPage("NHẬT KÝ SAO LƯU VÀ KHÔI PHỤC", "QUAY LẠI CÀI ĐẶT", { personalPage = "settings_home" }) {
+            Text(
+                "Mục nhật ký được đặt đúng vị trí theo công cụ tham chiếu. Bản Kotlin hiện chưa lưu một lịch sử sao lưu/khôi phục riêng biệt; thao tác sao lưu và khôi phục vẫn dùng bộ quản lý dữ liệu hiện có.",
+                modifier = Modifier.padding(16.dp),
+            )
+        }
+        "settings_clear_downloads" -> PersonalSubPage("XÓA TRUYỆN ĐÃ TẢI", "QUAY LẠI CÀI ĐẶT", { personalPage = "settings_home" }) {
+            Text(
+                "Để tránh xóa nhầm dữ liệu, thao tác xóa hàng loạt chưa được nối vào nút này. Bạn vẫn có thể xóa từng bản ngoại tuyến trong TỦ TRUYỆN > ĐÃ TẢI.",
+                modifier = Modifier.padding(16.dp),
+            )
+            StorageCard(
+                state = state,
+                onCacheLimitChange = onCacheLimitChange,
+                onTrimCache = onTrimReaderCache,
+                onClearCache = onClearReaderCache,
+            )
+        }
+        "settings_factory_reset" -> PersonalSubPage("ĐẶT LẠI ỨNG DỤNG NHƯ MỚI", "QUAY LẠI CÀI ĐẶT", { personalPage = "settings_home" }) {
+            Text(
+                "Mục đặt lại đã được đưa về đúng vị trí. Chức năng xóa toàn bộ dữ liệu chưa được kích hoạt ở bước căn chỉnh giao diện này để tránh một thao tác phá hủy dữ liệu khi chưa có quy trình xác nhận hai lần tương đương công cụ tham chiếu.",
+                modifier = Modifier.padding(16.dp),
+            )
+            Button(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth().padding(8.dp)) {
+                Text("ĐẶT LẠI NGAY")
+            }
         }
         "settings_tts" -> PersonalSubPage("CÀI ĐẶT TTS", "QUAY LẠI CÀI ĐẶT", { personalPage = "settings_home" }) {
             VoiceSettingsCard(
@@ -452,6 +490,96 @@ fun PersonalScreen(
                 onClearSession = onClearSourceSession,
             )
         }
+    }
+}
+
+@Composable
+private fun ReferenceSettingsHomePage(
+    diagnosticsMode: String,
+    onDiagnosticsModeChange: (String) -> Unit,
+    onBack: () -> Unit,
+    onSelect: (String) -> Unit,
+    onExportBackup: () -> Unit,
+    onRestoreBackup: () -> Unit,
+) {
+    Column(Modifier.fillMaxSize().background(ReferenceScreenBackground).verticalScroll(rememberScrollState())) {
+        ReferenceActionButton(
+            text = "QUAY LẠI CÁ NHÂN",
+            onClick = onBack,
+            normalColor = ReferenceGray,
+            accessibilityLabel = "Quay lại cá nhân",
+            modifier = Modifier.fillMaxWidth().padding(4.dp),
+        )
+        ScreenHeading("CÀI ĐẶT ỨNG DỤNG")
+        listOf(
+            "settings_pronunciation" to "TỪ ĐIỂN PHÁT ÂM TTS",
+            "settings_vietphrase" to "VIETPHRASE / CHUYỂN NGỮ",
+            "settings_ai" to "THIẾT LẬP AI",
+            "settings_automation" to "PHÂN VAI TTS BẰNG AI",
+        ).forEach { (id, label) ->
+            ReferenceActionButton(
+                text = label,
+                onClick = { onSelect(id) },
+                accessibilityLabel = label,
+                normalColor = ReferencePanelBackground,
+                normalContentColor = ReferenceText,
+                minHeight = 60.dp,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+        }
+        Text(
+            "Mức nhật ký chẩn đoán",
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.fillMaxWidth().padding(start = 10.dp, top = 14.dp, end = 10.dp, bottom = 4.dp),
+        )
+        listOf(
+            "off" to "Tắt",
+            "basic" to "Gỡ lỗi cơ bản",
+            "advanced" to "Gỡ lỗi nâng cao",
+        ).forEach { (value, label) ->
+            Button(
+                onClick = { onDiagnosticsModeChange(value) },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
+            ) { Text((if (diagnosticsMode == value) "✓ " else "") + label) }
+        }
+        ReferenceActionButton(
+            text = "CÀI ĐẶT KHÁC",
+            onClick = { onSelect("settings_other") },
+            normalColor = ReferencePanelBackground,
+            normalContentColor = ReferenceText,
+            minHeight = 60.dp,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 10.dp),
+        )
+        ReferenceActionButton(
+            text = "SAO LƯU DỮ LIỆU",
+            onClick = onExportBackup,
+            minHeight = 60.dp,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+        ReferenceActionButton(
+            text = "KHÔI PHỤC DỮ LIỆU",
+            onClick = onRestoreBackup,
+            minHeight = 60.dp,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+        ReferenceActionButton(
+            text = "NHẬT KÝ SAO LƯU VÀ KHÔI PHỤC",
+            onClick = { onSelect("settings_backup_log") },
+            minHeight = 60.dp,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+        ReferenceActionButton(
+            text = "XÓA TRUYỆN ĐÃ TẢI",
+            onClick = { onSelect("settings_clear_downloads") },
+            minHeight = 60.dp,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 10.dp),
+        )
+        ReferenceActionButton(
+            text = "ĐẶT LẠI ỨNG DỤNG NHƯ MỚI",
+            onClick = { onSelect("settings_factory_reset") },
+            minHeight = 60.dp,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp),
+        )
     }
 }
 

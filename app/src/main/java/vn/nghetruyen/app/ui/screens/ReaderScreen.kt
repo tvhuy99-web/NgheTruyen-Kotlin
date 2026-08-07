@@ -118,6 +118,8 @@ fun ReaderScreen(
     var showDisplayDialog by remember { mutableStateOf(false) }
     var showSearchDialog by remember { mutableStateOf(false) }
     var showSleepDialog by remember { mutableStateOf(false) }
+    var showTtsSettingsDialog by remember { mutableStateOf(false) }
+    var sleepStatus by remember(content.chapter.id) { mutableStateOf("Đang tắt") }
     var showMusicDialog by remember { mutableStateOf(false) }
     var showExportDialog by remember { mutableStateOf(false) }
     var showChapterInfoDialog by remember { mutableStateOf(false) }
@@ -298,7 +300,7 @@ fun ReaderScreen(
                     ReaderMenuButton("LƯU VỊ TRÍ ĐỌC") { showReaderOptions = false; onSaveReadingPosition() }
                     ReaderMenuButton("TÌM TRONG CHƯƠNG") { showReaderOptions = false; showSearchDialog = true }
                     if (textMode) ReaderMenuButton("HIỂN THỊ VĂN BẢN") { showReaderOptions = false; showDisplayDialog = true }
-                    ReaderMenuButton("HẸN GIỜ NGỦ") { showReaderOptions = false; showSleepDialog = true }
+                    ReaderMenuButton("HẸN GIỜ NGỦ - $sleepStatus") { showReaderOptions = false; showSleepDialog = true }
                     ReaderMenuButton("NHẠC NỀN") { showReaderOptions = false; showMusicDialog = true }
                     ReaderMenuButton(if (textMode) "XUẤT ÂM THANH (CẦN CHẾ ĐỘ TTS)" else "XUẤT ÂM THANH") {
                         showReaderOptions = false
@@ -310,7 +312,11 @@ fun ReaderScreen(
                     if (state.chapterTextMode != ChapterTextMode.ORIGINAL) {
                         ReaderMenuButton("KHÔI PHỤC CHƯƠNG GỐC TRƯỚC AI") { showReaderOptions = false; onShowOriginal() }
                     }
-                    ReaderMenuButton("CÀI ĐẶT TTS") { showReaderOptions = false; onOpenTtsSettings() }
+                    ReaderMenuButton("TẠO NHẬT KÝ VIETPHRASE") {
+                        showReaderOptions = false
+                        onMessage("Mục nhật ký VietPhrase đã được đưa về đúng vị trí; trình xem nhật ký chuyên dụng sẽ được nối ở bước hoàn thiện chức năng.")
+                    }
+                    ReaderMenuButton("CÀI ĐẶT TTS") { showReaderOptions = false; showTtsSettingsDialog = true }
                     ReaderMenuButton("SAO CHÉP CHƯƠNG") {
                         showReaderOptions = false
                         clipboard.setText(AnnotatedString(content.paragraphs.joinToString("\n\n")))
@@ -409,15 +415,69 @@ fun ReaderScreen(
         )
     }
 
+    if (showTtsSettingsDialog) {
+        val hasVoiceProfile = state.storyTtsProfiles.containsKey(content.chapter.storyId)
+        AlertDialog(
+            onDismissRequest = { showTtsSettingsDialog = false },
+            title = { Text("CÀI ĐẶT TTS") },
+            text = {
+                Column(modifier = Modifier.heightIn(max = 540.dp).verticalScroll(rememberScrollState())) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = hasVoiceProfile,
+                            onCheckedChange = { enabled -> if (enabled) onSaveVoiceProfile() else onClearVoiceProfile() },
+                        )
+                        Text("Dùng cài đặt TTS riêng cho truyện này")
+                    }
+                    Text("Bộ đọc TTS", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                    Text(state.selectedTtsEnginePackage ?: "Giọng đọc hệ thống")
+                    Text("Ngôn ngữ", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                    Text(state.selectedTtsLanguageTag.ifBlank { "vi-VN" })
+                    Text("Giọng đọc", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                    Text(state.selectedTtsVoiceName ?: "Giọng mặc định")
+                    Text("Phương pháp xử lý", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                    Text(if (state.sonicProcessingEnabled) "Sonic" else "TTS hệ thống")
+                    Text("Chế độ Sonic", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                    Text(if (state.sonicProcessingEnabled) "Đang bật" else "Đang tắt")
+                    Text("Tốc độ đọc: ${"%.2f".format(state.playback.rate)}×", modifier = Modifier.padding(top = 8.dp))
+                    Text("Cao độ: ${"%.2f".format(state.playback.pitch)}×", modifier = Modifier.padding(top = 4.dp))
+                    Text("Âm lượng: ${(state.ttsVolume * 100).toInt()}%", modifier = Modifier.padding(top = 4.dp))
+                    ReaderMenuButton("NGHE THỬ") {
+                        onMessage("Nghe thử TTS vẫn dùng bộ điều khiển hiện có; bước này ưu tiên đưa mục về đúng vị trí của công cụ tham chiếu.")
+                    }
+                    ReaderMenuButton("KHÔI PHỤC MẶC ĐỊNH") {
+                        onMessage("Khôi phục mặc định sẽ được nối sau khi hoàn thiện bộ chỉnh TTS nội bộ.")
+                    }
+                    ReaderMenuButton("LƯU CÀI ĐẶT TTS") {
+                        onSaveVoiceProfile()
+                        showTtsSettingsDialog = false
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showTtsSettingsDialog = false }) { Text("ĐÓNG") } },
+        )
+    }
+
     if (showSleepDialog) {
         AlertDialog(
             onDismissRequest = { showSleepDialog = false },
-            title = { Text("HẸN GIỜ NGỦ") },
+            title = { Text("HẸN GIỜ NGỦ - $sleepStatus") },
             text = { Column {
-                ReaderMenuButton("15 PHÚT") { showSleepDialog = false; onSleepTimer(15) }
-                ReaderMenuButton("30 PHÚT") { showSleepDialog = false; onSleepTimer(30) }
-                ReaderMenuButton("60 PHÚT") { showSleepDialog = false; onSleepTimer(60) }
-                ReaderMenuButton("HỦY HẸN GIỜ") { showSleepDialog = false; onSleepTimer(null) }
+                ReaderMenuButton("15 PHÚT") { showSleepDialog = false; sleepStatus = "Còn khoảng 15 phút"; onSleepTimer(15) }
+                ReaderMenuButton("30 PHÚT") { showSleepDialog = false; sleepStatus = "Còn khoảng 30 phút"; onSleepTimer(30) }
+                ReaderMenuButton("45 PHÚT") { showSleepDialog = false; sleepStatus = "Còn khoảng 45 phút"; onSleepTimer(45) }
+                ReaderMenuButton("60 PHÚT") { showSleepDialog = false; sleepStatus = "Còn khoảng 60 phút"; onSleepTimer(60) }
+                ReaderMenuButton("HẾT CHƯƠNG HIỆN TẠI") {
+                    showSleepDialog = false
+                    sleepStatus = "Hết chương hiện tại"
+                    onMessage("Tùy chọn hẹn giờ theo chương đã được đặt đúng vị trí; backend hiện mới hỗ trợ hẹn giờ theo phút.")
+                }
+                ReaderMenuButton("HẾT 3 CHƯƠNG") {
+                    showSleepDialog = false
+                    sleepStatus = "Hết 3 chương"
+                    onMessage("Tùy chọn hẹn giờ theo chương đã được đặt đúng vị trí; backend hiện mới hỗ trợ hẹn giờ theo phút.")
+                }
+                ReaderMenuButton("TẮT HẸN GIỜ") { showSleepDialog = false; sleepStatus = "Đang tắt"; onSleepTimer(null) }
             } },
             confirmButton = { TextButton(onClick = { showSleepDialog = false }) { Text("ĐÓNG") } },
         )
@@ -427,19 +487,28 @@ fun ReaderScreen(
         AlertDialog(
             onDismissRequest = { showMusicDialog = false },
             title = { Text("NHẠC NỀN") },
-            text = { Column {
+            text = { Column(modifier = Modifier.heightIn(max = 540.dp).verticalScroll(rememberScrollState())) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Bật nhạc nền", Modifier.weight(1f))
+                    Text("Bật nhạc nền khi đọc bằng TTS", Modifier.weight(1f))
                     Switch(state.backgroundMusicEnabled, onBackgroundMusicEnabledChange)
                 }
-                Text(state.backgroundMusicUri ?: "Chưa chọn tệp nhạc nền.", style = MaterialTheme.typography.bodySmall)
-                ReaderMenuButton("CHỌN TỆP NHẠC") { onSelectBackgroundMusic() }
-                if (!state.backgroundMusicUri.isNullOrBlank()) ReaderMenuButton("BỎ NHẠC NỀN") { onClearBackgroundMusic() }
+                Text("Chế độ phát khi không dùng nhạc theo cảnh", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                Text(state.sceneMusicPlaybackMode.name.replace('_', ' '), style = MaterialTheme.typography.bodySmall)
+                Text("CÂN BẰNG ÂM THANH", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp))
+                Text("Mức chuẩn hóa: ${"%.1f".format(state.sceneMusicTargetLufs)} LUFS", modifier = Modifier.padding(top = 6.dp))
                 Text("Âm lượng: ${(state.backgroundMusicVolume * 100).toInt()}%")
                 Row(Modifier.fillMaxWidth()) {
                     TextButton({ onBackgroundMusicVolumeChange(state.backgroundMusicVolume - 0.05f) }, Modifier.weight(1f)) { Text("NHỎ HƠN") }
                     TextButton({ onBackgroundMusicVolumeChange(state.backgroundMusicVolume + 0.05f) }, Modifier.weight(1f)) { Text("LỚN HƠN") }
                 }
+                Text(state.backgroundMusicUri ?: "Chưa chọn tệp nhạc nền.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
+                ReaderMenuButton("QUẢN LÝ DANH SÁCH NHẠC") { onSelectBackgroundMusic() }
+                if (!state.backgroundMusicUri.isNullOrBlank()) ReaderMenuButton("BỎ NHẠC NỀN") { onClearBackgroundMusic() }
+                Text(
+                    "Các điều khiển chuẩn hóa toàn kho, attack/release và quyền đổi nhạc cho AI sẽ tiếp tục được nối vào dialog này ở bước parity chức năng.",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
             } },
             confirmButton = { TextButton(onClick = { showMusicDialog = false }) { Text("ĐÓNG") } },
         )

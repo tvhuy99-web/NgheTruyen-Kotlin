@@ -309,15 +309,13 @@ fun ReaderScreen(
             }
 
             Row(modifier = Modifier.fillMaxWidth()) {
-                if (state.diagnosticsMode != "off") {
-                    ReaderButton(
-                        "XEM NHẬT KÝ",
-                        { showDiagnosticLogDialog = true },
-                        Modifier.weight(1f),
-                        normalColor = ReferenceGray,
-                        accessibilityLabel = "Xem nhật ký chẩn đoán",
-                    )
-                }
+                ReaderButton(
+                    "XEM NHẬT KÝ",
+                    { showDiagnosticLogDialog = true },
+                    Modifier.weight(1f),
+                    normalColor = ReferenceGray,
+                    accessibilityLabel = "Xem nhật ký chẩn đoán",
+                )
                 ReaderButton(
                     when {
                         state.aiBusy -> "AI ĐANG CHẠY…"

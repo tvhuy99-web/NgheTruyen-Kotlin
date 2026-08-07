@@ -330,16 +330,14 @@ fun ReaderScreen(
                     normalColor = ReferencePurple,
                     accessibilityLabel = "Dịch chương bằng AI",
                 )
-                if (!textMode) {
-                    ReaderButton(
-                        "PHÂN VAI AI",
-                        onVoiceCast,
-                        Modifier.weight(1f),
-                        enabled = !state.aiBusy,
-                        normalColor = Color(0xFFAF52DE),
-                        accessibilityLabel = "Phân vai giọng đọc bằng AI",
-                    )
-                }
+                ReaderButton(
+                    "PHÂN VAI AI",
+                    onVoiceCast,
+                    Modifier.weight(1f),
+                    enabled = !state.aiBusy,
+                    normalColor = Color(0xFFAF52DE),
+                    accessibilityLabel = "Phân vai giọng đọc bằng AI",
+                )
             }
         }
     }

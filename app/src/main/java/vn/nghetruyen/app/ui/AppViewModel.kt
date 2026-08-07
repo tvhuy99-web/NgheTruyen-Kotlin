@@ -1,5 +1,6 @@
 package vn.nghetruyen.app.ui
 
+import android.app.ActivityManager
 import android.app.Application
 import android.content.Intent
 import android.net.Uri
@@ -844,6 +845,27 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun checkFollowingNow() {
         container.followingUpdateScheduler.checkNow()
         showMessage("Đã bắt đầu kiểm tra truyện theo dõi.")
+    }
+
+    fun clearAllDownloadedStories() {
+        val storyIds = state.value.downloadedStories
+            .filter { it.sourceId != "offline" }
+            .map { it.id }
+            .distinct()
+        if (storyIds.isEmpty()) {
+            showMessage("Không có truyện đã tải để xóa.")
+            return
+        }
+        storyIds.forEach(::removeOfflineStory)
+        showMessage("Đã bắt đầu xóa ${storyIds.size} truyện đã tải. Tiến độ đọc, lịch sử và dấu trang được giữ lại.")
+    }
+
+    fun factoryResetApplication() {
+        ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_STOP)
+        val manager = getApplication<Application>().getSystemService(ActivityManager::class.java)
+        if (manager?.clearApplicationUserData() != true) {
+            showMessage("Không thể đặt lại dữ liệu ứng dụng trên thiết bị này.")
+        }
     }
 
     fun removeOfflineStory(storyId: String) {

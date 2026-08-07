@@ -196,6 +196,8 @@ fun NgheTruyenApp(
                         onBackupComponentChange = viewModel::setBackupComponentEnabled,
                         onExportBackup = onExportBackup,
                         onRestoreBackup = onRestoreBackup,
+                        onClearDownloadedStories = viewModel::clearAllDownloadedStories,
+                        onFactoryResetApplication = viewModel::factoryResetApplication,
                         onInstallSourcePack = onInstallSourcePack,
                         onImportSourceTrustRotation = onImportSourceTrustRotation,
                         onRefreshSourceRepository = viewModel::refreshSourceRepository,

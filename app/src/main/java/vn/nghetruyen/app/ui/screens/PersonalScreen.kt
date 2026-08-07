@@ -7,9 +7,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
@@ -19,6 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -143,6 +146,8 @@ fun PersonalScreen(
     onBackupComponentChange: (BackupComponent, Boolean) -> Unit,
     onExportBackup: () -> Unit,
     onRestoreBackup: () -> Unit,
+    onClearDownloadedStories: () -> Unit,
+    onFactoryResetApplication: () -> Unit,
     onInstallSourcePack: () -> Unit,
     onImportSourceTrustRotation: () -> Unit,
     onRefreshSourceRepository: (String) -> Unit,
@@ -165,6 +170,12 @@ fun PersonalScreen(
 ) {
     // NAVIGATION_AUDIT_V3_PERSONAL: reference-style hierarchical navigation.
     var personalPage by remember { mutableStateOf("home") }
+    var showSettingsDialog by remember { mutableStateOf(false) }
+    var showOtherSettingsDialog by remember { mutableStateOf(false) }
+    var showBackupLogDialog by remember { mutableStateOf(false) }
+    var showClearDownloadsDialog by remember { mutableStateOf(false) }
+    var showFactoryResetFirst by remember { mutableStateOf(false) }
+    var showFactoryResetFinal by remember { mutableStateOf(false) }
     var repositoryUrl by remember { mutableStateOf("") }
     var trustKeyId by remember { mutableStateOf("") }
     var trustAlgorithm by remember { mutableStateOf("ECDSA_P256_SHA256") }
@@ -207,8 +218,14 @@ fun PersonalScreen(
         else -> "Cá nhân"
     }
 
+    fun returnToSettings() {
+        personalPage = "home"
+        showSettingsDialog = true
+    }
+
     BackHandler(enabled = personalPage != "home") {
-        personalPage = parentPage(personalPage)
+        if (personalPage.startsWith("settings_")) returnToSettings()
+        else personalPage = parentPage(personalPage)
     }
     LaunchedEffect(personalPage) {
         view.announceForAccessibility(pageTitle(personalPage))
@@ -221,17 +238,12 @@ fun PersonalScreen(
                 "settings_home" to "Cài đặt",
                 "extensions_home" to "Tiện ích mở rộng",
             ),
-            onSelect = { personalPage = it },
+            onSelect = { target ->
+                if (target == "settings_home") showSettingsDialog = true
+                else personalPage = target
+            },
         )
-        "settings_home" -> ReferenceSettingsHomePage(
-            diagnosticsMode = state.diagnosticsMode,
-            onDiagnosticsModeChange = onDiagnosticsModeChange,
-            onBack = { personalPage = "home" },
-            onSelect = { personalPage = it },
-            onExportBackup = onExportBackup,
-            onRestoreBackup = onRestoreBackup,
-        )
-        "settings_pronunciation" -> PersonalSubPage("TỪ ĐIỂN PHÁT ÂM TTS", "QUAY LẠI CÀI ĐẶT", { personalPage = "settings_home" }) {
+        "settings_pronunciation" -> PersonalSubPage("TỪ ĐIỂN PHÁT ÂM TTS", "QUAY LẠI CÀI ĐẶT", { returnToSettings() }) {
             PronunciationCard(
                 rules = state.pronunciations,
                 onAdd = onAddPronunciation,
@@ -239,7 +251,7 @@ fun PersonalScreen(
                 onDelete = onDeletePronunciation,
             )
         }
-        "settings_vietphrase" -> PersonalSubPage("VIETPHRASE / CHUYỂN NGỮ", "QUAY LẠI CÀI ĐẶT", { personalPage = "settings_home" }) {
+        "settings_vietphrase" -> PersonalSubPage("VIETPHRASE / CHUYỂN NGỮ", "QUAY LẠI CÀI ĐẶT", { returnToSettings() }) {
             VietPhraseCard(
                 state = state,
                 onAdd = onAddVietPhrase,
@@ -257,7 +269,7 @@ fun PersonalScreen(
                 onRejectSuggestion = onRejectVietPhraseSuggestion,
             )
         }
-        "settings_ai" -> PersonalSubPage("THIẾT LẬP AI", "QUAY LẠI CÀI ĐẶT", { personalPage = "settings_home" }) {
+        "settings_ai" -> PersonalSubPage("THIẾT LẬP AI", "QUAY LẠI CÀI ĐẶT", { returnToSettings() }) {
             AiOnlineCard(
                 state = state,
                 onEnabledChange = onAiEnabledChange,
@@ -276,13 +288,13 @@ fun PersonalScreen(
                 onClearApiKey = onClearAiApiKey,
             )
         }
-        "settings_automation" -> PersonalSubPage("PHÂN VAI TTS BẰNG AI", "QUAY LẠI CÀI ĐẶT", { personalPage = "settings_home" }) {
+        "settings_automation" -> PersonalSubPage("PHÂN VAI TTS BẰNG AI", "QUAY LẠI CÀI ĐẶT", { returnToSettings() }) {
             ReferenceVoiceCastSettingsCard(
                 state = state,
                 onAutoVoiceCastChange = onAutoVoiceCastChange,
             )
         }
-        "settings_other" -> PersonalSubPage("CÀI ĐẶT KHÁC", "QUAY LẠI CÀI ĐẶT", { personalPage = "settings_home" }) {
+        "settings_other" -> PersonalSubPage("CÀI ĐẶT KHÁC", "QUAY LẠI CÀI ĐẶT", { returnToSettings() }) {
             Card(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 5.dp)) {
                 Column(Modifier.padding(16.dp)) {
                     SettingSwitch(
@@ -299,13 +311,13 @@ fun PersonalScreen(
                 }
             }
         }
-        "settings_backup_log" -> PersonalSubPage("NHẬT KÝ SAO LƯU VÀ KHÔI PHỤC", "QUAY LẠI CÀI ĐẶT", { personalPage = "settings_home" }) {
+        "settings_backup_log" -> PersonalSubPage("NHẬT KÝ SAO LƯU VÀ KHÔI PHỤC", "QUAY LẠI CÀI ĐẶT", { returnToSettings() }) {
             Text(
                 "Mục nhật ký được đặt đúng vị trí theo công cụ tham chiếu. Bản Kotlin hiện chưa lưu một lịch sử sao lưu/khôi phục riêng biệt; thao tác sao lưu và khôi phục vẫn dùng bộ quản lý dữ liệu hiện có.",
                 modifier = Modifier.padding(16.dp),
             )
         }
-        "settings_clear_downloads" -> PersonalSubPage("XÓA TRUYỆN ĐÃ TẢI", "QUAY LẠI CÀI ĐẶT", { personalPage = "settings_home" }) {
+        "settings_clear_downloads" -> PersonalSubPage("XÓA TRUYỆN ĐÃ TẢI", "QUAY LẠI CÀI ĐẶT", { returnToSettings() }) {
             Text(
                 "Để tránh xóa nhầm dữ liệu, thao tác xóa hàng loạt chưa được nối vào nút này. Bạn vẫn có thể xóa từng bản ngoại tuyến trong TỦ TRUYỆN > ĐÃ TẢI.",
                 modifier = Modifier.padding(16.dp),
@@ -317,7 +329,7 @@ fun PersonalScreen(
                 onClearCache = onClearReaderCache,
             )
         }
-        "settings_factory_reset" -> PersonalSubPage("ĐẶT LẠI ỨNG DỤNG NHƯ MỚI", "QUAY LẠI CÀI ĐẶT", { personalPage = "settings_home" }) {
+        "settings_factory_reset" -> PersonalSubPage("ĐẶT LẠI ỨNG DỤNG NHƯ MỚI", "QUAY LẠI CÀI ĐẶT", { returnToSettings() }) {
             Text(
                 "Mục đặt lại đã được đưa về đúng vị trí. Chức năng xóa toàn bộ dữ liệu chưa được kích hoạt ở bước căn chỉnh giao diện này để tránh một thao tác phá hủy dữ liệu khi chưa có quy trình xác nhận hai lần tương đương công cụ tham chiếu.",
                 modifier = Modifier.padding(16.dp),
@@ -326,7 +338,7 @@ fun PersonalScreen(
                 Text("ĐẶT LẠI NGAY")
             }
         }
-        "settings_tts" -> PersonalSubPage("CÀI ĐẶT TTS", "QUAY LẠI CÀI ĐẶT", { personalPage = "settings_home" }) {
+        "settings_tts" -> PersonalSubPage("CÀI ĐẶT TTS", "QUAY LẠI CÀI ĐẶT", { returnToSettings() }) {
             VoiceSettingsCard(
                 rate = state.playback.rate,
                 pitch = state.playback.pitch,
@@ -350,7 +362,7 @@ fun PersonalScreen(
                 onInterruptionModeChange = onInterruptionModeChange,
             )
         }
-        "settings_music" -> PersonalSubPage("NHẠC NỀN & NHẠC CẢNH", "QUAY LẠI CÀI ĐẶT", { personalPage = "settings_home" }) {
+        "settings_music" -> PersonalSubPage("NHẠC NỀN & NHẠC CẢNH", "QUAY LẠI CÀI ĐẶT", { returnToSettings() }) {
             BackgroundMusicCard(
                 uri = state.backgroundMusicUri,
                 enabled = state.backgroundMusicEnabled,
@@ -370,14 +382,14 @@ fun PersonalScreen(
                 onDelete = onDeleteSceneMusic,
             )
         }
-        "settings_following" -> PersonalSubPage("THEO DÕI CHƯƠNG MỚI", "QUAY LẠI CÀI ĐẶT", { personalPage = "settings_home" }) {
+        "settings_following" -> PersonalSubPage("THEO DÕI CHƯƠNG MỚI", "QUAY LẠI CÀI ĐẶT", { returnToSettings() }) {
             FollowingSettingsCard(
                 enabled = state.followingUpdatesEnabled,
                 onEnabledChange = onFollowingUpdatesChange,
                 onCheckNow = onCheckFollowingNow,
             )
         }
-        "settings_storage" -> PersonalSubPage("DUNG LƯỢNG NGOẠI TUYẾN", "QUAY LẠI CÀI ĐẶT", { personalPage = "settings_home" }) {
+        "settings_storage" -> PersonalSubPage("DUNG LƯỢNG NGOẠI TUYẾN", "QUAY LẠI CÀI ĐẶT", { returnToSettings() }) {
             StorageCard(
                 state = state,
                 onCacheLimitChange = onCacheLimitChange,
@@ -385,10 +397,10 @@ fun PersonalScreen(
                 onClearCache = onClearReaderCache,
             )
         }
-        "settings_export" -> PersonalSubPage("XUẤT SÁCH NÓI", "QUAY LẠI CÀI ĐẶT", { personalPage = "settings_home" }) {
+        "settings_export" -> PersonalSubPage("XUẤT SÁCH NÓI", "QUAY LẠI CÀI ĐẶT", { returnToSettings() }) {
             AudioExportCard(state, onCancelAudioExport, onResumeAudioExport, onOpenAudioExport)
         }
-        "settings_backup" -> PersonalSubPage("SAO LƯU & KHÔI PHỤC", "QUAY LẠI CÀI ĐẶT", { personalPage = "settings_home" }) {
+        "settings_backup" -> PersonalSubPage("SAO LƯU & KHÔI PHỤC", "QUAY LẠI CÀI ĐẶT", { returnToSettings() }) {
             TransferCard(
                 state = state,
                 onComponentChange = onBackupComponentChange,
@@ -396,7 +408,7 @@ fun PersonalScreen(
                 onRestoreBackup = onRestoreBackup,
             )
         }
-        "settings_diagnostics" -> PersonalSubPage("CHẨN ĐOÁN & HIỆU NĂNG", "QUAY LẠI CÀI ĐẶT", { personalPage = "settings_home" }) {
+        "settings_diagnostics" -> PersonalSubPage("CHẨN ĐOÁN & HIỆU NĂNG", "QUAY LẠI CÀI ĐẶT", { returnToSettings() }) {
             PerformanceCard(state.performanceReport, onRunPerformanceDiagnostics)
             SettingsCard("Kiến trúc ứng dụng", "Kotlin, Compose, Room, DataStore, WorkManager và foreground TTS service. Lua Native Source API 2 chạy trong LuaJ sandbox; không AndroLua, không luajava và không nạp DEX động.")
         }
@@ -472,26 +484,139 @@ fun PersonalScreen(
             )
         }
     }
+
+    if (showSettingsDialog) {
+        AlertDialog(
+            onDismissRequest = { showSettingsDialog = false },
+            title = { Text("CÀI ĐẶT ỨNG DỤNG") },
+            text = {
+                ReferenceSettingsHomePage(
+                    diagnosticsMode = state.diagnosticsMode,
+                    onDiagnosticsModeChange = onDiagnosticsModeChange,
+                    onSelect = { target ->
+                        showSettingsDialog = false
+                        when (target) {
+                            "settings_other" -> showOtherSettingsDialog = true
+                            "settings_backup_log" -> showBackupLogDialog = true
+                            "settings_clear_downloads" -> showClearDownloadsDialog = true
+                            "settings_factory_reset" -> showFactoryResetFirst = true
+                            else -> personalPage = target
+                        }
+                    },
+                    onExportBackup = onExportBackup,
+                    onRestoreBackup = onRestoreBackup,
+                )
+            },
+            confirmButton = { TextButton(onClick = { showSettingsDialog = false }) { Text("ĐÓNG") } },
+        )
+    }
+
+    if (showOtherSettingsDialog) {
+        AlertDialog(
+            onDismissRequest = { showOtherSettingsDialog = false; showSettingsDialog = true },
+            title = { Text("CÀI ĐẶT KHÁC") },
+            text = {
+                Column {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Đọc liên tục khi có cuộc gọi hoặc tin nhắn", Modifier.weight(1f))
+                        Switch(
+                            checked = state.audioInterruptionMode == AudioInterruptionMode.CONTINUE_DUCKED,
+                            onCheckedChange = { enabled ->
+                                onInterruptionModeChange(
+                                    if (enabled) AudioInterruptionMode.CONTINUE_DUCKED else AudioInterruptionMode.PAUSE,
+                                )
+                            },
+                        )
+                    }
+                    Text(
+                        "Mặc định tắt. Khi bật, ứng dụng cố gắng tiếp tục đọc ở mức âm lượng giảm khi có gián đoạn âm thanh tạm thời.",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showOtherSettingsDialog = false; showSettingsDialog = true }) { Text("ĐÓNG") }
+            },
+        )
+    }
+
+    if (showBackupLogDialog) {
+        AlertDialog(
+            onDismissRequest = { showBackupLogDialog = false; showSettingsDialog = true },
+            title = { Text("NHẬT KÝ SAO LƯU VÀ KHÔI PHỤC") },
+            text = {
+                Text("Bản Kotlin hiện chưa lưu lịch sử sao lưu/khôi phục riêng. Các thao tác sao lưu và khôi phục vẫn dùng bộ quản lý dữ liệu hiện có.")
+            },
+            confirmButton = {
+                TextButton(onClick = { showBackupLogDialog = false; showSettingsDialog = true }) { Text("ĐÓNG") }
+            },
+        )
+    }
+
+    if (showClearDownloadsDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearDownloadsDialog = false; showSettingsDialog = true },
+            title = { Text("XÓA TRUYỆN ĐÃ TẢI") },
+            text = {
+                Text("Xóa toàn bộ nội dung truyện đã tải khỏi thiết bị? Tiến độ đọc, lịch sử và dấu trang vẫn được giữ lại.")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showClearDownloadsDialog = false
+                    onClearDownloadedStories()
+                    showSettingsDialog = true
+                }) { Text("XÓA") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearDownloadsDialog = false; showSettingsDialog = true }) { Text("HỦY") }
+            },
+        )
+    }
+
+    if (showFactoryResetFirst) {
+        AlertDialog(
+            onDismissRequest = { showFactoryResetFirst = false; showSettingsDialog = true },
+            title = { Text("ĐẶT LẠI ỨNG DỤNG NHƯ MỚI") },
+            text = {
+                Text("Thao tác này sẽ xóa toàn bộ dữ liệu và cài đặt của ứng dụng, gồm tiến độ đọc, dấu trang, truyện đã tải, từ điển, cấu hình AI và tiện ích. Bạn có muốn tiếp tục?")
+            },
+            confirmButton = {
+                TextButton(onClick = { showFactoryResetFirst = false; showFactoryResetFinal = true }) { Text("TIẾP TỤC") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showFactoryResetFirst = false; showSettingsDialog = true }) { Text("HỦY") }
+            },
+        )
+    }
+
+    if (showFactoryResetFinal) {
+        AlertDialog(
+            onDismissRequest = { showFactoryResetFinal = false; showSettingsDialog = true },
+            title = { Text("XÁC NHẬN LẦN CUỐI") },
+            text = { Text("Dữ liệu sau khi xóa không thể khôi phục nếu bạn chưa sao lưu. Đặt lại ứng dụng ngay?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showFactoryResetFinal = false
+                    onFactoryResetApplication()
+                }) { Text("ĐẶT LẠI NGAY") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showFactoryResetFinal = false; showSettingsDialog = true }) { Text("HỦY") }
+            },
+        )
+    }
 }
 
 @Composable
 private fun ReferenceSettingsHomePage(
     diagnosticsMode: String,
     onDiagnosticsModeChange: (String) -> Unit,
-    onBack: () -> Unit,
     onSelect: (String) -> Unit,
     onExportBackup: () -> Unit,
     onRestoreBackup: () -> Unit,
 ) {
-    Column(Modifier.fillMaxSize().background(ReferenceScreenBackground).verticalScroll(rememberScrollState())) {
-        ReferenceActionButton(
-            text = "QUAY LẠI CÁ NHÂN",
-            onClick = onBack,
-            normalColor = ReferenceGray,
-            accessibilityLabel = "Quay lại cá nhân",
-            modifier = Modifier.fillMaxWidth().padding(4.dp),
-        )
-        ScreenHeading("CÀI ĐẶT ỨNG DỤNG")
+    Column(Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState())) {
         listOf(
             "settings_pronunciation" to "TỪ ĐIỂN PHÁT ÂM TTS",
             "settings_vietphrase" to "VIETPHRASE / CHUYỂN NGỮ",

@@ -1,9 +1,11 @@
 package vn.nghetruyen.app.sources
 
 import android.annotation.SuppressLint
+import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
+import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
@@ -11,6 +13,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.ComponentActivity
@@ -44,24 +47,75 @@ class SourceLoginActivity : ComponentActivity() {
             text = "Đăng nhập trực tiếp trên trang nguồn. Ứng dụng chỉ lưu cookie phiên đã mã hóa, không đọc hoặc lưu mật khẩu."
             setPadding(24, 18, 24, 18)
         }
-        val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        val done = Button(this).apply {
-            text = "LƯU PHIÊN VÀ ĐÓNG"
-            setOnClickListener {
-                captureSession()
-                setResult(RESULT_OK)
-                finish()
-            }
+        val browserOptions = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
+        val otherOptions = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
+        val addressField = EditText(this).apply {
+            setSingleLine(true)
+            setText(loginUrl)
+            hint = "URL HTTPS thuộc nguồn"
         }
-        val clear = Button(this).apply {
-            text = "XÓA PHIÊN"
-            setOnClickListener {
-                clearSessionCookies()
-                status.text = "Đã xóa phiên của nguồn này."
-            }
+        var desktopCompat = false
+
+        fun actionButton(label: String, action: () -> Unit) = Button(this).apply {
+            text = label
+            setOnClickListener { action() }
         }
-        actions.addView(done, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        actions.addView(clear, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        fun actionRow(vararg buttons: Button) = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            buttons.forEach { addView(it, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)) }
+        }
+
+        val navigation = actionRow(
+            actionButton("QUAY LẠI") { if (webView.canGoBack()) webView.goBack() },
+            actionButton("TIẾN TỚI") { if (webView.canGoForward()) webView.goForward() },
+            actionButton("TÙY CHỌN") {
+                browserOptions.visibility = if (browserOptions.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+                if (browserOptions.visibility == View.GONE) otherOptions.visibility = View.GONE
+            },
+        )
+        val addressRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(addressField, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(actionButton("ĐI TỚI") {
+                val target = addressField.text.toString().trim()
+                if (isAllowed(target)) webView.loadUrl(target)
+                else status.text = "URL phải dùng HTTPS và thuộc miền của nguồn."
+            })
+        }
+        browserOptions.addView(actionButton("LÀM MỚI") { webView.reload() })
+        browserOptions.addView(actionButton("TÙY CHỌN KHÁC") {
+            otherOptions.visibility = if (otherOptions.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        })
+        browserOptions.addView(actionButton("XÓA DỮ LIỆU ĐĂNG NHẬP CỦA TRANG") {
+            clearSessionCookies()
+            status.text = "Đã xóa dữ liệu đăng nhập của nguồn này."
+        })
+        browserOptions.addView(actionButton("ĐÓNG TRÌNH DUYỆT") {
+            captureSession()
+            setResult(RESULT_OK)
+            finish()
+        })
+        otherOptions.addView(actionButton("CHẾ ĐỘ TƯƠNG THÍCH CHROME") {
+            desktopCompat = !desktopCompat
+            webView.settings.userAgentString = if (desktopCompat) {
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+            } else {
+                WebSettings.getDefaultUserAgent(this@SourceLoginActivity)
+            }
+            webView.reload()
+        })
+        otherOptions.addView(actionButton("CHẨN ĐOÁN TRÌNH DUYỆT") {
+            val target = webView.url?.takeIf(::isAllowed) ?: loginUrl
+            startActivity(Intent(this, SourceDiagnosticBrowserActivity::class.java).apply {
+                putExtra(SourceDiagnosticBrowserActivity.EXTRA_SOURCE_ID, sourceId)
+                putExtra(SourceDiagnosticBrowserActivity.EXTRA_INITIAL_URL, target)
+                putExtra(SourceDiagnosticBrowserActivity.EXTRA_ALLOWED_HOSTS, allowedHosts.toTypedArray())
+            })
+        })
+        otherOptions.addView(actionButton("MỞ BẰNG TRÌNH DUYỆT HỆ THỐNG") {
+            val target = webView.url?.takeIf(::isAllowed) ?: loginUrl
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(target)))
+        })
 
         webView = WebView(this).apply {
             settings.javaScriptEnabled = true
@@ -86,6 +140,7 @@ class SourceLoginActivity : ComponentActivity() {
                 }
 
                 override fun onPageFinished(view: WebView, url: String) {
+                    addressField.setText(url)
                     if (isAllowed(url)) captureSession()
                     status.text = if (sessionStore.hasSession(sourceId)) {
                         "Đã nhận cookie phiên. Bạn có thể đóng màn hình và thử mở lại chương."
@@ -96,7 +151,10 @@ class SourceLoginActivity : ComponentActivity() {
             }
         }
         root.addView(status, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        root.addView(actions, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        root.addView(navigation, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        root.addView(addressRow, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        root.addView(browserOptions, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        root.addView(otherOptions, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         root.addView(webView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         setContentView(root)
         seedWebViewCookies()

@@ -3,11 +3,13 @@ package vn.nghetruyen.app.sources
 import android.annotation.SuppressLint
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.Uri
 import android.net.http.SslError
 import android.os.Bundle
+import android.view.View
 import android.view.ViewGroup
 import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
@@ -60,6 +62,7 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
     private var blockExternalResources = true
     private var dialogPolicy = DialogPolicy.CANCEL
     private var userAgentMode = 0
+    private var autoClearLog = false
 
     private val exportLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri == null) return@registerForActivityResult
@@ -88,36 +91,74 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
         }
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100 }
         urlField = EditText(this).apply { setSingleLine(true); setText(initialUrl); hint = "URL HTTPS thuộc nguồn" }
+        val browserOptions = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
+        val otherOptions = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
+        val diagnosticOptions = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
+
         root.addView(status, matchWrap())
         root.addView(progress, matchWrap())
-        root.addView(urlField, matchWrap())
         root.addView(row(
-            button("←") { if (webView.canGoBack()) webView.goBack() },
-            button("→") { if (webView.canGoForward()) webView.goForward() },
-            button("TẢI LẠI") { webView.reload() },
-            button("ĐI") { navigate(urlField.text.toString()) },
+            button("QUAY LẠI") { if (webView.canGoBack()) webView.goBack() },
+            button("TIẾN TỚI") { if (webView.canGoForward()) webView.goForward() },
+            button("TÙY CHỌN") {
+                browserOptions.visibility = if (browserOptions.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+                if (browserOptions.visibility == View.GONE) {
+                    otherOptions.visibility = View.GONE
+                    diagnosticOptions.visibility = View.GONE
+                    if (::logView.isInitialized) logView.visibility = View.GONE
+                }
+            },
         ), matchWrap())
-        root.addView(row(
-            button("KIỂM TRA JS") { runJavaScriptProbe() },
-            button("COOKIE") { runCookieProbe() },
-            button("QUÉT DOM") { runDomProbe() },
-            button("REQUEST") { summarizeRequests() },
-        ), matchWrap())
-        root.addView(row(
-            button("LƯU PHIÊN") { captureSession(); setStatus("Đã lưu phiên nguồn. Cookie chỉ được lưu mã hóa trong kho phiên.") },
-            button("MỨC LOG") { verbose = !verbose; record("INFO", "LOG_LEVEL", if (verbose) "VERBOSE" else "BASIC") },
+        val addressRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        addressRow.addView(urlField, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        addressRow.addView(button("ĐI TỚI") { navigate(urlField.text.toString()) })
+        root.addView(addressRow, matchWrap())
+
+        browserOptions.addView(button("LÀM MỚI") { webView.reload() }, matchWrap())
+        browserOptions.addView(button("TÙY CHỌN KHÁC") {
+            otherOptions.visibility = if (otherOptions.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        }, matchWrap())
+        browserOptions.addView(button("XÓA DỮ LIỆU ĐĂNG NHẬP CỦA TRANG") { clearSourceCookies() }, matchWrap())
+        browserOptions.addView(button("ĐÓNG TRÌNH DUYỆT") { finish() }, matchWrap())
+        root.addView(browserOptions, matchWrap())
+
+        otherOptions.addView(button("CHẾ ĐỘ TƯƠNG THÍCH CHROME") { cycleUserAgent() }, matchWrap())
+        otherOptions.addView(button("CHẨN ĐOÁN TRÌNH DUYỆT") {
+            diagnosticOptions.visibility = View.VISIBLE
+            if (::logView.isInitialized) logView.visibility = View.VISIBLE
+        }, matchWrap())
+        otherOptions.addView(button("MỨC NHẬT KÝ") {
+            verbose = !verbose
+            record("INFO", "LOG_LEVEL", if (verbose) "VERBOSE" else "BASIC")
+        }, matchWrap())
+        otherOptions.addView(button("TỰ XÓA NHẬT KÝ") {
+            autoClearLog = !autoClearLog
+            setStatus(if (autoClearLog) "Đã bật tự xóa nhật ký khi điều hướng." else "Đã tắt tự xóa nhật ký.")
+        }, matchWrap())
+        otherOptions.addView(button("MỞ BẰNG TRÌNH DUYỆT HỆ THỐNG") {
+            val target = webView.url ?: initialUrl
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(target)))
+        }, matchWrap())
+        root.addView(otherOptions, matchWrap())
+
+        diagnosticOptions.addView(row(
+            button("LÀM MỚI") { webView.reload() },
             button("SAO CHÉP") { copyLog() },
-            button("XUẤT JSON") { exportLauncher.launch("source-${sourceId.take(40)}-diagnostics.json") },
-            button("XÓA LOG") { entries.clear(); requests.clear(); requestCount = 0; renderLog() },
+            button("XUẤT") { exportLauncher.launch("source-${sourceId.take(40)}-diagnostics.json") },
         ), matchWrap())
-        root.addView(row(
-            button("UA") { cycleUserAgent() },
-            button("MIỀN") { strictOrigins = !strictOrigins; record("POLICY", "ORIGIN_MODE", if (strictOrigins) "SOURCE_ONLY" else "COMPATIBLE_HTTPS") },
-            button("TÀI NGUYÊN") { blockExternalResources = !blockExternalResources; record("POLICY", "RESOURCE_MODE", if (blockExternalResources) "BLOCK_EXTERNAL" else "OBSERVE_EXTERNAL") },
-            button("DIALOG") { dialogPolicy = dialogPolicy.next(); record("POLICY", "DIALOG_MODE", dialogPolicy.name) },
-            button("XÓA COOKIE") { clearSourceCookies() },
-            button("STORAGE") { runStorageProbe() },
+        diagnosticOptions.addView(row(
+            button("KIỂM TRA JS") { runJavaScriptProbe() },
+            button("KIỂM TRA COOKIE") { runCookieProbe() },
+            button("QUÉT TRANG") { runDomProbe() },
         ), matchWrap())
+        diagnosticOptions.addView(row(
+            button("XÓA NHẬT KÝ") { entries.clear(); requests.clear(); requestCount = 0; renderLog() },
+            button("ĐÓNG") {
+                diagnosticOptions.visibility = View.GONE
+                if (::logView.isInitialized) logView.visibility = View.GONE
+            },
+        ), matchWrap())
+        root.addView(diagnosticOptions, matchWrap())
 
         webView = WebView(this).apply web@{
             settings.apply {
@@ -160,7 +201,7 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
             webViewClient = diagnosticClient()
         }
         root.addView(webView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 3f))
-        logView = TextView(this).apply { setTextIsSelectable(true); setPadding(16, 10, 16, 16); textSize = 11f }
+        logView = TextView(this).apply { setTextIsSelectable(true); setPadding(16, 10, 16, 16); textSize = 11f; visibility = View.GONE }
         root.addView(ScrollView(this).apply { addView(logView, matchWrap()) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 2f))
         setContentView(root)
         seedWebViewCookies()
@@ -227,6 +268,7 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
 
     private fun navigate(raw: String) {
         val target = raw.trim()
+        if (autoClearLog) { entries.clear(); requests.clear(); requestCount = 0; renderLog() }
         if ((!isAllowed(target) && strictOrigins) || !isHttps(target)) {
             setStatus(if (strictOrigins) "URL phải dùng HTTPS và thuộc allowlist của nguồn." else "URL phải dùng HTTPS.")
             record("SECURITY", "URL_REJECTED", redactUrl(target))

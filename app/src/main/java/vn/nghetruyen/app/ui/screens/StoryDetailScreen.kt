@@ -94,6 +94,7 @@ fun StoryDetailScreen(
     onLoadMoreComments: () -> Unit,
     onOpenOriginal: (String) -> Unit,
     onCheckSource: (String) -> Unit,
+    onOpenSourceLogin: (String) -> Unit,
 ) {
     val detail = state.storyDetail ?: return
     val selectedTab = state.storyDetailTab
@@ -270,6 +271,27 @@ fun StoryDetailScreen(
                 minHeight = 64.dp,
                 modifier = Modifier.weight(1f).padding(1.dp),
             )
+        }
+        if (sourceDescriptor != null && (sourceDescriptor.loginUrl != null || sourceDescriptor.health != vn.nghetruyen.app.core.model.SourceHealth.READY)) {
+            Row(modifier = Modifier.fillMaxWidth().background(ReferenceDivider).padding(2.dp)) {
+                if (sourceDescriptor.loginUrl != null) {
+                    ReferenceActionButton(
+                        text = if (sourceDescriptor.id in state.sourceSessions) "MỞ LẠI PHIÊN" else "ĐĂNG NHẬP NGUỒN",
+                        onClick = { onOpenSourceLogin(sourceDescriptor.id) },
+                        normalColor = ReferenceGray,
+                        minHeight = 48.dp,
+                        modifier = Modifier.weight(1f).padding(1.dp),
+                    )
+                }
+                ReferenceActionButton(
+                    text = if (sourceDescriptor.id in state.sourceHealthChecking) "ĐANG KIỂM TRA" else "KIỂM TRA NGUỒN",
+                    onClick = { onCheckSource(sourceDescriptor.id) },
+                    enabled = sourceDescriptor.id !in state.sourceHealthChecking,
+                    normalColor = ReferenceGray,
+                    minHeight = 48.dp,
+                    modifier = Modifier.weight(1f).padding(1.dp),
+                )
+            }
         }
         if (showStoryMenu) {
             AlertDialog(

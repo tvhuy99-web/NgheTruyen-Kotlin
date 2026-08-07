@@ -63,6 +63,8 @@ fun ExploreScreen(
     onSuggestionSelected: (String) -> Unit,
     onLoadMore: () -> Unit,
     onStoryClick: (StorySummary) -> Unit,
+    onOpenSourceLogin: (String) -> Unit,
+    onCheckSource: (String) -> Unit,
 ) {
     var sourceMenuOpen by remember { mutableStateOf(false) }
     var searchDialogOpen by remember { mutableStateOf(false) }
@@ -122,6 +124,32 @@ fun ExploreScreen(
                             sourceMenuOpen = false
                             onSourceSelected(source.id)
                         },
+                    )
+                }
+            }
+
+            if (!state.searchAllSources && selectedSource != null &&
+                (selectedSource.loginUrl != null || selectedSource.health != SourceHealth.READY)
+            ) {
+                Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                    if (selectedSource.loginUrl != null) {
+                        ReferenceActionButton(
+                            text = if (selectedSource.id in state.sourceSessions) "MỞ LẠI PHIÊN" else "ĐĂNG NHẬP NGUỒN",
+                            onClick = { onOpenSourceLogin(selectedSource.id) },
+                            normalColor = ReferenceDivider,
+                            normalContentColor = ReferenceText,
+                            minHeight = 48.dp,
+                            modifier = Modifier.weight(1f).padding(1.dp),
+                        )
+                    }
+                    ReferenceActionButton(
+                        text = if (selectedSource.id in state.sourceHealthChecking) "ĐANG KIỂM TRA" else "KIỂM TRA NGUỒN",
+                        onClick = { onCheckSource(selectedSource.id) },
+                        enabled = selectedSource.id !in state.sourceHealthChecking && selectedSource.health != SourceHealth.NOT_PORTED,
+                        normalColor = ReferenceDivider,
+                        normalContentColor = ReferenceText,
+                        minHeight = 48.dp,
+                        modifier = Modifier.weight(1f).padding(1.dp),
                     )
                 }
             }

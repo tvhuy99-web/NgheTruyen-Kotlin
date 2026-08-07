@@ -121,6 +121,8 @@ fun ReaderScreen(
     onSceneMusicPlaybackModeChange: (SceneMusicPlaybackMode) -> Unit,
     onSceneMusicTargetLufsChange: (Float) -> Unit,
     onSelectSceneMusic: () -> Unit,
+    onOpenSourceLogin: (String) -> Unit,
+    onCheckSource: (String) -> Unit,
     onMessage: (String) -> Unit,
 ) {
     val content = state.chapterContent ?: return
@@ -155,6 +157,7 @@ fun ReaderScreen(
     }
     val selectedSearchIndex = searchMatches.getOrNull(searchResultPosition.coerceIn(0, searchMatches.lastIndex.coerceAtLeast(0)))
     val activeNote = state.notes.firstOrNull { it.chapterId == content.chapter.id && it.paragraphIndex == activeIndex }
+    val readerSourceDescriptor = state.storyDetail?.story?.sourceId?.let { sourceId -> state.sources.firstOrNull { it.id == sourceId } }
 
     DisposableEffect(view, display.keepScreenOn) {
         val previous = view.keepScreenOn
@@ -280,6 +283,28 @@ fun ReaderScreen(
                 }
                 if (state.playback.preparationState == PlaybackPreparationState.PREPARING) {
                     Text("Đang chuẩn bị giọng đọc và nội dung tiếp theo…", modifier = Modifier.fillMaxWidth().padding(10.dp), color = palette.text)
+                }
+            }
+
+            if (readerSourceDescriptor != null &&
+                (readerSourceDescriptor.loginUrl != null || readerSourceDescriptor.health != vn.nghetruyen.app.core.model.SourceHealth.READY)
+            ) {
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    if (readerSourceDescriptor.loginUrl != null) {
+                        ReaderButton(
+                            if (readerSourceDescriptor.id in state.sourceSessions) "MỞ LẠI PHIÊN" else "ĐĂNG NHẬP NGUỒN",
+                            { onOpenSourceLogin(readerSourceDescriptor.id) },
+                            Modifier.weight(1f),
+                            normalColor = ReferenceGray,
+                        )
+                    }
+                    ReaderButton(
+                        if (readerSourceDescriptor.id in state.sourceHealthChecking) "ĐANG KIỂM TRA" else "KIỂM TRA NGUỒN",
+                        { onCheckSource(readerSourceDescriptor.id) },
+                        Modifier.weight(1f),
+                        enabled = readerSourceDescriptor.id !in state.sourceHealthChecking,
+                        normalColor = ReferenceGray,
+                    )
                 }
             }
 

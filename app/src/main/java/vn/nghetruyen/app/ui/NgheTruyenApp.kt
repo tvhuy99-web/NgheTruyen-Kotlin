@@ -88,6 +88,8 @@ fun NgheTruyenApp(
                         onSuggestionSelected = viewModel::selectSearchSuggestion,
                         onLoadMore = viewModel::loadMoreStories,
                         onStoryClick = viewModel::openStory,
+                        onOpenSourceLogin = viewModel::openSourceLogin,
+                        onCheckSource = viewModel::checkSource,
                     )
                     RootTab.LIBRARY -> LibraryScreen(
                         state = state,
@@ -246,6 +248,7 @@ fun NgheTruyenApp(
                     onLoadMoreComments = viewModel::loadMoreStoryComments,
                     onOpenOriginal = viewModel::openExternalUrl,
                     onCheckSource = viewModel::checkSource,
+                    onOpenSourceLogin = viewModel::openSourceLogin,
                 )
                 Destination.Reader -> ReaderScreen(
                     state = state,
@@ -304,6 +307,8 @@ fun NgheTruyenApp(
                     onSceneMusicPlaybackModeChange = viewModel::setSceneMusicPlaybackMode,
                     onSceneMusicTargetLufsChange = viewModel::setSceneMusicTargetLufs,
                     onSelectSceneMusic = onSelectSceneMusic,
+                    onOpenSourceLogin = viewModel::openSourceLogin,
+                    onCheckSource = viewModel::checkSource,
                     onMessage = viewModel::readerActionMessage,
                 )
             }

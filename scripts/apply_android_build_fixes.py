@@ -145,6 +145,25 @@ if "NAVIGATION_AUDIT_V3_PERSONAL" not in personal_text:
 else:
     print("REFERENCE_UI_V2_V3_ALREADY_PERSISTED")
 
+# Two legitimate library flows create StoryDetail directly: offline stories and notes.
+# Pre-apply the same v4 tab state to both so the stricter v4 migration is unambiguous.
+vm_path = Path("app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt")
+vm_text = vm_path.read_text(encoding="utf-8")
+old_library_story = '''                    destination = Destination.Story,
+                    rootTab = RootTab.LIBRARY,
+                    storyDetail = StoryDetail(
+'''
+new_library_story = '''                    destination = Destination.Story,
+                    rootTab = RootTab.LIBRARY,
+                    storyDetailTab = "intro",
+                    storyAdvancedOptionsRequested = false,
+                    storyDetail = StoryDetail(
+'''
+if old_library_story in vm_text:
+    vm_text = vm_text.replace(old_library_story, new_library_story)
+    vm_path.write_text(vm_text, encoding="utf-8")
+    print("REFERENCE_PARITY_V4_LIBRARY_STORY_STATE_APPLIED")
+
 v4_parts = sorted(Path("scripts").glob("reference_parity_v4.c??"))
 if len(v4_parts) != 9:
     raise SystemExit(f"Expected 9 verified parity v4 chunks, found {len(v4_parts)}")

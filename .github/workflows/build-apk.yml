@@ -1,5 +1,5 @@
 name: Build APK
-# Reference parity v4.1 clean-build trigger.
+# Reference parity v4.1 final clean-build trigger.
 
 on:
   workflow_dispatch:

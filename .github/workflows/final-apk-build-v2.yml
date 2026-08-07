@@ -99,10 +99,10 @@ jobs:
               echo "RUN_ID=${GITHUB_RUN_ID}"
               echo
               echo "=== COMPILER ERRORS ==="
-              grep -E "(^e: |^error: | error: |FAILURE:|What went wrong|Execution failed for task|Unresolved reference|Compilation error|requires libraries|requires Android Gradle plugin)" /tmp/gradle-build.log | tail -n 500 || true
+              grep -E "(^e: |^error: | error: |FAILURE:|What went wrong|Execution failed for task|Unresolved reference|Compilation error|requires libraries|requires Android Gradle plugin)" /tmp/gradle-build.log | tail -n 800 || true
               echo
               echo "=== LOG TAIL ==="
-              tail -n 320 /tmp/gradle-build.log
+              tail -n 400 /tmp/gradle-build.log
             } > BUILD_APK_ERROR.txt
             exit $status
           fi
@@ -132,13 +132,14 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+          mkdir -p /tmp/apk-result
           CHECKSUM_LINE=""
           if [[ -f app-debug.apk.sha256 ]]; then
             CHECKSUM_LINE="$(cat app-debug.apk.sha256)"
           fi
-
-          git fetch origin main
-          git rebase origin/main
+          if [[ -f BUILD_APK_ERROR.txt ]]; then
+            cp BUILD_APK_ERROR.txt /tmp/apk-result/BUILD_APK_ERROR.txt
+          fi
 
           {
             echo "STATUS=${{ job.status }}"
@@ -153,16 +154,20 @@ jobs:
             if [[ -n "$CHECKSUM_LINE" ]]; then
               echo "$CHECKSUM_LINE"
             fi
-          } > BUILD_APK_RESULT.txt
+          } > /tmp/apk-result/BUILD_APK_RESULT.txt
 
-          rm -rf .gradle build app/build
-          rm -f app-debug.apk.sha256
-          git add BUILD_APK_RESULT.txt
-          if [[ -f BUILD_APK_ERROR.txt ]]; then
-            git add BUILD_APK_ERROR.txt
+          git fetch origin main
+          git reset --hard origin/main
+          git clean -fdx
+          cp /tmp/apk-result/BUILD_APK_RESULT.txt BUILD_APK_RESULT.txt
+          if [[ -f /tmp/apk-result/BUILD_APK_ERROR.txt ]]; then
+            cp /tmp/apk-result/BUILD_APK_ERROR.txt BUILD_APK_ERROR.txt
           else
-            git add -u BUILD_APK_ERROR.txt 2>/dev/null || true
+            rm -f BUILD_APK_ERROR.txt
           fi
+
+          git add BUILD_APK_RESULT.txt
+          git add -A BUILD_APK_ERROR.txt 2>/dev/null || true
           if git diff --cached --quiet; then
             exit 0
           fi

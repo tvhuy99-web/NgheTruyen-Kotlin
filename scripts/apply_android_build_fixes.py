@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import hashlib
 import subprocess
 
 
@@ -144,13 +145,21 @@ if "NAVIGATION_AUDIT_V3_PERSONAL" not in personal_text:
 else:
     print("REFERENCE_UI_V2_V3_ALREADY_PERSISTED")
 
-v4_parts = sorted(Path("scripts").glob("reference_parity_v4.part*.b64"))
-if not v4_parts:
-    raise SystemExit("Missing reference parity v4 payload")
+v4_parts = sorted(Path("scripts").glob("reference_parity_v4.c??"))
+if len(v4_parts) != 9:
+    raise SystemExit(f"Expected 9 verified parity v4 chunks, found {len(v4_parts)}")
+v4_text = "".join(part.read_text(encoding="utf-8").strip() for part in v4_parts)
+expected_sha = "15b637828d31a540485daf3a08dee9b1ae371e703e2980ef9e4e7e3e180a4f69"
+actual_sha = hashlib.sha256(v4_text.encode("ascii")).hexdigest()
+if actual_sha != expected_sha:
+    raise SystemExit(f"Parity v4 payload SHA mismatch: {actual_sha}")
+print("REFERENCE_PARITY_V4_PAYLOAD_OK")
 v4_payload = Path(".git/reference_parity_v4.py.gz.b64")
-v4_payload.write_text("".join(part.read_text(encoding="utf-8").strip() for part in v4_parts), encoding="utf-8")
+v4_payload.write_text(v4_text, encoding="ascii")
 v4_script = Path(".git/apply_reference_parity_v4.py")
 subprocess.run(["bash", "-lc", f"base64 -d {v4_payload} | gzip -d > {v4_script}"], check=True)
+if v4_script.stat().st_size != 66258:
+    raise SystemExit(f"Parity v4 script size mismatch: {v4_script.stat().st_size}")
 subprocess.run(["python3", str(v4_script)], check=True)
 
 print("ANDROID_BUILD_FIXES_APPLIED")

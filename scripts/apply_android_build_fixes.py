@@ -138,4 +138,5 @@ replace_exact(
 )
 
 subprocess.run(["python3", "scripts/finalize_reference_ui_polish_v2.py"], check=True)
+subprocess.run(["python3", "scripts/apply_navigation_audit_v3.py"], check=True)
 print("ANDROID_BUILD_FIXES_APPLIED")

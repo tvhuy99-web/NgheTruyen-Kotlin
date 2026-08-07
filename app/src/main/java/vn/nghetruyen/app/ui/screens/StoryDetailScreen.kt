@@ -94,6 +94,7 @@ fun StoryDetailScreen(
     var showExportDialog by remember(detail.story.id) { mutableStateOf(false) }
     var showVoiceRoleDialog by remember(detail.story.id) { mutableStateOf(false) }
     var showAdvancedOptions by remember(detail.story.id) { mutableStateOf(false) }
+    var showStoryMenu by remember(detail.story.id) { mutableStateOf(false) }
     fun defaultRoleDraft() = VoiceRoleDraft(
         roleName = "",
         enginePackage = state.selectedTtsEnginePackage,
@@ -156,7 +157,8 @@ fun StoryDetailScreen(
         if (detail.status.isNotBlank()) add(detail.status)
         add("${detail.chapters.size} chương")
     }.joinToString(" • ")
-    LaunchedEffect(selectedTab, visibleChapters.size, state.storyComments.size) {
+    val hasVoiceProfile = state.storyTtsProfiles.containsKey(detail.story.id)
+    LaunchedEffect(selectedTab, state.storyCommentsLoading) {
         delay(120)
         val announcement = when (selectedTab) {
             "intro" -> "Giới thiệu truyện ${detail.story.title}"
@@ -226,16 +228,112 @@ fun StoryDetailScreen(
             )
             ReferenceActionButton(
                 text = "TÙY CHỌN",
-                onClick = { showAdvancedOptions = !showAdvancedOptions },
-                selected = showAdvancedOptions,
+                onClick = { showStoryMenu = true },
+                selected = false,
                 selectedColor = ReferenceGray,
                 normalColor = ReferenceGray,
-                accessibilityLabel = if (showAdvancedOptions) "Đóng tùy chọn truyện" else "Mở tùy chọn truyện",
+                accessibilityLabel = "Tùy chọn truyện",
                 minHeight = 64.dp,
                 modifier = Modifier.weight(1f).padding(1.dp),
             )
         }
+        if (showStoryMenu) {
+            val following = state.following.any { it.storyId == detail.story.id }
+            AlertDialog(
+                onDismissRequest = { showStoryMenu = false },
+                title = { Text("TÙY CHỌN TRUYỆN") },
+                text = {
+                    Column {
+                        ReferenceActionButton(
+                            text = if (following) "BỎ THEO DÕI" else "THEO DÕI",
+                            onClick = {
+                                showStoryMenu = false
+                                onToggleFollowing()
+                            },
+                            selected = following,
+                            accessibilityLabel = if (following) "Bỏ theo dõi truyện" else "Theo dõi truyện",
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                        )
+                        ReferenceActionButton(
+                            text = "TẢI CHƯA ĐỌC",
+                            onClick = {
+                                showStoryMenu = false
+                                onDownloadUnread()
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                        )
+                        ReferenceActionButton(
+                            text = "TẢI KHOẢNG",
+                            onClick = {
+                                showStoryMenu = false
+                                showRangeDialog = true
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                        )
+                        if (detail.story.url.startsWith("https://")) {
+                            ReferenceActionButton(
+                                text = "MỞ TRANG GỐC",
+                                onClick = {
+                                    showStoryMenu = false
+                                    onOpenOriginal(detail.story.url)
+                                },
+                                normalColor = ReferenceGray,
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                            )
+                        }
+                        ReferenceActionButton(
+                            text = "XUẤT SÁCH NÓI",
+                            onClick = {
+                                showStoryMenu = false
+                                showExportDialog = true
+                            },
+                            normalColor = ReferencePurple,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                        )
+                        ReferenceActionButton(
+                            text = if (hasVoiceProfile) "CẬP NHẬT GIỌNG RIÊNG" else "LƯU GIỌNG RIÊNG",
+                            onClick = {
+                                showStoryMenu = false
+                                onSaveVoiceProfile()
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                        )
+                        if (hasVoiceProfile) {
+                            ReferenceActionButton(
+                                text = "BỎ GIỌNG RIÊNG",
+                                onClick = {
+                                    showStoryMenu = false
+                                    onClearVoiceProfile()
+                                },
+                                normalColor = ReferenceGray,
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                            )
+                        }
+                        ReferenceActionButton(
+                            text = "CẤU HÌNH GIỌNG & AI",
+                            onClick = {
+                                showStoryMenu = false
+                                showAdvancedOptions = true
+                            },
+                            normalColor = ReferenceGray,
+                            accessibilityLabel = "Mở cấu hình giọng đọc và AI nâng cao",
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showStoryMenu = false }) { Text("ĐÓNG") }
+                },
+            )
+        }
         if (showAdvancedOptions) {
+            ReferenceActionButton(
+                text = "ĐÓNG CẤU HÌNH NÂNG CAO",
+                onClick = { showAdvancedOptions = false },
+                normalColor = ReferenceGray,
+                accessibilityLabel = "Đóng cấu hình giọng đọc và AI nâng cao",
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
+            )
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
                 ReferenceActionButton(
                     text = "TẢI CHƯA ĐỌC",

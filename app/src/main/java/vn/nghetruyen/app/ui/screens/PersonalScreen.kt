@@ -42,7 +42,11 @@ import vn.nghetruyen.app.data.settings.AiProvider
 import vn.nghetruyen.app.sources.SourceCheckStatus
 import vn.nghetruyen.app.transfer.BackupComponent
 import vn.nghetruyen.app.ui.MainUiState
+import vn.nghetruyen.app.ui.components.ReferenceActionButton
+import vn.nghetruyen.app.ui.components.ReferenceGray
+import vn.nghetruyen.app.ui.components.ReferencePanelBackground
 import vn.nghetruyen.app.ui.components.ReferenceScreenBackground
+import vn.nghetruyen.app.ui.components.ReferenceText
 
 @Composable
 fun PersonalScreen(
@@ -151,7 +155,47 @@ fun PersonalScreen(
     onOpenSourceDiagnosticBrowser: (String) -> Unit,
     onClearSourceSession: (String) -> Unit,
 ) {
+    var personalPage by remember { mutableStateOf("home") }
+
+    if (personalPage == "home") {
+        Column(Modifier.fillMaxSize().background(ReferenceScreenBackground)) {
+            Text(
+                "CÁ NHÂN",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+            )
+            ReferenceActionButton(
+                text = "Cài đặt",
+                onClick = { personalPage = "settings" },
+                accessibilityLabel = "Cài đặt ứng dụng, giọng đọc và AI",
+                normalColor = ReferencePanelBackground,
+                normalContentColor = ReferenceText,
+                minHeight = 64.dp,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+            ReferenceActionButton(
+                text = "Tiện ích mở rộng",
+                onClick = { personalPage = "extensions" },
+                accessibilityLabel = "Quản lý nguồn truyện và tiện ích mở rộng",
+                normalColor = ReferencePanelBackground,
+                normalContentColor = ReferenceText,
+                minHeight = 64.dp,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+        }
+        return
+    }
+
     Column(Modifier.fillMaxSize().background(ReferenceScreenBackground).verticalScroll(rememberScrollState())) {
+        ReferenceActionButton(
+            text = "QUAY LẠI CÁ NHÂN",
+            onClick = { personalPage = "home" },
+            normalColor = ReferenceGray,
+            accessibilityLabel = "Quay lại danh sách Cá nhân",
+            modifier = Modifier.fillMaxWidth().padding(4.dp),
+        )
+        if (personalPage == "settings") {
         VoiceSettingsCard(
             rate = state.playback.rate,
             pitch = state.playback.pitch,
@@ -276,6 +320,9 @@ fun PersonalScreen(
             onExportBackup = onExportBackup,
             onRestoreBackup = onRestoreBackup,
         )
+        SettingsCard("Kiến trúc ứng dụng", "Kotlin, Compose, Room, DataStore, WorkManager và foreground TTS service. Lua Native Source API 2 chạy trong LuaJ sandbox; không AndroLua, không luajava và không nạp DEX động.")
+        }
+        if (personalPage == "extensions") {
         SourceManagementCard(
             state = state,
             onInstallSourcePack = onInstallSourcePack,

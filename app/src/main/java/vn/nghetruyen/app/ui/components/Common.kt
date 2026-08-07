@@ -85,7 +85,9 @@ fun ReferenceActionButton(
             .heightIn(min = minHeight)
             .semantics {
                 role = roleValue
-                this.selected = selected
+                if (roleValue == Role.Tab || selected) {
+                    this.selected = selected
+                }
                 contentDescription = accessibilityLabel + if (selected) ", đang chọn" else ""
             },
     ) {

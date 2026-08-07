@@ -165,11 +165,10 @@ fun ReaderScreen(
                     normalColor = ReferenceGray,
                     accessibilityLabel = "Quay lại màn hình trước",
                 )
-                ReaderButton("TÌM", { showSearchDialog = true }, Modifier.weight(0.8f), accessibilityLabel = "Tìm trong chương")
                 ReaderButton(
                     "TÙY CHỌN",
                     { showReaderActions = !showReaderActions },
-                    Modifier.weight(1f),
+                    Modifier.weight(1.8f),
                     normalColor = ReferenceGray,
                     selectedColor = ReferenceGray,
                     selected = showReaderActions,
@@ -178,7 +177,10 @@ fun ReaderScreen(
             }
             if (showReaderActions) {
                 Row(modifier = Modifier.fillMaxWidth()) {
+                    ReaderButton("TÌM", { showSearchDialog = true }, Modifier.weight(1f), accessibilityLabel = "Tìm trong chương")
                     ReaderButton("HIỂN THỊ", { showDisplayDialog = true }, Modifier.weight(1f))
+                }
+                Row(modifier = Modifier.fillMaxWidth()) {
                     ReaderButton("BẢN GỐC", onShowOriginal, Modifier.weight(1f))
                     ReaderButton("VIETPHRASE", onApplyVietPhrase, Modifier.weight(1f))
                 }
@@ -254,7 +256,7 @@ fun ReaderScreen(
                                 )
                                 .semantics(mergeDescendants = true) {
                                     role = Role.Button
-                                    this.selected = active
+                                    if (active) this.selected = true
                                     contentDescription = "Đoạn ${index + 1}" + (if (active) ", đang đọc. " else ". ") + content.paragraphs[index]
                                 }
                                 .clickable { onParagraphSelected(index) },
@@ -338,7 +340,7 @@ fun ReaderScreen(
                     when {
                         state.playback.preparationState == PlaybackPreparationState.PREPARING -> "ĐANG CHUẨN BỊ"
                         state.playback.preparationState == PlaybackPreparationState.FAILED -> "AI LỖI"
-                        state.playback.isPlaying -> "DỪNG"
+                        state.playback.isPlaying -> "TẠM DỪNG"
                         else -> "PHÁT"
                     },
                     onTogglePlayback,

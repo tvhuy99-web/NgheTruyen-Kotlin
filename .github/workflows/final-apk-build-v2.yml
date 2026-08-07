@@ -9,6 +9,7 @@ on:
       - ".github/workflows/final-apk-build-v2.yml"
       - "app/build.gradle.kts"
       - "app/src/**"
+      - "source-vbook/**"
 
 permissions:
   contents: write
@@ -19,6 +20,7 @@ concurrency:
 
 env:
   ARTIFACT_NAME: NgheTruyen-v2.8.0-debug-apk
+  VBOOK_RUNTIME_PATH: source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt
 
 jobs:
   build-apk:
@@ -30,6 +32,30 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Apply Rhino 1.9.1 compatibility patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = Path("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt")
+          text = source.read_text(encoding="utf-8")
+          text = text.replace(
+              "        classShutter = ClassShutter { false }",
+              "        setClassShutter(ClassShutter { false })",
+          )
+          text = text.replace(
+              '    override val ids: Array<Any> get() = Array(elements.size + 1) { index -> if (index < elements.size) index else "length" }',
+              '    override fun getIds(): Array<Any> = Array(elements.size + 1) { index -> if (index < elements.size) index else "length" }',
+          )
+          if "classShutter = ClassShutter" in text:
+              raise SystemExit("Rhino classShutter patch did not apply")
+          if "override val ids:" in text:
+              raise SystemExit("Rhino getIds patch did not apply")
+          source.write_text(text, encoding="utf-8")
+          PY
 
       - name: Record build start
         shell: bash
@@ -49,7 +75,7 @@ jobs:
             echo "ARTIFACT_NAME=${ARTIFACT_NAME}"
           } > BUILD_APK_RESULT.txt
           git add BUILD_APK_RESULT.txt
-          git commit -m "build: record APK build start"
+          git commit -m "build: record APK build start" || true
           git push origin HEAD:main
 
       - name: Set up JDK 17
@@ -132,7 +158,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          mkdir -p /tmp/apk-result
+          mkdir -p /tmp/apk-result/source-vbook
           CHECKSUM_LINE=""
           if [[ -f app-debug.apk.sha256 ]]; then
             CHECKSUM_LINE="$(cat app-debug.apk.sha256)"
@@ -140,6 +166,7 @@ jobs:
           if [[ -f BUILD_APK_ERROR.txt ]]; then
             cp BUILD_APK_ERROR.txt /tmp/apk-result/BUILD_APK_ERROR.txt
           fi
+          cp "$VBOOK_RUNTIME_PATH" /tmp/apk-result/source-vbook/VBookJsRuntime.kt
 
           {
             echo "STATUS=${{ job.status }}"
@@ -159,6 +186,8 @@ jobs:
           git fetch origin main
           git reset --hard origin/main
           git clean -fdx
+          mkdir -p "$(dirname "$VBOOK_RUNTIME_PATH")"
+          cp /tmp/apk-result/source-vbook/VBookJsRuntime.kt "$VBOOK_RUNTIME_PATH"
           cp /tmp/apk-result/BUILD_APK_RESULT.txt BUILD_APK_RESULT.txt
           if [[ -f /tmp/apk-result/BUILD_APK_ERROR.txt ]]; then
             cp /tmp/apk-result/BUILD_APK_ERROR.txt BUILD_APK_ERROR.txt
@@ -166,10 +195,10 @@ jobs:
             rm -f BUILD_APK_ERROR.txt
           fi
 
-          git add BUILD_APK_RESULT.txt
+          git add "$VBOOK_RUNTIME_PATH" BUILD_APK_RESULT.txt
           git add -A BUILD_APK_ERROR.txt 2>/dev/null || true
           if git diff --cached --quiet; then
             exit 0
           fi
-          git commit -m "build: record Android APK build result"
+          git commit -m "fix: update Rhino API and record APK build result"
           git push origin HEAD:main

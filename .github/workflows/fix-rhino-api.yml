@@ -57,3 +57,5 @@ jobs:
           git add -A
           git commit -m "fix: update VBook Rhino 1.9.1 API usage"
           git push origin HEAD:main
+
+# Triggered after workflow registration on the default branch.

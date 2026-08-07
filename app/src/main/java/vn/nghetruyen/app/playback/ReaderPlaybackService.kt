@@ -1410,7 +1410,7 @@ class ReaderPlaybackService : Service() {
         activeBaseVoice = config
         val chapterId = PlaybackQueueStore.state.value.chapterId
         voiceRoles = if (useStoryProfile && storyId.isNotBlank()) {
-            container.libraryRepository.listVoiceRoles(storyId)
+            container.libraryRepository.listEffectiveVoiceRoles(storyId, settings.autoVoiceCastEnabled)
         } else emptyList()
         val originalChapter = if (useStoryProfile && chapterId.isNotBlank()) {
             container.libraryRepository.loadCachedChapter(chapterId)

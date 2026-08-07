@@ -142,11 +142,10 @@ class OnlineAiServices(
     override suspend fun planVoiceCast(storyId: String, chapterId: String, rawText: String): AppResult<VoiceCastPlan> {
         if (rawText.length > MAX_PLAN_CHARS) return failure("AI_INPUT_TOO_LARGE", "Chương quá dài để phân vai trong một lượt.")
         val config = resolveConfiguration(storyId)
-        val existingRoles = libraryRepository.listVoiceRoles(storyId)
-            .filter { it.enabled }
+        val existingRoles = libraryRepository.listEffectiveVoiceRoles(storyId, settingsRepository.snapshot().autoVoiceCastEnabled)
             .take(40)
             .joinToString("\n") { role ->
-                "ROLE_EXISTING|${role.roleName.take(80)}|${role.aliasesCsv.take(400)}|${role.expression}"
+                "ROLE_EXISTING|${role.roleName.take(80)}|${role.aliasesCsv.take(400)}|${role.description.take(600)}|${role.expression}"
             }
             .ifBlank { "ROLE_EXISTING|Người kể chuyện|narrator|NEUTRAL" }
         val expressionRules = buildString {
@@ -238,11 +237,10 @@ class OnlineAiServices(
             return failure("AI_TRACKS_EMPTY", "Chưa có tệp nhạc cảnh đang bật.")
         }
         val config = resolveConfiguration(request.storyId)
-        val existingRoles = libraryRepository.listVoiceRoles(request.storyId)
-            .filter { it.enabled }
+        val existingRoles = libraryRepository.listEffectiveVoiceRoles(request.storyId, settingsRepository.snapshot().autoVoiceCastEnabled)
             .take(40)
             .joinToString("\n") { role ->
-                "ROLE_EXISTING|${role.roleName.take(80)}|${role.aliasesCsv.take(400)}|${role.expression}"
+                "ROLE_EXISTING|${role.roleName.take(80)}|${role.aliasesCsv.take(400)}|${role.description.take(600)}|${role.expression}"
             }
             .ifBlank { "ROLE_EXISTING|Người kể chuyện|narrator|NEUTRAL" }
         val expressionRules = buildString {

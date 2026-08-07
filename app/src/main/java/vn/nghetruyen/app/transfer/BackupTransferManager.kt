@@ -1423,6 +1423,7 @@ class BackupTransferManager(
             name("storyId").value(item.storyId)
             name("roleName").value(item.roleName)
             name("aliasesCsv").value(item.aliasesCsv)
+            name("description").value(item.description)
             name("enginePackage"); nullableValue(item.enginePackage)
             name("voiceName"); nullableValue(item.voiceName)
             name("languageTag").value(item.languageTag)
@@ -1445,7 +1446,7 @@ class BackupTransferManager(
         save: suspend (List<VoiceRoleEntity>) -> Unit,
     ): Int = readBatches(
         readItem = {
-            var id = ""; var storyId = ""; var roleName = ""; var aliases = ""
+            var id = ""; var storyId = ""; var roleName = ""; var aliases = ""; var description = ""
             var enginePackage: String? = null; var voiceName: String? = null; var languageTag = "vi-VN"
             var rate = 1f; var pitch = 1f; var volume = 1f
             var expression = "NEUTRAL"; var expressionStrength = 0.5f; var sonicSpeed = 1f; var sonicPitch = 1f
@@ -1456,6 +1457,7 @@ class BackupTransferManager(
                 "storyId" -> storyId = nextStringSafe("")
                 "roleName" -> roleName = nextStringSafe("")
                 "aliasesCsv" -> aliases = nextStringSafe("")
+                "description" -> description = nextStringSafe("").take(1000)
                 "enginePackage" -> enginePackage = nextNullableString()
                 "voiceName" -> voiceName = nextNullableString()
                 "languageTag" -> languageTag = nextStringSafe("vi-VN")
@@ -1474,7 +1476,7 @@ class BackupTransferManager(
             endObject()
             require(id.isNotBlank() && storyId.isNotBlank() && roleName.isNotBlank()) { "Vai giọng không hợp lệ." }
             VoiceRoleEntity(
-                id = id, storyId = storyId, roleName = roleName, aliasesCsv = aliases,
+                id = id, storyId = storyId, roleName = roleName, aliasesCsv = aliases, description = description,
                 enginePackage = enginePackage?.takeIf(String::isNotBlank), voiceName = voiceName,
                 languageTag = languageTag, rate = rate, pitch = pitch, volume = volume,
                 expression = expression, expressionStrength = expressionStrength,

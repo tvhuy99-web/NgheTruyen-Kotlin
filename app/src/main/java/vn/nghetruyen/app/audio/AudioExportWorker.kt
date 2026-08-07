@@ -81,7 +81,8 @@ class AudioExportWorker(
             if (chapters.isEmpty()) throw IOException("Chưa có nội dung chương để xuất. Hãy mở hoặc tải truyện trước.")
 
             val rules = container.libraryRepository.listEnabledPronunciations()
-            val roles = container.libraryRepository.listVoiceRoles(job.storyId).filter(VoiceRoleEntity::enabled)
+            val settings = container.settingsRepository.snapshot()
+            val roles = container.libraryRepository.listEffectiveVoiceRoles(job.storyId, settings.autoVoiceCastEnabled)
             val contentByChapter = LinkedHashMap<String, vn.nghetruyen.app.core.model.ChapterContent>()
             val assignmentsByChapter = LinkedHashMap<String, Map<Int, ChapterVoiceAssignmentEntity>>()
             for (chapter in chapters) {
@@ -99,7 +100,6 @@ class AudioExportWorker(
                 throw IOException("Bản xuất có quá nhiều đoạn. Hãy chia truyện thành nhiều khoảng chương.")
             }
 
-            val settings = container.settingsRepository.snapshot()
             val profile = container.libraryRepository.getStoryTtsProfile(job.storyId)
             val musicPlan = loadMusicPlan(job, chapters)
             val fingerprint = exportFingerprint(job, chunks, settings, profile, roles, rules, musicPlan)

@@ -36,6 +36,7 @@ import kotlinx.coroutines.delay
 import vn.nghetruyen.app.core.model.SearchSortMode
 import vn.nghetruyen.app.core.model.SourceHealth
 import vn.nghetruyen.app.core.model.StorySummary
+import vn.nghetruyen.app.sources.SourceUiSurface
 import vn.nghetruyen.app.ui.ExploreMode
 import vn.nghetruyen.app.ui.MainUiState
 import vn.nghetruyen.app.ui.components.LoadingRow
@@ -65,6 +66,7 @@ fun ExploreScreen(
     onStoryClick: (StorySummary) -> Unit,
     onOpenSourceLogin: (String) -> Unit,
     onCheckSource: (String) -> Unit,
+    onSourceUiAction: (String, String) -> Unit,
 ) {
     var sourceMenuOpen by remember { mutableStateOf(false) }
     var searchDialogOpen by remember { mutableStateOf(false) }
@@ -125,6 +127,27 @@ fun ExploreScreen(
                             onSourceSelected(source.id)
                         },
                     )
+                }
+            }
+
+            val customExploreActions = selectedSource?.uiActions.orEmpty()
+                .filter { SourceUiSurface.EXPLORE in it.surfaces }
+                .sortedWith(compareBy({ it.group }, { it.order }, { it.label }))
+            if (!state.searchAllSources && selectedSource != null && customExploreActions.isNotEmpty()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    customExploreActions.forEach { action ->
+                        ReferenceActionButton(
+                            text = action.label,
+                            onClick = { onSourceUiAction(selectedSource.id, action.id) },
+                            normalColor = ReferenceDivider,
+                            normalContentColor = ReferenceText,
+                            minHeight = 48.dp,
+                            modifier = Modifier.padding(1.dp),
+                        )
+                    }
                 }
             }
 

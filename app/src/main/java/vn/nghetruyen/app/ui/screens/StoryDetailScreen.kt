@@ -1,6 +1,7 @@
 package vn.nghetruyen.app.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
@@ -98,6 +99,7 @@ fun StoryDetailScreen(
     onOpenOriginal: (String) -> Unit,
     onCheckSource: (String) -> Unit,
     onOpenSourceLogin: (String) -> Unit,
+    onSourceUiAction: (String, String) -> Unit,
 ) {
     val detail = state.storyDetail ?: return
     val selectedTab = state.storyDetailTab
@@ -274,6 +276,22 @@ fun StoryDetailScreen(
                 minHeight = 64.dp,
                 modifier = Modifier.weight(1f).padding(1.dp),
             )
+        }
+        val customStoryActions = sourceDescriptor?.uiActions.orEmpty()
+            .filter { vn.nghetruyen.app.sources.SourceUiSurface.STORY in it.surfaces }
+            .sortedWith(compareBy({ it.group }, { it.order }, { it.label }))
+        if (sourceDescriptor != null && customStoryActions.isNotEmpty()) {
+            Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).background(ReferenceDivider).padding(2.dp)) {
+                customStoryActions.forEach { action ->
+                    ReferenceActionButton(
+                        text = action.label,
+                        onClick = { onSourceUiAction(sourceDescriptor.id, action.id) },
+                        normalColor = ReferenceGray,
+                        minHeight = 48.dp,
+                        modifier = Modifier.padding(1.dp),
+                    )
+                }
+            }
         }
         if (sourceDescriptor != null && (sourceDescriptor.loginUrl != null || sourceDescriptor.health != vn.nghetruyen.app.core.model.SourceHealth.READY)) {
             Row(modifier = Modifier.fillMaxWidth().background(ReferenceDivider).padding(2.dp)) {

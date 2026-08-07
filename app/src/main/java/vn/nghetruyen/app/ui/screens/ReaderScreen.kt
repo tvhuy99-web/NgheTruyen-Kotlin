@@ -3,6 +3,7 @@ package vn.nghetruyen.app.ui.screens
 // REFERENCE_PARITY_V4_READER: explicit Văn bản/TTS modes and reference-style options.
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -123,6 +124,7 @@ fun ReaderScreen(
     onSelectSceneMusic: () -> Unit,
     onOpenSourceLogin: (String) -> Unit,
     onCheckSource: (String) -> Unit,
+    onSourceUiAction: (String, String) -> Unit,
     onMessage: (String) -> Unit,
 ) {
     val content = state.chapterContent ?: return
@@ -283,6 +285,22 @@ fun ReaderScreen(
                 }
                 if (state.playback.preparationState == PlaybackPreparationState.PREPARING) {
                     Text("Đang chuẩn bị giọng đọc và nội dung tiếp theo…", modifier = Modifier.fillMaxWidth().padding(10.dp), color = palette.text)
+                }
+            }
+
+            val customReaderActions = readerSourceDescriptor?.uiActions.orEmpty()
+                .filter { vn.nghetruyen.app.sources.SourceUiSurface.READER in it.surfaces }
+                .sortedWith(compareBy({ it.group }, { it.order }, { it.label }))
+            if (readerSourceDescriptor != null && customReaderActions.isNotEmpty()) {
+                Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                    customReaderActions.forEach { action ->
+                        ReaderButton(
+                            action.label,
+                            { onSourceUiAction(readerSourceDescriptor.id, action.id) },
+                            Modifier.padding(1.dp),
+                            normalColor = ReferenceGray,
+                        )
+                    }
                 }
             }
 

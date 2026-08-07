@@ -82,6 +82,7 @@ data class VoiceRoleDraft(
     val roleName: String,
     val originalRoleId: String? = null,
     val aliases: String = "",
+    val description: String = "",
     val isNarrator: Boolean = false,
     val enginePackage: String? = null,
     val voiceName: String? = null,

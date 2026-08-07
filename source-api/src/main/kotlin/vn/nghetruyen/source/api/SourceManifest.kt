@@ -10,10 +10,24 @@ enum class SourceContentType { NOVEL, COMIC, AUDIO, MIXED }
 enum class SourceCookieMode { NONE, READ, WRITE, READ_WRITE, BROWSER_SHARED }
 enum class SourceCryptoCapability { MD5, SHA1, SHA256, SHA512, HMAC_MD5, HMAC_SHA1, HMAC_SHA256, HMAC_SHA512, AES_COMPAT, AES_GCM_SECRET }
 enum class SourceActionName {
-    HOME, GENRE, SEARCH, DETAIL, LATEST_CHAPTER, TOC_PAGES, TOC, CHAPTER, COMMENTS, SUGGESTIONS, LOGIN;
+    HOME, GENRE, SEARCH, DETAIL, LATEST_CHAPTER, TOC_PAGES, TOC, CHAPTER, COMMENTS, SUGGESTIONS, LOGIN, UI_ACTION;
 
-    val manifestKey: String get() = name.lowercase().replace("toc_pages", "tocPages")
+    val manifestKey: String get() = when (this) {
+        TOC_PAGES -> "tocPages"
+        UI_ACTION -> "uiAction"
+        else -> name.lowercase()
+    }
 }
+
+enum class SourceUiActionContext { EXPLORE, STORY, READER }
+
+data class SourceUiActionSpec(
+    val id: String,
+    val label: String,
+    val contexts: Set<SourceUiActionContext>,
+    val group: String = "",
+    val order: Int = 0,
+)
 
 data class SourceRuntimePolicy(
     val mode: SourceRuntimeMode,
@@ -95,6 +109,7 @@ data class SourceManifest(
     val redirectOrigins: Set<String> = emptySet(),
     val capabilities: SourceCapabilities,
     val actions: Map<SourceActionName, SourceActionSpec>,
+    val uiActions: List<SourceUiActionSpec> = emptyList(),
     val privacy: SourcePrivacyDisclosure = SourcePrivacyDisclosure(),
     val fixtures: List<SourceFixtureSpec> = emptyList(),
 ) {
@@ -113,6 +128,16 @@ data class SourceManifest(
             require(action.maxOutputBytes in 1024..4 * 1024 * 1024) { "SOURCE_ACTION_OUTPUT_LIMIT_INVALID" }
             action.timeoutMs?.let { require(it in 500..120_000) { "SOURCE_ACTION_TIMEOUT_INVALID" } }
         }
+        require(uiActions.size <= 24) { "SOURCE_UI_ACTIONS_TOO_MANY" }
+        require(uiActions.map { it.id }.distinct().size == uiActions.size) { "SOURCE_UI_ACTION_ID_DUPLICATE" }
+        uiActions.forEach { item ->
+            require(UI_ACTION_ID.matches(item.id)) { "SOURCE_UI_ACTION_ID_INVALID" }
+            require(item.label.isNotBlank() && item.label.length <= 80) { "SOURCE_UI_ACTION_LABEL_INVALID" }
+            require(item.contexts.isNotEmpty()) { "SOURCE_UI_ACTION_CONTEXT_REQUIRED" }
+            require(item.group.length <= 40) { "SOURCE_UI_ACTION_GROUP_INVALID" }
+            require(item.order in -1000..1000) { "SOURCE_UI_ACTION_ORDER_INVALID" }
+        }
+        require(uiActions.isEmpty() || SourceActionName.UI_ACTION in actions) { "SOURCE_UI_ACTION_HANDLER_MISSING" }
         runtime.entry?.let(::requireSafeRelativePath)
         require(runtime.instructionBudget in 1_000..1_000_000) { "SOURCE_INSTRUCTION_BUDGET_INVALID" }
         require(runtime.memoryBudgetBytes in 1024 * 1024..64 * 1024 * 1024) { "SOURCE_MEMORY_BUDGET_INVALID" }
@@ -135,6 +160,7 @@ data class SourceManifest(
     companion object {
         private val ID_PATTERN = Regex("^[a-z][a-z0-9]*(\\.[a-z0-9][a-z0-9-]*){2,}$")
         private val LOCALE_PATTERN = Regex("^[a-z]{2,3}(?:-[A-Z]{2})?$")
+        private val UI_ACTION_ID = Regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
         private val REQUIRED_ACTIONS = setOf(SourceActionName.DETAIL, SourceActionName.TOC, SourceActionName.CHAPTER)
         private val ALLOWED_METHODS = setOf("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE")
 

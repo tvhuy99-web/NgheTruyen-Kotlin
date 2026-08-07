@@ -7,6 +7,8 @@ import vn.nghetruyen.app.core.model.ChapterSummary
 import vn.nghetruyen.app.core.model.DownloadSelectionMode
 import vn.nghetruyen.app.core.model.DownloadState
 import vn.nghetruyen.app.core.model.ImportedBook
+import vn.nghetruyen.app.core.model.DEFAULT_GLOBAL_VOICE_PROFILES
+import vn.nghetruyen.app.core.model.GLOBAL_VOICE_PROFILE_STORY_ID
 import vn.nghetruyen.app.core.model.StorySummary
 import vn.nghetruyen.app.data.local.AppDatabase
 import vn.nghetruyen.app.data.local.AiUsageDailyEntity
@@ -438,6 +440,53 @@ class LibraryRepository(private val db: AppDatabase) {
     suspend fun listVoiceRoles(storyId: String): List<VoiceRoleEntity> =
         db.voiceRoleDao().listForStory(storyId)
 
+    suspend fun listEffectiveVoiceRoles(storyId: String, includeGlobal: Boolean = true): List<VoiceRoleEntity> {
+        val local = db.voiceRoleDao().listForStory(storyId).filter(VoiceRoleEntity::enabled)
+        if (!includeGlobal || storyId == GLOBAL_VOICE_PROFILE_STORY_ID) return local
+        val global = db.voiceRoleDao().listForStory(GLOBAL_VOICE_PROFILE_STORY_ID).filter(VoiceRoleEntity::enabled)
+        if (local.isEmpty()) return global
+        val overridden = local.map { it.roleName.trim().lowercase(Locale.ROOT) }.toSet()
+        return local + global.filter { it.roleName.trim().lowercase(Locale.ROOT) !in overridden }
+    }
+
+    suspend fun ensureGlobalVoiceProfiles() {
+        if (db.voiceRoleDao().listForStory(GLOBAL_VOICE_PROFILE_STORY_ID).isEmpty()) restoreGlobalVoiceProfiles()
+    }
+
+    suspend fun restoreGlobalVoiceProfiles(): List<VoiceRoleEntity> = db.withTransaction {
+        val existing = db.voiceRoleDao().listForStory(GLOBAL_VOICE_PROFILE_STORY_ID)
+        val byName = existing.associateBy { it.roleName.trim().lowercase(Locale.ROOT) }
+        val defaultNames = DEFAULT_GLOBAL_VOICE_PROFILES.map { it.name.lowercase(Locale.ROOT) }.toSet()
+        val now = System.currentTimeMillis()
+        val defaults = DEFAULT_GLOBAL_VOICE_PROFILES.map { seed ->
+            val old = byName[seed.name.lowercase(Locale.ROOT)]
+            VoiceRoleEntity(
+                id = old?.id ?: UUID.nameUUIDFromBytes("$GLOBAL_VOICE_PROFILE_STORY_ID\u0000${seed.name.lowercase(Locale.ROOT)}".toByteArray()).toString(),
+                storyId = GLOBAL_VOICE_PROFILE_STORY_ID,
+                roleName = seed.name,
+                aliasesCsv = old?.aliasesCsv.orEmpty(),
+                description = seed.description,
+                enginePackage = old?.enginePackage,
+                voiceName = old?.voiceName,
+                languageTag = old?.languageTag?.ifBlank { "vi-VN" } ?: "vi-VN",
+                rate = old?.rate ?: 1f,
+                pitch = old?.pitch ?: 1f,
+                volume = old?.volume ?: 1f,
+                expression = old?.expression ?: "NEUTRAL",
+                expressionStrength = old?.expressionStrength ?: 0.5f,
+                sonicSpeed = old?.sonicSpeed ?: 1f,
+                sonicPitch = old?.sonicPitch ?: 1f,
+                isNarrator = seed.narrator,
+                enabled = true,
+                updatedAt = now,
+            )
+        }
+        val custom = existing.filter { it.roleName.trim().lowercase(Locale.ROOT) !in defaultNames }.take((10 - defaults.size).coerceAtLeast(0))
+        db.voiceRoleDao().deleteForStory(GLOBAL_VOICE_PROFILE_STORY_ID)
+        db.voiceRoleDao().upsertAll(defaults + custom)
+        defaults + custom
+    }
+
     suspend fun saveVoiceRole(
         storyId: String,
         roleName: String,
@@ -454,6 +503,7 @@ class LibraryRepository(private val db: AppDatabase) {
         sonicSpeed: Float = 1.0f,
         sonicPitch: Float = 1.0f,
         enabled: Boolean = true,
+        description: String = "",
     ): Result<String> = runCatching {
         require(storyId.isNotBlank()) { "Thiếu mã truyện." }
         val cleanName = roleName.trim().take(80)
@@ -466,6 +516,7 @@ class LibraryRepository(private val db: AppDatabase) {
                 storyId = storyId,
                 roleName = cleanName,
                 aliasesCsv = aliasesCsv.trim().take(500),
+                description = description.trim().take(1000),
                 enginePackage = enginePackage?.takeIf(String::isNotBlank),
                 voiceName = voiceName?.takeIf(String::isNotBlank),
                 languageTag = languageTag.ifBlank { "vi-VN" },

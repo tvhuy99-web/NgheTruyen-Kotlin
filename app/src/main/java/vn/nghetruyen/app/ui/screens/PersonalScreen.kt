@@ -40,6 +40,9 @@ import vn.nghetruyen.app.core.model.SourceHealth
 import vn.nghetruyen.app.core.model.SceneMusicPlaybackMode
 import vn.nghetruyen.app.core.model.TtsEngineOption
 import vn.nghetruyen.app.core.model.TtsVoiceOption
+import vn.nghetruyen.app.core.model.VoiceRoleDraft
+import vn.nghetruyen.app.core.model.VoiceExpression
+import vn.nghetruyen.app.core.model.GLOBAL_VOICE_PROFILE_STORY_ID
 import vn.nghetruyen.app.ai.vietphrase.VietPhraseDictionaryKind
 import vn.nghetruyen.app.ai.vietphrase.VietPhraseScope
 import vn.nghetruyen.app.data.local.AudioExportJobEntity
@@ -57,6 +60,9 @@ import vn.nghetruyen.app.ui.components.ReferencePanelBackground
 import vn.nghetruyen.app.ui.components.ReferenceScreenBackground
 import vn.nghetruyen.app.ui.components.ReferenceText
 import vn.nghetruyen.app.ui.components.ScreenHeading
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun PersonalScreen(
@@ -80,6 +86,11 @@ fun PersonalScreen(
     onPauseOnHeadsetDisconnectChange: (Boolean) -> Unit,
     onRestorePlaybackChange: (Boolean) -> Unit,
     onAutoVoiceCastChange: (Boolean) -> Unit,
+    onSaveGlobalVoiceRole: (VoiceRoleDraft) -> Unit,
+    onGlobalVoiceRoleEnabledChange: (String, Boolean) -> Unit,
+    onDeleteGlobalVoiceRole: (String) -> Unit,
+    onRestoreGlobalVoiceProfiles: () -> Unit,
+    onPreviewGlobalVoiceRole: (VoiceRoleDraft) -> Unit,
     onAutoSceneMusicChange: (Boolean) -> Unit,
     onPrefetchNarrationPlansChange: (Boolean) -> Unit,
     onNarrationPrefetchWindowChange: (Int) -> Unit,
@@ -294,6 +305,11 @@ fun PersonalScreen(
             ReferenceVoiceCastSettingsCard(
                 state = state,
                 onAutoVoiceCastChange = onAutoVoiceCastChange,
+                onSaveGlobalVoiceRole = onSaveGlobalVoiceRole,
+                onGlobalVoiceRoleEnabledChange = onGlobalVoiceRoleEnabledChange,
+                onDeleteGlobalVoiceRole = onDeleteGlobalVoiceRole,
+                onRestoreGlobalVoiceProfiles = onRestoreGlobalVoiceProfiles,
+                onPreviewGlobalVoiceRole = onPreviewGlobalVoiceRole,
             )
         }
         "settings_other" -> PersonalSubPage("CÀI ĐẶT KHÁC", "QUAY LẠI CÀI ĐẶT", { returnToSettings() }) {
@@ -553,7 +569,24 @@ fun PersonalScreen(
             onDismissRequest = { showBackupLogDialog = false; showSettingsDialog = true },
             title = { Text("NHẬT KÝ SAO LƯU VÀ KHÔI PHỤC") },
             text = {
-                Text("Bản Kotlin hiện chưa lưu lịch sử sao lưu/khôi phục riêng. Các thao tác sao lưu và khôi phục vẫn dùng bộ quản lý dữ liệu hiện có.")
+                Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
+                    if (state.backupHistory.isEmpty()) {
+                        Text("Chưa có lần sao lưu hoặc khôi phục nào được ghi nhận.")
+                    } else {
+                        val formatter = remember { SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()) }
+                        state.backupHistory.forEachIndexed { index, entry ->
+                            if (index > 0) HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                            Text(
+                                "${if (entry.operation == "RESTORE") "KHÔI PHỤC" else "SAO LƯU"} • ${if (entry.success) "THÀNH CÔNG" else "THẤT BẠI"}",
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(formatter.format(Date(entry.timestampEpochMs)), style = MaterialTheme.typography.bodySmall)
+                            Text(entry.summary, modifier = Modifier.padding(top = 3.dp))
+                            if (entry.components.isNotEmpty()) Text("Nhóm: ${entry.components.joinToString()}", style = MaterialTheme.typography.bodySmall)
+                            entry.errorCode?.let { Text("Mã lỗi: $it", style = MaterialTheme.typography.bodySmall) }
+                        }
+                    }
+                }
             },
             confirmButton = {
                 TextButton(onClick = { showBackupLogDialog = false; showSettingsDialog = true }) { Text("ĐÓNG") }
@@ -1240,7 +1273,15 @@ private fun MediaMappingButton(label: String, value: String, onChange: (String) 
 private fun ReferenceVoiceCastSettingsCard(
     state: MainUiState,
     onAutoVoiceCastChange: (Boolean) -> Unit,
+    onSaveGlobalVoiceRole: (VoiceRoleDraft) -> Unit,
+    onGlobalVoiceRoleEnabledChange: (String, Boolean) -> Unit,
+    onDeleteGlobalVoiceRole: (String) -> Unit,
+    onRestoreGlobalVoiceProfiles: () -> Unit,
+    onPreviewGlobalVoiceRole: (VoiceRoleDraft) -> Unit,
 ) {
+    val roles = state.voiceRoles.filter { it.storyId == GLOBAL_VOICE_PROFILE_STORY_ID }.take(10)
+    var editDraft by remember { mutableStateOf<VoiceRoleDraft?>(null) }
+
     Card(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 5.dp)) {
         Column(Modifier.padding(16.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -1248,36 +1289,126 @@ private fun ReferenceVoiceCastSettingsCard(
                 Switch(checked = state.autoVoiceCastEnabled, onCheckedChange = onAutoVoiceCastChange)
             }
             Text(
-                "Bộ hồ sơ này là tiêu chuẩn dùng chung. Cấu hình vai riêng của từng truyện được mở từ TÙY CHỌN ĐỌC.",
+                "Bộ hồ sơ này được dùng làm fallback cho phát TTS, phân vai AI và xuất âm thanh khi truyện chưa có vai riêng.",
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
             )
-            if (state.voiceRoles.isEmpty()) {
-                Text("Chưa có hồ sơ giọng chung hiển thị trong kho dữ liệu Kotlin hiện tại.", style = MaterialTheme.typography.bodySmall)
-            } else {
-                state.voiceRoles.take(10).forEach { role ->
-                    Text(
-                        (if (role.enabled) "✓ " else "○ ") + (if (role.isNarrator) "Người kể chuyện" else role.roleName),
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp),
-                    )
+            roles.forEach { role ->
+                Card(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                    Column(Modifier.padding(10.dp)) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text(if (role.isNarrator) "Người kể chuyện" else role.roleName, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                            Switch(
+                                checked = role.enabled,
+                                onCheckedChange = { onGlobalVoiceRoleEnabledChange(role.id, it) },
+                                enabled = !role.isNarrator,
+                            )
+                        }
+                        role.description.takeIf(String::isNotBlank)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                        Row(Modifier.fillMaxWidth()) {
+                            Button(onClick = {
+                                editDraft = VoiceRoleDraft(
+                                    roleName = role.roleName,
+                                    originalRoleId = role.id,
+                                    aliases = role.aliasesCsv,
+                                    description = role.description,
+                                    isNarrator = role.isNarrator,
+                                    enginePackage = role.enginePackage,
+                                    voiceName = role.voiceName,
+                                    languageTag = role.languageTag,
+                                    rate = role.rate,
+                                    pitch = role.pitch,
+                                    volume = role.volume,
+                                    expression = runCatching { VoiceExpression.valueOf(role.expression) }.getOrDefault(VoiceExpression.NEUTRAL),
+                                    expressionStrength = role.expressionStrength,
+                                    sonicSpeed = role.sonicSpeed,
+                                    sonicPitch = role.sonicPitch,
+                                    enabled = role.enabled,
+                                )
+                            }, modifier = Modifier.weight(1f).padding(2.dp)) { Text("SỬA") }
+                            if (!role.isNarrator) {
+                                Button(onClick = { onDeleteGlobalVoiceRole(role.id) }, modifier = Modifier.weight(1f).padding(2.dp)) { Text("XÓA") }
+                            }
+                        }
+                    }
                 }
             }
             Button(
-                onClick = { },
-                enabled = false,
+                onClick = {
+                    editDraft = VoiceRoleDraft(
+                        roleName = "Giọng mới ${roles.size + 1}",
+                        enginePackage = state.selectedTtsEnginePackage,
+                        voiceName = state.selectedTtsVoiceName,
+                        languageTag = state.selectedTtsLanguageTag,
+                        rate = state.playback.rate,
+                        pitch = state.playback.pitch,
+                        volume = state.ttsVolume,
+                    )
+                },
+                enabled = roles.size < 10,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             ) { Text("THÊM GIỌNG") }
             Button(
-                onClick = { },
-                enabled = false,
+                onClick = onRestoreGlobalVoiceProfiles,
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
             ) { Text("KHÔI PHỤC 7 HỒ SƠ MẪU") }
-            Text(
-                "Hai nút quản lý hồ sơ được giữ đúng vị trí tham chiếu; backend hồ sơ giọng chung sẽ được nối với kho vai ở bước dữ liệu.",
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(top = 6.dp),
-            )
         }
+    }
+
+    editDraft?.let { draft ->
+        AlertDialog(
+            onDismissRequest = { editDraft = null },
+            title = { Text(if (draft.originalRoleId == null) "THÊM GIỌNG" else "SỬA HỒ SƠ GIỌNG") },
+            text = {
+                Column(Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState())) {
+                    OutlinedTextField(
+                        value = draft.roleName,
+                        onValueChange = { if (!draft.isNarrator) editDraft = draft.copy(roleName = it.take(80)) },
+                        label = { Text("Tên hồ sơ") },
+                        enabled = !draft.isNarrator,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = draft.description,
+                        onValueChange = { editDraft = draft.copy(description = it.take(1000)) },
+                        label = { Text("Mô tả để AI nhận diện vai") },
+                        minLines = 3,
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                    )
+                    OutlinedTextField(
+                        value = draft.aliases,
+                        onValueChange = { editDraft = draft.copy(aliases = it.take(500)) },
+                        label = { Text("Bí danh, phân cách bằng dấu phẩy") },
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                    )
+                    Text("Bộ đọc: ${draft.enginePackage ?: "mặc định"}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
+                    Text("Giọng: ${draft.voiceName ?: "mặc định"} • ${draft.languageTag}", style = MaterialTheme.typography.bodySmall)
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Tốc độ ${"%.2f".format(draft.rate)}×", Modifier.weight(1f))
+                        TextButton(onClick = { editDraft = draft.copy(rate = (draft.rate - 0.05f).coerceAtLeast(0.5f)) }) { Text("−") }
+                        TextButton(onClick = { editDraft = draft.copy(rate = (draft.rate + 0.05f).coerceAtMost(2f)) }) { Text("+") }
+                    }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Cao độ ${"%.2f".format(draft.pitch)}×", Modifier.weight(1f))
+                        TextButton(onClick = { editDraft = draft.copy(pitch = (draft.pitch - 0.05f).coerceAtLeast(0.5f)) }) { Text("−") }
+                        TextButton(onClick = { editDraft = draft.copy(pitch = (draft.pitch + 0.05f).coerceAtMost(2f)) }) { Text("+") }
+                    }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Âm lượng ${"%.0f".format(draft.volume * 100)}%", Modifier.weight(1f))
+                        TextButton(onClick = { editDraft = draft.copy(volume = (draft.volume - 0.05f).coerceAtLeast(0.05f)) }) { Text("−") }
+                        TextButton(onClick = { editDraft = draft.copy(volume = (draft.volume + 0.05f).coerceAtMost(1f)) }) { Text("+") }
+                    }
+                    Button(onClick = { onPreviewGlobalVoiceRole(draft) }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) { Text("NGHE THỬ") }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = draft.roleName.isNotBlank(),
+                    onClick = { onSaveGlobalVoiceRole(draft); editDraft = null },
+                ) { Text("LƯU") }
+            },
+            dismissButton = { TextButton(onClick = { editDraft = null }) { Text("HỦY") } },
+        )
     }
 }
 

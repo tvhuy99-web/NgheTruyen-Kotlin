@@ -52,6 +52,7 @@ import vn.nghetruyen.app.core.model.StorySummary
 import vn.nghetruyen.app.core.model.TtsEngineOption
 import vn.nghetruyen.app.core.model.TtsVoiceOption
 import vn.nghetruyen.app.core.model.VoiceRoleDraft
+import vn.nghetruyen.app.core.model.GLOBAL_VOICE_PROFILE_STORY_ID
 import vn.nghetruyen.app.data.local.AudioExportJobEntity
 import vn.nghetruyen.app.data.local.AiUsageDailyEntity
 import vn.nghetruyen.app.data.local.ChapterTransformEntity
@@ -88,6 +89,7 @@ import vn.nghetruyen.app.sources.SourceDescriptor
 import vn.nghetruyen.app.sources.SourceDiagnosticBrowserActivity
 import vn.nghetruyen.app.sources.SourceLoginActivity
 import vn.nghetruyen.app.sources.StorySearch
+import vn.nghetruyen.app.sources.SourceUiSurface
 import vn.nghetruyen.app.sourceplatform.SourceInstallPreview
 import vn.nghetruyen.app.sourceplatform.SourceDiagnosticUi
 import vn.nghetruyen.app.sourceplatform.StoryCommentCache
@@ -101,6 +103,7 @@ import vn.nghetruyen.app.downloads.DownloadRequest
 import vn.nghetruyen.app.downloads.DownloadStorageGuard
 import vn.nghetruyen.app.downloads.StoryDownloadPlanner
 import vn.nghetruyen.app.transfer.BackupComponent
+import vn.nghetruyen.app.transfer.BackupHistoryEntry
 import vn.nghetruyen.app.transfer.VietPhraseTransferManager
 import vn.nghetruyen.app.diagnostics.PerformanceDiagnostics
 import java.text.Normalizer
@@ -215,6 +218,7 @@ data class MainUiState(
     val vietPhraseOnlineBusy: Boolean = false,
     val vietPhraseOnlineStatus: String = "",
     val backupComponents: Set<BackupComponent> = BackupComponent.entries.toSet(),
+    val backupHistory: List<BackupHistoryEntry> = emptyList(),
     val sceneMusicTracks: List<SceneMusicTrackEntity> = emptyList(),
     val aiOnline: AiOnlineSettings = AiOnlineSettings(),
     val aiUsageRecent: List<AiUsageDailyEntity> = emptyList(),
@@ -261,6 +265,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             sourceDiagnosticCount = container.sourcePlatformManager.diagnosticsSnapshot().size,
             sourceDiagnostics = container.sourcePlatformManager.diagnosticSummaries(),
             sourceTraces = container.sourcePlatformManager.diagnosticTraces(),
+            backupHistory = container.backupHistoryStore.entries(),
         ),
     )
     val state: StateFlow<MainUiState> = mutableState.asStateFlow()
@@ -285,6 +290,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         refreshSourceSessions()
         refreshSourcePlatformState()
         refreshAiCredentialState()
+        viewModelScope.launch { container.libraryRepository.ensureGlobalVoiceProfiles() }
         search("")
     }
 
@@ -2170,6 +2176,61 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun saveGlobalVoiceRole(draft: VoiceRoleDraft) {
+        viewModelScope.launch {
+            container.libraryRepository.saveVoiceRole(
+                storyId = GLOBAL_VOICE_PROFILE_STORY_ID,
+                roleName = draft.roleName,
+                aliasesCsv = draft.aliases,
+                voiceName = draft.voiceName,
+                languageTag = draft.languageTag,
+                rate = draft.rate,
+                pitch = draft.pitch,
+                volume = draft.volume,
+                isNarrator = draft.isNarrator,
+                enginePackage = draft.enginePackage,
+                expression = draft.expression.name,
+                expressionStrength = draft.expressionStrength,
+                sonicSpeed = draft.sonicSpeed,
+                sonicPitch = draft.sonicPitch,
+                enabled = draft.enabled,
+                description = draft.description,
+            ).onSuccess { savedId ->
+                draft.originalRoleId?.takeIf { it != savedId }?.let { container.libraryRepository.deleteVoiceRole(it) }
+                ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
+                showMessage("Đã lưu hồ sơ giọng chung ${draft.roleName}.")
+            }.onFailure { showMessage(it.message ?: "Không lưu được hồ sơ giọng chung.") }
+        }
+    }
+
+    fun setGlobalVoiceRoleEnabled(id: String, enabled: Boolean) {
+        viewModelScope.launch {
+            container.libraryRepository.setVoiceRoleEnabled(id, enabled)
+            ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
+        }
+    }
+
+    fun deleteGlobalVoiceRole(id: String) {
+        viewModelScope.launch {
+            val role = state.value.voiceRoles.firstOrNull { it.id == id && it.storyId == GLOBAL_VOICE_PROFILE_STORY_ID } ?: return@launch
+            if (role.isNarrator) {
+                showMessage("Người kể chuyện là hồ sơ bắt buộc và không thể xóa.")
+                return@launch
+            }
+            container.libraryRepository.deleteVoiceRole(id)
+            ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
+            showMessage("Đã xóa hồ sơ giọng chung ${role.roleName}.")
+        }
+    }
+
+    fun restoreGlobalVoiceProfiles() {
+        viewModelScope.launch {
+            val roles = container.libraryRepository.restoreGlobalVoiceProfiles()
+            ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
+            showMessage("Đã khôi phục 7 hồ sơ mẫu; hiện có ${roles.size} hồ sơ giọng chung.")
+        }
+    }
+
     fun saveVoiceRoleForCurrentStory(draft: VoiceRoleDraft) {
         val storyId = state.value.storyDetail?.story?.id
             ?: state.value.chapterContent?.chapter?.storyId
@@ -2191,6 +2252,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 sonicSpeed = draft.sonicSpeed,
                 sonicPitch = draft.sonicPitch,
                 enabled = draft.enabled,
+                description = draft.description,
             ).onSuccess { savedId ->
                 draft.originalRoleId
                     ?.takeIf { it != savedId }
@@ -2721,6 +2783,41 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun runSourceUiAction(sourceId: String, actionId: String, surface: SourceUiSurface) {
+        val source = container.sourceRegistry.get(sourceId) ?: run {
+            showMessage("Không tìm thấy nguồn cho action này.")
+            return
+        }
+        val snapshot = state.value
+        val currentUrl = when (surface) {
+            SourceUiSurface.EXPLORE -> source.descriptor.baseUrl
+            SourceUiSurface.STORY -> snapshot.storyDetail?.story?.url
+            SourceUiSurface.READER -> snapshot.chapterContent?.chapter?.url
+        }
+        val storyId = snapshot.storyDetail?.story?.id ?: snapshot.chapterContent?.chapter?.storyId
+        val chapterId = snapshot.chapterContent?.chapter?.id
+        viewModelScope.launch {
+            when (val result = source.runUiAction(actionId, surface, currentUrl, storyId, chapterId)) {
+                is AppResult.Failure -> showMessage(result.message)
+                is AppResult.Success -> {
+                    result.value.openUrl?.takeIf(String::isNotBlank)?.let(::openExternalUrl)
+                    result.value.message.takeIf(String::isNotBlank)?.let(::showMessage)
+                    if (result.value.refresh) {
+                        when (surface) {
+                            SourceUiSurface.EXPLORE -> when (state.value.exploreMode) {
+                                ExploreMode.HOME -> browseHome()
+                                ExploreMode.CATEGORY -> state.value.activeCategory?.let(::browseCategory) ?: browseHome()
+                                ExploreMode.SEARCH -> search()
+                            }
+                            SourceUiSurface.STORY -> state.value.storyDetail?.story?.let(::openStory)
+                            SourceUiSurface.READER -> state.value.chapterContent?.chapter?.let(::openChapter)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fun openExternalUrl(url: String) {
         val uri = runCatching { Uri.parse(url) }.getOrNull()
         if (uri == null || uri.scheme != "https" || uri.host.isNullOrBlank()) {
@@ -2786,13 +2883,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             mutableState.update { it.copy(loading = true, message = "Đang tạo bản sao lưu…") }
             val selected = state.value.backupComponents
             when (val result = container.backupTransferManager.exportTo(destination, selected)) {
-                is AppResult.Success -> mutableState.update {
-                    it.copy(
-                        loading = false,
-                        message = "Đã sao lưu ${result.value.components.size} nhóm dữ liệu, ${result.value.stories} truyện và ${result.value.chapters} chương.",
-                    )
+                is AppResult.Success -> {
+                    val message = "Đã sao lưu ${result.value.components.size} nhóm dữ liệu, ${result.value.stories} truyện và ${result.value.chapters} chương."
+                    container.backupHistoryStore.record("BACKUP", true, message, components = result.value.components.map { it.name })
+                    mutableState.update { it.copy(loading = false, message = message, backupHistory = container.backupHistoryStore.entries()) }
                 }
-                is AppResult.Failure -> mutableState.update { it.copy(loading = false, message = result.message) }
+                is AppResult.Failure -> {
+                    container.backupHistoryStore.record("BACKUP", false, result.message, result.code, selected.map { it.name })
+                    mutableState.update { it.copy(loading = false, message = result.message, backupHistory = container.backupHistoryStore.entries()) }
+                }
             }
         }
     }
@@ -2802,13 +2901,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             mutableState.update { it.copy(loading = true, message = "Đang kiểm tra và khôi phục…") }
             val selected = state.value.backupComponents
             when (val result = container.backupTransferManager.restoreFrom(source, selected)) {
-                is AppResult.Success -> mutableState.update {
-                    it.copy(
-                        loading = false,
-                        message = "Đã khôi phục ${result.value.components.size} nhóm dữ liệu, ${result.value.stories} truyện và ${result.value.chapters} chương.",
-                    )
+                is AppResult.Success -> {
+                    val message = "Đã khôi phục ${result.value.components.size} nhóm dữ liệu, ${result.value.stories} truyện và ${result.value.chapters} chương."
+                    container.backupHistoryStore.record("RESTORE", true, message, components = result.value.components.map { it.name })
+                    mutableState.update { it.copy(loading = false, message = message, backupHistory = container.backupHistoryStore.entries()) }
                 }
-                is AppResult.Failure -> mutableState.update { it.copy(loading = false, message = result.message) }
+                is AppResult.Failure -> {
+                    container.backupHistoryStore.record("RESTORE", false, result.message, result.code, selected.map { it.name })
+                    mutableState.update { it.copy(loading = false, message = result.message, backupHistory = container.backupHistoryStore.entries()) }
+                }
             }
         }
     }

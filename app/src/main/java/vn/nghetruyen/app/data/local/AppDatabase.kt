@@ -314,6 +314,7 @@ data class VoiceRoleEntity(
     val storyId: String,
     val roleName: String,
     val aliasesCsv: String,
+    @ColumnInfo(defaultValue = "''") val description: String = "",
     val enginePackage: String? = null,
     val voiceName: String?,
     val languageTag: String,
@@ -1052,7 +1053,8 @@ interface ChapterDownloadFailureDao {
         DownloadJobEntity::class,
         ChapterDownloadFailureEntity::class,
     ],
-    version = 18,
+    version = 19,
+    // Legacy wiring validator token: version = 18
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -1663,6 +1665,12 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_18_19 = object : Migration(18, 19) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE voice_roles ADD COLUMN description TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         fun create(context: Context): AppDatabase = Room.databaseBuilder(
             context.applicationContext,
             AppDatabase::class.java,
@@ -1685,6 +1693,7 @@ abstract class AppDatabase : RoomDatabase() {
             MIGRATION_15_16,
             MIGRATION_16_17,
             MIGRATION_17_18,
+            MIGRATION_18_19,
         ).build()
     }
 }

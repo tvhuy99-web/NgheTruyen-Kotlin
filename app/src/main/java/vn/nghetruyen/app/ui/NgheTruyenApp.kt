@@ -27,6 +27,7 @@ import vn.nghetruyen.app.ui.screens.ReaderScreen
 import vn.nghetruyen.app.ui.screens.StoryDetailScreen
 import vn.nghetruyen.app.ui.components.ReferenceDivider
 import vn.nghetruyen.app.ui.components.ReferenceScreenBackground
+import vn.nghetruyen.app.sources.SourceUiSurface
 import vn.nghetruyen.app.ui.components.ReferenceTabButton
 
 @Composable
@@ -90,6 +91,7 @@ fun NgheTruyenApp(
                         onStoryClick = viewModel::openStory,
                         onOpenSourceLogin = viewModel::openSourceLogin,
                         onCheckSource = viewModel::checkSource,
+                        onSourceUiAction = { sourceId, actionId -> viewModel.runSourceUiAction(sourceId, actionId, SourceUiSurface.EXPLORE) },
                     )
                     RootTab.LIBRARY -> LibraryScreen(
                         state = state,
@@ -130,6 +132,11 @@ fun NgheTruyenApp(
                         onPauseOnHeadsetDisconnectChange = viewModel::setPauseOnHeadsetDisconnect,
                         onRestorePlaybackChange = viewModel::setRestorePlaybackAfterProcessDeath,
                         onAutoVoiceCastChange = viewModel::setAutoVoiceCastEnabled,
+                        onSaveGlobalVoiceRole = viewModel::saveGlobalVoiceRole,
+                        onGlobalVoiceRoleEnabledChange = viewModel::setGlobalVoiceRoleEnabled,
+                        onDeleteGlobalVoiceRole = viewModel::deleteGlobalVoiceRole,
+                        onRestoreGlobalVoiceProfiles = viewModel::restoreGlobalVoiceProfiles,
+                        onPreviewGlobalVoiceRole = viewModel::previewVoiceRole,
                         onAutoSceneMusicChange = viewModel::setAutoSceneMusicEnabled,
                         onPrefetchNarrationPlansChange = viewModel::setPrefetchNarrationPlansEnabled,
                         onNarrationPrefetchWindowChange = viewModel::setNarrationPrefetchWindowChapters,
@@ -251,6 +258,7 @@ fun NgheTruyenApp(
                     onOpenOriginal = viewModel::openExternalUrl,
                     onCheckSource = viewModel::checkSource,
                     onOpenSourceLogin = viewModel::openSourceLogin,
+                    onSourceUiAction = { sourceId, actionId -> viewModel.runSourceUiAction(sourceId, actionId, SourceUiSurface.STORY) },
                 )
                 Destination.Reader -> ReaderScreen(
                     state = state,
@@ -311,6 +319,7 @@ fun NgheTruyenApp(
                     onSelectSceneMusic = onSelectSceneMusic,
                     onOpenSourceLogin = viewModel::openSourceLogin,
                     onCheckSource = viewModel::checkSource,
+                    onSourceUiAction = { sourceId, actionId -> viewModel.runSourceUiAction(sourceId, actionId, SourceUiSurface.READER) },
                     onMessage = viewModel::readerActionMessage,
                 )
             }

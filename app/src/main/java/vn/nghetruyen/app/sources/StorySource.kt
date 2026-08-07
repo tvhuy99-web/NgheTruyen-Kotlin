@@ -26,6 +26,22 @@ enum class SourceImplementationKind {
     PLACEHOLDER,
 }
 
+enum class SourceUiSurface { EXPLORE, STORY, READER }
+
+data class SourceUiActionDescriptor(
+    val id: String,
+    val label: String,
+    val surfaces: Set<SourceUiSurface>,
+    val group: String = "",
+    val order: Int = 0,
+)
+
+data class SourceUiActionResult(
+    val message: String = "",
+    val openUrl: String? = null,
+    val refresh: Boolean = false,
+)
+
 data class SourceDescriptor(
     val id: String,
     val displayName: String,
@@ -40,6 +56,7 @@ data class SourceDescriptor(
     val supportsHome: Boolean = true,
     val supportsSuggestions: Boolean = false,
     val implementationKind: SourceImplementationKind = SourceImplementationKind.BUILT_IN,
+    val uiActions: List<SourceUiActionDescriptor> = emptyList(),
 )
 
 
@@ -83,6 +100,17 @@ interface StorySource {
     suspend fun commentsPage(url: String): AppResult<StoryCommentPage> = AppResult.Failure(
         code = "COMMENTS_UNSUPPORTED",
         message = "Nguồn này chưa hỗ trợ lấy bình luận trong ứng dụng.",
+    )
+
+    suspend fun runUiAction(
+        actionId: String,
+        surface: SourceUiSurface,
+        currentUrl: String? = null,
+        storyId: String? = null,
+        chapterId: String? = null,
+    ): AppResult<SourceUiActionResult> = AppResult.Failure(
+        code = "SOURCE_UI_ACTION_UNSUPPORTED",
+        message = "Nguồn này không có action giao diện tương ứng.",
     )
 
     suspend fun latestChapter(url: String): AppResult<ChapterSummary?> = when (val result = story(url)) {

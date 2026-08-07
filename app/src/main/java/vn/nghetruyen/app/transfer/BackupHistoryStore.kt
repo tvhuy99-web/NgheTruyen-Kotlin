@@ -1,0 +1,88 @@
+package vn.nghetruyen.app.transfer
+
+import android.content.Context
+import org.json.JSONArray
+import org.json.JSONObject
+import java.util.UUID
+
+data class BackupHistoryEntry(
+    val id: String,
+    val timestampEpochMs: Long,
+    val operation: String,
+    val success: Boolean,
+    val summary: String,
+    val errorCode: String? = null,
+    val components: List<String> = emptyList(),
+)
+
+class BackupHistoryStore(context: Context) {
+    private val preferences = context.applicationContext.getSharedPreferences("backup_history_v1", Context.MODE_PRIVATE)
+
+    @Synchronized
+    fun entries(): List<BackupHistoryEntry> = decode(preferences.getString(KEY, null))
+
+    @Synchronized
+    fun record(
+        operation: String,
+        success: Boolean,
+        summary: String,
+        errorCode: String? = null,
+        components: Collection<String> = emptyList(),
+    ): BackupHistoryEntry {
+        val entry = BackupHistoryEntry(
+            id = UUID.randomUUID().toString(),
+            timestampEpochMs = System.currentTimeMillis(),
+            operation = operation.take(20),
+            success = success,
+            summary = summary.trim().take(1200),
+            errorCode = errorCode?.trim()?.take(120),
+            components = components.map(String::trim).filter(String::isNotBlank).distinct().take(20),
+        )
+        val updated = (listOf(entry) + entries()).distinctBy(BackupHistoryEntry::id).take(MAX_ENTRIES)
+        preferences.edit().putString(KEY, encode(updated)).apply()
+        return entry
+    }
+
+    @Synchronized
+    fun clear() { preferences.edit().remove(KEY).apply() }
+
+    private fun encode(items: List<BackupHistoryEntry>): String = JSONArray().apply {
+        items.forEach { item ->
+            put(JSONObject().apply {
+                put("id", item.id)
+                put("timestampEpochMs", item.timestampEpochMs)
+                put("operation", item.operation)
+                put("success", item.success)
+                put("summary", item.summary)
+                put("errorCode", item.errorCode ?: JSONObject.NULL)
+                put("components", JSONArray(item.components))
+            })
+        }
+    }.toString()
+
+    private fun decode(raw: String?): List<BackupHistoryEntry> = runCatching {
+        val array = JSONArray(raw ?: "[]")
+        buildList {
+            for (index in 0 until array.length().coerceAtMost(MAX_ENTRIES)) {
+                val obj = array.optJSONObject(index) ?: continue
+                val id = obj.optString("id").takeIf(String::isNotBlank) ?: continue
+                add(BackupHistoryEntry(
+                    id = id,
+                    timestampEpochMs = obj.optLong("timestampEpochMs", 0L),
+                    operation = obj.optString("operation").take(20),
+                    success = obj.optBoolean("success", false),
+                    summary = obj.optString("summary").take(1200),
+                    errorCode = obj.optString("errorCode").takeIf { it.isNotBlank() && it != "null" }?.take(120),
+                    components = obj.optJSONArray("components")?.let { values ->
+                        buildList { for (i in 0 until values.length()) values.optString(i).takeIf(String::isNotBlank)?.let(::add) }
+                    }.orEmpty(),
+                ))
+            }
+        }.sortedByDescending(BackupHistoryEntry::timestampEpochMs)
+    }.getOrDefault(emptyList())
+
+    companion object {
+        private const val KEY = "entries"
+        private const val MAX_ENTRIES = 100
+    }
+}

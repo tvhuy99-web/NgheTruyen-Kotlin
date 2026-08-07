@@ -151,7 +151,7 @@ class NarrationPlanCoordinator(
 
     private suspend fun persistVoicePlan(content: ChapterContent, plan: VoiceCastPlan) {
         val appSettings = settings.snapshot()
-        val existing = library.listVoiceRoles(content.chapter.storyId)
+        val existing = library.listEffectiveVoiceRoles(content.chapter.storyId, appSettings.autoVoiceCastEnabled)
             .associateBy { it.roleName.trim().lowercase(Locale.ROOT) }
         val voices = when (val scan = voiceCatalog.load(appSettings.ttsEnginePackage)) {
             is AppResult.Success -> scan.value

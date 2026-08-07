@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - scripts/reference_ui_parity_deep.py
+      - scripts/fix_reference_ui_parity_deep.py
       - .github/workflows/reference-ui-parity-deep.yml
 
 permissions:
@@ -29,8 +30,10 @@ jobs:
           java-version: '17'
           cache: gradle
 
-      - name: Apply deep hierarchy parity
-        run: python3 scripts/reference_ui_parity_deep.py
+      - name: Normalize and apply deep hierarchy parity
+        run: |
+          python3 scripts/fix_reference_ui_parity_deep.py
+          python3 scripts/reference_ui_parity_deep.py
 
       - name: Validate wiring
         run: python3 scripts/validate_release.py --wiring-only
@@ -42,7 +45,7 @@ jobs:
         run: |
           rm -rf .gradle
           rm -f app/schemas/vn.nghetruyen.app.data.local.AppDatabase/18.json
-          rm scripts/reference_ui_parity_deep.py .github/workflows/reference-ui-parity-deep.yml
+          rm scripts/reference_ui_parity_deep.py scripts/fix_reference_ui_parity_deep.py .github/workflows/reference-ui-parity-deep.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A

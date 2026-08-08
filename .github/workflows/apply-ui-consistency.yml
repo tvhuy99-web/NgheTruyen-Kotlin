@@ -4,6 +4,8 @@ permissions:
   contents: write
 
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [fix/global-voice-role-editor]
 
@@ -140,12 +142,6 @@ jobs:
 
           personal_path = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt')
           personal = personal_path.read_text()
-          personal = replace_once(
-              personal,
-              '                            Text(if (role.isNarrator) "Người kể chuyện" else role.roleName, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)\n',
-              '                            Text(if (role.isNarrator) "Người kể chuyện" else role.roleName, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)\n',
-              'global role name',
-          )
           personal = replace_once(
               personal,
               '                        Row(Modifier.fillMaxWidth()) {\n                            Button(onClick = {',

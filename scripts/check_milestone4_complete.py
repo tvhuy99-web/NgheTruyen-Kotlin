@@ -41,7 +41,7 @@ fun main(){
  check(speech.expression==VoiceExpression.ANGRY && speech.rateMultiplier>1f)
  val tracks=listOf(SceneMusicTrackEntity(id="a",title="A",uri="a",tagsCsv="calm",orderIndex=0),SceneMusicTrackEntity(id="b",title="B",uri="b",tagsCsv="battle",orderIndex=1))
  check(SceneMusicSelector.select(tracks,null,"",SceneMusicPlaybackMode.SEQUENTIAL,emptyList(),"x")?.id=="a")
- val dir=createTempDir(); val input=File(dir,"i.wav"); val output=File(dir,"o.wav"); wave(input,4000)
+ val tempRoot=File(System.getenv("RUNNER_TEMP") ?: System.getenv("TMPDIR") ?: ".").apply{mkdirs()}; val dir=java.nio.file.Files.createTempDirectory(tempRoot.toPath(),"nghe-m4-smoke-").toFile(); val input=File(dir,"i.wav"); val output=File(dir,"o.wav"); wave(input,4000)
  val before=PcmLoudnessEstimator.estimateLufs(input); check(before in -70f..0f)
  val processed=SonicPcmProcessor.process(input,output,2f,1f); check(processed.dataLength in 7000L..9000L)
  dir.deleteRecursively(); println("MILESTONE4_COMPLETE_SMOKE_OK")
@@ -53,6 +53,7 @@ fun main(){
             entities,
             ROOT / "app/src/main/java/vn/nghetruyen/app/audio/WaveFileAssembler.kt",
             ROOT / "app/src/main/java/vn/nghetruyen/app/audio/PcmLoudnessEstimator.kt",
+            ROOT / "app/src/main/java/vn/nghetruyen/app/audio/ReferenceSonicRuntime.kt",
             ROOT / "app/src/main/java/vn/nghetruyen/app/audio/SonicPcmProcessor.kt",
             ROOT / "app/src/main/java/vn/nghetruyen/app/playback/VoiceExpressionProcessor.kt",
             ROOT / "app/src/main/java/vn/nghetruyen/app/playback/SceneMusicSelector.kt",

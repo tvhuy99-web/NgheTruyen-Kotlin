@@ -1,3 +1,15 @@
+## 2.9.0-xpk-parity (2026-08-08)
+
+- Chuyển route sản xuất sang màn Cá nhân đầy đủ và nối toàn bộ cấu hình TTS/Sonic, tai nghe, cache, following, export, nguồn, trust và diagnostics.
+- Sửa fallback AI: dịch lỗi tự động quay về bản gốc ở trạng thái playback sẵn sàng; Reader vẫn có nút phục hồi trực tiếp khi gặp trạng thái lỗi cũ.
+- Hoàn thiện Reader cuộn/từng đoạn, ghi chú theo đoạn, tùy chỉnh hiển thị, thao tác VietPhrase/AI và xuất âm thanh ngay cả khi đang xem văn bản.
+- Thêm lịch sử đọc Room theo chương/đoạn/thời gian, giới hạn 500 mục, tìm/mở/xóa trong Tủ truyện và đưa vào backup chọn lọc.
+- Hoàn thiện tải chưa đọc/khoảng/chọn nhiều/toàn bộ với Wi-Fi/sạc; thêm ưu tiên WorkManager expedited có fallback và foreground info tương thích.
+- Mở UI xuất sách nói nhiều phạm vi, WAV/M4A/MP3, một tệp/từng chương, nhạc cảnh và chapter marker.
+- Hoàn thiện quản lý VietPhrase: preview/commit nhập file, thêm/sửa/bật/tắt/xóa rule, trạng thái dictionary, snapshot rollback và duyệt suggestion AI.
+- Đồng bộ Source Platform với `BuildConfig.VERSION_NAME`; nâng Room schema 21→22, backup format 15→16, versionCode 32→33.
+- Thêm gate `check_xpk_parity_v290.py` và sửa các compiler gate Kotlin/audio/VietPhrase đã lỗi thời.
+
 ## 2.8.0-ai-narration-priority2-complete (2026-08-06)
 
 - Chặn playback, notification và media-button trong khi auto-translation đang chuẩn bị; khi lỗi phải thử lại hoặc chọn bản gốc rõ ràng.

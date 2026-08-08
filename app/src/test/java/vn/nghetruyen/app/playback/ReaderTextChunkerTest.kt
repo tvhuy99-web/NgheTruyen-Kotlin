@@ -33,6 +33,7 @@ class ReaderTextChunkerTest {
             sourceId = "source",
             storyId = "story",
             chapterId = "chapter",
+            chapterIndex = 0,
             chapterTitle = "Chương 1",
             paragraphs = listOf(longParagraph, "Đoạn thứ hai"),
         )
@@ -58,6 +59,7 @@ class ReaderTextChunkerTest {
             sourceId = "source",
             storyId = "story",
             chapterId = "chapter",
+            chapterIndex = 0,
             chapterTitle = "Chương 1",
             paragraphs = listOf("", "Nội dung"),
             startIndex = 99,

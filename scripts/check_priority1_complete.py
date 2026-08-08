@@ -133,7 +133,7 @@ def main() -> None:
     assert "fixture.input" in fixture_runner and "resources.read(fixture.input" in fixture_runner
     manager = (ROOT / "app/src/main/java/vn/nghetruyen/app/sourceplatform/SourcePlatformManager.kt").read_text(encoding="utf-8")
     assert "SourceFixtureExecutor" in manager and "VBookJsRuntime" in manager
-    assert "SemanticVersion(2, 7, 0)" in manager
+    assert "SemanticVersion.parse(BuildConfig.VERSION_NAME)" in manager
 
     keys = load_trust_keys()
     assert any(key_id == "nghe-truyen-priority1-p256-v2" for key_id, _ in keys)

@@ -5,13 +5,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 import java.io.FileOutputStream
+import kotlin.io.path.createTempDirectory
 import kotlin.math.PI
 import kotlin.math.sin
 
 class Mp3LameEncoderTest {
     @Test
     fun encodesPcm16WaveWithId3AndMp3Frames() {
-        val root = createTempDir(prefix = "mp3-lame-test-")
+        val root = createTempDirectory("mp3-lame-test-").toFile()
         try {
             val wav = File(root, "input.wav")
             val mp3 = File(root, "output.mp3")

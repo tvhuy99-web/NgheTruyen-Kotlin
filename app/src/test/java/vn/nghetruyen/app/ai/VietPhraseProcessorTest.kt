@@ -6,7 +6,15 @@ import vn.nghetruyen.app.data.local.VietPhraseEntity
 
 class VietPhraseProcessorTest {
     private fun rule(id: Long, source: String, target: String, priority: Int = 0, enabled: Boolean = true) =
-        VietPhraseEntity(id, source, target, priority, enabled, 0L, 0L)
+        VietPhraseEntity(
+            id = id,
+            source = source,
+            target = target,
+            priority = priority,
+            enabled = enabled,
+            createdAt = 0L,
+            updatedAt = 0L,
+        )
 
     @Test fun priorityThenLongestRuleWinsWithoutCascading() {
         val rules = listOf(

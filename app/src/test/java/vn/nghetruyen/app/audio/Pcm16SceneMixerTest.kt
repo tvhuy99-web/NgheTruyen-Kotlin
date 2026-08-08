@@ -5,11 +5,12 @@ import org.junit.Test
 import java.io.File
 import java.io.FileOutputStream
 import java.io.RandomAccessFile
+import kotlin.io.path.createTempDirectory
 
 class Pcm16SceneMixerTest {
     @Test
     fun mixesLoopingLayerWithoutLoadingNarrationIntoMemory() {
-        val root = createTempDir(prefix = "scene-mix-test-")
+        val root = createTempDirectory("scene-mix-test-").toFile()
         try {
             val voice = File(root, "voice.wav")
             val music = File(root, "music.wav")

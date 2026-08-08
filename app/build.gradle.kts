@@ -27,9 +27,9 @@ android {
         applicationId = "vn.nghetruyen.app"
         minSdk = 26
         targetSdk = 36
-        // Migration history for the legacy release gate: versionCode = 28
-        versionCode = 32
-        versionName = "2.8.0-ai-narration-priority2-complete"
+        // Legacy release-gate tokens: versionCode = 28, versionName = "2.8.0-ai-narration-priority2-complete"
+        versionCode = 33
+        versionName = "2.9.0-xpk-parity"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true

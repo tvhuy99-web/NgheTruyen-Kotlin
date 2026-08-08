@@ -46,6 +46,7 @@ import vn.nghetruyen.app.data.local.StoryTtsProfileEntity
 import vn.nghetruyen.app.data.local.StoryAiProfileEntity
 import vn.nghetruyen.app.data.local.VoiceRoleEntity
 import vn.nghetruyen.app.data.local.ReadingProgressEntity
+import vn.nghetruyen.app.data.local.ReadingHistoryEntity
 import vn.nghetruyen.app.data.local.StoryEntity
 import java.util.Locale
 import java.util.UUID
@@ -59,6 +60,7 @@ data class CacheTrimResult(
 class LibraryRepository(private val db: AppDatabase) {
     fun observeReading(): Flow<List<StoryEntity>> = db.storyDao().observeReading()
     fun observeReadingProgress(): Flow<List<ReadingProgressEntity>> = db.progressDao().observeAll()
+    fun observeReadingHistory(): Flow<List<ReadingHistoryEntity>> = db.readingHistoryDao().observeRecent()
     fun observeOffline(): Flow<List<StoryEntity>> = db.storyDao().observeOffline()
     fun observeBookmarks(): Flow<List<BookmarkEntity>> = db.bookmarkDao().observeAll()
     fun observeNotes(): Flow<List<ChapterNoteEntity>> = db.chapterNoteDao().observeAll()
@@ -112,6 +114,39 @@ class LibraryRepository(private val db: AppDatabase) {
     suspend fun deleteBookmark(bookmarkId: String) {
         db.bookmarkDao().delete(bookmarkId)
     }
+
+    suspend fun recordReadingHistory(
+        sourceId: String,
+        storyTitle: String,
+        chapter: ChapterSummary,
+        paragraphIndex: Int,
+        totalParagraphs: Int,
+    ) {
+        val storedStory = db.storyDao().get(chapter.storyId)
+        val safeTotal = totalParagraphs.coerceAtLeast(0)
+        val safeParagraph = if (safeTotal > 0) {
+            paragraphIndex.coerceIn(0, safeTotal - 1)
+        } else 0
+        val id = UUID.nameUUIDFromBytes(
+            "reading-history\u0000${chapter.storyId}\u0000${chapter.id}".toByteArray(),
+        ).toString()
+        db.readingHistoryDao().upsert(
+            ReadingHistoryEntity(
+                id = id,
+                storyId = chapter.storyId,
+                sourceId = sourceId.ifBlank { storedStory?.sourceId.orEmpty() },
+                storyTitle = storyTitle.ifBlank { storedStory?.title.orEmpty() }.ifBlank { "Truyện" },
+                chapterId = chapter.id,
+                chapterTitle = chapter.title.ifBlank { "Chương ${chapter.index + 1}" },
+                paragraphIndex = safeParagraph,
+                totalParagraphs = safeTotal,
+                visitedAt = System.currentTimeMillis(),
+            ),
+        )
+        db.readingHistoryDao().prune(500)
+    }
+
+    suspend fun clearReadingHistory() = db.readingHistoryDao().clear()
 
 
     suspend fun saveNote(
@@ -756,6 +791,46 @@ class LibraryRepository(private val db: AppDatabase) {
                 updatedAt = now,
             ),
         )
+    }
+
+    suspend fun updateVietPhrase(
+        id: Long,
+        source: String,
+        target: String,
+        priority: Int,
+        kind: VietPhraseDictionaryKind,
+        scope: VietPhraseScope,
+        storyId: String?,
+        ignoreCase: Boolean,
+    ): Result<Unit> = runCatching {
+        val cleanSource = source.trim()
+        val cleanTarget = target.trim()
+        require(cleanSource.isNotBlank()) { "Cụm nguồn không được để trống." }
+        require(cleanTarget.isNotBlank()) { "Cụm thay thế không được để trống." }
+        require(cleanSource.length <= 2_000 && cleanTarget.length <= 4_000) { "Quy tắc VietPhrase quá dài." }
+        require(scope != VietPhraseScope.STORY || !storyId.isNullOrBlank()) { "Quy tắc theo truyện phải có storyId." }
+        val dao = db.vietPhraseDao()
+        val existing = dao.get(id) ?: error("Quy tắc VietPhrase không còn tồn tại.")
+        val matchMode = when {
+            existing.matchMode == "REGEX" -> "REGEX"
+            Regex("\\{\\d+}").containsMatchIn(cleanSource) -> VietPhraseMatchMode.TEMPLATE.name
+            else -> VietPhraseMatchMode.LITERAL.name
+        }
+        check(
+            dao.update(
+                existing.copy(
+                    source = cleanSource,
+                    target = cleanTarget,
+                    priority = priority.coerceIn(-999, 999),
+                    kind = kind.name,
+                    scope = scope.name,
+                    storyId = storyId.orEmpty(),
+                    matchMode = matchMode,
+                    ignoreCase = ignoreCase,
+                    updatedAt = System.currentTimeMillis(),
+                ),
+            ) == 1,
+        ) { "Không cập nhật được quy tắc VietPhrase." }
     }
 
     suspend fun importVietPhrase(items: List<VietPhraseEntity>) = db.withTransaction {

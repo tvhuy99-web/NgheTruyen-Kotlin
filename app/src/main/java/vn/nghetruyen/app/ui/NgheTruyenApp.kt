@@ -18,8 +18,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import vn.nghetruyen.app.audio.AudioExportRequest
-import vn.nghetruyen.app.audio.AudioExportScope
-import vn.nghetruyen.app.core.model.AudioExportFormat
 import vn.nghetruyen.app.ui.screens.ExploreScreen
 import vn.nghetruyen.app.ui.screens.LibraryScreen
 import vn.nghetruyen.app.ui.screens.PersonalScreen
@@ -42,6 +40,7 @@ fun NgheTruyenApp(
     onSelectBackgroundMusic: () -> Unit,
     onSelectSceneMusic: () -> Unit,
     onInstallSourcePack: () -> Unit,
+    onExportSourcePack: (String, String) -> Unit,
     onImportSourceTrustRotation: () -> Unit,
     onExportSourceDiagnostics: () -> Unit,
     onTogglePlayback: () -> Unit,
@@ -101,6 +100,7 @@ fun NgheTruyenApp(
                         onPauseDownload = viewModel::pauseDownload,
                         onResumeDownload = viewModel::resumeDownload,
                         onRetryDownload = viewModel::retryDownload,
+                        onPrioritizeDownload = viewModel::prioritizeDownload,
                         onRetryFailedChapter = viewModel::retryFailedChapter,
                         onCancelDownload = viewModel::cancelDownload,
                         onRemoveOffline = viewModel::removeOfflineStory,
@@ -109,6 +109,8 @@ fun NgheTruyenApp(
                         onDeleteBookmark = viewModel::deleteBookmark,
                         onNoteClick = viewModel::openNote,
                         onDeleteNote = viewModel::deleteNote,
+                        onHistoryClick = viewModel::openReadingHistory,
+                        onClearReadingHistory = viewModel::clearReadingHistory,
                         onFollowingClick = viewModel::openFollowedStory,
                     )
                     RootTab.PERSONAL -> PersonalScreen(
@@ -162,6 +164,7 @@ fun NgheTruyenApp(
                         onPronunciationEnabledChange = viewModel::setPronunciationEnabled,
                         onDeletePronunciation = viewModel::deletePronunciation,
                         onAddVietPhrase = viewModel::addVietPhrase,
+                        onUpdateVietPhrase = viewModel::updateVietPhrase,
                         onImportVietPhrase = onImportVietPhrase,
                         onExportVietPhrase = onExportVietPhrase,
                         onCheckVietPhraseOnline = viewModel::checkVietPhraseOnlineUpdates,
@@ -211,6 +214,9 @@ fun NgheTruyenApp(
                         onCancelSourcePackInstall = viewModel::cancelSourcePackInstall,
                         onSourcePackEnabledChange = viewModel::setSourcePackEnabled,
                         onRollbackSourcePack = viewModel::rollbackSourcePack,
+                        onUpdateSourcePack = viewModel::updateSourcePack,
+                        onExportSourcePack = onExportSourcePack,
+                        onRemoveSourcePack = viewModel::removeSourcePack,
                         onEnrollSourceTrustKey = viewModel::enrollSourceTrustKey,
                         onRevokeSourceTrustKey = viewModel::revokeSourceTrustKey,
                         onInspectSourceSelector = viewModel::inspectSourceSelector,
@@ -271,9 +277,7 @@ fun NgheTruyenApp(
                     onSleepTimer = viewModel::setSleepTimer,
                     onSleepTimerByChapters = viewModel::setSleepTimerByChapters,
                     onBookmark = viewModel::bookmarkCurrent,
-                    onExportChapterWav = { onExportAudio(AudioExportRequest(AudioExportScope.CURRENT_CHAPTER, AudioExportFormat.WAV)) },
-                    onExportChapterM4a = { onExportAudio(AudioExportRequest(AudioExportScope.CURRENT_CHAPTER, AudioExportFormat.M4A)) },
-                    onExportChapterMp3 = { onExportAudio(AudioExportRequest(AudioExportScope.CURRENT_CHAPTER, AudioExportFormat.MP3)) },
+                    onExportAudio = onExportAudio,
                     onSaveVoiceProfile = viewModel::saveVoiceProfileForCurrentStory,
                     onClearVoiceProfile = viewModel::clearVoiceProfileForCurrentStory,
                     onThemeChange = viewModel::setReaderTheme,

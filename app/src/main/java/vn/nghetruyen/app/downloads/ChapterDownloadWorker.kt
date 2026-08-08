@@ -34,6 +34,11 @@ class ChapterDownloadWorker(
 
     private var notificationTitle: String = "Tải truyện ngoại tuyến"
 
+    override suspend fun getForegroundInfo(): ForegroundInfo {
+        createNotificationChannel()
+        return createForegroundInfo(0, "Đang chuẩn bị")
+    }
+
     override suspend fun doWork(): Result {
         val sourceId = inputData.getString(KEY_SOURCE_ID) ?: return Result.failure(error("Thiếu sourceId"))
         val storyId = inputData.getString(KEY_STORY_ID) ?: return Result.failure(error("Thiếu storyId"))

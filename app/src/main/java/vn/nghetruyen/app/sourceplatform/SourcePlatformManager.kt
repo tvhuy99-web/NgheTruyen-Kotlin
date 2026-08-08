@@ -1,6 +1,7 @@
 package vn.nghetruyen.app.sourceplatform
 
 import android.content.Context
+import vn.nghetruyen.app.BuildConfig
 import vn.nghetruyen.app.sources.SourceSessionStore
 import vn.nghetruyen.app.ai.TranslationEngine
 import vn.nghetruyen.app.sources.StorySource
@@ -511,7 +512,7 @@ class SourcePlatformManager(
     private data class SelfTestSummary(val checkCount: Int)
 
     companion object {
-        val CURRENT_APP_VERSION = SemanticVersion(2, 7, 0)
+        val CURRENT_APP_VERSION: SemanticVersion = SemanticVersion.parse(BuildConfig.VERSION_NAME)
         private const val REPOSITORY_INDEX_FILE = "index.json"
         private const val REPOSITORY_URL_FILE = "url.txt"
         private val REPOSITORY_ID = Regex("^[a-z][a-z0-9]*(\\.[a-z0-9][a-z0-9-]*){2,}$")

@@ -4,11 +4,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 import java.io.FileOutputStream
+import kotlin.io.path.createTempDirectory
 
 class PcmLoudnessEstimatorTest {
     @Test
     fun louderWaveProducesHigherEstimateAndLowerNormalizationGain() {
-        val root = createTempDir(prefix = "loudness-test-")
+        val root = createTempDirectory("loudness-test-").toFile()
         try {
             val quiet = File(root, "quiet.wav")
             val loud = File(root, "loud.wav")

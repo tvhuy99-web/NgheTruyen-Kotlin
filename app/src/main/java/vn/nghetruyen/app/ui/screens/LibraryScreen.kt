@@ -35,6 +35,7 @@ import vn.nghetruyen.app.data.local.ChapterDownloadFailureEntity
 import vn.nghetruyen.app.data.local.ChapterNoteEntity
 import vn.nghetruyen.app.data.local.DownloadJobEntity
 import vn.nghetruyen.app.data.local.FollowedStoryEntity
+import vn.nghetruyen.app.data.local.ReadingHistoryEntity
 import vn.nghetruyen.app.data.local.StoryEntity
 import vn.nghetruyen.app.ui.LibrarySection
 import vn.nghetruyen.app.ui.MainUiState
@@ -43,6 +44,9 @@ import vn.nghetruyen.app.ui.components.ReferenceDivider
 import vn.nghetruyen.app.ui.components.ReferenceScreenBackground
 import vn.nghetruyen.app.ui.components.ReferenceTabButton
 import vn.nghetruyen.app.ui.components.ReferenceText
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun LibraryScreen(
@@ -53,6 +57,7 @@ fun LibraryScreen(
     onPauseDownload: (String) -> Unit,
     onResumeDownload: (String) -> Unit,
     onRetryDownload: (String) -> Unit,
+    onPrioritizeDownload: (String) -> Unit,
     onRetryFailedChapter: (String) -> Unit,
     onCancelDownload: (String) -> Unit,
     onRemoveOffline: (String) -> Unit,
@@ -61,6 +66,8 @@ fun LibraryScreen(
     onDeleteBookmark: (String) -> Unit,
     onNoteClick: (ChapterNoteEntity) -> Unit,
     onDeleteNote: (String) -> Unit,
+    onHistoryClick: (ReadingHistoryEntity) -> Unit,
+    onClearReadingHistory: () -> Unit,
     onFollowingClick: (FollowedStoryEntity) -> Unit,
 ) {
     val view = LocalView.current
@@ -70,6 +77,8 @@ fun LibraryScreen(
     var showSort by remember { mutableStateOf(false) }
     var showDownloadQueue by remember { mutableStateOf(false) }
     var showReadingHistory by remember { mutableStateOf(false) }
+    var showClearReadingHistory by remember { mutableStateOf(false) }
+    var historyQuery by remember { mutableStateOf("") }
     var readingSort by remember { mutableStateOf("recent") }
     var downloadedSort by remember { mutableStateOf("recent") }
     var bookmarkSort by remember { mutableStateOf("recent") }
@@ -77,13 +86,15 @@ fun LibraryScreen(
     val itemCount = when (state.librarySection) {
         LibrarySection.READING -> state.readingStories.size
         LibrarySection.DOWNLOADED -> state.downloadedStories.size
-        LibrarySection.BOOKMARKS, LibrarySection.NOTES -> state.bookmarks.map(BookmarkEntity::storyId).distinct().size
+        LibrarySection.BOOKMARKS -> state.bookmarks.map(BookmarkEntity::storyId).distinct().size
+        LibrarySection.NOTES -> state.notes.size
         LibrarySection.FOLLOWING -> state.following.size
     }
     val sectionName = when (state.librarySection) {
         LibrarySection.READING -> "Đang đọc"
         LibrarySection.DOWNLOADED -> "Đã tải"
-        LibrarySection.BOOKMARKS, LibrarySection.NOTES -> "Đánh dấu"
+        LibrarySection.BOOKMARKS -> "Đánh dấu"
+        LibrarySection.NOTES -> "Ghi chú"
         LibrarySection.FOLLOWING -> "Theo dõi"
     }
 
@@ -134,6 +145,9 @@ fun LibraryScreen(
         }
         .filter { needle.isBlank() || it.label.lowercase().contains(needle) || it.storyId.lowercase().contains(needle) }
         .let { values -> if (bookmarkSort == "title") values.sortedBy { it.label.lowercase() } else values.sortedByDescending { it.createdAt } }
+    val visibleNotes = state.notes
+        .filter { needle.isBlank() || it.text.lowercase().contains(needle) || it.storyId.lowercase().contains(needle) || it.chapterId.lowercase().contains(needle) }
+        .let { values -> if (bookmarkSort == "title") values.sortedBy { it.text.lowercase() } else values.sortedByDescending { it.updatedAt } }
     val followingVisible = state.following.filter {
         needle.isBlank() || it.title.lowercase().contains(needle) ||
             it.sourceId.lowercase().contains(needle) || it.latestKnownChapter.lowercase().contains(needle)
@@ -166,7 +180,7 @@ fun LibraryScreen(
                     selected = selected,
                     onClick = { onSectionSelected(section) },
                     accessibilityLabel = "Tủ truyện, ${label.lowercase()}",
-                    minHeight = 58.dp,
+                    minHeight = 50.dp,
                     unselectedColor = ReferenceDivider,
                     unselectedContentColor = ReferenceText,
                     modifier = Modifier.weight(1f).padding(1.dp),
@@ -210,20 +224,29 @@ fun LibraryScreen(
                     onPauseDownload = onPauseDownload,
                     onResumeDownload = onResumeDownload,
                     onRetryDownload = onRetryDownload,
+                    onPrioritizeDownload = onPrioritizeDownload,
                     onRetryFailedChapter = onRetryFailedChapter,
                     onCancelDownload = onCancelDownload,
                     onRemoveOffline = onRemoveOffline,
                 )
             }
 
-            LibrarySection.BOOKMARKS, LibrarySection.NOTES -> {
+            LibrarySection.BOOKMARKS -> {
                 LibraryControl("TÌM TRUYỆN") { showSearch = true }
                 LibraryControl("SẮP XẾP: ${if (bookmarkSort == "title") "TÊN A-Z" else "MỚI ĐÁNH DẤU"}") { showSort = true }
+                LibraryControl("XEM GHI CHÚ") { onSectionSelected(LibrarySection.NOTES) }
                 BookmarkList(
                     bookmarks = visibleBookmarks,
                     onBookmarkOpen = onBookmarkClick,
                     onBookmarkDelete = onDeleteBookmark,
                 )
+            }
+
+            LibrarySection.NOTES -> {
+                LibraryControl("TÌM GHI CHÚ") { showSearch = true }
+                LibraryControl("SẮP XẾP: ${if (bookmarkSort == "title") "NỘI DUNG A-Z" else "MỚI CẬP NHẬT"}") { showSort = true }
+                LibraryControl("XEM ĐÁNH DẤU") { onSectionSelected(LibrarySection.BOOKMARKS) }
+                NoteList(visibleNotes, onNoteClick, onDeleteNote)
             }
 
             LibrarySection.FOLLOWING -> {
@@ -238,7 +261,8 @@ fun LibraryScreen(
         val meta = when (state.librarySection) {
             LibrarySection.READING -> "TÌM TRONG ĐANG ĐỌC" to "Nhập tên truyện, chương hoặc vài ký tự liên quan"
             LibrarySection.DOWNLOADED -> "TÌM TRUYỆN ĐÃ TẢI" to "Nhập tên truyện hoặc vài ký tự liên quan"
-            LibrarySection.BOOKMARKS, LibrarySection.NOTES -> "TÌM TRUYỆN ĐÃ ĐÁNH DẤU" to "Nhập tên truyện, chương hoặc vài ký tự liên quan"
+            LibrarySection.BOOKMARKS -> "TÌM TRUYỆN ĐÃ ĐÁNH DẤU" to "Nhập tên truyện, chương hoặc vài ký tự liên quan"
+            LibrarySection.NOTES -> "TÌM GHI CHÚ" to "Nhập nội dung ghi chú"
             LibrarySection.FOLLOWING -> "TÌM TRUYỆN ĐANG THEO DÕI" to "Nhập tên truyện, nguồn hoặc vài ký tự liên quan"
         }
         var draft by remember(showSearch) { mutableStateOf(query) }
@@ -284,8 +308,12 @@ fun LibraryScreen(
                 )
             }
             LibrarySection.BOOKMARKS, LibrarySection.NOTES -> {
-                title = "SẮP XẾP ĐÁNH DẤU"
-                options = listOf("recent" to "MỚI ĐÁNH DẤU", "title" to "TÊN A-Z")
+                title = if (state.librarySection == LibrarySection.NOTES) "SẮP XẾP GHI CHÚ" else "SẮP XẾP ĐÁNH DẤU"
+                options = if (state.librarySection == LibrarySection.NOTES) {
+                    listOf("recent" to "MỚI CẬP NHẬT", "title" to "NỘI DUNG A-Z")
+                } else {
+                    listOf("recent" to "MỚI ĐÁNH DẤU", "title" to "TÊN A-Z")
+                }
             }
             LibrarySection.FOLLOWING -> {
                 title = ""
@@ -336,6 +364,7 @@ fun LibraryScreen(
                             onPauseDownload = onPauseDownload,
                             onResumeDownload = onResumeDownload,
                             onRetryDownload = onRetryDownload,
+                            onPrioritizeDownload = onPrioritizeDownload,
                             onRetryFailedChapter = onRetryFailedChapter,
                             onCancelDownload = onCancelDownload,
                         )
@@ -352,17 +381,56 @@ fun LibraryScreen(
             title = { Text("LỊCH SỬ ĐỌC") },
             text = {
                 Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
-                    if (state.readingStories.isEmpty()) Text("Chưa có lịch sử đọc.")
-                    state.readingStories.sortedByDescending { it.updatedAt }.forEach { story ->
-                        ReferenceActionButton(
-                            text = story.title,
-                            onClick = { showReadingHistory = false; onStoryClick(story) },
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
-                        )
+                    OutlinedTextField(
+                        value = historyQuery,
+                        onValueChange = { historyQuery = it.take(160) },
+                        placeholder = { Text("Tìm truyện hoặc chương") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    val historyNeedle = historyQuery.trim().lowercase()
+                    val history = state.readingHistory.filter {
+                        historyNeedle.isBlank() || it.storyTitle.lowercase().contains(historyNeedle) ||
+                            it.chapterTitle.lowercase().contains(historyNeedle) ||
+                            it.sourceId.lowercase().contains(historyNeedle)
+                    }
+                    if (history.isEmpty()) Text("Chưa có lịch sử đọc.", modifier = Modifier.padding(top = 10.dp))
+                    val dayFormat = remember { SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()) }
+                    val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
+                    history.groupBy { dayFormat.format(Date(it.visitedAt)) }.forEach { (day, entries) ->
+                        Text(day, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp, bottom = 2.dp))
+                        entries.forEach { item ->
+                            ReferenceActionButton(
+                                text = "${timeFormat.format(Date(item.visitedAt))} • ${item.storyTitle}\n${item.chapterTitle} • đoạn ${item.paragraphIndex + 1}/${item.totalParagraphs.coerceAtLeast(1)} • ${item.sourceId}",
+                                onClick = { showReadingHistory = false; onHistoryClick(item) },
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
+                            )
+                        }
                     }
                 }
             },
             confirmButton = { TextButton(onClick = { showReadingHistory = false }) { Text("ĐÓNG") } },
+            dismissButton = {
+                if (state.readingHistory.isNotEmpty()) {
+                    TextButton(onClick = { showReadingHistory = false; showClearReadingHistory = true }) { Text("XÓA LỊCH SỬ") }
+                }
+            },
+        )
+    }
+
+    if (showClearReadingHistory) {
+        AlertDialog(
+            onDismissRequest = { showClearReadingHistory = false },
+            title = { Text("XÓA LỊCH SỬ ĐỌC") },
+            text = { Text("Xóa toàn bộ lịch sử đọc? Tiến độ đọc vẫn được giữ.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    onClearReadingHistory()
+                    historyQuery = ""
+                    showClearReadingHistory = false
+                }) { Text("XÓA") }
+            },
+            dismissButton = { TextButton(onClick = { showClearReadingHistory = false }) { Text("HỦY") } },
         )
     }
 }
@@ -383,6 +451,7 @@ private fun DownloadJobControls(
     onPauseDownload: (String) -> Unit,
     onResumeDownload: (String) -> Unit,
     onRetryDownload: (String) -> Unit,
+    onPrioritizeDownload: (String) -> Unit,
     onRetryFailedChapter: (String) -> Unit,
     onCancelDownload: (String) -> Unit,
 ) {
@@ -393,6 +462,9 @@ private fun DownloadJobControls(
             "QUEUED", "RUNNING" -> Button({ onPauseDownload(job.id) }, Modifier.weight(1f).padding(1.dp)) { Text("TẠM DỪNG") }
             "PAUSED" -> Button({ onResumeDownload(job.id) }, Modifier.weight(1f).padding(1.dp)) { Text("TIẾP TỤC") }
             "FAILED", "CANCELLED" -> Button({ onRetryDownload(job.id) }, Modifier.weight(1f).padding(1.dp)) { Text("THỬ LẠI") }
+        }
+        if (job.state in setOf("QUEUED", "PAUSED", "FAILED")) {
+            Button({ onPrioritizeDownload(job.id) }, Modifier.weight(1f).padding(1.dp)) { Text("ƯU TIÊN") }
         }
         if (job.state !in setOf("COMPLETED", "CANCELLED")) {
             Button({ onCancelDownload(job.storyId) }, Modifier.weight(1f).padding(1.dp)) { Text("HỦY") }
@@ -427,6 +499,36 @@ private fun BookmarkList(
                         text = "XÓA ĐÁNH DẤU",
                         onClick = { onBookmarkDelete(item.id) },
                         modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NoteList(
+    notes: List<ChapterNoteEntity>,
+    onOpen: (ChapterNoteEntity) -> Unit,
+    onDelete: (String) -> Unit,
+) {
+    if (notes.isEmpty()) {
+        Text("Chưa có ghi chú.", modifier = Modifier.padding(16.dp))
+        return
+    }
+    LazyColumn(modifier = Modifier.fillMaxSize()) {
+        items(notes, key = { "note:${it.id}" }) { note ->
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).clickable { onOpen(note) },
+            ) {
+                Column(Modifier.padding(12.dp)) {
+                    Text(note.text, fontWeight = FontWeight.SemiBold, maxLines = 3)
+                    Text("Đoạn ${note.paragraphIndex + 1}", style = MaterialTheme.typography.bodySmall)
+                    ReferenceActionButton(
+                        text = "XÓA GHI CHÚ",
+                        onClick = { onDelete(note.id) },
+                        minHeight = 44.dp,
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                     )
                 }
             }
@@ -471,6 +573,7 @@ private fun DownloadedSection(
     onPauseDownload: (String) -> Unit,
     onResumeDownload: (String) -> Unit,
     onRetryDownload: (String) -> Unit,
+    onPrioritizeDownload: (String) -> Unit,
     onRetryFailedChapter: (String) -> Unit,
     onCancelDownload: (String) -> Unit,
     onRemoveOffline: (String) -> Unit,
@@ -507,6 +610,7 @@ private fun DownloadedSection(
                         onPauseDownload = onPauseDownload,
                         onResumeDownload = onResumeDownload,
                         onRetryDownload = onRetryDownload,
+                        onPrioritizeDownload = onPrioritizeDownload,
                         onRetryFailedChapter = onRetryFailedChapter,
                         onCancelDownload = onCancelDownload,
                     )

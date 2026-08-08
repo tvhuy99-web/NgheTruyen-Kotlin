@@ -58,6 +58,7 @@ def require_text(path: str, *tokens: str) -> None:
 
 
 def main() -> None:
+    run_script("check_xpk_parity_v290.py")
     if "--wiring-only" not in sys.argv:
         run_script("check_clean_rewrite.py")
         run_script("check_truyenfull_fixtures.py")
@@ -113,7 +114,7 @@ def main() -> None:
 
     with (ROOT / "REWRITE_STATUS.json").open(encoding="utf-8") as handle:
         status = json.load(handle)
-    assert status["version"] == "2.8.0-ai-narration-priority2-complete"
+    assert status["version"] == "2.9.0-xpk-parity"
     assert status["luaIncluded"] is True
 
 

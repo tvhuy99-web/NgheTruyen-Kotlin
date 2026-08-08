@@ -12,6 +12,7 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.Update
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
@@ -53,6 +54,25 @@ data class ReadingProgressEntity(
     val paragraphIndex: Int,
     @ColumnInfo(defaultValue = "0") val totalParagraphs: Int = 0,
     val updatedAt: Long,
+)
+
+@Entity(
+    tableName = "reading_history",
+    indices = [
+        Index(value = ["storyId", "chapterId"], unique = true),
+        Index(value = ["visitedAt"]),
+    ],
+)
+data class ReadingHistoryEntity(
+    @PrimaryKey val id: String,
+    val storyId: String,
+    val sourceId: String,
+    val storyTitle: String,
+    val chapterId: String,
+    val chapterTitle: String,
+    val paragraphIndex: Int,
+    val totalParagraphs: Int,
+    val visitedAt: Long,
 )
 
 @Entity(
@@ -571,6 +591,27 @@ interface ProgressDao {
 }
 
 @Dao
+interface ReadingHistoryDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(item: ReadingHistoryEntity)
+
+    @Query("SELECT * FROM reading_history ORDER BY visitedAt DESC LIMIT :limit")
+    fun observeRecent(limit: Int = 500): Flow<List<ReadingHistoryEntity>>
+
+    @Query("SELECT * FROM reading_history ORDER BY visitedAt DESC LIMIT :limit")
+    suspend fun listRecent(limit: Int = 500): List<ReadingHistoryEntity>
+
+    @Query("DELETE FROM reading_history")
+    suspend fun clear()
+
+    @Query("DELETE FROM reading_history WHERE storyId = :storyId")
+    suspend fun deleteForStory(storyId: String)
+
+    @Query("DELETE FROM reading_history WHERE id IN (SELECT id FROM reading_history ORDER BY visitedAt DESC LIMIT -1 OFFSET :keep)")
+    suspend fun prune(keep: Int = 500)
+}
+
+@Dao
 interface BookmarkDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(bookmark: BookmarkEntity)
@@ -678,6 +719,12 @@ interface VietPhraseDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(items: List<VietPhraseEntity>)
+
+    @Update
+    suspend fun update(item: VietPhraseEntity): Int
+
+    @Query("SELECT * FROM viet_phrase_rules WHERE id = :id LIMIT 1")
+    suspend fun get(id: Long): VietPhraseEntity?
 
     @Query("SELECT * FROM viet_phrase_rules ORDER BY kind, scope, storyId, priority DESC, LENGTH(source) DESC, source COLLATE NOCASE")
     fun observeAll(): Flow<List<VietPhraseEntity>>
@@ -1044,6 +1091,7 @@ interface ChapterDownloadFailureDao {
         StoryEntity::class,
         ChapterEntity::class,
         ReadingProgressEntity::class,
+        ReadingHistoryEntity::class,
         BookmarkEntity::class,
         ChapterNoteEntity::class,
         FollowedStoryEntity::class,
@@ -1066,7 +1114,7 @@ interface ChapterDownloadFailureDao {
         DownloadJobEntity::class,
         ChapterDownloadFailureEntity::class,
     ],
-    version = 21,
+    version = 22,
     // Legacy wiring validator token: version = 18
     exportSchema = true,
 )
@@ -1074,6 +1122,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun storyDao(): StoryDao
     abstract fun chapterDao(): ChapterDao
     abstract fun progressDao(): ProgressDao
+    abstract fun readingHistoryDao(): ReadingHistoryDao
     abstract fun bookmarkDao(): BookmarkDao
     abstract fun chapterNoteDao(): ChapterNoteDao
     abstract fun followingDao(): FollowingDao
@@ -1729,6 +1778,28 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_21_22 = object : Migration(21, 22) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS reading_history (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        storyId TEXT NOT NULL,
+                        sourceId TEXT NOT NULL,
+                        storyTitle TEXT NOT NULL,
+                        chapterId TEXT NOT NULL,
+                        chapterTitle TEXT NOT NULL,
+                        paragraphIndex INTEGER NOT NULL,
+                        totalParagraphs INTEGER NOT NULL,
+                        visitedAt INTEGER NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_reading_history_storyId_chapterId ON reading_history(storyId, chapterId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_reading_history_visitedAt ON reading_history(visitedAt)")
+            }
+        }
+
         fun create(context: Context): AppDatabase = Room.databaseBuilder(
             context.applicationContext,
             AppDatabase::class.java,
@@ -1754,6 +1825,7 @@ abstract class AppDatabase : RoomDatabase() {
             MIGRATION_18_19,
             MIGRATION_19_20,
             MIGRATION_20_21,
+            MIGRATION_21_22,
         ).build()
     }
 }

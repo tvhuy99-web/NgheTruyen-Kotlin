@@ -1,8 +1,6 @@
 """Temporary test-only shim for the phase-3 patch generator.
 
-It adapts two stale generator assumptions without touching Android product source directly:
-1. the first generic LibraryRepository range replacement may have two matches;
-2. AppViewModel no longer imports the old reference voice persistence helper.
+It adapts stale generator assumptions without changing the intended product behavior.
 Remove this file after phase 3 verification.
 """
 import importlib.util
@@ -30,6 +28,11 @@ _target = (
 )
 _appvm_anchor = "import vn.nghetruyen.app.playback.ReaderDocumentNormalizer\n"
 _legacy_voice_import = "import vn.nghetruyen.app.ui.reference.ReferenceVoiceRolePersistence\n"
+_story_view_anchor = "    val view = LocalView.current\n"
+_story_scope = (
+    "    val privateRoles = state.voiceRoles.filter { it.storyId == detail.story.id }\n"
+    "    val globalRoles = state.voiceRoles.filter { it.storyId == GLOBAL_VOICE_PROFILE_STORY_ID }.take(7)\n"
+)
 
 
 class _SmartText(str):
@@ -49,6 +52,10 @@ def _smart_read_text(self, *args, **kwargs):
         if _appvm_anchor not in value:
             raise RuntimeError("Stable AppViewModel import anchor not found")
         return value.replace(_appvm_anchor, _appvm_anchor + _legacy_voice_import, 1)
+    if name.endswith("app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt") and _story_scope not in value:
+        if _story_view_anchor not in value:
+            raise RuntimeError("Stable StoryDetail view anchor not found")
+        return value.replace(_story_view_anchor, _story_view_anchor + _story_scope, 1)
     return value
 
 

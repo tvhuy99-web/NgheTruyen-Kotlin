@@ -1,0 +1,39 @@
+name: Fix VietPhrase compile
+
+on:
+  push:
+    branches:
+      - agent/xpk-parity-v290
+    paths:
+      - ".github/workflows/fix-vietphrase-compile.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/xpk-parity-v290
+          fetch-depth: 0
+      - name: Replace obsolete enum reference
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('app/src/main/java/vn/nghetruyen/app/data/repository/LibraryRepository.kt')
+          text = path.read_text(encoding='utf-8')
+          old = 'existing.matchMode == VietPhraseMatchMode.REGEX.name -> VietPhraseMatchMode.REGEX.name'
+          new = 'existing.matchMode == "REGEX" -> "REGEX"'
+          if text.count(old) != 1:
+              raise SystemExit(f'Expected exactly one obsolete REGEX enum reference, found {text.count(old)}')
+          path.write_text(text.replace(old, new), encoding='utf-8')
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/vn/nghetruyen/app/data/repository/LibraryRepository.kt
+          git rm .github/workflows/fix-vietphrase-compile.yml
+          git commit -m "fix: preserve legacy regex VietPhrase mode without obsolete enum"
+          git push origin HEAD:agent/xpk-parity-v290

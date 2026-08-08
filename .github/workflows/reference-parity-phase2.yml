@@ -38,6 +38,21 @@ jobs:
       - name: Apply reference parity phase 2
         run: python3 scripts/apply_reference_parity_phase2.py
 
+      - name: Align release validator with XPK reader menu
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/validate_release.py')
+          text = path.read_text()
+          old = '''    require_text(\n        "app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt",\n        "Tìm trong chương",\n        "SAO CHÉP ĐOẠN",\n        "SAO CHÉP CHƯƠNG",\n        "ReaderThemeMode.SEPIA",\n        "keepScreenOn",\n        "lineHeightPercent",\n        "VIETPHRASE",\n        "DỊCH LẠI",\n        "DÀN DỰNG AI",\n        "PHÂN VAI AI",\n        "NHẠC CẢNH",\n    )\n'''
+          new = '''    require_text(\n        "app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt",\n        "TÌM TRONG CHƯƠNG",\n        "SAO CHÉP CHƯƠNG",\n        "ReaderThemeMode.SEPIA",\n        "keepScreenOn",\n        "lineHeightPercent",\n        "VIETPHRASE",\n        "DỊCH AI",\n        "PHÂN VAI AI",\n        "XEM NHẬT KÝ",\n    )\n'''
+          if text.count(old) != 1:
+              raise SystemExit('Reader validator block not found exactly once')
+          path.write_text(text.replace(old, new, 1))
+          print('REFERENCE_READER_VALIDATOR_ALIGNED')
+          PY
+
       - name: Assert exact reference-facing options
         shell: bash
         run: |

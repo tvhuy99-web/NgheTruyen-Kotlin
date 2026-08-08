@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 
 phase7 = Path('scripts/apply_reference_parity_phase7.py').resolve()
 exec(phase7.read_text(), {'__name__': '__main__', '__file__': str(phase7)})
@@ -28,4 +29,25 @@ assert 'state.offlineStorage[storyId]?.chapterCount' not in reader
 assert 'repository.saveDownloadedChapter' in worker
 for token in ['TÌM TRONG CHƯƠNG', 'DỊCH AI', 'PHÂN VAI AI', 'DANH SÁCH NHẠC NỀN', 'VietPhraseDiagnosticExporter']:
     assert token in reader, f'Reader regression: {token}'
+
+# Compile before publish so Room exports schema 21 from the verified database model.
+subprocess.run(['bash', './gradlew', ':app:compileDebugKotlin', '--no-daemon'], check=True)
+schema21 = Path('app/schemas/vn.nghetruyen.app.data.local.AppDatabase/21.json')
+if not schema21.is_file():
+    raise SystemExit('Room schema 21 was not generated')
+
+product_files = [
+    'app/src/main/java/vn/nghetruyen/app/data/local/AppDatabase.kt',
+    'app/src/main/java/vn/nghetruyen/app/data/repository/LibraryRepository.kt',
+    'app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt',
+    'app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt',
+    str(schema21),
+]
+subprocess.run(['git', 'config', 'user.name', 'reference-parity-bot'], check=True)
+subprocess.run(['git', 'config', 'user.email', 'reference-parity-bot@users.noreply.github.com'], check=True)
+subprocess.run(['git', 'add', '--', *product_files], check=True)
+if subprocess.run(['git', 'diff', '--cached', '--quiet']).returncode != 0:
+    subprocess.run(['git', 'commit', '-m', 'fix: distinguish downloaded chapters from reader cache'], check=True)
+    subprocess.run(['git', 'push', 'origin', 'HEAD:agent/reference-ui-position-parity'], check=True)
+
 print('REFERENCE_PER_CHAPTER_OFFLINE_ASSERTIONS_OK')

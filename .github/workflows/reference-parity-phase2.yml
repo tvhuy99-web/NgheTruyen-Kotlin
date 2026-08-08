@@ -47,8 +47,6 @@ jobs:
           required = [
               '＋ THÊM CÁCH ĐỌC', 'THÊM CÁCH ĐỌC', 'SỬA CÁCH ĐỌC',
               'Bật VietPhrase', 'NHẬP FILE ZIP', 'XUẤT TỪ ĐIỂN ZIP',
-              'Names.txt', 'VietPhrase.txt', 'Pronouns.txt', 'LuatNhan.txt',
-              'ChinesePhienAmWords.txt', 'LacViet.txt', 'AIReplace.txt',
               'XÓA TẤT CẢ', 'TẢI TỰ ĐỘNG TỪ MẠNG',
               'Dùng Hán Việt khi không tìm thấy cụm',
               'CHỌN DỮ LIỆU SAO LƯU', 'CHỌN DỮ LIỆU KHÔI PHỤC',
@@ -62,6 +60,9 @@ jobs:
               assert token in p, token
           assert 'VietPhrase nâng cao' not in p
           assert 'THÊM QUY TẮC' not in p
+          models = Path('app/src/main/java/vn/nghetruyen/app/ai/vietphrase/VietPhraseModels.kt').read_text()
+          for file_name in ['Names.txt', 'VietPhrase.txt', 'Pronouns.txt', 'LuatNhan.txt', 'ChinesePhienAmWords.txt', 'LacViet.txt', 'AIReplace.txt']:
+              assert file_name in models, file_name
           app = Path('app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt').read_text()
           assert 'importFrom(uri)' in app
           assert 'setBackupComponents' in app

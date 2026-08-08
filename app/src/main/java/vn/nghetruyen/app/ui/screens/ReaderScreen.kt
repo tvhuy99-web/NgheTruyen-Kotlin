@@ -170,6 +170,8 @@ fun ReaderScreen(
     val sourceDescriptor = storyDetail?.story?.sourceId?.let { id -> state.sources.firstOrNull { it.id == id } }
 
     var showReaderOptions by remember(content.chapter.id) { mutableStateOf(false) }
+    var showReaderToolsDialog by remember { mutableStateOf(false) }
+    var showAiToolsDialog by remember { mutableStateOf(false) }
     var showReaderModeDialog by remember { mutableStateOf(false) }
     var showDisplayDialog by remember { mutableStateOf(false) }
     var showSearchDialog by remember { mutableStateOf(false) }
@@ -177,6 +179,7 @@ fun ReaderScreen(
     var showSleepDialog by remember { mutableStateOf(false) }
     var showTtsDialog by remember { mutableStateOf(false) }
     var showMusicDialog by remember { mutableStateOf(false) }
+    var musicAdvanced by remember { mutableStateOf(false) }
     var showMusicLibrary by remember { mutableStateOf(false) }
     var musicLibraryDraft by remember { mutableStateOf<List<SceneMusicTrackEntity>>(emptyList()) }
     var musicLibraryBaselineIds by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -449,42 +452,61 @@ fun ReaderScreen(
             onDismissRequest = { showReaderOptions = false },
             title = { Text("TÙY CHỌN ĐỌC") },
             text = { Column(Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState())) {
-                ReaderMenuButton("TRỞ LẠI DANH SÁCH CHƯƠNG") { showReaderOptions = false; onBackToChapters() }
-                ReaderMenuButton("LƯU VỊ TRÍ ĐỌC") { showReaderOptions = false; onSaveReadingPosition() }
-                ReaderMenuButton("ĐÁNH DẤU ĐOẠN ${activeIndex + 1}") { showReaderOptions = false; onBookmark() }
+                ReaderMenuButton("DANH SÁCH CHƯƠNG") { showReaderOptions = false; onBackToChapters() }
+                ReaderMenuButton("TÌM TRONG CHƯƠNG") { showReaderOptions = false; searchDraft = ""; showSearchDialog = true }
+                ReaderMenuButton("HẸN GIỜ NGỦ • ${state.sleepTimerStatus}") { showReaderOptions = false; showSleepDialog = true }
+                ReaderMenuButton("NHẠC NỀN") { showReaderOptions = false; musicAdvanced = false; showMusicDialog = true }
+                ReaderMenuButton("XUẤT ÂM THANH") { showReaderOptions = false; showExportDialog = true }
+                ReaderMenuButton("CHẾ ĐỘ ĐỌC • ${if (textMode) "VĂN BẢN" else "TTS"}") { showReaderOptions = false; showReaderModeDialog = true }
+                ReaderMenuButton("CÀI ĐẶT TTS") { showReaderOptions = false; showTtsDialog = true }
+                ReaderMenuButton("AI & CHUYỂN NGỮ") { showReaderOptions = false; showAiToolsDialog = true }
+                ReaderMenuButton("KHÁC") { showReaderOptions = false; showReaderToolsDialog = true }
+            } },
+            confirmButton = { TextButton(onClick = { showReaderOptions = false }) { Text("ĐÓNG") } },
+        )
+    }
+
+    if (showReaderToolsDialog) {
+        AlertDialog(
+            onDismissRequest = { showReaderToolsDialog = false },
+            title = { Text("KHÁC") },
+            text = { Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
+                ReaderMenuButton("LƯU VỊ TRÍ") { showReaderToolsDialog = false; onSaveReadingPosition() }
+                ReaderMenuButton("ĐÁNH DẤU ĐOẠN ${activeIndex + 1}") { showReaderToolsDialog = false; onBookmark() }
                 ReaderMenuButton(if (activeNote == null) "GHI CHÚ ĐOẠN ${activeIndex + 1}" else "SỬA GHI CHÚ ĐOẠN ${activeIndex + 1}") {
-                    showReaderOptions = false
+                    showReaderToolsDialog = false
                     noteDraft = activeNote?.text.orEmpty()
                     showNoteDialog = true
                 }
-                ReaderMenuButton("TÌM TRONG CHƯƠNG") { showReaderOptions = false; searchDraft = ""; showSearchDialog = true }
-                if (textMode) ReaderMenuButton("HIỂN THỊ VĂN BẢN") { showReaderOptions = false; showDisplayDialog = true }
-                ReaderMenuButton("HẸN GIỜ NGỦ - ${state.sleepTimerStatus}") { showReaderOptions = false; showSleepDialog = true }
-                ReaderMenuButton("NHẠC NỀN") { showReaderOptions = false; showMusicDialog = true }
-                ReaderMenuButton("XUẤT ÂM THANH") {
-                    showReaderOptions = false
-                    showExportDialog = true
-                }
-                ReaderMenuButton("CHẾ ĐỘ ĐỌC: ${if (textMode) "VĂN BẢN" else "TTS"}") { showReaderOptions = false; showReaderModeDialog = true }
-                ReaderMenuButton("THIẾT LẬP AI CHO TRUYỆN NÀY") { showReaderOptions = false; onOpenStoryAiOptions() }
-                ReaderMenuButton("PHÂN VAI TTS CHO TRUYỆN NÀY") { showReaderOptions = false; onOpenStoryVoiceCastOptions() }
-                if (state.vietPhraseRules.isNotEmpty() || state.vietPhraseDictionaryStates.isNotEmpty()) {
-                    ReaderMenuButton("ÁP DỤNG VIETPHRASE") { showReaderOptions = false; onApplyVietPhrase() }
-                    ReaderMenuButton("AI CẢI THIỆN VIETPHRASE") { showReaderOptions = false; onImproveVietPhrase() }
-                }
-                ReaderMenuButton("AI LẬP NHẠC CẢNH") { showReaderOptions = false; onPlanSceneMusic() }
-                ReaderMenuButton("AI PHÂN VAI + NHẠC CẢNH") { showReaderOptions = false; onPlanNarration() }
-                if (state.chapterTextMode == ChapterTextMode.AI_TRANSLATION || state.playback.preparationState == PlaybackPreparationState.FAILED) {
-                    ReaderMenuButton("KHÔI PHỤC CHƯƠNG GỐC TRƯỚC AI") { showReaderOptions = false; onShowOriginal() }
-                }
-                if (state.vietPhraseRules.isNotEmpty() || state.vietPhraseDictionaryStates.isNotEmpty()) {
-                    ReaderMenuButton("TẠO NHẬT KÝ VIETPHRASE") { showReaderOptions = false; createVietPhraseDiagnostic() }
-                }
-                ReaderMenuButton("CÀI ĐẶT TTS") { showReaderOptions = false; showTtsDialog = true }
-                ReaderMenuButton("SAO CHÉP CHƯƠNG") { showReaderOptions = false; showCopyDialog = true }
-                ReaderMenuButton("THÔNG TIN CHƯƠNG") { showReaderOptions = false; showChapterInfoDialog = true }
+                if (textMode) ReaderMenuButton("HIỂN THỊ") { showReaderToolsDialog = false; showDisplayDialog = true }
+                ReaderMenuButton("SAO CHÉP") { showReaderToolsDialog = false; showCopyDialog = true }
+                ReaderMenuButton("THÔNG TIN") { showReaderToolsDialog = false; showChapterInfoDialog = true }
             } },
-            confirmButton = { TextButton(onClick = { showReaderOptions = false }) { Text("ĐÓNG") } },
+            confirmButton = { TextButton(onClick = { showReaderToolsDialog = false; showReaderOptions = true }) { Text("ĐÓNG") } },
+        )
+    }
+
+    if (showAiToolsDialog) {
+        AlertDialog(
+            onDismissRequest = { showAiToolsDialog = false },
+            title = { Text("AI & CHUYỂN NGỮ") },
+            text = { Column(Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState())) {
+                ReaderMenuButton("AI CHO TRUYỆN") { showAiToolsDialog = false; onOpenStoryAiOptions() }
+                ReaderMenuButton("PHÂN VAI TTS") { showAiToolsDialog = false; onOpenStoryVoiceCastOptions() }
+                if (state.vietPhraseRules.isNotEmpty() || state.vietPhraseDictionaryStates.isNotEmpty()) {
+                    ReaderMenuButton("ÁP DỤNG VIETPHRASE") { showAiToolsDialog = false; onApplyVietPhrase() }
+                    ReaderMenuButton("CẢI THIỆN VIETPHRASE") { showAiToolsDialog = false; onImproveVietPhrase() }
+                }
+                ReaderMenuButton("LẬP NHẠC CẢNH") { showAiToolsDialog = false; onPlanSceneMusic() }
+                ReaderMenuButton("PHÂN VAI + NHẠC") { showAiToolsDialog = false; onPlanNarration() }
+                if (state.chapterTextMode == ChapterTextMode.AI_TRANSLATION || state.playback.preparationState == PlaybackPreparationState.FAILED) {
+                    ReaderMenuButton("KHÔI PHỤC BẢN GỐC") { showAiToolsDialog = false; onShowOriginal() }
+                }
+                if (state.vietPhraseRules.isNotEmpty() || state.vietPhraseDictionaryStates.isNotEmpty()) {
+                    ReaderMenuButton("NHẬT KÝ VIETPHRASE") { showAiToolsDialog = false; createVietPhraseDiagnostic() }
+                }
+            } },
+            confirmButton = { TextButton(onClick = { showAiToolsDialog = false; showReaderOptions = true }) { Text("ĐÓNG") } },
         )
     }
 
@@ -652,75 +674,96 @@ fun ReaderScreen(
 
     if (showMusicDialog) {
         AlertDialog(
-            onDismissRequest = { showMusicDialog = false },
-            title = { Text("NHẠC NỀN") },
-            text = { Column(Modifier.heightIn(max = 620.dp).verticalScroll(rememberScrollState())) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Bật nhạc nền khi đọc bằng TTS", Modifier.weight(1f)); Switch(musicEnabled, { musicEnabled = it }) }
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Trao toàn quyền giữ và đổi nhạc cho AI", Modifier.weight(1f)); Switch(musicAi, { musicAi = it }) }
-                Text("Chế độ phát", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
-                Row(Modifier.fillMaxWidth()) {
-                    TextButton({ musicMode = SceneMusicPlaybackMode.SEQUENTIAL }, Modifier.weight(1f)) { Text((if (musicMode == SceneMusicPlaybackMode.SEQUENTIAL) "✓ " else "") + "LẦN LƯỢT") }
-                    TextButton({ musicMode = SceneMusicPlaybackMode.SHUFFLE }, Modifier.weight(1f)) { Text((if (musicMode == SceneMusicPlaybackMode.SHUFFLE) "✓ " else "") + "NGẪU NHIÊN") }
-                    TextButton({ musicMode = SceneMusicPlaybackMode.SMART_AVOID_REPEAT }, Modifier.weight(1f)) { Text((if (musicMode == SceneMusicPlaybackMode.SMART_AVOID_REPEAT) "✓ " else "") + "TRÁNH LẶP") }
-                }
-                if (musicMode == SceneMusicPlaybackMode.SMART_AVOID_REPEAT) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Tránh lặp $musicAvoidRepeatWindow bài", Modifier.weight(1f))
-                        TextButton({ musicAvoidRepeatWindow = (musicAvoidRepeatWindow - 1).coerceAtLeast(0) }) { Text("−") }
-                        TextButton({ musicAvoidRepeatWindow = (musicAvoidRepeatWindow + 1).coerceAtMost(20) }) { Text("+") }
+            onDismissRequest = { showMusicDialog = false; musicAdvanced = false },
+            title = { Text(if (musicAdvanced) "NHẠC NỀN • NÂNG CAO" else "NHẠC NỀN") },
+            text = {
+                Column(Modifier.heightIn(max = 620.dp).verticalScroll(rememberScrollState())) {
+                    if (!musicAdvanced) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Bật nhạc nền", Modifier.weight(1f))
+                            Switch(musicEnabled, { musicEnabled = it })
+                        }
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text("AI đổi nhạc", Modifier.weight(1f))
+                            Switch(musicAi, { musicAi = it })
+                        }
+                        Text("Chế độ phát", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                        Row(Modifier.fillMaxWidth()) {
+                            TextButton({ musicMode = SceneMusicPlaybackMode.SEQUENTIAL }, Modifier.weight(1f)) { Text((if (musicMode == SceneMusicPlaybackMode.SEQUENTIAL) "✓ " else "") + "LẦN LƯỢT") }
+                            TextButton({ musicMode = SceneMusicPlaybackMode.SHUFFLE }, Modifier.weight(1f)) { Text((if (musicMode == SceneMusicPlaybackMode.SHUFFLE) "✓ " else "") + "NGẪU NHIÊN") }
+                            TextButton({ musicMode = SceneMusicPlaybackMode.SMART_AVOID_REPEAT }, Modifier.weight(1f)) { Text((if (musicMode == SceneMusicPlaybackMode.SMART_AVOID_REPEAT) "✓ " else "") + "TRÁNH LẶP") }
+                        }
+                        if (musicMode == SceneMusicPlaybackMode.SMART_AVOID_REPEAT) {
+                            ValueStepper(
+                                "Tránh lặp",
+                                "$musicAvoidRepeatWindow bài",
+                                { musicAvoidRepeatWindow = (musicAvoidRepeatWindow - 1).coerceAtLeast(0) },
+                                { musicAvoidRepeatWindow = (musicAvoidRepeatWindow + 1).coerceAtMost(20) },
+                            )
+                        }
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Giữ qua chương", Modifier.weight(1f))
+                            Switch(musicContinueAcrossChapters, { musicContinueAcrossChapters = it })
+                        }
+                        ReaderMenuButton("DANH SÁCH NHẠC • ${state.sceneMusicTracks.size}") {
+                            val rows = state.sceneMusicTracks.sortedWith(compareBy<SceneMusicTrackEntity> { it.orderIndex }.thenBy { it.title.lowercase() })
+                            musicLibraryDraft = rows.mapIndexed { index, row -> row.copy(orderIndex = index) }
+                            musicLibraryBaselineIds = rows.mapTo(linkedSetOf()) { it.id }
+                            musicSearch = ""
+                            showMusicLibrary = true
+                        }
+                        ReaderMenuButton("NÂNG CAO") { musicAdvanced = true }
+                    } else {
+                        ValueStepper(
+                            "Crossfade",
+                            "$musicCrossfadeMs ms",
+                            { musicCrossfadeMs = (musicCrossfadeMs - 400).coerceAtLeast(0) },
+                            { musicCrossfadeMs = (musicCrossfadeMs + 400).coerceAtMost(8_000) },
+                        )
+                        Text("Chuẩn hóa ${"%.1f".format(musicTargetLufs)} LUFS", fontWeight = FontWeight.SemiBold)
+                        Slider(musicTargetLufs, { musicTargetLufs = it }, valueRange = -36f..-18f, steps = 35)
+                        Text("Giảm giọng ${"%.1f".format(musicDuckDb)} dB", fontWeight = FontWeight.SemiBold)
+                        Slider(musicDuckDb, { musicDuckDb = it }, valueRange = 0f..24f, steps = 47)
+                        Text("Attack $musicAttackMs ms", fontWeight = FontWeight.SemiBold)
+                        Slider(musicAttackMs.toFloat(), { musicAttackMs = it.toInt() }, valueRange = 0f..2000f, steps = 39)
+                        Text("Release $musicReleaseMs ms", fontWeight = FontWeight.SemiBold)
+                        Slider(musicReleaseMs.toFloat(), { musicReleaseMs = it.toInt() }, valueRange = 0f..5000f, steps = 99)
+                        ReaderMenuButton("CHUẨN HÓA KHO NHẠC") {
+                            state.sceneMusicTracks.forEach { SceneMusicAnalysisWorker.enqueue(context, it.id) }
+                            onMessage("Đã đưa kho nhạc vào hàng đợi chuẩn hóa.")
+                        }
                     }
                 }
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Giữ nhạc qua chương", Modifier.weight(1f))
-                    Switch(musicContinueAcrossChapters, { musicContinueAcrossChapters = it })
+            },
+            confirmButton = {
+                if (musicAdvanced) {
+                    TextButton(onClick = { musicAdvanced = false }) { Text("XONG") }
+                } else {
+                    TextButton(onClick = {
+                        scope.launch {
+                            val settings = app.container.settingsRepository
+                            settings.setBackgroundMusicEnabled(musicEnabled)
+                            settings.setAutoSceneMusicEnabled(musicAi)
+                            settings.setSceneMusicPlaybackMode(musicMode)
+                            settings.setSceneMusicCrossfadeMillis(musicCrossfadeMs)
+                            settings.setSceneMusicContinueAcrossChapters(musicContinueAcrossChapters)
+                            settings.setSceneMusicAvoidRepeatWindow(musicAvoidRepeatWindow)
+                            settings.setSceneMusicTargetLufs(musicTargetLufs)
+                            settings.setBackgroundMusicDuckFactor(10.0.pow(-musicDuckDb / 20.0).toFloat())
+                            settings.setBackgroundMusicAttackMillis(musicAttackMs)
+                            settings.setBackgroundMusicReleaseMillis(musicReleaseMs)
+                            ReaderPlaybackService.command(context, ReaderPlaybackService.ACTION_REFRESH)
+                            onMessage("Đã lưu nhạc nền.")
+                            showMusicDialog = false
+                        }
+                    }) { Text("LƯU") }
                 }
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Crossfade $musicCrossfadeMs ms", Modifier.weight(1f))
-                    TextButton({ musicCrossfadeMs = (musicCrossfadeMs - 400).coerceAtLeast(0) }) { Text("−") }
-                    TextButton({ musicCrossfadeMs = (musicCrossfadeMs + 400).coerceAtMost(8_000) }) { Text("+") }
-                }
-                Text("CÂN BẰNG ÂM THANH", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp))
-                Text("Mức chuẩn hóa: ${"%.1f".format(musicTargetLufs)} LUFS")
-                Slider(musicTargetLufs, { musicTargetLufs = it }, valueRange = -36f..-18f, steps = 35)
-                Text("Giảm khi giọng đọc phát: ${"%.1f".format(musicDuckDb)} dB")
-                Slider(musicDuckDb, { musicDuckDb = it }, valueRange = 0f..24f, steps = 47)
-                Text("Attack: $musicAttackMs ms")
-                Slider(musicAttackMs.toFloat(), { musicAttackMs = it.toInt() }, valueRange = 0f..2000f, steps = 39)
-                Text("Release: $musicReleaseMs ms")
-                Slider(musicReleaseMs.toFloat(), { musicReleaseMs = it.toInt() }, valueRange = 0f..5000f, steps = 99)
-                ReaderMenuButton("CHUẨN HÓA TOÀN BỘ KHO NHẠC") {
-                    state.sceneMusicTracks.forEach { SceneMusicAnalysisWorker.enqueue(context, it.id) }
-                    onMessage("Đã đưa toàn bộ kho nhạc vào hàng đợi chuẩn hóa.")
-                }
-                Text("Kho nhạc: ${state.sceneMusicTracks.size} mục", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
-                ReaderMenuButton("QUẢN LÝ DANH SÁCH NHẠC") {
-                    val rows = state.sceneMusicTracks.sortedWith(compareBy<SceneMusicTrackEntity> { it.orderIndex }.thenBy { it.title.lowercase() })
-                    musicLibraryDraft = rows.mapIndexed { index, row -> row.copy(orderIndex = index) }
-                    musicLibraryBaselineIds = rows.mapTo(linkedSetOf()) { it.id }
-                    musicSearch = ""
-                    showMusicLibrary = true
-                }
-                Text("AI chỉ đổi nhạc khi tùy chọn trao quyền ở trên được bật.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
-            } },
-            confirmButton = { TextButton(onClick = {
-                scope.launch {
-                    val settings = app.container.settingsRepository
-                    settings.setBackgroundMusicEnabled(musicEnabled)
-                    settings.setAutoSceneMusicEnabled(musicAi)
-                    settings.setSceneMusicPlaybackMode(musicMode)
-                    settings.setSceneMusicCrossfadeMillis(musicCrossfadeMs)
-                    settings.setSceneMusicContinueAcrossChapters(musicContinueAcrossChapters)
-                    settings.setSceneMusicAvoidRepeatWindow(musicAvoidRepeatWindow)
-                    settings.setSceneMusicTargetLufs(musicTargetLufs)
-                    settings.setBackgroundMusicDuckFactor(10.0.pow(-musicDuckDb / 20.0).toFloat())
-                    settings.setBackgroundMusicAttackMillis(musicAttackMs)
-                    settings.setBackgroundMusicReleaseMillis(musicReleaseMs)
-                    ReaderPlaybackService.command(context, ReaderPlaybackService.ACTION_REFRESH)
-                    onMessage("Đã lưu cài đặt nhạc nền.")
-                    showMusicDialog = false
-                }
-            }) { Text("LƯU CÀI ĐẶT") } },
-            dismissButton = { TextButton(onClick = { showMusicDialog = false }) { Text("ĐÓNG") } },
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    if (musicAdvanced) musicAdvanced = false else showMusicDialog = false
+                }) { Text(if (musicAdvanced) "HỦY" else "ĐÓNG") }
+            },
         )
     }
 
@@ -730,7 +773,6 @@ fun ReaderScreen(
         val enabledCount = musicLibraryDraft.count(SceneMusicTrackEntity::enabled)
         val normalizedCount = musicLibraryDraft.count { kotlin.math.abs(it.loudnessLufsEstimate + 18f) > 0.05f }
         val describedCount = musicLibraryDraft.count { it.tagsCsv.isNotBlank() }
-        val estimatedTokens = musicLibraryDraft.sumOf { it.title.length + it.tagsCsv.length }.div(4).coerceAtLeast(0)
         fun stopPreview() {
             runCatching { musicPreviewPlayer?.stop() }
             runCatching { musicPreviewPlayer?.release() }
@@ -747,11 +789,7 @@ fun ReaderScreen(
             title = { Text("DANH SÁCH NHẠC NỀN") },
             text = { Column(Modifier.heightIn(max = 620.dp).verticalScroll(rememberScrollState())) {
                 Text(
-                    "Kho nhạc: ${musicLibraryDraft.size} bài\n" +
-                        "Bài đang bật: $enabledCount bài\n" +
-                        "Đã chuẩn hóa: $normalizedCount bài\n" +
-                        "Đã có mô tả: $describedCount bài\n" +
-                        "Ước tính khi gửi danh mục AI: khoảng $estimatedTokens token",
+                    "${musicLibraryDraft.size} bài • $enabledCount bật • $normalizedCount chuẩn hóa • $describedCount mô tả",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 OutlinedTextField(
@@ -893,18 +931,16 @@ fun ReaderScreen(
                 onDismissRequest = { editingTrack = null },
                 title = { Text("SỬA THÔNG TIN AI") },
                 text = { Column {
-                    Text("Tên bài gửi cho AI")
                     OutlinedTextField(title, { title = it.take(120) }, placeholder = { Text("Tên bài") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                    Text("Mô tả tham khảo cho AI, không bắt buộc AI làm theo", modifier = Modifier.padding(top = 8.dp))
+                    Text("Mô tả cho AI", modifier = Modifier.padding(top = 8.dp))
                     OutlinedTextField(
                         description,
                         { description = it.take(301) },
-                        placeholder = { Text("Tông/diễn biến: ...; Dùng: ...; Tránh: ...") },
+                        placeholder = { Text("Mô tả ngắn") },
                         minLines = 4,
                         maxLines = 7,
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    Text("Tối đa 300 ký tự. Chỉ ghi thông tin thực sự giúp AI phân biệt và chọn bài.", style = MaterialTheme.typography.bodySmall)
                 } },
                 confirmButton = { TextButton(onClick = {
                     if (description.length > 300) onMessage("Mô tả có ${description.length} ký tự, vượt giới hạn 300.")
@@ -926,11 +962,7 @@ fun ReaderScreen(
             onDismissRequest = { showMusicBulkDialog = false },
             title = { Text("DÁN MÔ TẢ HÀNG LOẠT") },
             text = { Column {
-                Text(
-                    "Mỗi bài một dòng theo định dạng:\nTên bài || Tông/diễn biến: ...; Dùng: ...; Tránh: ...\n\n" +
-                        "Tên phải khớp với danh sách. Dòng có mô tả trống được bỏ qua. Ghi [XÓA] để xóa mô tả hiện có.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
+                Text("Mỗi dòng: Tên bài || Mô tả. Dùng [XÓA] để xóa mô tả.", style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(
                     musicBulkText,
                     { musicBulkText = it.take(120_000) },

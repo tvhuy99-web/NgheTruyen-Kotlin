@@ -16,6 +16,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -352,17 +353,19 @@ private fun CompactVoiceValueRow(
     value: Float,
     minimum: Float,
     maximum: Float,
-    step: Float = 0.05f,
     percent: Boolean = false,
     onChange: (Float) -> Unit,
 ) {
     val safeValue = value.coerceIn(minimum, maximum)
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            if (percent) "$label ${"%.0f".format(safeValue * 100)}%" else "$label ${"%.2f".format(safeValue)}×",
-            modifier = Modifier.weight(1f),
-        )
-        TextButton(onClick = { onChange((safeValue - step).coerceAtLeast(minimum)) }) { Text("−") }
-        TextButton(onClick = { onChange((safeValue + step).coerceAtMost(maximum)) }) { Text("+") }
-    }
+    Text(
+        if (percent) "$label ${"%.0f".format(safeValue * 100)}%" else "$label ${"%.2f".format(safeValue)}×",
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.padding(top = 5.dp),
+    )
+    Slider(
+        value = safeValue,
+        onValueChange = { onChange(it.coerceIn(minimum, maximum)) },
+        valueRange = minimum..maximum,
+        modifier = Modifier.fillMaxWidth(),
+    )
 }

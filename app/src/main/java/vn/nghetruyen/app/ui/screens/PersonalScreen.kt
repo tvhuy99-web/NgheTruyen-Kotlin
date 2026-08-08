@@ -410,7 +410,7 @@ fun PersonalScreen(
                 onRestoreBackup = onRestoreBackup,
             )
         }
-        "settings_diagnostics" -> PersonalSubPage("CHẨN ĐOÁN & HIỆU NĂNG", "QUAY LẠI CÀI ĐẶT", { returnToSettings() }) {
+        "settings_diagnostics" -> PersonalSubPage("CHẨN ĐOÁN", "QUAY LẠI CÀI ĐẶT", { returnToSettings() }) {
             PerformanceCard(state.performanceReport, onRunPerformanceDiagnostics)
         }
         "extensions_home" -> PersonalMenuPage(
@@ -564,7 +564,7 @@ fun PersonalScreen(
     if (showBackupLogDialog) {
         AlertDialog(
             onDismissRequest = { showBackupLogDialog = false; showSettingsDialog = true },
-            title = { Text("NHẬT KÝ SAO LƯU VÀ KHÔI PHỤC") },
+            title = { Text("NHẬT KÝ SAO LƯU") },
             text = {
                 Text(
                     "Tệp: ${state.backupLogPath}\n\n${state.backupLogText.takeLast(40_000)}",
@@ -720,7 +720,7 @@ private fun ReferenceSettingsHomePage(
     Column(Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState())) {
         listOf(
             "settings_tts" to "TTS & GIỌNG ĐỌC",
-            "settings_playback" to "TAI NGHE, SONIC & TỰ ĐỘNG",
+            "settings_playback" to "TAI NGHE & TỰ ĐỘNG",
             "settings_pronunciation" to "TỪ ĐIỂN PHÁT ÂM TTS",
             "settings_vietphrase" to "VIETPHRASE / CHUYỂN NGỮ",
             "settings_ai" to "THIẾT LẬP AI",
@@ -728,8 +728,8 @@ private fun ReferenceSettingsHomePage(
             "settings_music" to "NHẠC NỀN & NHẠC CẢNH",
             "settings_following" to "THEO DÕI CHƯƠNG MỚI",
             "settings_storage" to "DUNG LƯỢNG NGOẠI TUYẾN",
-            "settings_export" to "QUẢN LÝ XUẤT SÁCH NÓI",
-            "settings_diagnostics" to "CHẨN ĐOÁN & HIỆU NĂNG",
+            "settings_export" to "XUẤT SÁCH NÓI",
+            "settings_diagnostics" to "CHẨN ĐOÁN",
         ).forEach { (id, label) ->
             ReferenceActionButton(
                 text = label,
@@ -785,7 +785,7 @@ private fun ReferenceSettingsHomePage(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp),
         )
         ReferenceActionButton(
-            text = "NHẬT KÝ SAO LƯU VÀ KHÔI PHỤC",
+            text = "NHẬT KÝ SAO LƯU",
             onClick = { onSelect("settings_backup_log") },
             minHeight = 50.dp,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp),
@@ -815,15 +815,6 @@ private fun PersonalMenuPage(
     extraContent: @Composable () -> Unit = {},
 ) {
     Column(Modifier.fillMaxSize().background(ReferenceScreenBackground).verticalScroll(rememberScrollState())) {
-        if (backLabel != null && onBack != null) {
-            ReferenceActionButton(
-                text = backLabel,
-                onClick = onBack,
-                normalColor = ReferenceGray,
-                accessibilityLabel = backLabel.lowercase(),
-                modifier = Modifier.fillMaxWidth().padding(4.dp),
-            )
-        }
         ScreenHeading(title)
         items.forEach { (id, label) ->
             ReferenceActionButton(
@@ -848,13 +839,6 @@ private fun PersonalSubPage(
     content: @Composable () -> Unit,
 ) {
     Column(Modifier.fillMaxSize().background(ReferenceScreenBackground).verticalScroll(rememberScrollState())) {
-        ReferenceActionButton(
-            text = backLabel,
-            onClick = onBack,
-            normalColor = ReferenceGray,
-            accessibilityLabel = backLabel.lowercase(),
-            modifier = Modifier.fillMaxWidth().padding(4.dp),
-        )
         ScreenHeading(title)
         content()
     }
@@ -1360,41 +1344,34 @@ private fun ReferenceVoiceCastSettingsCard(
                 Switch(checked = state.autoVoiceCastEnabled, onCheckedChange = onAutoVoiceCastChange)
             }
             roles.forEach { role ->
-                Card(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-                    Column(Modifier.padding(8.dp)) {
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Text(if (role.isNarrator) "Người kể chuyện" else role.roleName, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
-                            Switch(
-                                checked = role.enabled,
-                                onCheckedChange = { onGlobalVoiceRoleEnabledChange(role.id, it) },
-                                enabled = !role.isNarrator,
-                            )
-                        }
-                        Text((role.enginePackage ?: "Hệ thống") + " • " + (role.voiceName ?: "Mặc định"), style = MaterialTheme.typography.bodySmall)
-                        Row(Modifier.fillMaxWidth()) {
-                            Button(onClick = {
-                                editDraft = VoiceRoleDraft(
-                                    roleName = role.roleName,
-                                    originalRoleId = role.id,
-                                    aliases = role.aliasesCsv,
-                                    description = role.description,
-                                    isNarrator = role.isNarrator,
-                                    enginePackage = role.enginePackage,
-                                    voiceName = role.voiceName,
-                                    languageTag = role.languageTag,
-                                    rate = role.rate,
-                                    pitch = role.pitch,
-                                    volume = role.volume,
-                                    expression = runCatching { VoiceExpression.valueOf(role.expression) }.getOrDefault(VoiceExpression.NEUTRAL),
-                                    expressionStrength = role.expressionStrength,
-                                    sonicSpeed = role.sonicSpeed,
-                                    sonicPitch = role.sonicPitch,
-                                    enabled = role.enabled,
-                                )
-                            }, modifier = Modifier.weight(1f).padding(2.dp)) { Text("SỬA") }
-                        }
-                    }
-                }
+                ReferenceActionButton(
+                    text = (if (role.enabled) "" else "TẮT • ") +
+                        (if (role.isNarrator) "Người kể chuyện" else role.roleName) + "\n" +
+                        (role.enginePackage ?: "Hệ thống") + " • " + (role.voiceName ?: "Mặc định"),
+                    onClick = {
+                        editDraft = VoiceRoleDraft(
+                            roleName = role.roleName,
+                            originalRoleId = role.id,
+                            aliases = role.aliasesCsv,
+                            description = role.description,
+                            isNarrator = role.isNarrator,
+                            enginePackage = role.enginePackage,
+                            voiceName = role.voiceName,
+                            languageTag = role.languageTag,
+                            rate = role.rate,
+                            pitch = role.pitch,
+                            volume = role.volume,
+                            expression = runCatching { VoiceExpression.valueOf(role.expression) }.getOrDefault(VoiceExpression.NEUTRAL),
+                            expressionStrength = role.expressionStrength,
+                            sonicSpeed = role.sonicSpeed,
+                            sonicPitch = role.sonicPitch,
+                            enabled = role.enabled,
+                        )
+                    },
+                    normalColor = ReferencePanelBackground,
+                    normalContentColor = ReferenceText,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                )
             }
             Button(
                 onClick = {

@@ -35,6 +35,21 @@ jobs:
           java-version: '17'
           cache: gradle
 
+      - name: Preserve Kotlin escapes in patch generator
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/apply_reference_parity_phase2.py')
+          text = path.read_text()
+          old = 'result, count = re.subn(pattern, repl, text, count=1, flags=re.S)'
+          new = 'result, count = re.subn(pattern, lambda _match: repl, text, count=1, flags=re.S)'
+          if text.count(old) != 1:
+              raise SystemExit('regex_once implementation not found')
+          path.write_text(text.replace(old, new, 1))
+          print('PARITY_GENERATOR_ESCAPES_OK')
+          PY
+
       - name: Apply reference parity phase 2
         run: python3 scripts/apply_reference_parity_phase2.py
 

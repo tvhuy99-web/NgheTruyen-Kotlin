@@ -33,6 +33,27 @@ jobs:
           java-version: '17'
           cache: gradle
 
+      - name: Specialize repository range patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/apply_reference_parity_phase3.py')
+          text = path.read_text()
+          old = '''text = replace_once(text, 'rate = rate.coerceIn(0.5f, 2.0f),\\n                pitch = pitch.coerceIn(0.5f, 2.0f),\\n                volume = volume.coerceIn(0.05f, 1.0f),',
+                    'rate = rate.coerceIn(0.25f, 3.0f),\\n                pitch = pitch.coerceIn(0.5f, 2.0f),\\n                volume = volume.coerceIn(0f, 2.0f),',
+                    "story TTS profile ranges")'''
+          new = '''_old_story_ranges = 'rate = rate.coerceIn(0.5f, 2.0f),\\n                pitch = pitch.coerceIn(0.5f, 2.0f),\\n                volume = volume.coerceIn(0.05f, 1.0f),'
+_new_story_ranges = 'rate = rate.coerceIn(0.25f, 3.0f),\\n                pitch = pitch.coerceIn(0.5f, 2.0f),\\n                volume = volume.coerceIn(0f, 2.0f),'
+if _old_story_ranges not in text:
+    raise SystemExit("story TTS profile ranges: source block not found")
+text = text.replace(_old_story_ranges, _new_story_ranges, 1)'''
+          if text.count(old) != 1:
+              raise SystemExit('phase3 repository replacement block not found exactly once')
+          path.write_text(text.replace(old, new, 1))
+          print('PHASE3_REPOSITORY_PATCH_SPECIALIZED')
+          PY
+
       - name: Apply voice parity patch
         run: python3 scripts/apply_reference_parity_phase3.py
 

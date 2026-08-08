@@ -259,7 +259,6 @@ fun StoryDetailScreen(
     }
 
     Column(Modifier.fillMaxSize().background(ReferenceScreenBackground)) {
-        ReferenceActionButton("QUAY LẠI", onBack, normalColor = ReferenceGray, modifier = Modifier.fillMaxWidth().padding(4.dp))
         Column(Modifier.fillMaxWidth().background(ReferencePanelBackground).padding(10.dp)) {
             Text(detail.story.title, color = ReferenceText, fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.semantics { heading() })
             Text(storyMeta, color = ReferenceSecondaryText)
@@ -560,23 +559,17 @@ fun StoryDetailScreen(
                         }
                     }
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Tự động dịch khi mở chương", Modifier.weight(1f))
+                        Text("Tự động dịch", Modifier.weight(1f))
                         Switch(aiAutoRun, { aiAutoRun = it }, enabled = aiMode == "TRANSLATE")
                     }
-                    Text(
-                        "Chỉ dùng với chế độ Dịch chương gốc. Nếu đang ở chế độ TTS và TTS đã bật, bản dịch sẽ tự đọc. Ở chế độ Văn bản, công cụ chỉ dịch và hiển thị, không tự bật TTS.",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Dùng lời nhắc riêng cho truyện này", Modifier.weight(1f))
+                        Text("Lời nhắc riêng", Modifier.weight(1f))
                         Switch(aiCustomPrompts, { aiCustomPrompts = it })
                     }
                     if (aiCustomPrompts) {
-                        Text("Lời nhắc riêng khi dịch", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
-                        Text("Biến: {{CHAPTER_TITLE}}, {{CHAPTER_TEXT}}", style = MaterialTheme.typography.bodySmall)
+                        Text("Lời nhắc dịch", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
                         OutlinedTextField(aiTranslatePrompt, { aiTranslatePrompt = it.take(16_000) }, minLines = 5, modifier = Modifier.fillMaxWidth())
-                        Text("Lời nhắc riêng khi cải thiện VietPhrase", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
-                        Text("Biến: {{SOURCE_TITLE}}, {{SOURCE_TEXT}}, {{VIETPHRASE_TITLE}}, {{VIETPHRASE_TEXT}}", style = MaterialTheme.typography.bodySmall)
+                        Text("Lời nhắc VietPhrase", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
                         OutlinedTextField(aiImprovePrompt, { aiImprovePrompt = it.take(16_000) }, minLines = 5, modifier = Modifier.fillMaxWidth())
                     }
                 }
@@ -619,54 +612,32 @@ fun StoryDetailScreen(
                             StoryVoiceCastMode.OFF to "Tắt phân vai cho truyện này",
                         ).forEach { (value, label) -> DropdownMenuItem(text = { Text(label) }, onClick = { voiceMode = value; modeExpanded = false }) }
                     }
-                    Text(
-                        when (voiceMode) {
-                            StoryVoiceCastMode.PRIVATE -> "Truyện sử dụng một bộ hồ sơ độc lập, kể cả khi công tắc cấu hình chung đang tắt."
-                            StoryVoiceCastMode.OFF -> "Không sử dụng phân vai AI cho truyện này. Bộ hồ sơ riêng đã tạo trước đó vẫn được giữ lại."
-                            StoryVoiceCastMode.GLOBAL -> "Truyện dùng bộ hồ sơ trong cài đặt chung và phụ thuộc công tắc bật mặc định ở đó."
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(vertical = 6.dp),
-                    )
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Tự động phân vai rồi đọc khi mở chương ở chế độ TTS", Modifier.weight(1f))
+                        Text("Tự động phân vai", Modifier.weight(1f))
                         Switch(voiceAutoRun, { voiceAutoRun = it }, enabled = voiceMode != StoryVoiceCastMode.OFF)
                     }
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("AI tự điều chỉnh tốc độ, cao độ và âm lượng", Modifier.weight(1f))
+                        Text("AI điều chỉnh giọng", Modifier.weight(1f))
                         Switch(expressive, { expressive = it }, enabled = voiceMode != StoryVoiceCastMode.OFF)
                     }
                     if (expressive && voiceMode != StoryVoiceCastMode.OFF) {
-                        Text(
-                            "AI xử lý phân vai và ba thông số phần trăm trong cùng một lượt. Không dùng nhãn buồn, vui hay tức giận. Chỉ lời thoại trực tiếp được đổi giọng và thông số; lời kể cùng nội tâm luôn giữ giọng Người kể chuyện ở thông số gốc. Mức AI trả về được áp trực tiếp trong giới hạn bên dưới. Âm lượng chỉ có thể tăng khi mức gốc còn dưới 100%.",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
                         ReferencePercentSlider("Giới hạn tốc độ", speedLimit) { speedLimit = it }
                         ReferencePercentSlider("Giới hạn cao độ", pitchLimit) { pitchLimit = it }
                         ReferencePercentSlider("Giới hạn âm lượng", volumeLimit) { volumeLimit = it }
-                        ReferenceActionButton("XEM / SỬA HƯỚNG DẪN THÔNG SỐ", { showExpressionPromptDialog = true }, normalColor = ReferenceGray, modifier = Modifier.fillMaxWidth())
+                        ReferenceActionButton("HƯỚNG DẪN AI", { showExpressionPromptDialog = true }, normalColor = ReferenceGray, modifier = Modifier.fillMaxWidth())
                     }
-                    Text(
-                        "Thứ tự luôn là: tải chương → dịch tự động (nếu bật) → phân vai → TTS. Vì vậy hai tác vụ AI không chạy chồng lên nhau.",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
                     if (voiceMode == StoryVoiceCastMode.PRIVATE) {
                         val privateRoles = state.voiceRoles.filter { it.storyId == detail.story.id }
                         Text("Bộ hồ sơ riêng: ${privateRoles.size} vai", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
-                        ReferenceActionButton("THIẾT LẬP BỘ GIỌNG RIÊNG", { showVoiceProfiles = true }, normalColor = ReferenceGray, modifier = Modifier.fillMaxWidth())
+                        ReferenceActionButton("BỘ GIỌNG RIÊNG", { showVoiceProfiles = true }, normalColor = ReferenceGray, modifier = Modifier.fillMaxWidth())
                     }
-                    Text("Ghi chú chung bổ sung cho AI", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                    Text("Ghi chú AI", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
                     OutlinedTextField(
                         voiceNote,
                         { voiceNote = it.take(4_000) },
-                        placeholder = { Text("Ví dụ: thông báo trong ngoặc vuông thuộc vai Hệ thống; lời truyền âm dùng giọng của người phát...") },
+                        placeholder = { Text("Ghi chú cho AI") },
                         minLines = 3,
                         modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text(
-                        "Tên, mô tả và cách tổ chức nhân vật do người dùng quyết định. Ứng dụng chỉ cung cấp cấu trúc hồ sơ, ID ổn định và giọng Người kể chuyện bắt buộc.",
-                        style = MaterialTheme.typography.bodySmall,
                     )
                 }
             },
@@ -700,7 +671,8 @@ fun StoryDetailScreen(
                 Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
                     privateRoles.forEach { role ->
                         ReferenceActionButton(
-                            text = role.roleName + "\n" + (role.enginePackage ?: "Hệ thống") + " • " + (role.voiceName ?: "Mặc định"),
+                            text = (if (role.enabled) "" else "TẮT • ") + role.roleName + "\n" +
+                                (role.enginePackage ?: "Hệ thống") + " • " + (role.voiceName ?: "Mặc định"),
                             onClick = {
                                 roleDraft = role.toDraft(context)
                                 showVoiceRoleDialog = true
@@ -710,8 +682,8 @@ fun StoryDetailScreen(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
                         )
                     }
-                    ReferenceActionButton("THÊM VAI HOẶC NHÂN VẬT", { roleDraft = defaultRoleDraft(); showVoiceRoleDialog = true }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
-                    ReferenceActionButton("SAO CHÉP LẠI TỪ CẤU HÌNH CHUNG", { copyGlobalConfirm = true }, normalColor = ReferenceGray, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+                    ReferenceActionButton("THÊM VAI", { roleDraft = defaultRoleDraft(); showVoiceRoleDialog = true }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+                    ReferenceActionButton("SAO CHÉP TỪ CẤU HÌNH CHUNG", { copyGlobalConfirm = true }, normalColor = ReferenceGray, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
                     ReferenceActionButton("KHÔI PHỤC 7 HỒ SƠ MẪU", { restorePrivateConfirm = true }, normalColor = ReferenceGray, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
                 }
             },
@@ -746,7 +718,7 @@ fun StoryDetailScreen(
         AlertDialog(
             onDismissRequest = { copyGlobalConfirm = false },
             title = { Text("SAO CHÉP CẤU HÌNH CHUNG") },
-            text = { Text("Thay toàn bộ bộ giọng riêng hiện tại bằng một bản sao mới của cấu hình chung? Sau khi sao chép, hai bộ vẫn độc lập.") },
+            text = { Text("Thay bộ giọng riêng bằng cấu hình chung?") },
             confirmButton = { TextButton(onClick = {
                 privateRoles.forEach { onDeleteVoiceRole(it.id) }
                 globalRoles.forEach { onSaveVoiceRole(it.toDraft(context).copy(originalRoleId = null)) }
@@ -759,7 +731,7 @@ fun StoryDetailScreen(
         AlertDialog(
             onDismissRequest = { restorePrivateConfirm = false },
             title = { Text("KHÔI PHỤC HỒ SƠ MẪU") },
-            text = { Text("Khôi phục tên và mô tả của 7 hồ sơ mẫu? Cấu hình âm thanh và các hồ sơ tùy chỉnh sẽ được giữ lại trong giới hạn 10 hồ sơ.") },
+            text = { Text("Khôi phục 7 hồ sơ mẫu?") },
             confirmButton = { TextButton(onClick = {
                 val currentByName = privateRoles.associateBy { it.roleName.trim().lowercase() }
                 globalRoles.forEach { global ->
@@ -784,7 +756,7 @@ fun StoryDetailScreen(
         AlertDialog(
             onDismissRequest = { deletePrivateRole = null },
             title = { Text("XÓA HỒ SƠ") },
-            text = { Text("Xóa hồ sơ “${role.roleName}”? Kết quả cũ dùng hồ sơ này sẽ trở về Người kể chuyện.") },
+            text = { Text("Xóa hồ sơ “${role.roleName}”?") },
             confirmButton = { TextButton(onClick = { onDeleteVoiceRole(role.id); deletePrivateRole = null }) { Text("XÓA") } },
             dismissButton = { TextButton(onClick = { deletePrivateRole = null }) { Text("HỦY") } },
         )

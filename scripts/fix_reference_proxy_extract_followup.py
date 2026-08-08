@@ -1,5 +1,6 @@
 from pathlib import Path
 
+# This follow-up keeps the OpenAI-compatible parser aligned with the XPK Responses/chat fallback behavior.
 path = Path('app/src/main/java/vn/nghetruyen/app/ai/OnlineAiServices.kt')
 text = path.read_text(encoding='utf-8')
 start = text.index('    private fun extractContent(provider: AiProvider, raw: String): String = when (provider) {\n')

@@ -1,0 +1,57 @@
+name: Sync compact UI gates
+
+on:
+  push:
+    branches:
+      - agent/compact-ui-parity
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/compact-ui-parity
+          fetch-depth: 0
+      - name: Sync static gate labels
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          replacements = {
+              "AI CẢI THIỆN VIETPHRASE": "CẢI THIỆN VIETPHRASE",
+              "AI PHÂN VAI + NHẠC CẢNH": "PHÂN VAI + NHẠC CẢNH",
+              "Lời nhắc riêng khi dịch": "Lời nhắc dịch",
+              "Lời nhắc riêng khi cải thiện VietPhrase": "Lời nhắc VietPhrase",
+              "Tự động dịch khi mở chương": "Tự động dịch",
+              "Tự động phân vai rồi đọc khi mở chương ở chế độ TTS": "Tự động phân vai",
+              "AI tự điều chỉnh tốc độ, cao độ và âm lượng": "AI điều chỉnh giọng",
+              "TAI NGHE, SONIC & TỰ ĐỘNG": "TAI NGHE & TỰ ĐỘNG",
+              "BẢN KHÔI PHỤC": "KHÔI PHỤC",
+              "GỢI Ý AI CHỜ DUYỆT": "GỢI Ý AI",
+          }
+          changed = []
+          for path in Path("scripts").glob("check*.py"):
+              text = path.read_text(encoding="utf-8")
+              updated = text
+              for old, new in replacements.items():
+                  updated = updated.replace(old, new)
+              if updated != text:
+                  path.write_text(updated, encoding="utf-8")
+                  changed.append(str(path))
+          print("\n".join(changed) if changed else "No gate labels changed")
+          PY
+      - name: Commit gate sync
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/check*.py
+          git commit -m "test: sync static gates with compact UI labels"
+          git push origin HEAD:agent/compact-ui-parity

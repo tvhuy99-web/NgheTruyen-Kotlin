@@ -100,9 +100,9 @@ def main() -> int:
         "TẠO NHẬT KÝ VIETPHRASE",
     )
     require(
-        "app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt",
-        "GEMINI NATIVE",
-        "TẢI DANH SÁCH MODEL GEMINI",
+        "app/src/main/java/vn/nghetruyen/app/ui/screens/ReferencePersonalScreen.kt",
+        "Google Gemini",
+        "TẢI DS",
     )
     require(
         "app/src/main/java/vn/nghetruyen/app/transfer/BackupTransferManager.kt",

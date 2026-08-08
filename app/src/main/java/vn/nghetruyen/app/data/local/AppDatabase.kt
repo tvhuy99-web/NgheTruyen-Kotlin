@@ -838,10 +838,10 @@ interface SceneMusicTrackDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(items: List<SceneMusicTrackEntity>)
 
-    @Query("SELECT * FROM scene_music_tracks ORDER BY title COLLATE NOCASE")
+    @Query("SELECT * FROM scene_music_tracks ORDER BY orderIndex ASC, title COLLATE NOCASE")
     suspend fun listAll(): List<SceneMusicTrackEntity>
 
-    @Query("SELECT * FROM scene_music_tracks ORDER BY title COLLATE NOCASE")
+    @Query("SELECT * FROM scene_music_tracks ORDER BY orderIndex ASC, title COLLATE NOCASE")
     fun observeAll(): Flow<List<SceneMusicTrackEntity>>
 
     @Query("SELECT * FROM scene_music_tracks WHERE enabled = 1 ORDER BY title COLLATE NOCASE")
@@ -855,6 +855,9 @@ interface SceneMusicTrackDao {
 
     @Query("DELETE FROM scene_music_tracks WHERE id = :id")
     suspend fun delete(id: String)
+
+    @Query("DELETE FROM scene_music_tracks")
+    suspend fun deleteAll()
 }
 
 @Dao

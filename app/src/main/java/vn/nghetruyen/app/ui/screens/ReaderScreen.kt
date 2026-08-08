@@ -1,6 +1,8 @@
 package vn.nghetruyen.app.ui.screens
 
 import android.content.Context
+import android.media.MediaPlayer
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -51,11 +53,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.log10
 import kotlin.math.pow
 import vn.nghetruyen.app.NgheTruyenApplication
+import vn.nghetruyen.app.ai.vietphrase.VietPhraseDiagnosticExport
+import vn.nghetruyen.app.ai.vietphrase.VietPhraseDiagnosticExporter
 import vn.nghetruyen.app.ai.vietphrase.VietPhraseDictionaryKind
 import vn.nghetruyen.app.ai.vietphrase.VietPhraseEngine
 import vn.nghetruyen.app.ai.vietphrase.VietPhraseMatchMode
@@ -172,12 +178,24 @@ fun ReaderScreen(
     var showTtsDialog by remember { mutableStateOf(false) }
     var showMusicDialog by remember { mutableStateOf(false) }
     var showMusicLibrary by remember { mutableStateOf(false) }
+    var musicLibraryDraft by remember { mutableStateOf<List<SceneMusicTrackEntity>>(emptyList()) }
+    var musicLibraryBaselineIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var musicSearch by remember { mutableStateOf("") }
+    var selectedMusicTrackId by remember { mutableStateOf<String?>(null) }
     var editingTrack by remember { mutableStateOf<SceneMusicTrackEntity?>(null) }
+    var showMusicBulkDialog by remember { mutableStateOf(false) }
+    var musicBulkText by remember { mutableStateOf("") }
+    var showMusicBulkResult by remember { mutableStateOf(false) }
+    var musicBulkUpdates by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var musicBulkErrors by remember { mutableStateOf<List<String>>(emptyList()) }
+    var showMusicClearAllConfirm by remember { mutableStateOf(false) }
+    var musicPreviewPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
     var showExportDialog by remember { mutableStateOf(false) }
     var showCopyDialog by remember { mutableStateOf(false) }
     var showChapterInfoDialog by remember { mutableStateOf(false) }
     var showDiagnosticLogDialog by remember { mutableStateOf(false) }
-    var showVietPhraseLogDialog by remember { mutableStateOf(false) }
+    var vietPhraseDiagnosticBusy by remember(content.chapter.id) { mutableStateOf(false) }
+    var vietPhraseDiagnosticResult by remember(content.chapter.id) { mutableStateOf<VietPhraseDiagnosticExport?>(null) }
     var showNoteDialog by remember { mutableStateOf(false) }
     var noteDraft by remember(content.chapter.id, activeIndex) { mutableStateOf("") }
     var searchDraft by remember(content.chapter.id) { mutableStateOf("") }
@@ -202,6 +220,14 @@ fun ReaderScreen(
     var musicDuckDb by remember { mutableStateOf((-20.0 * log10(state.backgroundMusicDuckFactor.coerceAtLeast(0.0630957f).toDouble())).toFloat().coerceIn(0f, 24f)) }
     var musicAttackMs by remember { mutableIntStateOf(250) }
     var musicReleaseMs by remember { mutableIntStateOf(900) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            runCatching { musicPreviewPlayer?.stop() }
+            runCatching { musicPreviewPlayer?.release() }
+            musicPreviewPlayer = null
+        }
+    }
 
     DisposableEffect(view, display.keepScreenOn) {
         val previous = view.keepScreenOn
@@ -242,6 +268,18 @@ fun ReaderScreen(
         }
     }
 
+    LaunchedEffect(state.sceneMusicTracks, showMusicLibrary) {
+        if (showMusicLibrary) {
+            val draftIds = musicLibraryDraft.mapTo(linkedSetOf()) { it.id }
+            val added = state.sceneMusicTracks.filter { it.id !in musicLibraryBaselineIds && it.id !in draftIds }
+            if (added.isNotEmpty()) {
+                musicLibraryDraft = (musicLibraryDraft + added)
+                    .take(500)
+                    .mapIndexed { index, row -> row.copy(orderIndex = index) }
+            }
+        }
+    }
+
     LaunchedEffect(activeIndex, textMode) {
         if (textMode && content.paragraphs.isNotEmpty() && normalizedQuery.isBlank() && !listState.isScrollInProgress) {
             if (listState.layoutInfo.visibleItemsInfo.none { it.index == activeIndex + 1 }) {
@@ -252,6 +290,51 @@ fun ReaderScreen(
     LaunchedEffect(content.chapter.id, state.readerMode) {
         delay(120)
         view.announceForAccessibility("${content.chapter.title}. Chế độ ${if (textMode) "Văn bản" else "TTS"}. ${content.paragraphs.size} đoạn")
+    }
+
+    fun createVietPhraseDiagnostic() {
+        if (vietPhraseDiagnosticBusy) {
+            onMessage("Đang tạo một nhật ký VietPhrase khác.")
+            return
+        }
+        val rawParagraphs = state.originalChapterContent?.paragraphs ?: content.paragraphs
+        if (rawParagraphs.isEmpty()) {
+            onMessage("Hãy mở một chương truyện trước khi tạo nhật ký VietPhrase.")
+            return
+        }
+        val rules = state.vietPhraseRules.mapNotNull { item ->
+            runCatching {
+                VietPhraseRule(
+                    id = item.id.toString(),
+                    source = item.source,
+                    target = item.target,
+                    kind = VietPhraseDictionaryKind.valueOf(item.kind),
+                    priority = item.priority,
+                    enabled = item.enabled,
+                    scope = VietPhraseScope.valueOf(item.scope),
+                    storyId = item.storyId.takeIf(String::isNotBlank),
+                    matchMode = VietPhraseMatchMode.valueOf(item.matchMode),
+                    ignoreCase = item.ignoreCase,
+                    updatedAt = item.updatedAt,
+                )
+            }.getOrNull()
+        }
+        vietPhraseDiagnosticBusy = true
+        scope.launch {
+            val exported = withContext(Dispatchers.IO) {
+                VietPhraseDiagnosticExporter.export(
+                    context = context,
+                    title = content.chapter.title,
+                    paragraphs = rawParagraphs,
+                    rules = rules,
+                    storyId = storyId,
+                    fallbackHanViet = state.vietPhraseFallbackHanViet,
+                )
+            }
+            vietPhraseDiagnosticBusy = false
+            exported.onSuccess { vietPhraseDiagnosticResult = it }
+                .onFailure { onMessage(it.message ?: "Lỗi tạo nhật ký VietPhrase.") }
+        }
     }
 
     val palette = readerPalette(display.theme)
@@ -352,7 +435,7 @@ fun ReaderScreen(
                     ReaderMenuButton("KHÔI PHỤC CHƯƠNG GỐC TRƯỚC AI") { showReaderOptions = false; onShowOriginal() }
                 }
                 if (state.vietPhraseRules.isNotEmpty() || state.vietPhraseDictionaryStates.isNotEmpty()) {
-                    ReaderMenuButton("TẠO NHẬT KÝ VIETPHRASE") { showReaderOptions = false; showVietPhraseLogDialog = true }
+                    ReaderMenuButton("TẠO NHẬT KÝ VIETPHRASE") { showReaderOptions = false; createVietPhraseDiagnostic() }
                 }
                 ReaderMenuButton("CÀI ĐẶT TTS") { showReaderOptions = false; showTtsDialog = true }
                 ReaderMenuButton("SAO CHÉP CHƯƠNG") { showReaderOptions = false; showCopyDialog = true }
@@ -543,7 +626,13 @@ fun ReaderScreen(
                     onMessage("Đã đưa toàn bộ kho nhạc vào hàng đợi chuẩn hóa.")
                 }
                 Text("Kho nhạc: ${state.sceneMusicTracks.size} mục", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
-                ReaderMenuButton("QUẢN LÝ DANH SÁCH NHẠC") { showMusicLibrary = true }
+                ReaderMenuButton("QUẢN LÝ DANH SÁCH NHẠC") {
+                    val rows = state.sceneMusicTracks.sortedWith(compareBy<SceneMusicTrackEntity> { it.orderIndex }.thenBy { it.title.lowercase() })
+                    musicLibraryDraft = rows.mapIndexed { index, row -> row.copy(orderIndex = index) }
+                    musicLibraryBaselineIds = rows.mapTo(linkedSetOf()) { it.id }
+                    musicSearch = ""
+                    showMusicLibrary = true
+                }
                 Text("AI chỉ đổi nhạc khi tùy chọn trao quyền ở trên được bật.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
             } },
             confirmButton = { TextButton(onClick = {
@@ -566,39 +655,298 @@ fun ReaderScreen(
     }
 
     if (showMusicLibrary) {
+        val normalizedSearch = musicSearch.trim().lowercase()
+        val visibleTracks = musicLibraryDraft.filter { normalizedSearch.isBlank() || it.title.lowercase().contains(normalizedSearch) }
+        val enabledCount = musicLibraryDraft.count(SceneMusicTrackEntity::enabled)
+        val normalizedCount = musicLibraryDraft.count { kotlin.math.abs(it.loudnessLufsEstimate + 18f) > 0.05f }
+        val describedCount = musicLibraryDraft.count { it.tagsCsv.isNotBlank() }
+        val estimatedTokens = musicLibraryDraft.sumOf { it.title.length + it.tagsCsv.length }.div(4).coerceAtLeast(0)
+        fun stopPreview() {
+            runCatching { musicPreviewPlayer?.stop() }
+            runCatching { musicPreviewPlayer?.release() }
+            musicPreviewPlayer = null
+        }
+        fun cancelLibrary() {
+            stopPreview()
+            val transientIds = state.sceneMusicTracks.mapTo(linkedSetOf()) { it.id } - musicLibraryBaselineIds
+            scope.launch { transientIds.forEach { app.container.database.sceneMusicTrackDao().delete(it) } }
+            showMusicLibrary = false
+        }
         AlertDialog(
-            onDismissRequest = { showMusicLibrary = false },
-            title = { Text("QUẢN LÝ DANH SÁCH NHẠC") },
-            text = { Column(Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState())) {
-                ReaderMenuButton("THÊM TỆP NHẠC") { onSelectSceneMusic() }
-                state.sceneMusicTracks.forEach { track ->
-                    ReferenceActionButton(track.title + track.tagsCsv.takeIf(String::isNotBlank)?.let { "\n$it" }.orEmpty(), { editingTrack = track }, normalColor = ReferenceGray, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp))
+            onDismissRequest = ::cancelLibrary,
+            title = { Text("DANH SÁCH NHẠC NỀN") },
+            text = { Column(Modifier.heightIn(max = 620.dp).verticalScroll(rememberScrollState())) {
+                Text(
+                    "Kho nhạc: ${musicLibraryDraft.size} bài\n" +
+                        "Bài đang bật: $enabledCount bài\n" +
+                        "Đã chuẩn hóa: $normalizedCount bài\n" +
+                        "Đã có mô tả: $describedCount bài\n" +
+                        "Ước tính khi gửi danh mục AI: khoảng $estimatedTokens token",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                OutlinedTextField(
+                    musicSearch,
+                    { musicSearch = it.take(120) },
+                    placeholder = { Text("Tìm theo tên bài") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                )
+                if (visibleTracks.isEmpty()) {
+                    Text(if (musicLibraryDraft.isEmpty()) "Chưa có bài nhạc nào." else "Không có bài phù hợp với nội dung tìm kiếm.", modifier = Modifier.padding(vertical = 8.dp))
+                }
+                visibleTracks.forEach { track ->
+                    val index = musicLibraryDraft.indexOfFirst { it.id == track.id }
+                    val status = if (track.enabled) "đang bật" else "đang tắt"
+                    val described = if (track.tagsCsv.isNotBlank()) "đã có mô tả" else "chưa có mô tả"
+                    ReferenceActionButton(
+                        "${index + 1}. ${track.title}, $status, $described",
+                        { selectedMusicTrackId = track.id },
+                        normalColor = ReferenceGray,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                    )
+                }
+                Row(Modifier.fillMaxWidth()) {
+                    Button(onClick = onSelectSceneMusic, enabled = musicLibraryDraft.size < 500, modifier = Modifier.weight(1f).padding(2.dp)) { Text("THÊM BÀI") }
+                    Button(onClick = { musicBulkText = ""; showMusicBulkDialog = true }, modifier = Modifier.weight(1f).padding(2.dp)) { Text("DÁN MÔ TẢ") }
+                }
+                Row(Modifier.fillMaxWidth()) {
+                    Button(onClick = {
+                        clipboard.setText(AnnotatedString(musicLibraryDraft.joinToString("\n") { it.title }))
+                        onMessage("Đã sao chép tên của ${musicLibraryDraft.size} bài.")
+                    }, enabled = musicLibraryDraft.isNotEmpty(), modifier = Modifier.weight(1f).padding(2.dp)) { Text("SAO CHÉP TÊN") }
+                    Button(onClick = {
+                        clipboard.setText(AnnotatedString(musicLibraryDraft.joinToString("\n") { "${it.title} || ${it.tagsCsv}" }))
+                        onMessage("Đã sao chép tên và mô tả của ${musicLibraryDraft.size} bài.")
+                    }, enabled = musicLibraryDraft.isNotEmpty(), modifier = Modifier.weight(1f).padding(2.dp)) { Text("SAO CHÉP MÔ TẢ") }
+                }
+                Row(Modifier.fillMaxWidth()) {
+                    Button(onClick = ::stopPreview, enabled = musicPreviewPlayer != null, modifier = Modifier.weight(1f).padding(2.dp)) { Text("DỪNG NGHE THỬ") }
+                    Button(onClick = { showMusicClearAllConfirm = true }, enabled = musicLibraryDraft.isNotEmpty(), modifier = Modifier.weight(1f).padding(2.dp)) { Text("XÓA TẤT CẢ") }
                 }
             } },
-            confirmButton = { TextButton(onClick = { showMusicLibrary = false }) { Text("ĐÓNG") } },
+            confirmButton = { TextButton(onClick = {
+                val invalid = musicLibraryDraft.firstOrNull { it.tagsCsv.length > 300 }
+                if (invalid != null) {
+                    onMessage("Mô tả của “${invalid.title}” vượt giới hạn 300 ký tự.")
+                } else if (musicLibraryDraft.size > 500) {
+                    onMessage("Danh sách vượt giới hạn 500 bài.")
+                } else {
+                    stopPreview()
+                    scope.launch {
+                        val dao = app.container.database.sceneMusicTrackDao()
+                        val existing = dao.listAll()
+                        val now = System.currentTimeMillis()
+                        val normalized = musicLibraryDraft.mapIndexed { index, row -> row.copy(orderIndex = index, updatedAt = now) }
+                        val keepIds = normalized.mapTo(hashSetOf()) { it.id }
+                        existing.filter { it.id !in keepIds }.forEach { dao.delete(it.id) }
+                        dao.upsertAll(normalized)
+                        onMessage("Đã lưu danh sách nhạc nền.")
+                        showMusicLibrary = false
+                    }
+                }
+            }) { Text("LƯU DANH SÁCH") } },
+            dismissButton = { TextButton(onClick = ::cancelLibrary) { Text("HỦY") } },
         )
     }
 
+    selectedMusicTrackId?.let { selectedId ->
+        musicLibraryDraft.firstOrNull { it.id == selectedId }?.let { track ->
+            val index = musicLibraryDraft.indexOfFirst { it.id == track.id }
+            AlertDialog(
+                onDismissRequest = { selectedMusicTrackId = null },
+                title = { Text(track.title) },
+                text = { Column {
+                    ReaderMenuButton("NGHE THỬ") {
+                        runCatching { musicPreviewPlayer?.stop() }
+                        runCatching { musicPreviewPlayer?.release() }
+                        musicPreviewPlayer = runCatching { MediaPlayer.create(context, Uri.parse(track.uri)) }.getOrNull()?.also { player ->
+                            player.setOnCompletionListener { completed ->
+                                runCatching { completed.release() }
+                                if (musicPreviewPlayer === completed) musicPreviewPlayer = null
+                            }
+                            player.start()
+                        }
+                        if (musicPreviewPlayer == null) onMessage("Không nghe thử được bài nhạc này.")
+                        selectedMusicTrackId = null
+                    }
+                    ReaderMenuButton("SỬA TÊN VÀ MÔ TẢ") { editingTrack = track; selectedMusicTrackId = null }
+                    ReaderMenuButton(if (track.enabled) "TẮT BÀI NÀY" else "BẬT BÀI NÀY") {
+                        musicLibraryDraft = musicLibraryDraft.map { if (it.id == track.id) it.copy(enabled = !track.enabled) else it }
+                        selectedMusicTrackId = null
+                    }
+                    if (index > 0) ReaderMenuButton("DI CHUYỂN LÊN") {
+                        val rows = musicLibraryDraft.toMutableList()
+                        val previous = rows[index - 1]
+                        rows[index - 1] = rows[index]
+                        rows[index] = previous
+                        musicLibraryDraft = rows.mapIndexed { position, row -> row.copy(orderIndex = position) }
+                        selectedMusicTrackId = null
+                    }
+                    if (index in 0 until musicLibraryDraft.lastIndex) ReaderMenuButton("DI CHUYỂN XUỐNG") {
+                        val rows = musicLibraryDraft.toMutableList()
+                        val next = rows[index + 1]
+                        rows[index + 1] = rows[index]
+                        rows[index] = next
+                        musicLibraryDraft = rows.mapIndexed { position, row -> row.copy(orderIndex = position) }
+                        selectedMusicTrackId = null
+                    }
+                    ReaderMenuButton("XÓA KHỎI DANH SÁCH") {
+                        selectedMusicTrackId = null
+                        editingTrack = track.copy(title = "__DELETE_CONFIRM__${track.title}")
+                    }
+                } },
+                confirmButton = { TextButton(onClick = { selectedMusicTrackId = null }) { Text("ĐÓNG") } },
+            )
+        }
+    }
+
     editingTrack?.let { track ->
-        var title by remember(track.id, track.title) { mutableStateOf(track.title) }
-        var tags by remember(track.id, track.tagsCsv) { mutableStateOf(track.tagsCsv) }
+        if (track.title.startsWith("__DELETE_CONFIRM__")) {
+            val realTitle = track.title.removePrefix("__DELETE_CONFIRM__")
+            AlertDialog(
+                onDismissRequest = { editingTrack = null },
+                title = { Text("XÓA BÀI NHẠC") },
+                text = { Text("Xóa ‘$realTitle’ khỏi danh sách?") },
+                confirmButton = { TextButton(onClick = {
+                    musicPreviewPlayer?.let { runCatching { it.stop() }; runCatching { it.release() } }
+                    musicPreviewPlayer = null
+                    musicLibraryDraft = musicLibraryDraft.filterNot { it.id == track.id }
+                        .mapIndexed { index, row -> row.copy(orderIndex = index) }
+                    editingTrack = null
+                }) { Text("XÓA") } },
+                dismissButton = { TextButton(onClick = { editingTrack = null }) { Text("HỦY") } },
+            )
+        } else {
+            var title by remember(track.id, track.title) { mutableStateOf(track.title) }
+            var description by remember(track.id, track.tagsCsv) { mutableStateOf(track.tagsCsv) }
+            AlertDialog(
+                onDismissRequest = { editingTrack = null },
+                title = { Text("SỬA THÔNG TIN AI") },
+                text = { Column {
+                    Text("Tên bài gửi cho AI")
+                    OutlinedTextField(title, { title = it.take(120) }, placeholder = { Text("Tên bài") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    Text("Mô tả tham khảo cho AI, không bắt buộc AI làm theo", modifier = Modifier.padding(top = 8.dp))
+                    OutlinedTextField(
+                        description,
+                        { description = it.take(301) },
+                        placeholder = { Text("Tông/diễn biến: ...; Dùng: ...; Tránh: ...") },
+                        minLines = 4,
+                        maxLines = 7,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text("Tối đa 300 ký tự. Chỉ ghi thông tin thực sự giúp AI phân biệt và chọn bài.", style = MaterialTheme.typography.bodySmall)
+                } },
+                confirmButton = { TextButton(onClick = {
+                    if (description.length > 300) onMessage("Mô tả có ${description.length} ký tự, vượt giới hạn 300.")
+                    else {
+                        val cleanTitle = title.trim().ifBlank { track.title }
+                        musicLibraryDraft = musicLibraryDraft.map {
+                            if (it.id == track.id) it.copy(title = cleanTitle, tagsCsv = description.trim()) else it
+                        }
+                        editingTrack = null
+                    }
+                }) { Text("LƯU") } },
+                dismissButton = { TextButton(onClick = { editingTrack = null }) { Text("HỦY") } },
+            )
+        }
+    }
+
+    if (showMusicBulkDialog) {
         AlertDialog(
-            onDismissRequest = { editingTrack = null },
-            title = { Text("SỬA TỆP NHẠC") },
+            onDismissRequest = { showMusicBulkDialog = false },
+            title = { Text("DÁN MÔ TẢ HÀNG LOẠT") },
             text = { Column {
-                OutlinedTextField(title, { title = it.take(120) }, label = { Text("Tên hiển thị") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(tags, { tags = it.take(500) }, label = { Text("Mô tả / tag") }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
-                TextButton(onClick = { clipboard.getText()?.text?.takeIf(String::isNotBlank)?.let { tags = it.take(500) } }) { Text("DÁN MÔ TẢ") }
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Bật tệp này", Modifier.weight(1f)); Switch(track.enabled, { enabled -> scope.launch { app.container.database.sceneMusicTrackDao().setEnabled(track.id, enabled, System.currentTimeMillis()) } }) }
+                Text(
+                    "Mỗi bài một dòng theo định dạng:\nTên bài || Tông/diễn biến: ...; Dùng: ...; Tránh: ...\n\n" +
+                        "Tên phải khớp với danh sách. Dòng có mô tả trống được bỏ qua. Ghi [XÓA] để xóa mô tả hiện có.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                OutlinedTextField(
+                    musicBulkText,
+                    { musicBulkText = it.take(120_000) },
+                    placeholder = { Text("Dán toàn bộ tên và mô tả tại đây") },
+                    minLines = 12,
+                    maxLines = 18,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             } },
             confirmButton = { TextButton(onClick = {
-                scope.launch { app.container.database.sceneMusicTrackDao().upsert(track.copy(title = title.trim().ifBlank { track.title }, tagsCsv = tags.trim(), updatedAt = System.currentTimeMillis())) }
-                editingTrack = null
-            }) { Text("LƯU") } },
+                val tracksByName = musicLibraryDraft.associateBy { it.title.trim().lowercase() }
+                val updates = linkedMapOf<String, String>()
+                val errors = mutableListOf<String>()
+                musicBulkText.lineSequence().forEachIndexed { index, raw ->
+                    val line = raw.trim()
+                    if (line.isBlank()) return@forEachIndexed
+                    val separator = line.indexOf("||")
+                    if (separator < 0) {
+                        errors += "Dòng ${index + 1}: thiếu dấu ||."
+                        return@forEachIndexed
+                    }
+                    val name = line.substring(0, separator).trim()
+                    val description = line.substring(separator + 2).trim()
+                    val track = tracksByName[name.lowercase()]
+                    when {
+                        name.isBlank() -> errors += "Dòng ${index + 1}: thiếu tên bài."
+                        track == null -> errors += "Dòng ${index + 1}: không tìm thấy bài “$name”."
+                        description.isBlank() -> Unit
+                        description != "[XÓA]" && description.length > 300 -> errors += "Dòng ${index + 1}: mô tả có ${description.length} ký tự, vượt giới hạn 300."
+                        else -> updates[track.id] = if (description == "[XÓA]") "" else description
+                    }
+                }
+                musicBulkUpdates = updates
+                musicBulkErrors = errors
+                showMusicBulkResult = true
+            }) { Text("KIỂM TRA") } },
+            dismissButton = { TextButton(onClick = { showMusicBulkDialog = false }) { Text("ĐÓNG") } },
+        )
+    }
+
+    if (showMusicBulkResult) {
+        val message = buildString {
+            append("Dòng hợp lệ: ${musicBulkUpdates.size}\nDòng cần kiểm tra: ${musicBulkErrors.size}")
+            if (musicBulkErrors.isNotEmpty()) {
+                append("\n\nCÁC DÒNG CẦN KIỂM TRA:\n")
+                append(musicBulkErrors.take(20).joinToString("\n"))
+                if (musicBulkErrors.size > 20) append("\n... và ${musicBulkErrors.size - 20} lỗi khác.")
+            }
+        }
+        AlertDialog(
+            onDismissRequest = { showMusicBulkResult = false },
+            title = { Text("KẾT QUẢ KIỂM TRA") },
+            text = { Text(message) },
+            confirmButton = {
+                if (musicBulkUpdates.isNotEmpty()) TextButton(onClick = {
+                    musicLibraryDraft = musicLibraryDraft.map { row ->
+                        musicBulkUpdates[row.id]?.let { row.copy(tagsCsv = it) } ?: row
+                    }
+                    showMusicBulkResult = false
+                    showMusicBulkDialog = false
+                    onMessage("Đã cập nhật ${musicBulkUpdates.size} bài. ${musicBulkErrors.size} dòng cần kiểm tra.")
+                }) { Text("ÁP DỤNG DÒNG HỢP LỆ") }
+            },
             dismissButton = { Row {
-                TextButton(onClick = { scope.launch { app.container.database.sceneMusicTrackDao().delete(track.id) }; editingTrack = null }) { Text("XÓA") }
-                TextButton(onClick = { editingTrack = null }) { Text("HỦY") }
+                if (musicBulkErrors.isNotEmpty()) TextButton(onClick = {
+                    clipboard.setText(AnnotatedString(musicBulkErrors.joinToString("\n")))
+                    onMessage("Đã sao chép danh sách lỗi.")
+                }) { Text("SAO CHÉP LỖI") }
+                TextButton(onClick = { showMusicBulkResult = false }) { Text("QUAY LẠI") }
             } },
+        )
+    }
+
+    if (showMusicClearAllConfirm) {
+        AlertDialog(
+            onDismissRequest = { showMusicClearAllConfirm = false },
+            title = { Text("XÓA TOÀN BỘ DANH SÁCH") },
+            text = { Text("Xóa tất cả bài nhạc khỏi bản nháp?") },
+            confirmButton = { TextButton(onClick = {
+                runCatching { musicPreviewPlayer?.stop() }
+                runCatching { musicPreviewPlayer?.release() }
+                musicPreviewPlayer = null
+                musicLibraryDraft = emptyList()
+                showMusicClearAllConfirm = false
+            }) { Text("XÓA") } },
+            dismissButton = { TextButton(onClick = { showMusicClearAllConfirm = false }) { Text("HỦY") } },
         )
     }
 
@@ -663,33 +1011,34 @@ fun ReaderScreen(
         )
     }
 
-    if (showVietPhraseLogDialog) {
-        val rawParagraphs = state.originalChapterContent?.paragraphs ?: content.paragraphs
-        val rules = state.vietPhraseRules.mapNotNull { item ->
-            runCatching {
-                VietPhraseRule(
-                    id = item.id.toString(), source = item.source, target = item.target,
-                    kind = VietPhraseDictionaryKind.valueOf(item.kind), priority = item.priority, enabled = item.enabled,
-                    scope = VietPhraseScope.valueOf(item.scope), storyId = item.storyId.takeIf(String::isNotBlank),
-                    matchMode = VietPhraseMatchMode.valueOf(item.matchMode), ignoreCase = item.ignoreCase, updatedAt = item.updatedAt,
-                )
-            }.getOrNull()
-        }
-        val result = remember(content.chapter.id, rules, rawParagraphs) {
-            runCatching { VietPhraseEngine(rules).translateWithTrace(rawParagraphs.joinToString("\n"), VietPhraseOptions(storyId = storyId, traceLimit = 2_000)) }.getOrNull()
+    if (vietPhraseDiagnosticBusy) {
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("ĐANG TẠO NHẬT KÝ VIETPHRASE") },
+            text = { Text("Đang phân tích chương và đóng gói file ZIP…") },
+            confirmButton = {},
+        )
+    }
+
+    vietPhraseDiagnosticResult?.let { result ->
+        val output = buildString {
+            append(result.summary)
+            append("\n\nFILE ZIP:\n")
+            append(result.path)
+            if (result.preview.isNotBlank()) {
+                append("\n\n60 QUYẾT ĐỊNH ĐẦU TIÊN:\n")
+                append(result.preview)
+            }
         }
         AlertDialog(
-            onDismissRequest = { showVietPhraseLogDialog = false },
+            onDismissRequest = { vietPhraseDiagnosticResult = null },
             title = { Text("NHẬT KÝ VIETPHRASE") },
-            text = { Column(Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState())) {
-                if (result == null) Text("Không tạo được nhật ký VietPhrase.")
-                else {
-                    Text("Đã áp dụng ${result.trace.size} lượt thay thế${if (result.traceTruncated) " (đã rút gọn)" else ""}.", fontWeight = FontWeight.SemiBold)
-                    result.appliedByKind.forEach { (kind, count) -> Text("${kind.fileName}: $count", style = MaterialTheme.typography.bodySmall) }
-                    result.trace.take(300).forEach { entry -> Text("${entry.kind?.fileName ?: "?"}: ${entry.source} → ${entry.replacement}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 3.dp)) }
-                }
-            } },
-            confirmButton = { TextButton(onClick = { showVietPhraseLogDialog = false }) { Text("ĐÓNG") } },
+            text = { Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) { Text(output) } },
+            confirmButton = { TextButton(onClick = { vietPhraseDiagnosticResult = null }) { Text("ĐÓNG") } },
+            dismissButton = { TextButton(onClick = {
+                clipboard.setText(AnnotatedString(result.path))
+                onMessage("Đã sao chép đường dẫn file ZIP.")
+            }) { Text("SAO CHÉP ĐƯỜNG DẪN") } },
         )
     }
 

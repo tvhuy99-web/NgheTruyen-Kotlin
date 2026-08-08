@@ -1,5 +1,8 @@
 package vn.nghetruyen.app.ui.components
 
+import android.os.Handler
+import android.os.Looper
+import android.speech.tts.TextToSpeech
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,32 +19,98 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import vn.nghetruyen.app.core.model.TtsEngineOption
 import vn.nghetruyen.app.core.model.TtsVoiceOption
 import vn.nghetruyen.app.core.model.VoiceRoleDraft
+import vn.nghetruyen.app.ui.reference.ReferenceVoiceRoleExtras
 
 @Composable
 fun GlobalVoiceRoleEditorDialog(
     draft: VoiceRoleDraft,
     engines: List<TtsEngineOption>,
-    voices: List<TtsVoiceOption>,
-    loadingVoices: Boolean,
     onDraftChange: (VoiceRoleDraft) -> Unit,
-    onLoadVoices: (String?) -> Unit,
     onPreview: (VoiceRoleDraft) -> Unit,
     onSave: (VoiceRoleDraft) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val context = LocalContext.current
     var engineExpanded by remember { mutableStateOf(false) }
     var languageExpanded by remember { mutableStateOf(false) }
     var voiceExpanded by remember { mutableStateOf(false) }
+    var voices by remember(draft.enginePackage) { mutableStateOf<List<TtsVoiceOption>>(emptyList()) }
+    var loadingVoices by remember(draft.enginePackage) { mutableStateOf(true) }
+
+    LaunchedEffect(draft.originalRoleId) {
+        draft.originalRoleId?.let { roleId ->
+            val extra = ReferenceVoiceRoleExtras.load(context, roleId)
+            if (draft.processingMethod != extra.processingMethod || draft.sonicAccurate != extra.sonicAccurate) {
+                onDraftChange(
+                    draft.copy(
+                        processingMethod = extra.processingMethod,
+                        sonicAccurate = extra.sonicAccurate,
+                    ),
+                )
+            }
+        }
+    }
+
+    DisposableEffect(draft.enginePackage) {
+        val mainHandler = Handler(Looper.getMainLooper())
+        var disposed = false
+        var tts: TextToSpeech? = null
+        loadingVoices = true
+        voices = emptyList()
+        val listener = TextToSpeech.OnInitListener { status ->
+            val activeTts = tts
+            val loaded = if (status == TextToSpeech.SUCCESS && activeTts != null) {
+                activeTts.voices.orEmpty()
+                    .map { voice ->
+                        TtsVoiceOption(
+                            name = voice.name,
+                            displayName = voice.name,
+                            languageTag = voice.locale?.toLanguageTag().orEmpty(),
+                            networkRequired = voice.isNetworkConnectionRequired,
+                            quality = voice.quality,
+                            enginePackage = draft.enginePackage,
+                        )
+                    }
+                    .sortedWith(
+                        compareBy<TtsVoiceOption> { it.networkRequired }
+                            .thenByDescending { it.quality }
+                            .thenBy { it.displayName.lowercase() },
+                    )
+            } else {
+                emptyList()
+            }
+            mainHandler.post {
+                if (!disposed) {
+                    voices = loaded
+                    loadingVoices = false
+                }
+            }
+        }
+        tts = draft.enginePackage?.takeIf(String::isNotBlank)?.let { packageName ->
+            TextToSpeech(context.applicationContext, listener, packageName)
+        } ?: TextToSpeech(context.applicationContext, listener)
+
+        onDispose {
+            disposed = true
+            mainHandler.removeCallbacksAndMessages(null)
+            tts?.runCatching { stop() }
+            tts?.runCatching { shutdown() }
+            tts = null
+        }
+    }
 
     val engineLabel = engines.firstOrNull { it.packageName == draft.enginePackage }?.label
         ?: draft.enginePackage
@@ -102,7 +171,6 @@ fun GlobalVoiceRoleEditorDialog(
                             onClick = {
                                 engineExpanded = false
                                 onDraftChange(draft.copy(enginePackage = null, voiceName = null))
-                                onLoadVoices(null)
                             },
                         )
                         engines.forEach { engine ->
@@ -111,7 +179,6 @@ fun GlobalVoiceRoleEditorDialog(
                                 onClick = {
                                     engineExpanded = false
                                     onDraftChange(draft.copy(enginePackage = engine.packageName, voiceName = null))
-                                    onLoadVoices(engine.packageName)
                                 },
                             )
                         }

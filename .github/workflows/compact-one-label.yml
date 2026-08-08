@@ -35,3 +35,4 @@ jobs:
           git add app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt
           git commit -m "ui: shorten VietPhrase restore title"
           git push origin HEAD:agent/compact-ui-parity
+# trigger

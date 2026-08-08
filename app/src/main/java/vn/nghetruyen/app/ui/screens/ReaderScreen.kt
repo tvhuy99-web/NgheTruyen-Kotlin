@@ -215,8 +215,11 @@ fun ReaderScreen(
 
     var musicEnabled by remember { mutableStateOf(state.backgroundMusicEnabled) }
     var musicAi by remember { mutableStateOf(state.autoSceneMusicEnabled) }
-    var musicMode by remember { mutableStateOf(if (state.sceneMusicPlaybackMode == SceneMusicPlaybackMode.SHUFFLE) SceneMusicPlaybackMode.SHUFFLE else SceneMusicPlaybackMode.SEQUENTIAL) }
+    var musicMode by remember { mutableStateOf(state.sceneMusicPlaybackMode) }
     var musicTargetLufs by remember { mutableStateOf(state.sceneMusicTargetLufs.coerceIn(-36f, -18f)) }
+    var musicCrossfadeMs by remember { mutableIntStateOf(state.sceneMusicCrossfadeMillis) }
+    var musicContinueAcrossChapters by remember { mutableStateOf(state.sceneMusicContinueAcrossChapters) }
+    var musicAvoidRepeatWindow by remember { mutableIntStateOf(state.sceneMusicAvoidRepeatWindow) }
     var musicDuckDb by remember { mutableStateOf((-20.0 * log10(state.backgroundMusicDuckFactor.coerceAtLeast(0.0630957f).toDouble())).toFloat().coerceIn(0f, 24f)) }
     var musicAttackMs by remember { mutableIntStateOf(250) }
     var musicReleaseMs by remember { mutableIntStateOf(900) }
@@ -260,8 +263,11 @@ fun ReaderScreen(
             val settings = app.container.settingsRepository.snapshot()
             musicEnabled = settings.backgroundMusicEnabled
             musicAi = settings.autoSceneMusicEnabled
-            musicMode = if (settings.sceneMusicPlaybackMode == SceneMusicPlaybackMode.SHUFFLE) SceneMusicPlaybackMode.SHUFFLE else SceneMusicPlaybackMode.SEQUENTIAL
+            musicMode = settings.sceneMusicPlaybackMode
             musicTargetLufs = settings.sceneMusicTargetLufs.coerceIn(-36f, -18f)
+            musicCrossfadeMs = settings.sceneMusicCrossfadeMillis
+            musicContinueAcrossChapters = settings.sceneMusicContinueAcrossChapters
+            musicAvoidRepeatWindow = settings.sceneMusicAvoidRepeatWindow
             musicDuckDb = (-20.0 * log10(settings.backgroundMusicDuckFactor.coerceAtLeast(0.0630957f).toDouble())).toFloat().coerceIn(0f, 24f)
             musicAttackMs = settings.backgroundMusicAttackMillis
             musicReleaseMs = settings.backgroundMusicReleaseMillis
@@ -653,8 +659,25 @@ fun ReaderScreen(
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Trao toàn quyền giữ và đổi nhạc cho AI", Modifier.weight(1f)); Switch(musicAi, { musicAi = it }) }
                 Text("Chế độ phát", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
                 Row(Modifier.fillMaxWidth()) {
-                    TextButton({ musicMode = SceneMusicPlaybackMode.SEQUENTIAL }, Modifier.weight(1f)) { Text((if (musicMode == SceneMusicPlaybackMode.SEQUENTIAL) "✓ " else "") + "PHÁT LẦN LƯỢT") }
-                    TextButton({ musicMode = SceneMusicPlaybackMode.SHUFFLE }, Modifier.weight(1f)) { Text((if (musicMode == SceneMusicPlaybackMode.SHUFFLE) "✓ " else "") + "PHÁT NGẪU NHIÊN") }
+                    TextButton({ musicMode = SceneMusicPlaybackMode.SEQUENTIAL }, Modifier.weight(1f)) { Text((if (musicMode == SceneMusicPlaybackMode.SEQUENTIAL) "✓ " else "") + "LẦN LƯỢT") }
+                    TextButton({ musicMode = SceneMusicPlaybackMode.SHUFFLE }, Modifier.weight(1f)) { Text((if (musicMode == SceneMusicPlaybackMode.SHUFFLE) "✓ " else "") + "NGẪU NHIÊN") }
+                    TextButton({ musicMode = SceneMusicPlaybackMode.SMART_AVOID_REPEAT }, Modifier.weight(1f)) { Text((if (musicMode == SceneMusicPlaybackMode.SMART_AVOID_REPEAT) "✓ " else "") + "TRÁNH LẶP") }
+                }
+                if (musicMode == SceneMusicPlaybackMode.SMART_AVOID_REPEAT) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Tránh lặp $musicAvoidRepeatWindow bài", Modifier.weight(1f))
+                        TextButton({ musicAvoidRepeatWindow = (musicAvoidRepeatWindow - 1).coerceAtLeast(0) }) { Text("−") }
+                        TextButton({ musicAvoidRepeatWindow = (musicAvoidRepeatWindow + 1).coerceAtMost(20) }) { Text("+") }
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Giữ nhạc qua chương", Modifier.weight(1f))
+                    Switch(musicContinueAcrossChapters, { musicContinueAcrossChapters = it })
+                }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Crossfade $musicCrossfadeMs ms", Modifier.weight(1f))
+                    TextButton({ musicCrossfadeMs = (musicCrossfadeMs - 400).coerceAtLeast(0) }) { Text("−") }
+                    TextButton({ musicCrossfadeMs = (musicCrossfadeMs + 400).coerceAtMost(8_000) }) { Text("+") }
                 }
                 Text("CÂN BẰNG ÂM THANH", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp))
                 Text("Mức chuẩn hóa: ${"%.1f".format(musicTargetLufs)} LUFS")
@@ -685,6 +708,9 @@ fun ReaderScreen(
                     settings.setBackgroundMusicEnabled(musicEnabled)
                     settings.setAutoSceneMusicEnabled(musicAi)
                     settings.setSceneMusicPlaybackMode(musicMode)
+                    settings.setSceneMusicCrossfadeMillis(musicCrossfadeMs)
+                    settings.setSceneMusicContinueAcrossChapters(musicContinueAcrossChapters)
+                    settings.setSceneMusicAvoidRepeatWindow(musicAvoidRepeatWindow)
                     settings.setSceneMusicTargetLufs(musicTargetLufs)
                     settings.setBackgroundMusicDuckFactor(10.0.pow(-musicDuckDb / 20.0).toFloat())
                     settings.setBackgroundMusicAttackMillis(musicAttackMs)

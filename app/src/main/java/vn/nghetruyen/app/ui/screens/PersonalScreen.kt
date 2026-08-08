@@ -1370,6 +1370,7 @@ private fun ReferenceVoiceCastSettingsCard(
                                 enabled = !role.isNarrator,
                             )
                         }
+                        Text((role.enginePackage ?: "Hệ thống") + " • " + (role.voiceName ?: "Mặc định"), style = MaterialTheme.typography.bodySmall)
                         Row(Modifier.fillMaxWidth()) {
                             Button(onClick = {
                                 editDraft = VoiceRoleDraft(
@@ -1391,9 +1392,6 @@ private fun ReferenceVoiceCastSettingsCard(
                                     enabled = role.enabled,
                                 )
                             }, modifier = Modifier.weight(1f).padding(2.dp)) { Text("SỬA") }
-                            if (!role.isNarrator) {
-                                Button(onClick = { onDeleteGlobalVoiceRole(role.id) }, modifier = Modifier.weight(1f).padding(2.dp)) { Text("XÓA") }
-                            }
                         }
                     }
                 }
@@ -1433,6 +1431,9 @@ private fun ReferenceVoiceCastSettingsCard(
                 onSaveGlobalVoiceRole(it)
                 editDraft = null
             },
+            onDelete = if (!draft.isNarrator && draft.originalRoleId != null) {
+                { onDeleteGlobalVoiceRole(draft.originalRoleId); editDraft = null }
+            } else null,
             onDismiss = { editDraft = null },
         )
     }

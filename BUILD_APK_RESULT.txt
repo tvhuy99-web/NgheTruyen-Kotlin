@@ -1,12 +1,9 @@
-STATUS=success
-COMMIT_SHA=1c5f0429a195939b001dbbaa617f1551fd704183
-RUN_ID=31248268794
+STATUS=failure
+COMMIT_SHA=a08517459c613b4aec5b1e8e40a7adf247c28018
+RUN_ID=31260232330
 RUN_ATTEMPT=1
-VALIDATE_OUTCOME=success
-BUILD_OUTCOME=success
-UPLOAD_OUTCOME=success
-CLEANUP_OUTCOME=success
-ARTIFACT_ID=9019216485
+VALIDATE_OUTCOME=skipped
+BUILD_OUTCOME=skipped
+UPLOAD_OUTCOME=skipped
+ARTIFACT_ID=
 ARTIFACT_NAME=NgheTruyen-v2.8.0-debug-apk
-DELETED_BRANCHES=agent/reference-ui-position-parity,agent/stable-debug-signing,agent/talkback-settings-reader
-78aba53ef7de13460895eabfab3b13b0d7809bb9a95844ea7e7375c4ba4a3a06  app/build/outputs/apk/debug/app-debug.apk

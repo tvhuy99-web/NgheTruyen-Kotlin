@@ -5,13 +5,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 import java.io.FileOutputStream
+import kotlin.io.path.createTempDirectory
 import kotlin.math.PI
 import kotlin.math.sin
 
 class SonicPcmProcessorTest {
     @Test
     fun speedChangesDurationWhileKeepingValidPcm16Wave() {
-        val root = createTempDir(prefix = "sonic-test-")
+        val root = createTempDirectory("sonic-test-").toFile()
         try {
             val input = File(root, "input.wav")
             val output = File(root, "output.wav")

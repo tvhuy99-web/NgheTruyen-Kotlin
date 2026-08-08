@@ -1,0 +1,92 @@
+name: Reference parity phase 2
+
+on:
+  push:
+    branches:
+      - agent/reference-ui-position-parity
+    paths:
+      - .github/workflows/reference-parity-phase2.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  parity-phase2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout parity branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/reference-ui-position-parity
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Apply reference parity phase 2
+        run: python3 scripts/apply_reference_parity_phase2.py
+
+      - name: Assert exact reference-facing options
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt').read_text()
+          required = [
+              '＋ THÊM CÁCH ĐỌC', 'THÊM CÁCH ĐỌC', 'SỬA CÁCH ĐỌC',
+              'Bật VietPhrase', 'NHẬP FILE ZIP', 'XUẤT TỪ ĐIỂN ZIP',
+              'Names.txt', 'VietPhrase.txt', 'Pronouns.txt', 'LuatNhan.txt',
+              'ChinesePhienAmWords.txt', 'LacViet.txt', 'AIReplace.txt',
+              'XÓA TẤT CẢ', 'TẢI TỰ ĐỘNG TỪ MẠNG',
+              'Dùng Hán Việt khi không tìm thấy cụm',
+              'CHỌN DỮ LIỆU SAO LƯU', 'CHỌN DỮ LIỆU KHÔI PHỤC',
+              'CÀI ĐẶT CHUNG, GIỌNG ĐỌC VÀ AI',
+              'DỮ LIỆU ĐỌC, DẤU TRANG, TỪ ĐIỂN VÀ TRUYỆN ĐÃ TẢI',
+              'NHẠC NỀN', 'VIETPHRASE', 'TIỆN ÍCH VÀ NGUỒN TRUYỆN',
+              'XÓA NHẬT KÝ',
+              'TTS không tự tạm dừng khi Android báo gián đoạn âm thanh tạm thời',
+          ]
+          for token in required:
+              assert token in p, token
+          assert 'VietPhrase nâng cao' not in p
+          assert 'THÊM QUY TẮC' not in p
+          app = Path('app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt').read_text()
+          assert 'importFrom(uri)' in app
+          assert 'setBackupComponents' in app
+          assert 'backupLogPath' in app and 'backupLogText' in app
+          engine = Path('app/src/main/java/vn/nghetruyen/app/ai/vietphrase/VietPhraseEngine.kt').read_text()
+          assert 'fallbackHanVietTrie' in engine
+          runtime = Path('app/src/main/java/vn/nghetruyen/app/ai/vietphrase/ReferenceVietPhraseRuntime.kt').read_text()
+          assert 'var enabled: Boolean = false' in runtime
+          playback = Path('app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt').read_text()
+          assert 'Đang tiếp tục đọc khi âm thanh khác phát xen.' in playback
+          print('REFERENCE_PARITY_PHASE2_ASSERTIONS_OK')
+          PY
+
+      - name: Validate release wiring
+        run: python3 scripts/validate_release.py --wiring-only
+
+      - name: Compile Kotlin
+        run: bash ./gradlew :app:compileDebugKotlin --no-daemon
+
+      - name: Remove temporary phase tooling
+        run: rm -f scripts/apply_reference_parity_phase2.py .github/workflows/reference-parity-phase2.yml
+
+      - name: Commit verified product changes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'No product changes to commit.'
+            exit 0
+          fi
+          git commit -m "fix: match reference settings and transfer flows"
+          git push origin HEAD:agent/reference-ui-position-parity

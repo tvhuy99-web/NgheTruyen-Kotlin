@@ -16,6 +16,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -25,6 +26,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -38,9 +40,11 @@ import vn.nghetruyen.app.ui.reference.ReferenceVoiceRoleExtras
 fun GlobalVoiceRoleEditorDialog(
     draft: VoiceRoleDraft,
     engines: List<TtsEngineOption>,
+    title: String? = null,
     onDraftChange: (VoiceRoleDraft) -> Unit,
     onPreview: (VoiceRoleDraft) -> Unit,
     onSave: (VoiceRoleDraft) -> Unit,
+    onDelete: (() -> Unit)? = null,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -127,7 +131,7 @@ fun GlobalVoiceRoleEditorDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (draft.originalRoleId == null) "THÊM GIỌNG" else "SỬA HỒ SƠ GIỌNG") },
+        title = { Text(title ?: if (draft.originalRoleId == null) "THÊM GIỌNG" else "SỬA HỒ SƠ GIỌNG") },
         text = {
             Column(
                 Modifier
@@ -158,6 +162,15 @@ fun GlobalVoiceRoleEditorDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().padding(top = 5.dp),
                 )
+                if (!draft.isNarrator) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Bật", Modifier.weight(1f))
+                        Switch(
+                            checked = draft.enabled,
+                            onCheckedChange = { onDraftChange(draft.copy(enabled = it)) },
+                        )
+                    }
+                }
 
                 Text("Bộ đọc TTS", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
                 Box(Modifier.fillMaxWidth()) {
@@ -316,12 +329,19 @@ fun GlobalVoiceRoleEditorDialog(
         confirmButton = {
             TextButton(
                 enabled = draft.roleName.isNotBlank(),
-                onClick = { onSave(draft) },
+                onClick = { onSave(draft.copy(enabled = if (draft.isNarrator) true else draft.enabled)) },
             ) {
                 Text("LƯU")
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("HỦY") } },
+        dismissButton = {
+            Row {
+                if (onDelete != null && !draft.isNarrator && draft.originalRoleId != null) {
+                    TextButton(onClick = onDelete) { Text("XÓA") }
+                }
+                TextButton(onClick = onDismiss) { Text("HỦY") }
+            }
+        },
     )
 }
 
@@ -336,7 +356,7 @@ private fun CompactVoiceValueRow(
     onChange: (Float) -> Unit,
 ) {
     val safeValue = value.coerceIn(minimum, maximum)
-    Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(
             if (percent) "$label ${"%.0f".format(safeValue * 100)}%" else "$label ${"%.2f".format(safeValue)}×",
             modifier = Modifier.weight(1f),

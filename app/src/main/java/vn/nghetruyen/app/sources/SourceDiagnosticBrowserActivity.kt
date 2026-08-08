@@ -1,20 +1,16 @@
 package vn.nghetruyen.app.sources
 
 import android.annotation.SuppressLint
+import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
-import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.Uri
 import android.net.http.SslError
 import android.os.Bundle
-import android.view.View
-import android.view.ViewGroup
 import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
-import android.webkit.JsPromptResult
-import android.webkit.JsResult
 import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
@@ -27,7 +23,6 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ProgressBar
-import android.widget.ScrollView
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
@@ -39,10 +34,9 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Dedicated, source-scoped login diagnostics browser.
- *
- * It records URLs, methods, resource classes, header names and browser lifecycle events, but never
- * records request header values, response bodies, passwords, form values or cookie values.
+ * Source-scoped diagnostics browser matching the option hierarchy of the reference XPK.
+ * Only redacted metadata is recorded. Passwords, form values, response bodies and cookie values
+ * are never written to the diagnostic log.
  */
 class SourceDiagnosticBrowserActivity : ComponentActivity() {
     private lateinit var sourceId: String
@@ -53,24 +47,27 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
     private lateinit var urlField: EditText
     private lateinit var status: TextView
     private lateinit var progress: ProgressBar
-    private lateinit var logView: TextView
+
     private val entries = ArrayDeque<DiagnosticEntry>()
-    private val requests = ArrayDeque<DiagnosticRequest>()
-    private var verbose = false
     private var requestCount = 0
-    private var strictOrigins = true
-    private var blockExternalResources = true
-    private var dialogPolicy = DialogPolicy.CANCEL
-    private var userAgentMode = 0
-    private var autoClearLog = false
+    private val browserPrefs by lazy {
+        getSharedPreferences(SourceLoginActivity.BROWSER_PREFS, MODE_PRIVATE)
+    }
+    private var desktopCompat = false
+    private var logLevel = 0
+    private var autoClearLogOnClose = false
 
     private val exportLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri == null) return@registerForActivityResult
         runCatching {
-            contentResolver.openOutputStream(uri, "wt")?.use { output -> output.write(exportJson().toByteArray(Charsets.UTF_8)) }
-                ?: error("Không mở được tệp xuất.")
-        }.onSuccess { setStatus("Đã xuất nhật ký chẩn đoán đã khử dữ liệu nhạy cảm.") }
-            .onFailure { setStatus(it.message ?: "Không xuất được nhật ký.") }
+            contentResolver.openOutputStream(uri, "wt")?.use { output ->
+                output.write(exportJson().toByteArray(Charsets.UTF_8))
+            } ?: error("Không mở được tệp xuất.")
+        }.onSuccess {
+            status.text = "Đã xuất nhật ký chẩn đoán đã khử dữ liệu nhạy cảm."
+        }.onFailure {
+            status.text = it.message ?: "Không xuất được nhật ký."
+        }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -79,88 +76,58 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
         sourceId = intent.getStringExtra(EXTRA_SOURCE_ID).orEmpty()
         initialUrl = intent.getStringExtra(EXTRA_INITIAL_URL).orEmpty()
         allowedHosts = intent.getStringArrayExtra(EXTRA_ALLOWED_HOSTS)?.map(String::lowercase)?.toSet().orEmpty()
-        require(sourceId.isNotBlank() && initialUrl.isNotBlank() && allowedHosts.isNotEmpty()) { "Thiếu cấu hình chẩn đoán nguồn." }
+        require(sourceId.isNotBlank() && initialUrl.isNotBlank() && allowedHosts.isNotEmpty()) {
+            "Thiếu cấu hình chẩn đoán nguồn."
+        }
         require(isAllowed(initialUrl)) { "URL chẩn đoán nằm ngoài allowlist." }
         sessionStore = (application as NgheTruyenApplication).container.sourceSessionStore
+        desktopCompat = browserPrefs.getBoolean(SourceLoginActivity.KEY_CHROME_COMPAT, false)
+        logLevel = browserPrefs.getInt(SourceLoginActivity.KEY_LOG_LEVEL, 0).coerceIn(0, 2)
+        autoClearLogOnClose = browserPrefs.getBoolean(SourceLoginActivity.KEY_AUTO_CLEAR_LOG_ON_CLOSE, false)
 
         WebView.setWebContentsDebuggingEnabled(false)
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.WHITE) }
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.WHITE)
+        }
         status = TextView(this).apply {
-            text = "Trình duyệt chẩn đoán chỉ ghi metadata đã khử bí mật. Mật khẩu, nội dung biểu mẫu và giá trị cookie không được ghi."
+            text = "Trình duyệt chẩn đoán chỉ ghi metadata đã khử bí mật."
             setPadding(20, 12, 20, 12)
         }
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100 }
-        urlField = EditText(this).apply { setSingleLine(true); setText(initialUrl); hint = "URL HTTPS thuộc nguồn" }
-        val browserOptions = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
-        val otherOptions = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
-        val diagnosticOptions = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
+        urlField = EditText(this).apply {
+            setSingleLine(true)
+            setText(initialUrl)
+            hint = "URL HTTPS thuộc nguồn"
+        }
+
+        fun button(label: String, action: () -> Unit) = Button(this).apply {
+            text = label
+            setOnClickListener { action() }
+        }
+        fun row(vararg buttons: Button) = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            buttons.forEach { addView(it, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)) }
+        }
 
         root.addView(status, matchWrap())
         root.addView(progress, matchWrap())
-        root.addView(row(
-            button("QUAY LẠI") { if (webView.canGoBack()) webView.goBack() },
-            button("TIẾN TỚI") { if (webView.canGoForward()) webView.goForward() },
-            button("TÙY CHỌN") {
-                browserOptions.visibility = if (browserOptions.visibility == View.VISIBLE) View.GONE else View.VISIBLE
-                if (browserOptions.visibility == View.GONE) {
-                    otherOptions.visibility = View.GONE
-                    diagnosticOptions.visibility = View.GONE
-                    if (::logView.isInitialized) logView.visibility = View.GONE
-                }
-            },
-        ), matchWrap())
-        val addressRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        addressRow.addView(urlField, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        addressRow.addView(button("ĐI TỚI") { navigate(urlField.text.toString()) })
+        root.addView(
+            row(
+                button("QUAY LẠI") { if (webView.canGoBack()) webView.goBack() },
+                button("TIẾN TỚI") { if (webView.canGoForward()) webView.goForward() },
+                button("TÙY CHỌN") { showBrowserOptions() },
+            ),
+            matchWrap(),
+        )
+        val addressRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(urlField, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(button("ĐI TỚI") { navigate(urlField.text.toString()) })
+        }
         root.addView(addressRow, matchWrap())
 
-        browserOptions.addView(button("LÀM MỚI") { webView.reload() }, matchWrap())
-        browserOptions.addView(button("TÙY CHỌN KHÁC") {
-            otherOptions.visibility = if (otherOptions.visibility == View.VISIBLE) View.GONE else View.VISIBLE
-        }, matchWrap())
-        browserOptions.addView(button("XÓA DỮ LIỆU ĐĂNG NHẬP CỦA TRANG") { clearSourceCookies() }, matchWrap())
-        browserOptions.addView(button("ĐÓNG TRÌNH DUYỆT") { finish() }, matchWrap())
-        root.addView(browserOptions, matchWrap())
-
-        otherOptions.addView(button("CHẾ ĐỘ TƯƠNG THÍCH CHROME") { cycleUserAgent() }, matchWrap())
-        otherOptions.addView(button("CHẨN ĐOÁN TRÌNH DUYỆT") {
-            diagnosticOptions.visibility = View.VISIBLE
-            if (::logView.isInitialized) logView.visibility = View.VISIBLE
-        }, matchWrap())
-        otherOptions.addView(button("MỨC NHẬT KÝ") {
-            verbose = !verbose
-            record("INFO", "LOG_LEVEL", if (verbose) "VERBOSE" else "BASIC")
-        }, matchWrap())
-        otherOptions.addView(button("TỰ XÓA NHẬT KÝ") {
-            autoClearLog = !autoClearLog
-            setStatus(if (autoClearLog) "Đã bật tự xóa nhật ký khi điều hướng." else "Đã tắt tự xóa nhật ký.")
-        }, matchWrap())
-        otherOptions.addView(button("MỞ BẰNG TRÌNH DUYỆT HỆ THỐNG") {
-            val target = webView.url ?: initialUrl
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(target)))
-        }, matchWrap())
-        root.addView(otherOptions, matchWrap())
-
-        diagnosticOptions.addView(row(
-            button("LÀM MỚI") { webView.reload() },
-            button("SAO CHÉP") { copyLog() },
-            button("XUẤT") { exportLauncher.launch("source-${sourceId.take(40)}-diagnostics.json") },
-        ), matchWrap())
-        diagnosticOptions.addView(row(
-            button("KIỂM TRA JS") { runJavaScriptProbe() },
-            button("KIỂM TRA COOKIE") { runCookieProbe() },
-            button("QUÉT TRANG") { runDomProbe() },
-        ), matchWrap())
-        diagnosticOptions.addView(row(
-            button("XÓA NHẬT KÝ") { entries.clear(); requests.clear(); requestCount = 0; renderLog() },
-            button("ĐÓNG") {
-                diagnosticOptions.visibility = View.GONE
-                if (::logView.isInitialized) logView.visibility = View.GONE
-            },
-        ), matchWrap())
-        root.addView(diagnosticOptions, matchWrap())
-
-        webView = WebView(this).apply web@{
+        webView = WebView(this).apply browser@{
             settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
@@ -173,199 +140,302 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
                 safeBrowsingEnabled = true
                 mediaPlaybackRequiresUserGesture = true
                 cacheMode = WebSettings.LOAD_DEFAULT
-                userAgentString = DIAGNOSTIC_USER_AGENT
+                userAgentString = currentUserAgent()
             }
             CookieManager.getInstance().apply {
                 setAcceptCookie(true)
-                setAcceptThirdPartyCookies(this@web, false)
+                setAcceptThirdPartyCookies(this@browser, false)
             }
             webChromeClient = object : WebChromeClient() {
-                override fun onProgressChanged(view: WebView?, newProgress: Int) { this@SourceDiagnosticBrowserActivity.progress.progress = newProgress }
+                override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                    this@SourceDiagnosticBrowserActivity.progress.progress = newProgress
+                }
+
                 override fun onConsoleMessage(message: ConsoleMessage): Boolean {
-                    record("CONSOLE", "${message.messageLevel()}@${message.lineNumber()}", sanitize(message.message(), 800))
+                    if (logLevel >= 2) {
+                        record("CONSOLE", "${message.messageLevel()}@${message.lineNumber()}", sanitize(message.message(), 800))
+                    }
                     return true
                 }
-                override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message?): Boolean {
-                    record("WARN", "POPUP_BLOCKED", "isUserGesture=$isUserGesture")
-                    return false
-                }
-                override fun onJsAlert(view: WebView?, url: String?, message: String?, result: JsResult): Boolean =
-                    handleDialog("ALERT", url, message, null, result, null)
-
-                override fun onJsConfirm(view: WebView?, url: String?, message: String?, result: JsResult): Boolean =
-                    handleDialog("CONFIRM", url, message, null, result, null)
-
-                override fun onJsPrompt(view: WebView?, url: String?, message: String?, defaultValue: String?, result: JsPromptResult): Boolean =
-                    handleDialog("PROMPT", url, message, defaultValue, null, result)
             }
             webViewClient = diagnosticClient()
         }
-        root.addView(webView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 3f))
-        logView = TextView(this).apply { setTextIsSelectable(true); setPadding(16, 10, 16, 16); textSize = 11f; visibility = View.GONE }
-        root.addView(ScrollView(this).apply { addView(logView, matchWrap()) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 2f))
+        root.addView(webView, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
         setContentView(root)
         seedWebViewCookies()
-        record("INFO", "DIAGNOSTIC_STARTED", "source=$sourceId hosts=${allowedHosts.sorted().joinToString()}")
+        record("INFO", "BROWSER_STARTED", "source=$sourceId")
         navigate(initialUrl)
+    }
+
+    private fun showBrowserOptions() {
+        AlertDialog.Builder(this)
+            .setTitle("TÙY CHỌN TRÌNH DUYỆT")
+            .setItems(
+                arrayOf(
+                    "LÀM MỚI",
+                    "TÙY CHỌN KHÁC",
+                    "XÓA DỮ LIỆU ĐĂNG NHẬP CỦA TRANG",
+                    "ĐÓNG TRÌNH DUYỆT",
+                ),
+            ) { _, which ->
+                when (which) {
+                    0 -> webView.reload()
+                    1 -> showOtherOptions()
+                    2 -> confirmClearLoginData()
+                    3 -> finish()
+                }
+            }
+            .setNegativeButton("HỦY", null)
+            .show()
+    }
+
+    private fun showOtherOptions() {
+        val chrome = if (desktopCompat) "BẬT" else "TẮT"
+        val level = SourceLoginActivity.logLevelLabel(logLevel).uppercase()
+        val autoClear = if (autoClearLogOnClose) "BẬT" else "TẮT"
+        AlertDialog.Builder(this)
+            .setTitle("TÙY CHỌN KHÁC")
+            .setItems(
+                arrayOf(
+                    "TƯƠNG THÍCH CHROME: $chrome",
+                    "CHẨN ĐOÁN TRÌNH DUYỆT",
+                    "MỨC GHI NHẬT KÝ: $level",
+                    "TỰ XÓA NHẬT KÝ KHI ĐÓNG: $autoClear",
+                    "MỞ BẰNG TRÌNH DUYỆT HỆ THỐNG",
+                ),
+            ) { _, which ->
+                when (which) {
+                    0 -> {
+                        desktopCompat = !desktopCompat
+                        browserPrefs.edit().putBoolean(SourceLoginActivity.KEY_CHROME_COMPAT, desktopCompat).apply()
+                        webView.settings.userAgentString = currentUserAgent()
+                        webView.reload()
+                    }
+                    1 -> showDiagnosticsDialog()
+                    2 -> showLogLevelDialog()
+                    3 -> {
+                        autoClearLogOnClose = !autoClearLogOnClose
+                        browserPrefs.edit()
+                            .putBoolean(SourceLoginActivity.KEY_AUTO_CLEAR_LOG_ON_CLOSE, autoClearLogOnClose)
+                            .apply()
+                    }
+                    4 -> {
+                        val target = webView.url?.takeIf(::isHttps) ?: initialUrl
+                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(target)))
+                    }
+                }
+            }
+            .setNegativeButton("ĐÓNG", null)
+            .show()
+    }
+
+    private fun showLogLevelDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("MỨC GHI NHẬT KÝ")
+            .setSingleChoiceItems(arrayOf("TẮT", "CƠ BẢN", "CHI TIẾT"), logLevel) { dialog, which ->
+                logLevel = which.coerceIn(0, 2)
+                browserPrefs.edit().putInt(SourceLoginActivity.KEY_LOG_LEVEL, logLevel).apply()
+                record("INFO", "LOG_LEVEL", SourceLoginActivity.logLevelLabel(logLevel))
+                dialog.dismiss()
+            }
+            .setNegativeButton("HỦY", null)
+            .show()
+    }
+
+    private fun showDiagnosticsDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("CHẨN ĐOÁN TRÌNH DUYỆT")
+            .setItems(
+                arrayOf(
+                    "LÀM MỚI",
+                    "SAO CHÉP NHẬT KÝ",
+                    "XUẤT NHẬT KÝ",
+                    "KIỂM TRA JS",
+                    "KIỂM TRA COOKIE",
+                    "QUÉT TRANG",
+                    "XÓA NHẬT KÝ",
+                ),
+            ) { _, which ->
+                when (which) {
+                    0 -> webView.reload()
+                    1 -> copyLog()
+                    2 -> exportLauncher.launch("source-${sourceId.take(40)}-diagnostics.json")
+                    3 -> runJavaScriptProbe()
+                    4 -> runCookieProbe()
+                    5 -> runDomProbe()
+                    6 -> clearLog()
+                }
+            }
+            .setNegativeButton("ĐÓNG", null)
+            .show()
+    }
+
+    private fun confirmClearLoginData() {
+        val host = runCatching { Uri.parse(webView.url ?: initialUrl).host }.getOrNull()
+            ?: allowedHosts.firstOrNull().orEmpty()
+        AlertDialog.Builder(this)
+            .setTitle("XÓA DỮ LIỆU ĐĂNG NHẬP")
+            .setMessage("Xóa cookie và dữ liệu đăng nhập của $host?")
+            .setPositiveButton("XÓA") { _, _ ->
+                SourceLoginActivity.clearStoredSession(sourceId, allowedHosts, sessionStore)
+                status.text = "Đã xóa dữ liệu đăng nhập của trang."
+                webView.reload()
+            }
+            .setNegativeButton("HỦY", null)
+            .show()
     }
 
     private fun diagnosticClient(): WebViewClient = object : WebViewClient() {
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
             val target = request.url.toString()
-            if (!isAllowed(target) && (strictOrigins || !isHttps(target))) {
+            if (!isAllowed(target)) {
                 record("SECURITY", "NAVIGATION_BLOCKED", redactUrl(target))
-                setStatus("Đã chặn điều hướng theo chính sách miền hiện tại.")
+                status.text = "Đã chặn điều hướng ra ngoài miền của nguồn."
                 return true
             }
-            if (!isAllowed(target)) record("WARN", "EXTERNAL_NAVIGATION_ALLOWED", redactUrl(target))
-            record("NAV", "NAVIGATION", "${request.method} ${redactUrl(target)}")
+            if (logLevel >= 1) record("NAV", "NAVIGATION", redactUrl(target))
             return false
         }
 
-        override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+        override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
             urlField.setText(url)
-            record("PAGE", "START", redactUrl(url))
+            if (logLevel >= 1) record("PAGE", "START", redactUrl(url))
         }
 
         override fun onPageFinished(view: WebView, url: String) {
             urlField.setText(url)
             captureSession()
-            record("PAGE", "FINISH", "${redactUrl(url)} title=${sanitize(view.title.orEmpty(), 200)}")
-            setStatus("Trang đã tải. Có $requestCount request metadata trong phiên chẩn đoán.")
+            if (logLevel >= 1) record("PAGE", "FINISH", redactUrl(url))
+            status.text = "Trang đã tải. Có $requestCount request trong phiên chẩn đoán."
         }
 
         override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
-            requestCount++
-            val target = request.url.toString()
-            val redacted = redactUrl(target)
-            val external = !isAllowed(target)
-            val blocked = external && (blockExternalResources || !isHttps(target))
-            val detail = "${request.method} $redacted main=${request.isForMainFrame} external=$external blocked=$blocked headers=${request.requestHeaders.keys.sorted().joinToString()}"
-            recordRequest(request, redacted, blocked)
-            if (blocked) {
-                record("SECURITY", "RESOURCE_BLOCKED", detail)
-                return WebResourceResponse("text/plain", "UTF-8", 403, "Blocked", emptyMap(), byteArrayOf().inputStream())
+            requestCount += 1
+            if (logLevel >= 2) {
+                record(
+                    "REQUEST",
+                    request.method,
+                    "${redactUrl(request.url.toString())} main=${request.isForMainFrame} headers=${request.requestHeaders.keys.sorted().joinToString()}",
+                )
             }
-            if (external) record("WARN", "EXTERNAL_RESOURCE_ALLOWED", detail)
-            else if (verbose || request.isForMainFrame) record("REQUEST", resourceType(target), detail)
             return null
         }
 
         override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-            record("ERROR", "WEB_ERROR", "code=${error.errorCode} main=${request.isForMainFrame} url=${redactUrl(request.url.toString())} desc=${sanitize(error.description.toString(), 300)}")
+            if (logLevel >= 1) {
+                record(
+                    "ERROR",
+                    "WEB_${error.errorCode}",
+                    "main=${request.isForMainFrame} url=${redactUrl(request.url.toString())} desc=${sanitize(error.description.toString(), 300)}",
+                )
+            }
         }
 
         override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
-            record("HTTP", "HTTP_${errorResponse.statusCode}", "main=${request.isForMainFrame} url=${redactUrl(request.url.toString())}")
+            if (logLevel >= 1) {
+                record("HTTP", "HTTP_${errorResponse.statusCode}", "main=${request.isForMainFrame} url=${redactUrl(request.url.toString())}")
+            }
         }
 
         override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
             handler.cancel()
             record("SECURITY", "SSL_BLOCKED", "primary=${error.primaryError} url=${redactUrl(error.url.orEmpty())}")
         }
-
     }
 
     private fun navigate(raw: String) {
         val target = raw.trim()
-        if (autoClearLog) { entries.clear(); requests.clear(); requestCount = 0; renderLog() }
-        if ((!isAllowed(target) && strictOrigins) || !isHttps(target)) {
-            setStatus(if (strictOrigins) "URL phải dùng HTTPS và thuộc allowlist của nguồn." else "URL phải dùng HTTPS.")
+        if (!isAllowed(target)) {
+            status.text = "URL phải dùng HTTPS và thuộc allowlist của nguồn."
             record("SECURITY", "URL_REJECTED", redactUrl(target))
             return
         }
-        record("NAV", "LOAD_URL", redactUrl(target))
+        if (logLevel >= 1) record("NAV", "LOAD_URL", redactUrl(target))
         webView.loadUrl(target)
     }
 
-    private fun runJavaScriptProbe() = evaluateProbe(
-        "JS_PROBE",
-        "JSON.stringify({href:location.href,title:document.title,readyState:document.readyState,links:document.links.length,forms:document.forms.length,localStorageKeys:Object.keys(localStorage).length})",
-    )
-
-    private fun runDomProbe() = evaluateProbe(
-        "DOM_PROBE",
-        "JSON.stringify({title:document.title,textLength:(document.body&&document.body.innerText||'').length,htmlLength:(document.documentElement&&document.documentElement.outerHTML||'').length,links:document.links.length,forms:document.forms.length,scripts:document.scripts.length,iframes:document.querySelectorAll('iframe').length})",
-    )
-
-    private fun evaluateProbe(name: String, script: String) {
-        webView.evaluateJavascript(script) { raw -> record("PROBE", name, sanitize(decodeJs(raw), 1_500)) }
+    private fun runJavaScriptProbe() {
+        webView.evaluateJavascript(
+            "JSON.stringify({href:location.href,title:document.title,readyState:document.readyState,links:document.links.length,forms:document.forms.length})",
+        ) { raw ->
+            record("PROBE", "JS", sanitize(decodeJs(raw), 1_500))
+            status.text = "Đã kiểm tra JavaScript."
+        }
     }
 
-    private fun runStorageProbe() = evaluateProbe(
-        "STORAGE_PROBE",
-        "(function(){function s(x){var n=0;for(var i=0;i<x.length;i++){var k=x.key(i);n+=(k||'').length+(x.getItem(k)||'').length;}return {count:x.length,characters:n};}return JSON.stringify({local:s(localStorage),session:s(sessionStorage),indexedDb:!!window.indexedDB,serviceWorker:!!navigator.serviceWorker});})()",
-    )
+    private fun runDomProbe() {
+        webView.evaluateJavascript(
+            "JSON.stringify({title:document.title,textLength:(document.body&&document.body.innerText||'').length,links:document.links.length,forms:document.forms.length,scripts:document.scripts.length,iframes:document.querySelectorAll('iframe').length})",
+        ) { raw ->
+            record("PROBE", "DOM", sanitize(decodeJs(raw), 1_500))
+            status.text = "Đã quét metadata trang."
+        }
+    }
 
     private fun runCookieProbe() {
         val url = webView.url ?: initialUrl
         val header = CookieManager.getInstance().getCookie(url).orEmpty()
         val names = CookieHeaderCodec.cookieNames(header).distinct().sorted()
-        record("PROBE", "COOKIE", "host=${Uri.parse(url).host.orEmpty()} count=${names.size} names=${names.joinToString()} storedSession=${sessionStore.hasSession(sourceId)}")
-    }
-
-    private fun summarizeRequests() {
-        val requestEntries = entries.filter { it.level == "REQUEST" || it.category.startsWith("HTTP_") }
-        val hosts = requestEntries.mapNotNull { Regex("https://([^/\\s?]+)").find(it.detail)?.groupValues?.getOrNull(1) }.groupingBy { it }.eachCount()
-        record("PROBE", "REQUEST_SUMMARY", "total=$requestCount logged=${requestEntries.size} hosts=${hosts.entries.sortedByDescending { it.value }.joinToString { "${it.key}:${it.value}" }}")
-    }
-
-    private fun cycleUserAgent() {
-        userAgentMode = (userAgentMode + 1) % 3
-        val ua = when (userAgentMode) {
-            1 -> DESKTOP_USER_AGENT
-            2 -> WebSettings.getDefaultUserAgent(this)
-            else -> DIAGNOSTIC_USER_AGENT
-        }
-        webView.settings.userAgentString = ua.take(512)
-        record("POLICY", "USER_AGENT", when (userAgentMode) { 1 -> "DESKTOP"; 2 -> "SYSTEM"; else -> "DIAGNOSTIC" })
-        webView.reload()
-    }
-
-    private fun clearSourceCookies() {
-        val manager = CookieManager.getInstance()
-        allowedHosts.forEach { host ->
-            val url = "https://$host/"
-            CookieHeaderCodec.cookieNames(manager.getCookie(url).orEmpty()).forEach { name ->
-                manager.setCookie(url, "$name=; Max-Age=0; Path=/; Secure; SameSite=Lax")
-            }
-        }
-        manager.flush()
-        sessionStore.clear(sourceId)
-        record("SESSION", "COOKIES_CLEARED", "source=$sourceId")
-    }
-
-    private fun handleDialog(
-        type: String,
-        url: String?,
-        message: String?,
-        defaultValue: String?,
-        result: JsResult?,
-        promptResult: JsPromptResult?,
-    ): Boolean {
-        record("DIALOG", type, "url=${redactUrl(url.orEmpty())} message=${sanitize(message.orEmpty(), 500)} defaultLength=${defaultValue.orEmpty().length} policy=${dialogPolicy.name}")
-        when (dialogPolicy) {
-            DialogPolicy.ACCEPT -> if (promptResult != null) promptResult.confirm(defaultValue.orEmpty()) else result?.confirm()
-            DialogPolicy.CANCEL -> if (promptResult != null) promptResult.cancel() else result?.cancel()
-            DialogPolicy.DEFAULT_VALUE -> if (promptResult != null) promptResult.confirm(defaultValue.orEmpty()) else result?.confirm()
-        }
-        return true
-    }
-
-    private fun recordRequest(request: WebResourceRequest, redactedUrl: String, blocked: Boolean) {
-        if (requests.size >= MAX_REQUESTS) requests.removeFirst()
-        requests.add(
-            DiagnosticRequest(
-                timestamp = System.currentTimeMillis(),
-                method = request.method.take(16),
-                url = redactedUrl,
-                host = request.url.host.orEmpty().lowercase().take(255),
-                mainFrame = request.isForMainFrame,
-                resourceType = resourceType(request.url.toString()),
-                headerNames = request.requestHeaders.keys.map(String::lowercase).distinct().sorted().take(64),
-                blocked = blocked,
-            ),
+        record(
+            "PROBE",
+            "COOKIE",
+            "host=${Uri.parse(url).host.orEmpty()} count=${names.size} names=${names.joinToString()} storedSession=${sessionStore.hasSession(sourceId)}",
         )
+        status.text = "Đã kiểm tra cookie theo tên, không ghi giá trị cookie."
+    }
+
+    private fun record(level: String, category: String, detail: String) {
+        if (logLevel == 0 && level !in setOf("SECURITY", "PROBE")) return
+        entries.addLast(DiagnosticEntry(System.currentTimeMillis(), level, category, sanitize(detail, 2_000)))
+        while (entries.size > MAX_LOG_ENTRIES) entries.removeFirst()
+    }
+
+    private fun copyLog() {
+        val text = renderLogText()
+        val clipboard = getSystemService(ClipboardManager::class.java)
+        clipboard.setPrimaryClip(ClipData.newPlainText("Nhật ký chẩn đoán", text))
+        status.text = "Đã sao chép nhật ký chẩn đoán."
+    }
+
+    private fun clearLog() {
+        entries.clear()
+        requestCount = 0
+        status.text = "Đã xóa nhật ký chẩn đoán."
+    }
+
+    private fun renderLogText(): String = buildString {
+        appendLine("Nguồn: $sourceId")
+        appendLine("Mức ghi: ${SourceLoginActivity.logLevelLabel(logLevel)}")
+        appendLine("Request: $requestCount")
+        entries.forEach { entry ->
+            appendLine("${formatTime(entry.timestamp)} ${entry.level} ${entry.category} ${entry.detail}")
+        }
+    }
+
+    private fun exportJson(): String = JSONObject()
+        .put("sourceId", sourceId)
+        .put("logLevel", SourceLoginActivity.logLevelLabel(logLevel))
+        .put("requestCount", requestCount)
+        .put(
+            "entries",
+            JSONArray().apply {
+                entries.forEach { entry ->
+                    put(
+                        JSONObject()
+                            .put("timestamp", entry.timestamp)
+                            .put("level", entry.level)
+                            .put("category", entry.category)
+                            .put("detail", entry.detail),
+                    )
+                }
+            },
+        )
+        .toString(2)
+
+    private fun currentUserAgent(): String = if (desktopCompat) {
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+    } else {
+        WebSettings.getDefaultUserAgent(this)
     }
 
     private fun captureSession() {
@@ -389,133 +459,68 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
         manager.flush()
     }
 
-    private fun record(level: String, category: String, detail: String) {
-        if (entries.size >= MAX_ENTRIES) entries.removeFirst()
-        entries.add(DiagnosticEntry(System.currentTimeMillis(), level, category, sanitize(detail, 2_000)))
-        renderLog()
+    override fun onPause() {
+        if (::webView.isInitialized) captureSession()
+        super.onPause()
     }
 
-    private fun renderLog() {
-        if (!::logView.isInitialized) return
-        val formatter = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
-        logView.text = entries.joinToString("\n") { "${formatter.format(Date(it.timestamp))} ${it.level}/${it.category} ${it.detail}" }
+    override fun onDestroy() {
+        if (autoClearLogOnClose) clearLog()
+        if (::webView.isInitialized) {
+            webView.stopLoading()
+            webView.loadUrl("about:blank")
+            webView.removeAllViews()
+            webView.destroy()
+        }
+        super.onDestroy()
     }
-
-    private fun copyLog() {
-        val text = entries.joinToString("\n") { "${it.timestamp} ${it.level}/${it.category} ${it.detail}" }
-        (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Source diagnostics", text))
-        setStatus("Đã sao chép nhật ký đã khử dữ liệu nhạy cảm.")
-    }
-
-    private fun exportJson(): String = JSONObject().apply {
-        put("schema", 2)
-        put("sourceId", sourceId)
-        put("allowedHosts", JSONArray(allowedHosts.sorted()))
-        put("verbose", verbose)
-        put("requestCount", requestCount)
-        put("originPolicy", if (strictOrigins) "SOURCE_ONLY" else "COMPATIBLE_HTTPS")
-        put("resourcePolicy", if (blockExternalResources) "BLOCK_EXTERNAL" else "OBSERVE_EXTERNAL")
-        put("dialogPolicy", dialogPolicy.name)
-        put("userAgentMode", userAgentMode)
-        put("exportedAtEpochMs", System.currentTimeMillis())
-        put("requests", JSONArray(requests.map { item -> JSONObject().apply {
-            put("timestampEpochMs", item.timestamp)
-            put("method", item.method)
-            put("url", item.url)
-            put("host", item.host)
-            put("mainFrame", item.mainFrame)
-            put("resourceType", item.resourceType)
-            put("headerNames", JSONArray(item.headerNames))
-            put("blocked", item.blocked)
-        } }))
-        put("events", JSONArray(entries.map { entry -> JSONObject().apply {
-            put("timestampEpochMs", entry.timestamp)
-            put("level", entry.level)
-            put("category", entry.category)
-            put("detail", entry.detail)
-        } }))
-    }.toString(2)
-
-    private fun setStatus(value: String) { status.text = value }
 
     private fun isHttps(value: String): Boolean {
         val uri = runCatching { Uri.parse(value) }.getOrNull() ?: return false
-        return uri.scheme.equals("https", true) && uri.host != null && uri.userInfo == null
+        return uri.scheme == "https" && !uri.host.isNullOrBlank()
     }
 
     private fun isAllowed(value: String): Boolean {
         val uri = runCatching { Uri.parse(value) }.getOrNull() ?: return false
-        if (!uri.scheme.equals("https", true) || uri.userInfo != null) return false
+        if (uri.scheme != "https") return false
         val host = uri.host?.lowercase() ?: return false
         return allowedHosts.any { allowed -> host == allowed || host.endsWith(".$allowed") }
     }
 
     private fun redactUrl(value: String): String = runCatching {
         val uri = Uri.parse(value)
-        uri.buildUpon().clearQuery().fragment(null).build().toString()
-    }.getOrDefault(value.substringBefore('?').substringBefore('#')).take(1_000)
+        if (uri.scheme != "https") return@runCatching "[non-https]"
+        val path = uri.encodedPath.orEmpty().take(300)
+        "https://${uri.host.orEmpty()}$path"
+    }.getOrDefault("[invalid-url]")
 
-    private fun resourceType(url: String): String = when (url.substringBefore('?').substringAfterLast('.', "").lowercase()) {
-        "js", "mjs" -> "SCRIPT"
-        "css" -> "STYLE"
-        "png", "jpg", "jpeg", "gif", "webp", "svg", "ico" -> "IMAGE"
-        "woff", "woff2", "ttf", "otf" -> "FONT"
-        "json" -> "JSON"
-        "mp3", "m4a", "mp4", "webm" -> "MEDIA"
-        else -> "RESOURCE"
-    }
-
-    private fun decodeJs(raw: String?): String = raw?.let { value ->
-        runCatching { org.json.JSONTokener(value).nextValue()?.toString().orEmpty() }.getOrDefault(value)
-    }.orEmpty()
-
-    private fun sanitize(raw: String, max: Int): String = raw
-        .replace(Regex("(?i)(authorization|cookie|set-cookie|password|passwd|token|api[_-]?key)\\s*[:=]\\s*[^\\s,;]+"), "$1=<redacted>")
-        .filter { it == '\n' || it == '\t' || !it.isISOControl() }
+    private fun sanitize(value: String, max: Int): String = value
+        .replace(Regex("(?i)(password|passwd|token|secret|authorization|cookie)\\s*[:=]\\s*[^\\s,;]+"), "$1=[REDACTED]")
+        .replace(Regex("[\\r\\n]+"), " ")
         .take(max)
 
-    private fun button(label: String, action: () -> Unit): Button = Button(this).apply { text = label; setOnClickListener { action() } }
-    private fun row(vararg views: Button): LinearLayout = LinearLayout(this).apply {
-        orientation = LinearLayout.HORIZONTAL
-        views.forEach { addView(it, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)) }
-    }
-    private fun matchWrap() = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+    private fun decodeJs(value: String): String = runCatching {
+        if (value == "null") "null" else JSONObject("{\"v\":$value}").optString("v", value)
+    }.getOrDefault(value)
 
-    override fun onPause() { captureSession(); super.onPause() }
-    override fun onDestroy() {
-        if (::webView.isInitialized) {
-            webView.stopLoading(); webView.loadUrl("about:blank"); webView.removeAllViews(); webView.destroy()
-        }
-        super.onDestroy()
-    }
+    private fun formatTime(timestamp: Long): String = SimpleDateFormat("HH:mm:ss", Locale.ROOT).format(Date(timestamp))
 
-    data class DiagnosticEntry(val timestamp: Long, val level: String, val category: String, val detail: String)
-    data class DiagnosticRequest(
-        val timestamp: Long,
-        val method: String,
-        val url: String,
-        val host: String,
-        val mainFrame: Boolean,
-        val resourceType: String,
-        val headerNames: List<String>,
-        val blocked: Boolean,
+    private fun matchWrap() = LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams.MATCH_PARENT,
+        LinearLayout.LayoutParams.WRAP_CONTENT,
     )
 
-    private enum class DialogPolicy {
-        CANCEL,
-        ACCEPT,
-        DEFAULT_VALUE;
-
-        fun next(): DialogPolicy = entries[(ordinal + 1) % entries.size]
-    }
+    data class DiagnosticEntry(
+        val timestamp: Long,
+        val level: String,
+        val category: String,
+        val detail: String,
+    )
 
     companion object {
         const val EXTRA_SOURCE_ID = "source_id"
         const val EXTRA_INITIAL_URL = "initial_url"
         const val EXTRA_ALLOWED_HOSTS = "allowed_hosts"
-        private const val MAX_ENTRIES = 1_000
-        private const val MAX_REQUESTS = 2_000
-        private const val DIAGNOSTIC_USER_AGENT = "NgheTruyen-SourceDiagnostic/2.5 Android"
-        private const val DESKTOP_USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+        private const val MAX_LOG_ENTRIES = 400
     }
 }

@@ -7,6 +7,12 @@ on:
       - agent/reference-ui-position-parity
     paths:
       - .github/workflows/reference-parity-phase3.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/reference-parity-phase3.yml
+      - scripts/apply_reference_parity_phase3.py
   workflow_dispatch:
 
 permissions:
@@ -28,7 +34,7 @@ jobs:
           java-version: '17'
           cache: gradle
 
-      - name: Apply, assert, compile and publish result
+      - name: Apply, assert and compile
         shell: bash
         run: |
           set +e
@@ -109,6 +115,12 @@ text = text.replace(_old_story_ranges, _new_story_ranges, 1)'''
           if [ $rc -eq 0 ]; then
             bash ./gradlew :app:compileDebugKotlin --no-daemon >> "$LOG" 2>&1
             rc=$?
+          fi
+
+          cat "$LOG"
+
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            exit $rc
           fi
 
           git config user.name "github-actions[bot]"

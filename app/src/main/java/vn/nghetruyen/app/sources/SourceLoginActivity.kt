@@ -1,11 +1,11 @@
 package vn.nghetruyen.app.sources
 
 import android.annotation.SuppressLint
+import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
-import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
@@ -26,6 +26,12 @@ class SourceLoginActivity : ComponentActivity() {
     private lateinit var sessionStore: SourceSessionStore
     private lateinit var webView: WebView
     private lateinit var status: TextView
+    private lateinit var addressField: EditText
+
+    private val browserPrefs by lazy { getSharedPreferences(BROWSER_PREFS, MODE_PRIVATE) }
+    private var desktopCompat = false
+    private var logLevel = 0
+    private var autoClearLogOnClose = false
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -38,6 +44,9 @@ class SourceLoginActivity : ComponentActivity() {
         }
         require(isAllowed(loginUrl)) { "URL đăng nhập nằm ngoài allowlist." }
         sessionStore = (application as NgheTruyenApplication).container.sourceSessionStore
+        desktopCompat = browserPrefs.getBoolean(KEY_CHROME_COMPAT, false)
+        logLevel = browserPrefs.getInt(KEY_LOG_LEVEL, 0).coerceIn(0, 2)
+        autoClearLogOnClose = browserPrefs.getBoolean(KEY_AUTO_CLEAR_LOG_ON_CLOSE, false)
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -47,14 +56,11 @@ class SourceLoginActivity : ComponentActivity() {
             text = "Đăng nhập trực tiếp trên trang nguồn. Ứng dụng chỉ lưu cookie phiên đã mã hóa, không đọc hoặc lưu mật khẩu."
             setPadding(24, 18, 24, 18)
         }
-        val browserOptions = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
-        val otherOptions = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
-        val addressField = EditText(this).apply {
+        addressField = EditText(this).apply {
             setSingleLine(true)
             setText(loginUrl)
             hint = "URL HTTPS thuộc nguồn"
         }
-        var desktopCompat = false
 
         fun actionButton(label: String, action: () -> Unit) = Button(this).apply {
             text = label
@@ -68,10 +74,7 @@ class SourceLoginActivity : ComponentActivity() {
         val navigation = actionRow(
             actionButton("QUAY LẠI") { if (webView.canGoBack()) webView.goBack() },
             actionButton("TIẾN TỚI") { if (webView.canGoForward()) webView.goForward() },
-            actionButton("TÙY CHỌN") {
-                browserOptions.visibility = if (browserOptions.visibility == View.VISIBLE) View.GONE else View.VISIBLE
-                if (browserOptions.visibility == View.GONE) otherOptions.visibility = View.GONE
-            },
+            actionButton("TÙY CHỌN") { showBrowserOptions() },
         )
         val addressRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -82,40 +85,6 @@ class SourceLoginActivity : ComponentActivity() {
                 else status.text = "URL phải dùng HTTPS và thuộc miền của nguồn."
             })
         }
-        browserOptions.addView(actionButton("LÀM MỚI") { webView.reload() })
-        browserOptions.addView(actionButton("TÙY CHỌN KHÁC") {
-            otherOptions.visibility = if (otherOptions.visibility == View.VISIBLE) View.GONE else View.VISIBLE
-        })
-        browserOptions.addView(actionButton("XÓA DỮ LIỆU ĐĂNG NHẬP CỦA TRANG") {
-            clearSessionCookies()
-            status.text = "Đã xóa dữ liệu đăng nhập của nguồn này."
-        })
-        browserOptions.addView(actionButton("ĐÓNG TRÌNH DUYỆT") {
-            captureSession()
-            setResult(RESULT_OK)
-            finish()
-        })
-        otherOptions.addView(actionButton("CHẾ ĐỘ TƯƠNG THÍCH CHROME") {
-            desktopCompat = !desktopCompat
-            webView.settings.userAgentString = if (desktopCompat) {
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-            } else {
-                WebSettings.getDefaultUserAgent(this@SourceLoginActivity)
-            }
-            webView.reload()
-        })
-        otherOptions.addView(actionButton("CHẨN ĐOÁN TRÌNH DUYỆT") {
-            val target = webView.url?.takeIf(::isAllowed) ?: loginUrl
-            startActivity(Intent(this, SourceDiagnosticBrowserActivity::class.java).apply {
-                putExtra(SourceDiagnosticBrowserActivity.EXTRA_SOURCE_ID, sourceId)
-                putExtra(SourceDiagnosticBrowserActivity.EXTRA_INITIAL_URL, target)
-                putExtra(SourceDiagnosticBrowserActivity.EXTRA_ALLOWED_HOSTS, allowedHosts.toTypedArray())
-            })
-        })
-        otherOptions.addView(actionButton("MỞ BẰNG TRÌNH DUYỆT HỆ THỐNG") {
-            val target = webView.url?.takeIf(::isAllowed) ?: loginUrl
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(target)))
-        })
 
         webView = WebView(this).apply {
             settings.javaScriptEnabled = true
@@ -127,6 +96,7 @@ class SourceLoginActivity : ComponentActivity() {
             settings.setSupportMultipleWindows(false)
             settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
             settings.safeBrowsingEnabled = true
+            settings.userAgentString = currentUserAgent()
             CookieManager.getInstance().setAcceptCookie(true)
             CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
             webViewClient = object : WebViewClient() {
@@ -153,12 +123,119 @@ class SourceLoginActivity : ComponentActivity() {
         root.addView(status, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         root.addView(navigation, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         root.addView(addressRow, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        root.addView(browserOptions, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        root.addView(otherOptions, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         root.addView(webView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         setContentView(root)
         seedWebViewCookies()
         webView.loadUrl(loginUrl)
+    }
+
+    private fun showBrowserOptions() {
+        AlertDialog.Builder(this)
+            .setTitle("TÙY CHỌN TRÌNH DUYỆT")
+            .setItems(
+                arrayOf(
+                    "LÀM MỚI",
+                    "TÙY CHỌN KHÁC",
+                    "XÓA DỮ LIỆU ĐĂNG NHẬP CỦA TRANG",
+                    "ĐÓNG TRÌNH DUYỆT",
+                ),
+            ) { _, which ->
+                when (which) {
+                    0 -> webView.reload()
+                    1 -> showOtherOptions()
+                    2 -> confirmClearLoginData()
+                    3 -> {
+                        captureSession()
+                        setResult(RESULT_OK)
+                        finish()
+                    }
+                }
+            }
+            .setNegativeButton("HỦY", null)
+            .show()
+    }
+
+    private fun showOtherOptions() {
+        val chrome = if (desktopCompat) "BẬT" else "TẮT"
+        val level = logLevelLabel(logLevel).uppercase()
+        val autoClear = if (autoClearLogOnClose) "BẬT" else "TẮT"
+        AlertDialog.Builder(this)
+            .setTitle("TÙY CHỌN KHÁC")
+            .setItems(
+                arrayOf(
+                    "TƯƠNG THÍCH CHROME: $chrome",
+                    "CHẨN ĐOÁN TRÌNH DUYỆT",
+                    "MỨC GHI NHẬT KÝ: $level",
+                    "TỰ XÓA NHẬT KÝ KHI ĐÓNG: $autoClear",
+                    "MỞ BẰNG TRÌNH DUYỆT HỆ THỐNG",
+                ),
+            ) { _, which ->
+                when (which) {
+                    0 -> {
+                        desktopCompat = !desktopCompat
+                        browserPrefs.edit().putBoolean(KEY_CHROME_COMPAT, desktopCompat).apply()
+                        webView.settings.userAgentString = currentUserAgent()
+                        webView.reload()
+                    }
+                    1 -> openDiagnosticBrowser()
+                    2 -> showLogLevelDialog()
+                    3 -> {
+                        autoClearLogOnClose = !autoClearLogOnClose
+                        browserPrefs.edit().putBoolean(KEY_AUTO_CLEAR_LOG_ON_CLOSE, autoClearLogOnClose).apply()
+                    }
+                    4 -> openSystemBrowser()
+                }
+            }
+            .setNegativeButton("ĐÓNG", null)
+            .show()
+    }
+
+    private fun showLogLevelDialog() {
+        val labels = arrayOf("TẮT", "CƠ BẢN", "CHI TIẾT")
+        AlertDialog.Builder(this)
+            .setTitle("MỨC GHI NHẬT KÝ")
+            .setSingleChoiceItems(labels, logLevel) { dialog, which ->
+                logLevel = which.coerceIn(0, 2)
+                browserPrefs.edit().putInt(KEY_LOG_LEVEL, logLevel).apply()
+                dialog.dismiss()
+            }
+            .setNegativeButton("HỦY", null)
+            .show()
+    }
+
+    private fun confirmClearLoginData() {
+        val host = runCatching { Uri.parse(webView.url ?: loginUrl).host }.getOrNull()
+            ?: allowedHosts.firstOrNull().orEmpty()
+        AlertDialog.Builder(this)
+            .setTitle("XÓA DỮ LIỆU ĐĂNG NHẬP")
+            .setMessage("Xóa cookie và dữ liệu đăng nhập của $host?")
+            .setPositiveButton("XÓA") { _, _ ->
+                clearSessionCookies()
+                status.text = "Đã xóa dữ liệu đăng nhập của trang."
+                webView.reload()
+            }
+            .setNegativeButton("HỦY", null)
+            .show()
+    }
+
+    private fun openDiagnosticBrowser() {
+        val target = webView.url?.takeIf(::isAllowed) ?: loginUrl
+        startActivity(Intent(this, SourceDiagnosticBrowserActivity::class.java).apply {
+            putExtra(SourceDiagnosticBrowserActivity.EXTRA_SOURCE_ID, sourceId)
+            putExtra(SourceDiagnosticBrowserActivity.EXTRA_INITIAL_URL, target)
+            putExtra(SourceDiagnosticBrowserActivity.EXTRA_ALLOWED_HOSTS, allowedHosts.toTypedArray())
+        })
+    }
+
+    private fun openSystemBrowser() {
+        val target = webView.url?.takeIf(::isAllowed) ?: loginUrl
+        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(target)))
+    }
+
+    private fun currentUserAgent(): String = if (desktopCompat) {
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+    } else {
+        WebSettings.getDefaultUserAgent(this)
     }
 
     override fun onPause() {
@@ -212,6 +289,17 @@ class SourceLoginActivity : ComponentActivity() {
         const val EXTRA_SOURCE_ID = "source_id"
         const val EXTRA_LOGIN_URL = "login_url"
         const val EXTRA_ALLOWED_HOSTS = "allowed_hosts"
+
+        const val BROWSER_PREFS = "reference_browser_options"
+        const val KEY_CHROME_COMPAT = "chrome_compat"
+        const val KEY_LOG_LEVEL = "log_level"
+        const val KEY_AUTO_CLEAR_LOG_ON_CLOSE = "auto_clear_log_on_close"
+
+        fun logLevelLabel(level: Int): String = when (level) {
+            1 -> "Cơ bản"
+            2 -> "Chi tiết"
+            else -> "Tắt"
+        }
 
         fun clearStoredSession(sourceId: String, allowedHosts: Set<String>, sessionStore: SourceSessionStore) {
             val manager = CookieManager.getInstance()

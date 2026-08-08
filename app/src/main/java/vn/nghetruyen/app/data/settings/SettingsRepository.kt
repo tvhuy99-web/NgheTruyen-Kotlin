@@ -19,9 +19,7 @@ import vn.nghetruyen.app.core.model.SceneMusicPlaybackMode
 
 private val Context.dataStore by preferencesDataStore(name = "nghe_truyen_settings")
 
-
 enum class AiProvider { OPENAI_COMPATIBLE, GEMINI }
-
 
 val DEFAULT_AI_TRANSLATE_PROMPT: String = """Bạn là dịch giả văn học chuyên nghiệp, chuyên dịch truyện Trung Quốc sang tiếng Việt.
 
@@ -135,8 +133,8 @@ data class AiOnlineSettings(
     val improvePrompt: String = DEFAULT_AI_IMPROVE_PROMPT,
     val timeoutMillis: Int = 120_000,
     val temperature: Float = 0.2f,
-    // Legacy fields remain readable for compatibility but are no longer surfaced or enforced.
-    val translationInstruction: String = "",
+    // Legacy field remains readable for old backups. It is mirrored from translationPrompt on save.
+    val translationInstruction: String = DEFAULT_AI_TRANSLATE_PROMPT,
     val dailyRequestLimit: Int = 30,
     val dailyInputCharsLimit: Int = 500_000,
     val maxRetries: Int = 0,
@@ -158,6 +156,8 @@ data class AppSettings(
     val backgroundMusicEnabled: Boolean = false,
     val backgroundMusicVolume: Float = 0.18f,
     val backgroundMusicDuckFactor: Float = 0.25f,
+    val backgroundMusicAttackMillis: Int = 250,
+    val backgroundMusicReleaseMillis: Int = 900,
     val followingUpdatesEnabled: Boolean = false,
     val readerCacheLimitMiB: Int = 64,
     val readerMode: ReaderMode = ReaderMode.TEXT,
@@ -179,7 +179,8 @@ data class AppSettings(
     val sceneMusicPlaybackMode: SceneMusicPlaybackMode = SceneMusicPlaybackMode.SMART_AVOID_REPEAT,
     val sceneMusicTargetLufs: Float = -18.0f,
     val sceneMusicAvoidRepeatWindow: Int = 4,
-    val sonicProcessingEnabled: Boolean = true,
+    val sonicProcessingEnabled: Boolean = false,
+    val sonicAccurateMode: Boolean = false,
     val sonicDefaultSpeed: Float = 1.0f,
     val sonicDefaultPitch: Float = 1.0f,
     val ttsCacheEnabled: Boolean = true,
@@ -205,6 +206,8 @@ class SettingsRepository(private val context: Context) {
         val backgroundMusicEnabled = booleanPreferencesKey("background_music_enabled")
         val backgroundMusicVolume = floatPreferencesKey("background_music_volume")
         val backgroundMusicDuckFactor = floatPreferencesKey("background_music_duck_factor")
+        val backgroundMusicAttackMillis = intPreferencesKey("background_music_attack_millis")
+        val backgroundMusicReleaseMillis = intPreferencesKey("background_music_release_millis")
         val followingUpdates = booleanPreferencesKey("following_updates")
         val readerCacheLimitMiB = intPreferencesKey("reader_cache_limit_mib")
         val readerMode = stringPreferencesKey("reader_mode")
@@ -234,6 +237,7 @@ class SettingsRepository(private val context: Context) {
         val sceneMusicTargetLufs = floatPreferencesKey("scene_music_target_lufs")
         val sceneMusicAvoidRepeatWindow = intPreferencesKey("scene_music_avoid_repeat_window")
         val sonicProcessingEnabled = booleanPreferencesKey("sonic_processing_enabled")
+        val sonicAccurateMode = booleanPreferencesKey("sonic_accurate_mode")
         val sonicDefaultSpeed = floatPreferencesKey("sonic_default_speed")
         val sonicDefaultPitch = floatPreferencesKey("sonic_default_pitch")
         val ttsCacheEnabled = booleanPreferencesKey("tts_cache_enabled")
@@ -245,7 +249,7 @@ class SettingsRepository(private val context: Context) {
         val aiProvider = stringPreferencesKey("ai_provider")
         val aiConsent = booleanPreferencesKey("ai_consent_granted")
         val aiEndpoint = stringPreferencesKey("ai_endpoint")
-        val aiModel = stringPreferencesKey("ai_model") // legacy effective model
+        val aiModel = stringPreferencesKey("ai_model")
         val aiOpenAiModel = stringPreferencesKey("ai_model_openai_compatible")
         val aiGeminiModel = stringPreferencesKey("ai_model_gemini")
         val aiTemperature = floatPreferencesKey("ai_temperature")
@@ -276,6 +280,7 @@ class SettingsRepository(private val context: Context) {
             ?: legacyModel.takeUnless { it.startsWith("gemini-", ignoreCase = true) }
             .orEmpty()
         val aiModel = if (aiProvider == AiProvider.GEMINI) geminiModel else openAiModel
+        val translatePrompt = prefs[Keys.aiTranslatePrompt]?.takeIf(String::isNotBlank) ?: DEFAULT_AI_TRANSLATE_PROMPT
         AppSettings(
             selectedSourceId = prefs[Keys.source] ?: "truyenfull",
             ttsRate = normalizeRate(prefs[Keys.ttsRate] ?: 1.0f),
@@ -293,6 +298,8 @@ class SettingsRepository(private val context: Context) {
             backgroundMusicEnabled = prefs[Keys.backgroundMusicEnabled] ?: false,
             backgroundMusicVolume = normalizeMusicVolume(prefs[Keys.backgroundMusicVolume] ?: 0.18f),
             backgroundMusicDuckFactor = normalizeDuckFactor(prefs[Keys.backgroundMusicDuckFactor] ?: 0.25f),
+            backgroundMusicAttackMillis = normalizeMusicAttackMillis(prefs[Keys.backgroundMusicAttackMillis] ?: 250),
+            backgroundMusicReleaseMillis = normalizeMusicReleaseMillis(prefs[Keys.backgroundMusicReleaseMillis] ?: 900),
             followingUpdatesEnabled = prefs[Keys.followingUpdates] ?: false,
             readerCacheLimitMiB = normalizeCacheLimit(prefs[Keys.readerCacheLimitMiB] ?: 64),
             readerMode = runCatching { ReaderMode.valueOf(prefs[Keys.readerMode] ?: ReaderMode.TEXT.name) }
@@ -324,18 +331,18 @@ class SettingsRepository(private val context: Context) {
             sceneMusicCrossfadeMillis = normalizeCrossfadeMillis(prefs[Keys.sceneMusicCrossfadeMillis] ?: 1_600),
             sceneMusicContinueAcrossChapters = prefs[Keys.sceneMusicContinueAcrossChapters] ?: true,
             sceneMusicPlaybackMode = runCatching {
-                SceneMusicPlaybackMode.valueOf(prefs[Keys.sceneMusicPlaybackMode] ?: SceneMusicPlaybackMode.SMART_AVOID_REPEAT.name)
-            }.getOrDefault(SceneMusicPlaybackMode.SMART_AVOID_REPEAT),
+                SceneMusicPlaybackMode.valueOf(prefs[Keys.sceneMusicPlaybackMode] ?: SceneMusicPlaybackMode.SEQUENTIAL.name)
+            }.getOrDefault(SceneMusicPlaybackMode.SEQUENTIAL),
             sceneMusicTargetLufs = normalizeTargetLufs(prefs[Keys.sceneMusicTargetLufs] ?: -18.0f),
             sceneMusicAvoidRepeatWindow = normalizeRepeatWindow(prefs[Keys.sceneMusicAvoidRepeatWindow] ?: 4),
-            sonicProcessingEnabled = prefs[Keys.sonicProcessingEnabled] ?: true,
+            sonicProcessingEnabled = prefs[Keys.sonicProcessingEnabled] ?: false,
+            sonicAccurateMode = prefs[Keys.sonicAccurateMode] ?: false,
             sonicDefaultSpeed = normalizeSonic(prefs[Keys.sonicDefaultSpeed] ?: 1.0f),
             sonicDefaultPitch = normalizeSonic(prefs[Keys.sonicDefaultPitch] ?: 1.0f),
             ttsCacheEnabled = prefs[Keys.ttsCacheEnabled] ?: true,
             ttsCacheLimitMiB = normalizeTtsCacheLimit(prefs[Keys.ttsCacheLimitMiB] ?: 64),
             normalizeTtsVolumeEnabled = prefs[Keys.normalizeTtsVolumeEnabled] ?: true,
             ttsTargetLufs = normalizeTtsTargetLufs(prefs[Keys.ttsTargetLufs] ?: -18.0f),
-
             aiOnline = AiOnlineSettings(
                 provider = aiProvider,
                 enabled = prefs[Keys.aiOnlineEnabled] ?: false,
@@ -346,11 +353,14 @@ class SettingsRepository(private val context: Context) {
                 geminiModel = geminiModel,
                 openAiModel = openAiModel,
                 mode = prefs[Keys.aiDefaultMode]?.takeIf { it == "improve" } ?: "translate",
-                translationPrompt = prefs[Keys.aiTranslatePrompt]?.takeIf(String::isNotBlank) ?: DEFAULT_AI_TRANSLATE_PROMPT,
+                translationPrompt = translatePrompt,
                 improvePrompt = prefs[Keys.aiImprovePrompt]?.takeIf(String::isNotBlank) ?: DEFAULT_AI_IMPROVE_PROMPT,
                 timeoutMillis = (prefs[Keys.aiTimeoutMillis] ?: 120_000).coerceAtLeast(10_000),
                 temperature = (prefs[Keys.aiTemperature] ?: 0.2f).coerceIn(0f, 2f),
-                translationInstruction = prefs[Keys.aiTranslationInstruction].orEmpty().take(2000),
+                translationInstruction = prefs[Keys.aiTranslationInstruction]
+                    ?.takeIf(String::isNotBlank)
+                    ?.take(16_000)
+                    ?: translatePrompt,
                 dailyRequestLimit = normalizeAiRequestLimit(prefs[Keys.aiDailyRequestLimit] ?: 30),
                 dailyInputCharsLimit = normalizeAiCharLimit(prefs[Keys.aiDailyInputCharsLimit] ?: 500_000),
                 maxRetries = 0,
@@ -398,6 +408,12 @@ class SettingsRepository(private val context: Context) {
     }
     suspend fun setBackgroundMusicDuckFactor(value: Float) {
         context.dataStore.edit { it[Keys.backgroundMusicDuckFactor] = normalizeDuckFactor(value) }
+    }
+    suspend fun setBackgroundMusicAttackMillis(value: Int) {
+        context.dataStore.edit { it[Keys.backgroundMusicAttackMillis] = normalizeMusicAttackMillis(value) }
+    }
+    suspend fun setBackgroundMusicReleaseMillis(value: Int) {
+        context.dataStore.edit { it[Keys.backgroundMusicReleaseMillis] = normalizeMusicReleaseMillis(value) }
     }
     suspend fun setFollowingUpdatesEnabled(enabled: Boolean) {
         context.dataStore.edit { it[Keys.followingUpdates] = enabled }
@@ -452,6 +468,7 @@ class SettingsRepository(private val context: Context) {
     suspend fun setSceneMusicTargetLufs(value: Float) { context.dataStore.edit { it[Keys.sceneMusicTargetLufs] = normalizeTargetLufs(value) } }
     suspend fun setSceneMusicAvoidRepeatWindow(value: Int) { context.dataStore.edit { it[Keys.sceneMusicAvoidRepeatWindow] = normalizeRepeatWindow(value) } }
     suspend fun setSonicProcessingEnabled(enabled: Boolean) { context.dataStore.edit { it[Keys.sonicProcessingEnabled] = enabled } }
+    suspend fun setSonicAccurateMode(enabled: Boolean) { context.dataStore.edit { it[Keys.sonicAccurateMode] = enabled } }
     suspend fun setSonicDefaultSpeed(value: Float) { context.dataStore.edit { it[Keys.sonicDefaultSpeed] = normalizeSonic(value) } }
     suspend fun setSonicDefaultPitch(value: Float) { context.dataStore.edit { it[Keys.sonicDefaultPitch] = normalizeSonic(value) } }
     suspend fun setTtsCacheEnabled(enabled: Boolean) { context.dataStore.edit { it[Keys.ttsCacheEnabled] = enabled } }
@@ -479,7 +496,7 @@ class SettingsRepository(private val context: Context) {
         }
     }
     suspend fun setAiTemperature(value: Float) { context.dataStore.edit { it[Keys.aiTemperature] = value.coerceIn(0f, 2f) } }
-    suspend fun setAiTranslationInstruction(value: String) { context.dataStore.edit { it[Keys.aiTranslationInstruction] = value.trim().take(2000) } }
+    suspend fun setAiTranslationInstruction(value: String) { context.dataStore.edit { it[Keys.aiTranslationInstruction] = value.trim().take(16_000) } }
     suspend fun setAiDailyRequestLimit(value: Int) { context.dataStore.edit { it[Keys.aiDailyRequestLimit] = normalizeAiRequestLimit(value) } }
     suspend fun setAiDailyInputCharsLimit(value: Int) { context.dataStore.edit { it[Keys.aiDailyInputCharsLimit] = normalizeAiCharLimit(value) } }
     suspend fun setAiMaxRetries(value: Int) { context.dataStore.edit { it[Keys.aiMaxRetries] = normalizeAiRetries(value) } }
@@ -504,6 +521,8 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.aiDefaultMode] = mode
             prefs[Keys.aiTranslatePrompt] = translatePrompt
             prefs[Keys.aiImprovePrompt] = improvePrompt
+            // Keep the legacy key synchronized because older story AI paths still read it.
+            prefs[Keys.aiTranslationInstruction] = translatePrompt.take(16_000)
             prefs[Keys.aiTimeoutMillis] = value.timeoutMillis.coerceAtLeast(10_000)
             prefs[Keys.aiTemperature] = value.temperature.coerceIn(0f, 2f)
         }
@@ -528,6 +547,8 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.backgroundMusicEnabled] = settings.backgroundMusicEnabled && !settings.backgroundMusicUri.isNullOrBlank()
             prefs[Keys.backgroundMusicVolume] = normalizeMusicVolume(settings.backgroundMusicVolume)
             prefs[Keys.backgroundMusicDuckFactor] = normalizeDuckFactor(settings.backgroundMusicDuckFactor)
+            prefs[Keys.backgroundMusicAttackMillis] = normalizeMusicAttackMillis(settings.backgroundMusicAttackMillis)
+            prefs[Keys.backgroundMusicReleaseMillis] = normalizeMusicReleaseMillis(settings.backgroundMusicReleaseMillis)
             prefs[Keys.followingUpdates] = settings.followingUpdatesEnabled
             prefs[Keys.readerCacheLimitMiB] = normalizeCacheLimit(settings.readerCacheLimitMiB)
             prefs[Keys.readerMode] = settings.readerMode.name
@@ -556,6 +577,7 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.sceneMusicTargetLufs] = normalizeTargetLufs(settings.sceneMusicTargetLufs)
             prefs[Keys.sceneMusicAvoidRepeatWindow] = normalizeRepeatWindow(settings.sceneMusicAvoidRepeatWindow)
             prefs[Keys.sonicProcessingEnabled] = settings.sonicProcessingEnabled
+            prefs[Keys.sonicAccurateMode] = settings.sonicAccurateMode
             prefs[Keys.sonicDefaultSpeed] = normalizeSonic(settings.sonicDefaultSpeed)
             prefs[Keys.sonicDefaultPitch] = normalizeSonic(settings.sonicDefaultPitch)
             prefs[Keys.ttsCacheEnabled] = settings.ttsCacheEnabled
@@ -569,15 +591,16 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.aiEndpoint] = settings.aiOnline.endpoint.trim().take(500).ifBlank { "https://openrouter.ai/api/v1/chat/completions" }
             val restoredGeminiModel = settings.aiOnline.geminiModel.trim().take(200).ifBlank { DEFAULT_GEMINI_MODEL }
             val restoredOpenAiModel = settings.aiOnline.openAiModel.trim().take(200)
+            val restoredTranslatePrompt = settings.aiOnline.translationPrompt.trim().ifBlank { DEFAULT_AI_TRANSLATE_PROMPT }
             prefs[Keys.aiGeminiModel] = restoredGeminiModel
             prefs[Keys.aiOpenAiModel] = restoredOpenAiModel
             prefs[Keys.aiModel] = if (settings.aiOnline.provider == AiProvider.GEMINI) restoredGeminiModel else restoredOpenAiModel
             prefs[Keys.aiDefaultMode] = if (settings.aiOnline.mode == "improve") "improve" else "translate"
-            prefs[Keys.aiTranslatePrompt] = settings.aiOnline.translationPrompt.trim().ifBlank { DEFAULT_AI_TRANSLATE_PROMPT }
+            prefs[Keys.aiTranslatePrompt] = restoredTranslatePrompt
             prefs[Keys.aiImprovePrompt] = settings.aiOnline.improvePrompt.trim().ifBlank { DEFAULT_AI_IMPROVE_PROMPT }
             prefs[Keys.aiTimeoutMillis] = settings.aiOnline.timeoutMillis.coerceAtLeast(10_000)
             prefs[Keys.aiTemperature] = settings.aiOnline.temperature.coerceIn(0f, 2f)
-            prefs[Keys.aiTranslationInstruction] = settings.aiOnline.translationInstruction.trim().take(2000)
+            prefs[Keys.aiTranslationInstruction] = restoredTranslatePrompt.take(16_000)
             prefs[Keys.aiDailyRequestLimit] = normalizeAiRequestLimit(settings.aiOnline.dailyRequestLimit)
             prefs[Keys.aiDailyInputCharsLimit] = normalizeAiCharLimit(settings.aiOnline.dailyInputCharsLimit)
             prefs[Keys.aiMaxRetries] = normalizeAiRetries(settings.aiOnline.maxRetries)
@@ -592,18 +615,20 @@ class SettingsRepository(private val context: Context) {
         fun normalizeCacheLimit(value: Int): Int = CACHE_LIMIT_OPTIONS_MIB.minBy { option ->
             kotlin.math.abs(option - value)
         }
-        fun normalizeRate(value: Float): Float = value.coerceIn(0.5f, 2.0f)
+        fun normalizeRate(value: Float): Float = value.coerceIn(0.25f, 3.0f)
         fun normalizePitch(value: Float): Float = value.coerceIn(0.5f, 2.0f)
-        fun normalizeVolume(value: Float): Float = value.coerceIn(0.05f, 1.0f)
-        fun normalizeMusicVolume(value: Float): Float = value.coerceIn(0.0f, 0.6f)
-        fun normalizeDuckFactor(value: Float): Float = value.coerceIn(0.05f, 1.0f)
+        fun normalizeVolume(value: Float): Float = value.coerceIn(0.0f, 2.0f)
+        fun normalizeMusicVolume(value: Float): Float = value.coerceIn(0.0f, 1.0f)
+        fun normalizeDuckFactor(value: Float): Float = value.coerceIn(0.0630957f, 1.0f)
+        fun normalizeMusicAttackMillis(value: Int): Int = value.coerceIn(0, 2_000)
+        fun normalizeMusicReleaseMillis(value: Int): Int = value.coerceIn(0, 5_000)
         fun normalizeFontSize(value: Int): Int = value.coerceIn(14, 36)
         fun normalizeLineHeight(value: Int): Int = value.coerceIn(110, 220)
         fun normalizeHorizontalPadding(value: Int): Int = value.coerceIn(4, 40)
         fun normalizeParagraphSpacing(value: Int): Int = value.coerceIn(0, 32)
         fun normalizeCrossfadeMillis(value: Int): Int = value.coerceIn(0, 8_000)
         fun normalizePrefetchWindow(value: Int): Int = value.coerceIn(1, 5)
-        fun normalizeTargetLufs(value: Float): Float = value.coerceIn(-30f, -10f)
+        fun normalizeTargetLufs(value: Float): Float = value.coerceIn(-36f, -18f)
         fun normalizeRepeatWindow(value: Int): Int = value.coerceIn(0, 12)
         fun normalizeSonic(value: Float): Float = value.coerceIn(0.5f, 2.0f)
         fun normalizeTtsCacheLimit(value: Int): Int = listOf(16, 32, 64, 128, 256, 512).minBy { kotlin.math.abs(it - value) }

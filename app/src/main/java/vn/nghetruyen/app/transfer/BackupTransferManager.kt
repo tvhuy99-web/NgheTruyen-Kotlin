@@ -593,6 +593,11 @@ class BackupTransferManager(
         name("aiImprovePrompt").value(value.aiOnline.improvePrompt)
         name("aiTimeoutMillis").value(value.aiOnline.timeoutMillis.toLong())
         name("aiTemperature").value(value.aiOnline.temperature.toDouble())
+        name("aiTranslationInstruction").value(value.aiOnline.translationInstruction)
+        name("aiDailyRequestLimit").value(value.aiOnline.dailyRequestLimit.toLong())
+        name("aiDailyInputCharsLimit").value(value.aiOnline.dailyInputCharsLimit.toLong())
+        name("aiMaxRetries").value(value.aiOnline.maxRetries.toLong())
+        name("aiRetryBaseDelayMillis").value(value.aiOnline.retryBaseDelayMillis.toLong())
         // Consent and API key are device/user-session specific and are never exported.
         name("aiOnlineEnabled").value(false)
         name("aiConsentGranted").value(false)

@@ -50,7 +50,8 @@ def main() -> None:
     )
     require(
         "app/src/main/java/vn/nghetruyen/app/sources/ChapterCatalogIndex.kt",
-        "object ChapterCatalogIndex",
+        "class ChapterCatalogIndex(",
+        "fun search(rawQuery: String)",
     )
 
     print("P1_UI_STATIC_WIRING_OK")

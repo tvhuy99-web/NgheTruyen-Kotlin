@@ -33,11 +33,11 @@ def main() -> None:
     )
     require(
         "app/src/main/java/vn/nghetruyen/app/downloads/DownloadBatchPlanner.kt",
-        "class DownloadBatchPlanner",
+        "object DownloadBatchPlanner",
     )
     require(
         "app/src/main/java/vn/nghetruyen/app/downloads/DownloadStorageGuard.kt",
-        "class DownloadStorageGuard",
+        "object DownloadStorageGuard",
     )
 
     print("MILESTONE3_DOWNLOAD_STATIC_WIRING_OK")

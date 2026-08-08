@@ -174,7 +174,7 @@ fun GlobalVoiceRoleEditorDialog(
                     }
                 }
 
-                Text("Bộ đọc TTS", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                Text("TTS", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
                 Box(Modifier.fillMaxWidth()) {
                     Button(onClick = { engineExpanded = true }, modifier = Modifier.fillMaxWidth()) {
                         Text(engineLabel)

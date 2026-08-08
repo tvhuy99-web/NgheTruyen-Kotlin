@@ -1031,7 +1031,7 @@ fun ReaderScreen(
                     clipboard.setText(AnnotatedString(musicBulkErrors.joinToString("\n")))
                     onMessage("Đã sao chép danh sách lỗi.")
                 }) { Text("SAO CHÉP LỖI") }
-                TextButton(onClick = { showMusicBulkResult = false }) { Text("QUAY LẠI") }
+                TextButton(onClick = { showMusicBulkResult = false }) { Text("SỬA") }
             } },
         )
     }

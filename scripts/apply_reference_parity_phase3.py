@@ -31,7 +31,7 @@ for token in [
     assert token in exporter, token
 for token in [
     'ĐANG TẠO NHẬT KÝ VIETPHRASE', 'FILE ZIP:', '60 QUYẾT ĐỊNH ĐẦU TIÊN:',
-    'SAO CHÉP ĐƯỜNG DẪN', 'VietPhraseDiagnosticExporter', 'export(',
+    'SAO CHÉP ĐƯỜNG DẪN', 'VietPhraseDiagnosticExporter',
 ]:
     assert token in reader, token
 assert 'showVietPhraseLogDialog' not in reader

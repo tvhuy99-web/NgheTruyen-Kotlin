@@ -128,10 +128,11 @@ fun GlobalVoiceRoleEditorDialog(
     val voiceLabel = filteredVoices.firstOrNull { it.name == draft.voiceName }?.displayName
         ?: draft.voiceName
         ?: "Giọng mặc định"
+    val dialogTitle = title ?: if (draft.originalRoleId == null) "THÊM GIỌNG" else "SỬA HỒ SƠ GIỌNG"
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(title ?: if (draft.originalRoleId == null) "THÊM GIỌNG" else "SỬA HỒ SƠ GIỌNG") },
+        title = { Text(dialogTitle) },
         text = {
             Column(
                 Modifier

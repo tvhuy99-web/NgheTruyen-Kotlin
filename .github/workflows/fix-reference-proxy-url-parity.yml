@@ -1,9 +1,8 @@
 name: Fix reference proxy URL parity
 
 on:
-  push:
-    branches:
-      - agent/reference-ui-position-parity
+  pull_request:
+    branches: [main]
     paths:
       - scripts/fix_reference_proxy_url_parity.py
       - scripts/fix_reference_proxy_extract_followup.py
@@ -14,6 +13,7 @@ permissions:
 
 jobs:
   apply:
+    if: github.head_ref == 'agent/reference-ui-position-parity'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

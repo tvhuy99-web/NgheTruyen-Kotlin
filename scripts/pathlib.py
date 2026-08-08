@@ -1,7 +1,8 @@
 """Temporary test-only shim for the phase-3 patch generator.
 
-It makes the generator's first generic LibraryRepository range replacement target the
-first occurrence while leaving later, more-specific replacements untouched.
+It adapts two stale generator assumptions without touching Android product source directly:
+1. the first generic LibraryRepository range replacement may have two matches;
+2. AppViewModel no longer imports the old reference voice persistence helper.
 Remove this file after phase 3 verification.
 """
 import importlib.util
@@ -27,6 +28,8 @@ _target = (
     "                pitch = pitch.coerceIn(0.5f, 2.0f),\n"
     "                volume = volume.coerceIn(0.05f, 1.0f),"
 )
+_appvm_anchor = "import vn.nghetruyen.app.playback.ReaderDocumentNormalizer\n"
+_legacy_voice_import = "import vn.nghetruyen.app.ui.reference.ReferenceVoiceRolePersistence\n"
 
 
 class _SmartText(str):
@@ -39,8 +42,13 @@ class _SmartText(str):
 
 def _smart_read_text(self, *args, **kwargs):
     value = _original_read_text(self, *args, **kwargs)
-    if str(self).endswith("app/src/main/java/vn/nghetruyen/app/data/repository/LibraryRepository.kt"):
+    name = str(self)
+    if name.endswith("app/src/main/java/vn/nghetruyen/app/data/repository/LibraryRepository.kt"):
         return _SmartText(value)
+    if name.endswith("app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt") and _legacy_voice_import not in value:
+        if _appvm_anchor not in value:
+            raise RuntimeError("Stable AppViewModel import anchor not found")
+        return value.replace(_appvm_anchor, _appvm_anchor + _legacy_voice_import, 1)
     return value
 
 

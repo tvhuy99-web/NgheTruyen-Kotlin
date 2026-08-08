@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 
 phase5 = Path('scripts/apply_reference_parity_phase5.py').resolve()
 exec(phase5.read_text(), {'__name__': '__main__', '__file__': str(phase5)})
@@ -59,6 +60,29 @@ new_read = '''            var storyId = ""; var chapterId = ""; var paragraph = 
 if backup.count(old_read) != 1:
     raise SystemExit(f'backup progress reader: expected 1 occurrence, found {backup.count(old_read)}')
 backup_path.write_text(backup.replace(old_read, new_read, 1))
+
+# Compile before publishing so Room emits the exact schema 20 JSON from the verified model.
+subprocess.run(['bash', './gradlew', ':app:compileDebugKotlin', '--no-daemon'], check=True)
+schema20 = Path('app/schemas/vn.nghetruyen.app.data.local.AppDatabase/20.json')
+if not schema20.is_file():
+    raise SystemExit('Room schema 20 was not generated')
+
+product_files = [
+    'app/src/main/java/vn/nghetruyen/app/data/local/AppDatabase.kt',
+    'app/src/main/java/vn/nghetruyen/app/data/repository/LibraryRepository.kt',
+    'app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt',
+    'app/src/main/java/vn/nghetruyen/app/ui/screens/LibraryScreen.kt',
+    'app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt',
+    'app/src/main/java/vn/nghetruyen/app/transfer/BackupTransferManager.kt',
+    'scripts/validate_release.py',
+    str(schema20),
+]
+subprocess.run(['git', 'config', 'user.name', 'reference-parity-bot'], check=True)
+subprocess.run(['git', 'config', 'user.email', 'reference-parity-bot@users.noreply.github.com'], check=True)
+subprocess.run(['git', 'add', '--', *product_files], check=True)
+if subprocess.run(['git', 'diff', '--cached', '--quiet']).returncode != 0:
+    subprocess.run(['git', 'commit', '-m', 'fix: match reference library and chapter option behavior'], check=True)
+    subprocess.run(['git', 'push', 'origin', 'HEAD:agent/reference-ui-position-parity'], check=True)
 
 library = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/LibraryScreen.kt').read_text()
 story = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt').read_text()

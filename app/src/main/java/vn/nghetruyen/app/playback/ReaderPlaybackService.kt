@@ -53,6 +53,7 @@ import vn.nghetruyen.app.data.local.ChapterVoiceAssignmentEntity
 import vn.nghetruyen.app.data.local.SceneMusicCueEntity
 import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
 import vn.nghetruyen.app.data.local.VoiceRoleEntity
+import vn.nghetruyen.app.ui.reference.ReferenceVoiceRoleExtras
 import vn.nghetruyen.app.audio.Pcm16WaveConverter
 import vn.nghetruyen.app.audio.SonicPcmProcessor
 import vn.nghetruyen.app.audio.PcmLoudnessEstimator
@@ -70,6 +71,8 @@ private data class RuntimeVoiceConfig(
     val volume: Float,
     val sonicSpeed: Float = 1f,
     val sonicPitch: Float = 1f,
+    val sonicEnabled: Boolean = false,
+    val sonicAccurate: Boolean = false,
 )
 
 private data class ActiveSpeechAttempt(
@@ -651,11 +654,16 @@ class ReaderPlaybackService : Service() {
         val aiPitchMultiplier = (1f + (voiceAssignment?.pitchAdjustPct ?: 0f) / 100f).coerceIn(0.5f, 1.5f)
         val aiVolumeMultiplier = (1f + (voiceAssignment?.volumeAdjustPct ?: 0f) / 100f).coerceIn(0.2f, 2f)
         val config = roleConfig.copy(
-            rate = (roleConfig.rate * expression.rateMultiplier * aiRateMultiplier).coerceIn(0.5f, 2f),
+            rate = (roleConfig.rate * expression.rateMultiplier * aiRateMultiplier).coerceIn(0.25f, 3f),
             pitch = (roleConfig.pitch * expression.pitchMultiplier * aiPitchMultiplier).coerceIn(0.5f, 2f),
-            volume = (roleConfig.volume * expression.volumeMultiplier * aiVolumeMultiplier).coerceIn(0.05f, 1f),
-            sonicSpeed = (roleConfig.sonicSpeed * expression.sonicSpeedMultiplier * sonicDefaultSpeed).coerceIn(0.5f, 2f),
-            sonicPitch = (roleConfig.sonicPitch * expression.sonicPitchMultiplier * sonicDefaultPitch).coerceIn(0.5f, 2f),
+            volume = (roleConfig.volume * expression.volumeMultiplier * aiVolumeMultiplier)
+                .coerceIn(0f, if (roleConfig.sonicEnabled) 2f else 1f),
+            sonicSpeed = if (roleConfig.sonicEnabled)
+                (roleConfig.sonicSpeed * expression.sonicSpeedMultiplier * sonicDefaultSpeed).coerceIn(0.25f, 3f)
+            else 1f,
+            sonicPitch = if (roleConfig.sonicEnabled)
+                (roleConfig.sonicPitch * expression.sonicPitchMultiplier * sonicDefaultPitch).coerceIn(0.5f, 2f)
+            else 1f,
         )
         val desiredEngine = config.enginePackage?.takeUnless(failedEnginePackages::contains)
             ?: activeBaseVoice.enginePackage?.takeUnless(failedEnginePackages::contains)
@@ -675,11 +683,10 @@ class ReaderPlaybackService : Service() {
         activeUtteranceId = utteranceId
         val spokenText = PronunciationProcessor.apply(expression.text, pronunciationRules)
             .ifBlank { expression.text }
-        val hasSonicTransform = sonicProcessingEnabled &&
-            (kotlin.math.abs(config.sonicSpeed - 1f) >= 0.015f || kotlin.math.abs(config.sonicPitch - 1f) >= 0.015f)
+        val hasSonicTransform = config.sonicEnabled
         val useRenderedPipeline = !forceNoSonic &&
             (hasSonicTransform || ttsCacheEnabled || normalizeTtsVolumeEnabled)
-        val renderConfig = if (hasSonicTransform) config else config.copy(sonicSpeed = 1f, sonicPitch = 1f)
+        val renderConfig = if (hasSonicTransform) config else config.copy(sonicSpeed = 1f, sonicPitch = 1f, sonicEnabled = false)
         activeSpeechAttempt = ActiveSpeechAttempt(spokenText, renderConfig, useRenderedPipeline, recoveryState)
         completionGuard.begin(utteranceId)
         playbackHealth.chunkStarted(System.currentTimeMillis(), utteranceId)
@@ -836,13 +843,13 @@ class ReaderPlaybackService : Service() {
             recoverActiveSpeech("SONIC_SYNTHESIS_FAILED")
             return
         }
-        val speed = activeSonicSpeed.coerceIn(0.5f, 2f)
+        val speed = activeSonicSpeed.coerceIn(0.25f, 3f)
         val pitch = activeSonicPitch.coerceIn(0.5f, 2f)
-        val volume = activeSonicVolume.coerceIn(0.05f, 1f)
+        val volume = activeSonicVolume.coerceIn(0f, 2f)
         serviceScope.launch {
             val processed = runCatching {
                 Pcm16WaveConverter.convert(raw, pcm, volume)
-                SonicPcmProcessor.process(pcm, output, speed, pitch)
+                SonicPcmProcessor.process(pcm, output, speed, pitch, activeSpeechAttempt?.config?.sonicAccurate ?: false)
             }
             withContext(Dispatchers.Main) {
                 if (activeUtteranceId != playbackId || activeSonicPlaybackId != playbackId) {
@@ -941,11 +948,13 @@ class ReaderPlaybackService : Service() {
             enginePackage = intent.getStringExtra(EXTRA_PREVIEW_ENGINE)?.takeIf(String::isNotBlank),
             voiceName = intent.getStringExtra(EXTRA_PREVIEW_VOICE)?.takeIf(String::isNotBlank),
             languageTag = intent.getStringExtra(EXTRA_PREVIEW_LANGUAGE).orEmpty().ifBlank { "vi-VN" },
-            rate = intent.getFloatExtra(EXTRA_PREVIEW_RATE, 1f).coerceIn(0.5f, 2f),
+            rate = intent.getFloatExtra(EXTRA_PREVIEW_RATE, 1f).coerceIn(0.25f, 3f),
             pitch = intent.getFloatExtra(EXTRA_PREVIEW_PITCH, 1f).coerceIn(0.5f, 2f),
-            volume = intent.getFloatExtra(EXTRA_PREVIEW_VOLUME, 1f).coerceIn(0.05f, 1f),
-            sonicSpeed = intent.getFloatExtra(EXTRA_PREVIEW_SONIC_SPEED, 1f).coerceIn(0.5f, 2f),
+            volume = intent.getFloatExtra(EXTRA_PREVIEW_VOLUME, 1f).coerceIn(0f, 2f),
+            sonicSpeed = intent.getFloatExtra(EXTRA_PREVIEW_SONIC_SPEED, 1f).coerceIn(0.25f, 3f),
             sonicPitch = intent.getFloatExtra(EXTRA_PREVIEW_SONIC_PITCH, 1f).coerceIn(0.5f, 2f),
+            sonicEnabled = intent.getBooleanExtra(EXTRA_PREVIEW_SONIC_ENABLED, false),
+            sonicAccurate = intent.getBooleanExtra(EXTRA_PREVIEW_SONIC_ACCURATE, false),
         )
         val previewRole = VoiceRoleEntity(
             id = "preview",
@@ -970,11 +979,11 @@ class ReaderPlaybackService : Service() {
         preparePreview(
             expressive.text,
             baseConfig.copy(
-                rate = (baseConfig.rate * expressive.rateMultiplier).coerceIn(0.5f, 2f),
+                rate = (baseConfig.rate * expressive.rateMultiplier).coerceIn(0.25f, 3f),
                 pitch = (baseConfig.pitch * expressive.pitchMultiplier).coerceIn(0.5f, 2f),
-                volume = (baseConfig.volume * expressive.volumeMultiplier).coerceIn(0.05f, 1f),
-                sonicSpeed = (baseConfig.sonicSpeed * expressive.sonicSpeedMultiplier).coerceIn(0.5f, 2f),
-                sonicPitch = (baseConfig.sonicPitch * expressive.sonicPitchMultiplier).coerceIn(0.5f, 2f),
+                volume = (baseConfig.volume * expressive.volumeMultiplier).coerceIn(0f, if (baseConfig.sonicEnabled) 2f else 1f),
+                sonicSpeed = if (baseConfig.sonicEnabled) (baseConfig.sonicSpeed * expressive.sonicSpeedMultiplier).coerceIn(0.25f, 3f) else 1f,
+                sonicPitch = if (baseConfig.sonicEnabled) (baseConfig.sonicPitch * expressive.sonicPitchMultiplier).coerceIn(0.5f, 2f) else 1f,
             ),
         )
     }
@@ -1406,6 +1415,8 @@ class ReaderPlaybackService : Service() {
             rate = profile?.rate ?: settings.ttsRate,
             pitch = profile?.pitch ?: settings.ttsPitch,
             volume = profile?.volume ?: settings.ttsVolume,
+            sonicEnabled = settings.sonicProcessingEnabled,
+            sonicAccurate = settings.sonicAccurateMode,
         )
         activeBaseVoice = config
         val chapterId = PlaybackQueueStore.state.value.chapterId
@@ -1523,20 +1534,26 @@ class ReaderPlaybackService : Service() {
         if (selected != null && tts.setVoice(selected) == TextToSpeech.ERROR) {
             transitionMessage = "Không dùng được giọng đã chọn; đã dùng giọng mặc định."
         }
-        tts.setSpeechRate(config.rate.coerceIn(0.5f, 2.0f))
+        tts.setSpeechRate(config.rate.coerceIn(0.25f, 3.0f))
         tts.setPitch(config.pitch.coerceIn(0.5f, 2.0f))
     }
 
-    private fun VoiceRoleEntity.toRuntimeVoice(): RuntimeVoiceConfig = RuntimeVoiceConfig(
-        enginePackage = enginePackage,
-        voiceName = voiceName,
-        languageTag = languageTag,
-        rate = rate,
-        pitch = pitch,
-        volume = volume,
-        sonicSpeed = sonicSpeed,
-        sonicPitch = sonicPitch,
-    )
+    private fun VoiceRoleEntity.toRuntimeVoice(): RuntimeVoiceConfig {
+        val extra = ReferenceVoiceRoleExtras.load(this@ReaderPlaybackService, id)
+        val sonic = extra.processingMethod == "sonic"
+        return RuntimeVoiceConfig(
+            enginePackage = enginePackage,
+            voiceName = voiceName,
+            languageTag = languageTag,
+            rate = rate,
+            pitch = pitch,
+            volume = volume.coerceIn(0f, if (sonic) 2f else 1f),
+            sonicSpeed = if (sonic) sonicSpeed.coerceIn(0.25f, 3f) else 1f,
+            sonicPitch = if (sonic) sonicPitch.coerceIn(0.5f, 2f) else 1f,
+            sonicEnabled = sonic,
+            sonicAccurate = extra.sonicAccurate,
+        )
+    }
 
     private fun updateSceneMusicForParagraph(paragraphIndex: Int) {
         if (sceneMusicCues.isEmpty()) return
@@ -1943,6 +1960,8 @@ class ReaderPlaybackService : Service() {
         private const val EXTRA_PREVIEW_VOLUME = "preview_volume"
         private const val EXTRA_PREVIEW_SONIC_SPEED = "preview_sonic_speed"
         private const val EXTRA_PREVIEW_SONIC_PITCH = "preview_sonic_pitch"
+        private const val EXTRA_PREVIEW_SONIC_ENABLED = "preview_sonic_enabled"
+        private const val EXTRA_PREVIEW_SONIC_ACCURATE = "preview_sonic_accurate"
         private const val EXTRA_PREVIEW_EXPRESSION = "preview_expression"
         private const val EXTRA_PREVIEW_EXPRESSION_STRENGTH = "preview_expression_strength"
 
@@ -1985,6 +2004,8 @@ class ReaderPlaybackService : Service() {
                     .putExtra(EXTRA_PREVIEW_VOLUME, draft.volume)
                     .putExtra(EXTRA_PREVIEW_SONIC_SPEED, draft.sonicSpeed)
                     .putExtra(EXTRA_PREVIEW_SONIC_PITCH, draft.sonicPitch)
+                    .putExtra(EXTRA_PREVIEW_SONIC_ENABLED, draft.processingMethod == "sonic")
+                    .putExtra(EXTRA_PREVIEW_SONIC_ACCURATE, draft.sonicAccurate)
                     .putExtra(EXTRA_PREVIEW_EXPRESSION, draft.expression.name)
                     .putExtra(EXTRA_PREVIEW_EXPRESSION_STRENGTH, draft.expressionStrength),
             )

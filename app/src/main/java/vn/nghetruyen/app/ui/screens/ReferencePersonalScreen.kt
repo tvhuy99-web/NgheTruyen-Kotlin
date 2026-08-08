@@ -211,7 +211,7 @@ fun ReferencePersonalScreen(
     if (showSettings) {
         AlertDialog(
             onDismissRequest = { showSettings = false },
-            title = { Text("CÀI ĐẶT") },
+            title = { Text("CÀI ĐẶT ỨNG DỤNG") },
             text = {
                 Column(Modifier.heightIn(max = 620.dp).verticalScroll(rememberScrollState())) {
                     SettingsButton("TỪ ĐIỂN PHÁT ÂM TTS") { showSettings = false; showPronunciation = true }
@@ -524,8 +524,8 @@ private fun PronunciationReferenceDialog(
             onDismissRequest = { adding = false; edit = null },
             title = { Text(if (current == null) "THÊM CÁCH ĐỌC" else "SỬA CÁCH ĐỌC") },
             text = { Column {
-                OutlinedTextField(original, { original = it.take(300) }, label = { Text("Từ hoặc cụm từ") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(replacement, { replacement = it.take(500) }, label = { Text("Cách đọc") }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+                OutlinedTextField(original, { original = it.take(300) }, label = { Text("Từ hoặc cụm từ gốc") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(replacement, { replacement = it.take(500) }, label = { Text("TTS sẽ đọc thành") }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
             } },
             confirmButton = { TextButton(enabled = original.isNotBlank() && replacement.isNotBlank(), onClick = {
                 if (current == null) onAdd(original, replacement) else onUpdate(current, original, replacement)
@@ -553,6 +553,7 @@ private fun VietPhraseReferenceDialog(
     var fileMenu by remember { mutableStateOf<VietPhraseDictionaryKind?>(null) }
     var deleteKind by remember { mutableStateOf<VietPhraseDictionaryKind?>(null) }
     var deleteAll by remember { mutableStateOf(false) }
+    var downloadConfirm by remember { mutableStateOf(false) }
     val order = listOf(
         VietPhraseDictionaryKind.NAMES,
         VietPhraseDictionaryKind.VIET_PHRASE,
@@ -575,7 +576,7 @@ private fun VietPhraseReferenceDialog(
                 SettingsButton("XUẤT TỪ ĐIỂN ZIP", onExport)
                 order.forEach { kind -> SettingsButton(kind.fileName) { fileMenu = kind } }
                 SettingsButton("XÓA TẤT CẢ") { deleteAll = true }
-                SettingsButton("TẢI TỰ ĐỘNG TỪ MẠNG", onInstallOnline)
+                SettingsButton("TẢI TỰ ĐỘNG TỪ MẠNG") { downloadConfirm = true }
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text("Dùng Hán Việt khi không tìm thấy cụm", Modifier.weight(1f))
                     Switch(fallback, { value -> fallback = value; ReferenceVietPhraseRuntime.setFallbackHanViet(context, value) })
@@ -602,8 +603,8 @@ private fun VietPhraseReferenceDialog(
     deleteKind?.let { kind ->
         AlertDialog(
             onDismissRequest = { deleteKind = null },
-            title = { Text("XÓA DỮ LIỆU FILE") },
-            text = { Text("Xóa toàn bộ dữ liệu của ${kind.fileName}?") },
+            title = { Text("XÓA ${kind.fileName}") },
+            text = { Text("Xóa dữ liệu của file này?") },
             confirmButton = { TextButton(onClick = {
                 state.vietPhraseRules.filter { it.kind == kind.name }.forEach { onDeleteRule(it.id) }
                 deleteKind = null
@@ -614,10 +615,19 @@ private fun VietPhraseReferenceDialog(
     if (deleteAll) {
         AlertDialog(
             onDismissRequest = { deleteAll = false },
-            title = { Text("XÓA TẤT CẢ VIETPHRASE") },
-            text = { Text("Xóa toàn bộ dữ liệu VietPhrase đã nhập?") },
+            title = { Text("XÓA TOÀN BỘ VIETPHRASE") },
+            text = { Text("Xóa tất cả dữ liệu VietPhrase?") },
             confirmButton = { TextButton(onClick = { state.vietPhraseRules.forEach { onDeleteRule(it.id) }; deleteAll = false }) { Text("XÓA") } },
             dismissButton = { TextButton(onClick = { deleteAll = false }) { Text("HỦY") } },
+        )
+    }
+    if (downloadConfirm) {
+        AlertDialog(
+            onDismissRequest = { downloadConfirm = false },
+            title = { Text("TẢI TỰ ĐỘNG TỪ MẠNG") },
+            text = { Text("Tải và cài bộ dữ liệu VietPhrase từ mạng?") },
+            confirmButton = { TextButton(onClick = { downloadConfirm = false; onInstallOnline() }) { Text("TẢI") } },
+            dismissButton = { TextButton(onClick = { downloadConfirm = false }) { Text("HỦY") } },
         )
     }
     state.pendingVietPhraseImport?.let { preview ->
@@ -784,6 +794,8 @@ private fun GlobalVoiceCastReferenceDialog(
     var processing by remember { mutableStateOf("system") }
     var accurate by remember { mutableStateOf(false) }
     var voices by remember { mutableStateOf<List<TtsVoiceOption>>(emptyList()) }
+    var deleteRole by remember { mutableStateOf<VoiceRoleEntity?>(null) }
+    var restoreConfirm by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("PHÂN VAI TTS BẰNG AI") },
@@ -796,28 +808,23 @@ private fun GlobalVoiceCastReferenceDialog(
                     ReferenceActionButton(
                         text = (if (role.isNarrator) "Người kể chuyện" else role.roleName) + role.description.takeIf(String::isNotBlank)?.let { "\n$it" }.orEmpty(),
                         onClick = {
-                            draft = role.toVoiceDraft()
                             val extra = ReferenceVoiceRoleExtras.load(context, role.id)
                             processing = extra.processingMethod
                             accurate = extra.sonicAccurate
+                            draft = role.toVoiceDraft().copy(processingMethod = processing, sonicAccurate = accurate)
                             scope.launch { voices = (app.container.ttsVoiceCatalog.load(role.enginePackage) as? AppResult.Success)?.value.orEmpty() }
                         },
                         normalColor = ReferencePanelBackground,
                         normalContentColor = ReferenceText,
                         modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
                     )
-                    if (!role.isNarrator) {
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Text("Bật hồ sơ", Modifier.weight(1f)); Switch(role.enabled, { onEnabledChange(role.id, it) })
-                        }
-                    }
                 }
                 SettingsButton("THÊM GIỌNG") {
                     draft = VoiceRoleDraft(roleName = "", enginePackage = state.selectedTtsEnginePackage, voiceName = state.selectedTtsVoiceName, languageTag = state.selectedTtsLanguageTag, rate = 1f, pitch = 1f, volume = 1f)
                     processing = "system"; accurate = false
                     scope.launch { voices = (app.container.ttsVoiceCatalog.load(state.selectedTtsEnginePackage) as? AppResult.Success)?.value.orEmpty() }
                 }
-                SettingsButton("KHÔI PHỤC 7 HỒ SƠ MẪU", onRestore)
+                SettingsButton("KHÔI PHỤC 7 HỒ SƠ MẪU") { restoreConfirm = true }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("ĐÓNG") } },
@@ -830,13 +837,18 @@ private fun GlobalVoiceCastReferenceDialog(
         val visibleVoices = voices.filter { current.languageTag.isBlank() || it.languageTag == current.languageTag }
         AlertDialog(
             onDismissRequest = { draft = null },
-            title = { Text(if (current.originalRoleId == null) "THÊM HỒ SƠ GIỌNG" else "SỬA HỒ SƠ GIỌNG") },
+            title = { Text("HỒ SƠ GIỌNG TTS") },
             text = { Column(Modifier.heightIn(max = 580.dp).verticalScroll(rememberScrollState())) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Checkbox(current.isNarrator, { draft = current.copy(isNarrator = it, roleName = if (it) "Người kể chuyện" else "") }); Text("Đây là Người kể chuyện") }
-                if (!current.isNarrator) {
-                    OutlinedTextField(current.roleName, { draft = current.copy(roleName = it.take(80)) }, label = { Text("Tên vai") }, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(current.description, { draft = current.copy(description = it.take(1_000)) }, label = { Text("Mô tả") }, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(current.aliases, { draft = current.copy(aliases = it.take(500)) }, label = { Text("Bí danh") }, modifier = Modifier.fillMaxWidth())
+                if (current.isNarrator) {
+                    Text("Người kể chuyện", fontWeight = FontWeight.SemiBold)
+                    Text("Người kể chuyện luôn được bật", style = MaterialTheme.typography.bodySmall)
+                } else {
+                    OutlinedTextField(current.roleName, { draft = current.copy(roleName = it.take(80)) }, label = { Text("Tên vai hoặc tên nhân vật") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(current.description, { draft = current.copy(description = it.take(1_000)) }, label = { Text("Mô tả để AI nhận biết") }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Bật hồ sơ này", Modifier.weight(1f))
+                        Switch(current.enabled, { draft = current.copy(enabled = it) })
+                    }
                 }
                 Text("Bộ đọc TTS", modifier = Modifier.padding(top = 6.dp))
                 Button(onClick = { engineMenu = true }, modifier = Modifier.fillMaxWidth()) { Text(state.ttsEngines.firstOrNull { it.packageName == current.enginePackage }?.label ?: "Mặc định hệ thống") }
@@ -847,7 +859,7 @@ private fun GlobalVoiceCastReferenceDialog(
                 Text("Ngôn ngữ", modifier = Modifier.padding(top = 6.dp))
                 Button(onClick = { languageMenu = true }, modifier = Modifier.fillMaxWidth()) { Text(current.languageTag.ifBlank { "vi-VN" }) }
                 DropdownMenu(languageMenu, { languageMenu = false }) { (if (languages.isEmpty()) listOf("vi-VN") else languages).forEach { lang -> DropdownMenuItem({ Text(lang) }, { draft = current.copy(languageTag = lang, voiceName = null); languageMenu = false }) } }
-                Text("Giọng đọc", modifier = Modifier.padding(top = 6.dp))
+                Text("Giọng nói", modifier = Modifier.padding(top = 6.dp))
                 Button(onClick = { voiceMenu = true }, modifier = Modifier.fillMaxWidth()) { Text(visibleVoices.firstOrNull { it.name == current.voiceName }?.displayName ?: "Giọng mặc định") }
                 DropdownMenu(voiceMenu, { voiceMenu = false }) {
                     DropdownMenuItem({ Text("Giọng mặc định") }, { draft = current.copy(voiceName = null); voiceMenu = false })
@@ -855,8 +867,8 @@ private fun GlobalVoiceCastReferenceDialog(
                 }
                 Text("Phương pháp xử lý", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
                 Row(Modifier.fillMaxWidth()) {
-                    TextButton({ processing = "system"; draft = current.copy(volume = current.volume.coerceAtMost(1f)) }, Modifier.weight(1f)) { Text((if (processing == "system") "✓ " else "") + "Android") }
-                    TextButton({ processing = "sonic" }, Modifier.weight(1f)) { Text((if (processing == "sonic") "✓ " else "") + "Sonic") }
+                    TextButton({ processing = "system"; draft = current.copy(volume = current.volume.coerceAtMost(1f)) }, Modifier.weight(1f)) { Text((if (processing == "system") "✓ " else "") + "Android, tối đa 100%") }
+                    TextButton({ processing = "sonic" }, Modifier.weight(1f)) { Text((if (processing == "sonic") "✓ " else "") + "Sonic, tối đa 200%") }
                 }
                 if (processing == "sonic") {
                     Text("Chế độ Sonic", fontWeight = FontWeight.SemiBold)
@@ -868,26 +880,44 @@ private fun GlobalVoiceCastReferenceDialog(
                 VoiceSlider("Tốc độ", current.rate, 0.25f, 3f) { draft = current.copy(rate = it) }
                 VoiceSlider("Cao độ", current.pitch, 0.5f, 2f) { draft = current.copy(pitch = it) }
                 VoiceSlider("Âm lượng", current.volume, 0f, if (processing == "sonic") 2f else 1f, true) { draft = current.copy(volume = it) }
-                SettingsButton("NGHE THỬ") { onPreview(current) }
+                SettingsButton("NGHE THỬ") { onPreview(current.copy(processingMethod = processing, sonicAccurate = accurate)) }
             } },
-            confirmButton = { TextButton(enabled = current.isNarrator || current.roleName.isNotBlank(), onClick = {
+            confirmButton = { TextButton(enabled = current.isNarrator || (current.roleName.isNotBlank() && current.description.isNotBlank() && !current.voiceName.isNullOrBlank()), onClick = {
                 val normalized = current.copy(
                     roleName = if (current.isNarrator) "Người kể chuyện" else current.roleName,
                     volume = current.volume.coerceAtMost(if (processing == "sonic") 2f else 1f),
                     sonicSpeed = if (processing == "sonic") current.sonicSpeed else 1f,
                     sonicPitch = if (processing == "sonic") current.sonicPitch else 1f,
                 )
-                onSave(normalized)
-                current.originalRoleId?.let { ReferenceVoiceRoleExtras.save(context, it, ReferenceVoiceRoleExtra(processing, accurate)) }
+                onSave(normalized.copy(processingMethod = processing, sonicAccurate = accurate))
                 draft = null
-            }) { Text("LƯU") } },
+            }) { Text("LƯU HỒ SƠ") } },
             dismissButton = { Row {
                 if (!current.isNarrator && current.originalRoleId != null) TextButton(onClick = {
-                    roles.firstOrNull { it.id == current.originalRoleId }?.let(onDelete)
+                    deleteRole = roles.firstOrNull { it.id == current.originalRoleId }
                     draft = null
-                }) { Text("XÓA") }
+                }) { Text("XÓA HỒ SƠ") }
+                else if (current.isNarrator) TextButton(onClick = {}) { Text("NGƯỜI KỂ CHUYỆN BẮT BUỘC") }
                 TextButton(onClick = { draft = null }) { Text("HỦY") }
             } },
+        )
+    }
+    deleteRole?.let { role ->
+        AlertDialog(
+            onDismissRequest = { deleteRole = null },
+            title = { Text("XÓA HỒ SƠ") },
+            text = { Text("Xóa hồ sơ “${role.roleName}”? Kết quả cũ dùng hồ sơ này sẽ trở về Người kể chuyện.") },
+            confirmButton = { TextButton(onClick = { onDelete(role); deleteRole = null }) { Text("XÓA") } },
+            dismissButton = { TextButton(onClick = { deleteRole = null }) { Text("HỦY") } },
+        )
+    }
+    if (restoreConfirm) {
+        AlertDialog(
+            onDismissRequest = { restoreConfirm = false },
+            title = { Text("KHÔI PHỤC HỒ SƠ MẪU") },
+            text = { Text("Khôi phục tên và mô tả của 7 hồ sơ mẫu? Cấu hình âm thanh và các hồ sơ tùy chỉnh sẽ được giữ lại trong giới hạn 10 hồ sơ.") },
+            confirmButton = { TextButton(onClick = { restoreConfirm = false; onRestore() }) { Text("KHÔI PHỤC") } },
+            dismissButton = { TextButton(onClick = { restoreConfirm = false }) { Text("HỦY") } },
         )
     }
 }

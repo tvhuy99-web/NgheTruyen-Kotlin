@@ -83,6 +83,9 @@ import vn.nghetruyen.app.playback.PlaybackPreparationState
 import vn.nghetruyen.app.playback.PlaybackSnapshot
 import vn.nghetruyen.app.playback.ReaderPlaybackService
 import vn.nghetruyen.app.playback.ReaderDocumentNormalizer
+import vn.nghetruyen.app.ui.reference.ReferenceVoiceRolePersistence
+import vn.nghetruyen.app.ui.reference.ReferenceVoiceRoleExtra
+import vn.nghetruyen.app.ui.reference.ReferenceVoiceRoleExtras
 import vn.nghetruyen.app.playback.ReaderPositionResolver
 import vn.nghetruyen.app.playback.ReaderChapterNavigation
 import vn.nghetruyen.app.sources.SourceCheckReport
@@ -2234,7 +2237,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 enabled = draft.enabled,
                 description = draft.description,
             ).onSuccess { savedId ->
-                draft.originalRoleId?.takeIf { it != savedId }?.let { container.libraryRepository.deleteVoiceRole(it) }
+                ReferenceVoiceRoleExtras.save(
+                    getApplication(), savedId,
+                    ReferenceVoiceRoleExtra(draft.processingMethod, draft.sonicAccurate),
+                )
+                draft.originalRoleId?.takeIf { it != savedId }?.let { oldId ->
+                    container.libraryRepository.deleteVoiceRole(oldId)
+                    ReferenceVoiceRoleExtras.remove(getApplication(), oldId)
+                }
                 ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
                 showMessage("Đã lưu hồ sơ giọng chung ${draft.roleName}.")
             }.onFailure { showMessage(it.message ?: "Không lưu được hồ sơ giọng chung.") }
@@ -2256,6 +2266,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
             container.libraryRepository.deleteVoiceRole(id)
+            ReferenceVoiceRoleExtras.remove(getApplication(), id)
             ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
             showMessage("Đã xóa hồ sơ giọng chung ${role.roleName}.")
         }
@@ -2292,9 +2303,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 enabled = draft.enabled,
                 description = draft.description,
             ).onSuccess { savedId ->
+                ReferenceVoiceRoleExtras.save(
+                    getApplication(), savedId,
+                    ReferenceVoiceRoleExtra(draft.processingMethod, draft.sonicAccurate),
+                )
                 draft.originalRoleId
                     ?.takeIf { it != savedId }
-                    ?.let { container.libraryRepository.deleteVoiceRole(it) }
+                    ?.let { oldId ->
+                        container.libraryRepository.deleteVoiceRole(oldId)
+                        ReferenceVoiceRoleExtras.remove(getApplication(), oldId)
+                    }
                 ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
                 showMessage("Đã lưu hồ sơ giọng cho ${if (draft.isNarrator) "Người kể chuyện" else draft.roleName}.")
             }.onFailure { showMessage(it.message ?: "Không lưu được vai giọng.") }
@@ -2327,6 +2345,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteVoiceRole(id: String) {
         viewModelScope.launch {
             container.libraryRepository.deleteVoiceRole(id)
+            ReferenceVoiceRoleExtras.remove(getApplication(), id)
             ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
         }
     }

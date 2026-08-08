@@ -94,6 +94,8 @@ data class VoiceRoleDraft(
     val expressionStrength: Float = 0.5f,
     val sonicSpeed: Float = 1f,
     val sonicPitch: Float = 1f,
+    val processingMethod: String = "system",
+    val sonicAccurate: Boolean = false,
     val enabled: Boolean = true,
 )
 

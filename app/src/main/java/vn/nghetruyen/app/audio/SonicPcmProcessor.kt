@@ -21,7 +21,7 @@ import kotlin.math.roundToInt
 object SonicPcmProcessor {
     private const val MAX_PCM_BYTES = 64L * 1024L * 1024L
 
-    fun process(source: File, destination: File, speed: Float, pitch: Float): WaveSegment {
+    fun process(source: File, destination: File, speed: Float, pitch: Float, accurate: Boolean = ReferenceSonicRuntime.accurateMode): WaveSegment {
         val wave = WaveFileAssembler.inspect(source)
         if (wave.audioFormat != 1 || wave.bitsPerSample != 16 || wave.channelCount !in 1..2) {
             throw IOException("Sonic chỉ hỗ trợ WAV PCM16 mono hoặc stereo.")
@@ -46,7 +46,7 @@ object SonicPcmProcessor {
             channels = wave.channelCount,
             sampleRate = wave.sampleRate.toInt(),
             speed = stretchSpeed,
-            accurate = ReferenceSonicRuntime.accurateMode,
+            accurate = accurate,
         )
         val originalFrames = samples.size / wave.channelCount
         val targetFrames = max(1, (originalFrames / normalizedSpeed).roundToInt())

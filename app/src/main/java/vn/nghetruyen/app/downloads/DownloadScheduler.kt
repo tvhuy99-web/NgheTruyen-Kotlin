@@ -6,6 +6,7 @@ import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
 import androidx.work.workDataOf
 import java.time.Duration
@@ -85,6 +86,12 @@ class DownloadScheduler(context: Context) {
 
     fun resume(request: DownloadRequest): DownloadRequest = enqueue(request, ExistingWorkPolicy.REPLACE)
 
+    fun prioritize(request: DownloadRequest): DownloadRequest = enqueue(
+        request = request,
+        policy = ExistingWorkPolicy.REPLACE,
+        expedited = true,
+    )
+
     fun cancel(request: DownloadRequest) {
         workManager.cancelUniqueWork(request.jobId)
     }
@@ -96,13 +103,14 @@ class DownloadScheduler(context: Context) {
     private fun enqueue(
         request: DownloadRequest,
         policy: ExistingWorkPolicy = ExistingWorkPolicy.REPLACE,
+        expedited: Boolean = false,
     ): DownloadRequest {
         val networkType = when {
             request.sourceId == "offline" -> NetworkType.NOT_REQUIRED
             request.wifiOnly -> NetworkType.UNMETERED
             else -> NetworkType.CONNECTED
         }
-        val work = OneTimeWorkRequestBuilder<ChapterDownloadWorker>()
+        val builder = OneTimeWorkRequestBuilder<ChapterDownloadWorker>()
             .setConstraints(
                 Constraints.Builder()
                     .setRequiredNetworkType(networkType)
@@ -125,7 +133,10 @@ class DownloadScheduler(context: Context) {
             .addTag("story-download")
             .addTag("story-download:${request.storyId}")
             .addTag("download-job:${request.jobId}")
-            .build()
+        if (expedited) {
+            builder.setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+        }
+        val work = builder.build()
         workManager.enqueueUniqueWork(request.jobId, policy, work)
         return request
     }

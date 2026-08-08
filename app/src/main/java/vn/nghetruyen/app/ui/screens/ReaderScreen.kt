@@ -70,6 +70,8 @@ import vn.nghetruyen.app.ai.vietphrase.VietPhraseRule
 import vn.nghetruyen.app.ai.vietphrase.VietPhraseScope
 import vn.nghetruyen.app.audio.ReferenceAudioExportRuntime
 import vn.nghetruyen.app.audio.SceneMusicAnalysisWorker
+import vn.nghetruyen.app.audio.AudioExportRequest
+import vn.nghetruyen.app.audio.AudioExportScope
 import vn.nghetruyen.app.core.common.AppResult
 import vn.nghetruyen.app.core.model.AudioExportFormat
 import vn.nghetruyen.app.core.model.ReaderLayoutMode
@@ -107,9 +109,7 @@ fun ReaderScreen(
     onSleepTimer: (Int?) -> Unit,
     onSleepTimerByChapters: (Int) -> Unit,
     onBookmark: () -> Unit,
-    onExportChapterWav: () -> Unit,
-    onExportChapterM4a: () -> Unit,
-    onExportChapterMp3: () -> Unit,
+    onExportAudio: (AudioExportRequest) -> Unit,
     onSaveVoiceProfile: () -> Unit,
     onClearVoiceProfile: () -> Unit,
     onThemeChange: (ReaderThemeMode) -> Unit,
@@ -340,27 +340,49 @@ fun ReaderScreen(
     val palette = readerPalette(display.theme)
     Surface(modifier = Modifier.fillMaxSize(), color = palette.background, contentColor = palette.text) {
         Column(Modifier.fillMaxSize()) {
-            ReaderButton("TÙY CHỌN", { showReaderOptions = true }, Modifier.fillMaxWidth(), normalColor = ReferenceGray, minHeight = 58.dp)
+            ReaderButton("TÙY CHỌN", { showReaderOptions = true }, Modifier.fillMaxWidth(), normalColor = ReferenceGray, minHeight = 52.dp)
             if (textMode) {
-                LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth()) {
-                    item(key = "reader-title") {
-                        Text(content.chapter.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = palette.text, modifier = Modifier.fillMaxWidth().semantics { heading() }.padding(12.dp))
+                if (display.layoutMode == ReaderLayoutMode.SCROLL) {
+                    LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth()) {
+                        item(key = "reader-title") {
+                            Text(content.chapter.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = palette.text, modifier = Modifier.fillMaxWidth().semantics { heading() }.padding(12.dp))
+                        }
+                        items(count = content.paragraphs.size, key = { "${content.chapter.id}:$it" }) { index ->
+                            Text(
+                                content.paragraphs[index],
+                                color = palette.text,
+                                fontSize = display.fontSizeSp.sp,
+                                lineHeight = (display.fontSizeSp * display.lineHeightPercent / 100f).sp,
+                                modifier = Modifier.fillMaxWidth()
+                                    .background(if (index in searchMatches) palette.search else Color.Transparent)
+                                    .clickable { onParagraphSelected(index) }
+                                    .padding(horizontal = display.horizontalPaddingDp.dp, vertical = (display.paragraphSpacingDp / 2f).dp),
+                            )
+                        }
                     }
-                    items(count = content.paragraphs.size, key = { "${content.chapter.id}:$it" }) { index ->
+                } else {
+                    Column(
+                        Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())
+                            .padding(horizontal = display.horizontalPaddingDp.dp, vertical = 16.dp),
+                    ) {
+                        Text(content.chapter.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = palette.text)
                         Text(
-                            content.paragraphs[index],
+                            content.paragraphs.getOrElse(activeIndex) { "" },
                             color = palette.text,
                             fontSize = display.fontSizeSp.sp,
                             lineHeight = (display.fontSizeSp * display.lineHeightPercent / 100f).sp,
-                            modifier = Modifier.fillMaxWidth()
-                                .background(if (index in searchMatches) palette.search else Color.Transparent)
-                                .padding(horizontal = display.horizontalPaddingDp.dp, vertical = (display.paragraphSpacingDp / 2f).dp),
+                            modifier = Modifier.fillMaxWidth().padding(top = 18.dp),
                         )
+                    }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        ReaderButton("ĐOẠN TRƯỚC", { onParagraphSelected((activeIndex - 1).coerceAtLeast(0)) }, Modifier.weight(1f), enabled = activeIndex > 0, minHeight = 52.dp)
+                        Text("${activeIndex + 1}/${content.paragraphs.size}", modifier = Modifier.padding(horizontal = 8.dp), color = palette.text)
+                        ReaderButton("ĐOẠN SAU", { onParagraphSelected((activeIndex + 1).coerceAtMost(content.paragraphs.lastIndex)) }, Modifier.weight(1f), enabled = activeIndex < content.paragraphs.lastIndex, minHeight = 52.dp)
                     }
                 }
                 Row(Modifier.fillMaxWidth()) {
-                    ReaderButton("TRƯỚC", onPreviousChapter, Modifier.weight(1f), minHeight = 64.dp)
-                    ReaderButton("SAU", onNextChapter, Modifier.weight(1f), minHeight = 64.dp)
+                    ReaderButton("TRƯỚC", onPreviousChapter, Modifier.weight(1f), minHeight = 56.dp)
+                    ReaderButton("SAU", onNextChapter, Modifier.weight(1f), minHeight = 56.dp)
                 }
             } else {
                 Column(Modifier.weight(1f).fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
@@ -368,8 +390,8 @@ fun ReaderScreen(
                     Text("Đoạn ${activeIndex + 1}/${content.paragraphs.size.coerceAtLeast(1)}", color = palette.text, modifier = Modifier.padding(top = 8.dp))
                 }
                 Row(Modifier.fillMaxWidth()) {
-                    ReaderButton("TRƯỚC", onPreviousChapter, Modifier.weight(1.2f), minHeight = 64.dp)
-                    ReaderButton("LÙI", onRewind, Modifier.weight(1f), minHeight = 64.dp)
+                    ReaderButton("TRƯỚC", onPreviousChapter, Modifier.weight(1.2f), minHeight = 56.dp)
+                    ReaderButton("LÙI", onRewind, Modifier.weight(1f), minHeight = 56.dp)
                     ReaderButton(
                         when {
                             state.playback.preparationState == PlaybackPreparationState.PREPARING -> "ĐANG CHUẨN BỊ"
@@ -380,12 +402,12 @@ fun ReaderScreen(
                         onTogglePlayback,
                         Modifier.weight(1.4f),
                         enabled = state.playback.preparationState == PlaybackPreparationState.READY,
-                        minHeight = 64.dp,
+                        minHeight = 56.dp,
                         normalColor = ReferenceGreen,
                         selected = state.playback.isPlaying,
                     )
-                    ReaderButton("TỚI", onForward, Modifier.weight(1f), minHeight = 64.dp)
-                    ReaderButton("SAU", onNextChapter, Modifier.weight(1.2f), minHeight = 64.dp)
+                    ReaderButton("TỚI", onForward, Modifier.weight(1f), minHeight = 56.dp)
+                    ReaderButton("SAU", onNextChapter, Modifier.weight(1.2f), minHeight = 56.dp)
                 }
             }
 
@@ -410,6 +432,9 @@ fun ReaderScreen(
                 ReaderButton(if (state.aiBusy) "AI ĐANG CHẠY…" else if (state.chapterTextMode == ChapterTextMode.AI_TRANSLATION) "DỊCH LẠI" else "DỊCH AI", onAiTranslate, Modifier.weight(1f), enabled = !state.aiBusy, normalColor = ReferencePurple)
                 ReaderButton("PHÂN VAI AI", onVoiceCast, Modifier.weight(1f), enabled = !state.aiBusy, normalColor = Color(0xFFAF52DE))
             }
+            if (state.playback.preparationState == PlaybackPreparationState.FAILED) {
+                ReaderButton("TIẾP TỤC BẰNG BẢN GỐC", onShowOriginal, Modifier.fillMaxWidth(), normalColor = ReferenceGreen)
+            }
         }
     }
 
@@ -420,18 +445,30 @@ fun ReaderScreen(
             text = { Column(Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState())) {
                 ReaderMenuButton("TRỞ LẠI DANH SÁCH CHƯƠNG") { showReaderOptions = false; onBackToChapters() }
                 ReaderMenuButton("LƯU VỊ TRÍ ĐỌC") { showReaderOptions = false; onSaveReadingPosition() }
+                ReaderMenuButton("ĐÁNH DẤU ĐOẠN ${activeIndex + 1}") { showReaderOptions = false; onBookmark() }
+                ReaderMenuButton(if (activeNote == null) "GHI CHÚ ĐOẠN ${activeIndex + 1}" else "SỬA GHI CHÚ ĐOẠN ${activeIndex + 1}") {
+                    showReaderOptions = false
+                    noteDraft = activeNote?.text.orEmpty()
+                    showNoteDialog = true
+                }
                 ReaderMenuButton("TÌM TRONG CHƯƠNG") { showReaderOptions = false; searchDraft = ""; showSearchDialog = true }
                 if (textMode) ReaderMenuButton("HIỂN THỊ VĂN BẢN") { showReaderOptions = false; showDisplayDialog = true }
                 ReaderMenuButton("HẸN GIỜ NGỦ - ${state.sleepTimerStatus}") { showReaderOptions = false; showSleepDialog = true }
                 ReaderMenuButton("NHẠC NỀN") { showReaderOptions = false; showMusicDialog = true }
-                ReaderMenuButton(if (textMode) "XUẤT ÂM THANH (CẦN CHẾ ĐỘ TTS)" else "XUẤT ÂM THANH") {
+                ReaderMenuButton("XUẤT ÂM THANH") {
                     showReaderOptions = false
-                    if (textMode) onMessage("XUẤT ÂM THANH chỉ hoạt động trong chế độ TTS.") else showExportDialog = true
+                    showExportDialog = true
                 }
                 ReaderMenuButton("CHẾ ĐỘ ĐỌC: ${if (textMode) "VĂN BẢN" else "TTS"}") { showReaderOptions = false; showReaderModeDialog = true }
                 ReaderMenuButton("THIẾT LẬP AI CHO TRUYỆN NÀY") { showReaderOptions = false; onOpenStoryAiOptions() }
                 ReaderMenuButton("PHÂN VAI TTS CHO TRUYỆN NÀY") { showReaderOptions = false; onOpenStoryVoiceCastOptions() }
-                if (state.chapterTextMode == ChapterTextMode.AI_TRANSLATION) {
+                if (state.vietPhraseRules.isNotEmpty() || state.vietPhraseDictionaryStates.isNotEmpty()) {
+                    ReaderMenuButton("ÁP DỤNG VIETPHRASE") { showReaderOptions = false; onApplyVietPhrase() }
+                    ReaderMenuButton("AI CẢI THIỆN VIETPHRASE") { showReaderOptions = false; onImproveVietPhrase() }
+                }
+                ReaderMenuButton("AI LẬP NHẠC CẢNH") { showReaderOptions = false; onPlanSceneMusic() }
+                ReaderMenuButton("AI PHÂN VAI + NHẠC CẢNH") { showReaderOptions = false; onPlanNarration() }
+                if (state.chapterTextMode == ChapterTextMode.AI_TRANSLATION || state.playback.preparationState == PlaybackPreparationState.FAILED) {
                     ReaderMenuButton("KHÔI PHỤC CHƯƠNG GỐC TRƯỚC AI") { showReaderOptions = false; onShowOriginal() }
                 }
                 if (state.vietPhraseRules.isNotEmpty() || state.vietPhraseDictionaryStates.isNotEmpty()) {
@@ -498,10 +535,17 @@ fun ReaderScreen(
             onDismissRequest = { showDisplayDialog = false },
             title = { Text("HIỂN THỊ VĂN BẢN") },
             text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.fillMaxWidth()) {
+                    ReaderButton("CUỘN", { onLayoutModeChange(ReaderLayoutMode.SCROLL) }, Modifier.weight(1f), selected = display.layoutMode == ReaderLayoutMode.SCROLL)
+                    ReaderButton("TỪNG ĐOẠN", { onLayoutModeChange(ReaderLayoutMode.PAGED) }, Modifier.weight(1f), selected = display.layoutMode == ReaderLayoutMode.PAGED)
+                }
                 ValueStepper("Cỡ chữ", "${display.fontSizeSp} sp", { onFontSizeChange(display.fontSizeSp - 1) }, { onFontSizeChange(display.fontSizeSp + 1) })
                 ValueStepper("Khoảng cách dòng", "${display.lineHeightPercent}%", { onLineHeightChange(display.lineHeightPercent - 10) }, { onLineHeightChange(display.lineHeightPercent + 10) })
+                ValueStepper("Lề ngang", "${display.horizontalPaddingDp} dp", { onHorizontalPaddingChange(display.horizontalPaddingDp - 2) }, { onHorizontalPaddingChange(display.horizontalPaddingDp + 2) })
+                ValueStepper("Khoảng đoạn", "${display.paragraphSpacingDp} dp", { onParagraphSpacingChange(display.paragraphSpacingDp - 2) }, { onParagraphSpacingChange(display.paragraphSpacingDp + 2) })
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Chế độ nền tối khi đọc", Modifier.weight(1f)); Switch(display.theme == ReaderThemeMode.DARK, { onThemeChange(if (it) ReaderThemeMode.DARK else ReaderThemeMode.LIGHT) }) }
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Giữ màn hình sáng khi đọc", Modifier.weight(1f)); Switch(display.keepScreenOn, onKeepScreenOnChange) }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Phím âm lượng chuyển đoạn khi TTS", Modifier.weight(1f)); Switch(display.volumeKeysNavigate, onVolumeKeysNavigateChange) }
             } },
             confirmButton = { TextButton(onClick = { showDisplayDialog = false }) { Text("LƯU") } },
         )
@@ -954,6 +998,8 @@ fun ReaderScreen(
         var fileName by remember(showExportDialog) { mutableStateOf(content.chapter.title.take(120).ifBlank { "chuong-${content.chapter.index + 1}" }) }
         var format by remember(showExportDialog) { mutableStateOf(AudioExportFormat.MP3) }
         var formatExpanded by remember { mutableStateOf(false) }
+        var includeMusic by remember(showExportDialog) { mutableStateOf(false) }
+        var chapterMarkers by remember(showExportDialog) { mutableStateOf(true) }
         AlertDialog(
             onDismissRequest = { showExportDialog = false },
             title = { Text("XUẤT ÂM THANH") },
@@ -964,15 +1010,28 @@ fun ReaderScreen(
                 DropdownMenu(expanded = formatExpanded, onDismissRequest = { formatExpanded = false }) {
                     listOf(AudioExportFormat.WAV, AudioExportFormat.M4A, AudioExportFormat.MP3).forEach { item -> DropdownMenuItem(text = { Text(item.name) }, onClick = { format = item; formatExpanded = false }) }
                 }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Kèm nhạc cảnh", Modifier.weight(1f))
+                    Switch(includeMusic, { includeMusic = it })
+                }
+                if (format == AudioExportFormat.MP3) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Đánh dấu chương trong MP3", Modifier.weight(1f))
+                        Switch(chapterMarkers, { chapterMarkers = it })
+                    }
+                }
             } },
             confirmButton = { TextButton(enabled = fileName.isNotBlank(), onClick = {
                 ReferenceAudioExportRuntime.setNextFileName("${fileName.trim()}.${format.extension}")
                 showExportDialog = false
-                when (format) {
-                    AudioExportFormat.WAV -> onExportChapterWav()
-                    AudioExportFormat.M4A -> onExportChapterM4a()
-                    AudioExportFormat.MP3 -> onExportChapterMp3()
-                }
+                onExportAudio(
+                    AudioExportRequest(
+                        scope = AudioExportScope.CURRENT_CHAPTER,
+                        format = format,
+                        includeSceneMusic = includeMusic,
+                        chapterMarkers = chapterMarkers,
+                    ),
+                )
             }) { Text("CHỌN NƠI LƯU VÀ BẮT ĐẦU") } },
             dismissButton = { TextButton(onClick = { showExportDialog = false }) { Text("HỦY") } },
         )

@@ -407,6 +407,28 @@ class AppDatabaseMigrationTest {
         }
     }
 
+    @Test
+    fun migration21To22AddsBoundedReadingHistory() {
+        withDatabase("migration-21-22.db", 21) { db ->
+            AppDatabase.MIGRATION_21_22.migrate(db)
+
+            assertTrue(db.hasTable("reading_history"))
+            assertEquals(
+                listOf(
+                    "id", "storyId", "sourceId", "storyTitle", "chapterId", "chapterTitle",
+                    "paragraphIndex", "totalParagraphs", "visitedAt",
+                ),
+                db.columnNames("reading_history"),
+            )
+            db.execSQL(
+                "INSERT INTO reading_history VALUES " +
+                    "('h-1','story-1','source-1','Truyện','chapter-1','Chương 1',3,20,1234)",
+            )
+            assertEquals("Chương 1", db.scalarText("SELECT chapterTitle FROM reading_history"))
+            assertEquals("3", db.scalarText("SELECT CAST(paragraphIndex AS TEXT) FROM reading_history"))
+        }
+    }
+
     private fun withDatabase(
         name: String,
         version: Int,

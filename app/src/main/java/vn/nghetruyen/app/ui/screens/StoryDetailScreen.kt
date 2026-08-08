@@ -47,7 +47,10 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import vn.nghetruyen.app.ai.StoryVoiceCastMode
 import vn.nghetruyen.app.ai.StoryVoiceCastReferenceCodec
+import vn.nghetruyen.app.audio.AudioExportPackaging
 import vn.nghetruyen.app.audio.AudioExportRequest
+import vn.nghetruyen.app.audio.AudioExportScope
+import vn.nghetruyen.app.core.model.AudioExportFormat
 import vn.nghetruyen.app.core.model.TtsEngineOption
 import vn.nghetruyen.app.core.model.VoiceExpression
 import vn.nghetruyen.app.core.model.VoiceRoleDraft
@@ -75,10 +78,10 @@ fun StoryDetailScreen(
     state: MainUiState,
     onBack: () -> Unit,
     onReadFirst: () -> Unit,
-    onDownload: () -> Unit,
-    onDownloadUnread: () -> Unit,
-    onDownloadRange: (Int, Int) -> Unit,
-    onDownloadSelected: (List<Int>) -> Unit,
+    onDownload: (Boolean, Boolean) -> Unit,
+    onDownloadUnread: (Boolean, Boolean) -> Unit,
+    onDownloadRange: (Int, Int, Boolean, Boolean) -> Unit,
+    onDownloadSelected: (List<Int>, Boolean, Boolean) -> Unit,
     onToggleFollowing: () -> Unit,
     onToggleStoryBookmark: () -> Unit,
     onGenreSelected: (String) -> Unit,
@@ -122,8 +125,12 @@ fun StoryDetailScreen(
     var chapterSearchError by remember(detail.story.id) { mutableStateOf(false) }
     var showChapterSortDialog by remember(detail.story.id) { mutableStateOf(false) }
     var showDownloadScopeDialog by remember(detail.story.id) { mutableStateOf(false) }
+    var showRangeDownloadDialog by remember(detail.story.id) { mutableStateOf(false) }
     var showMultiChapterDialog by remember(detail.story.id) { mutableStateOf(false) }
+    var showAudioExportDialog by remember(detail.story.id) { mutableStateOf(false) }
     var selectedDownloadChapters by remember(detail.story.id) { mutableStateOf(setOf<Int>()) }
+    var downloadWifiOnly by remember(detail.story.id) { mutableStateOf(false) }
+    var downloadChargingOnly by remember(detail.story.id) { mutableStateOf(false) }
     var showStoryMenu by remember(detail.story.id) { mutableStateOf(false) }
     var advancedMode by remember(detail.story.id) { mutableStateOf<String?>(null) }
     var showVoiceProfiles by remember(detail.story.id) { mutableStateOf(false) }
@@ -261,11 +268,11 @@ fun StoryDetailScreen(
                 text = if (state.continueAvailable) "ĐỌC TIẾP" + currentChapter?.title?.takeIf(String::isNotBlank)?.let { "\n$it" }.orEmpty() else "ĐỌC NGAY",
                 onClick = onReadFirst,
                 normalColor = ReferenceGreen,
-                minHeight = 64.dp,
+                minHeight = 56.dp,
                 modifier = Modifier.weight(1f).padding(1.dp),
             )
-            ReferenceActionButton("TẢI TRUYỆN", { showDownloadScopeDialog = true }, normalColor = ReferencePurple, minHeight = 64.dp, modifier = Modifier.weight(1f).padding(1.dp))
-            ReferenceActionButton("TÙY CHỌN", { showStoryMenu = true }, normalColor = ReferenceGray, minHeight = 64.dp, modifier = Modifier.weight(1f).padding(1.dp))
+            ReferenceActionButton("TẢI TRUYỆN", { showDownloadScopeDialog = true }, normalColor = ReferencePurple, minHeight = 56.dp, modifier = Modifier.weight(1f).padding(1.dp))
+            ReferenceActionButton("TÙY CHỌN", { showStoryMenu = true }, normalColor = ReferenceGray, minHeight = 56.dp, modifier = Modifier.weight(1f).padding(1.dp))
         }
 
         val customStoryActions = sourceDescriptor?.uiActions.orEmpty()
@@ -303,7 +310,7 @@ fun StoryDetailScreen(
                     text = label,
                     selected = selectedTab == id,
                     onClick = { onTabSelected(id); if (id == "comments") onLoadComments(false) },
-                    minHeight = 60.dp,
+                    minHeight = 50.dp,
                     unselectedColor = ReferenceDivider,
                     unselectedContentColor = ReferenceText,
                     modifier = Modifier.weight(1f).padding(1.dp),
@@ -414,10 +421,122 @@ fun StoryDetailScreen(
                 val following = state.following.any { it.storyId == detail.story.id }
                 ReferenceActionButton(if (storyBookmarked) "BỎ ĐÁNH DẤU" else "ĐÁNH DẤU", { showStoryMenu = false; onToggleStoryBookmark() }, selected = storyBookmarked, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp))
                 ReferenceActionButton(if (following) "BỎ THEO DÕI" else "THEO DÕI", { showStoryMenu = false; onToggleFollowing() }, selected = following, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp))
+                ReferenceActionButton("XUẤT SÁCH NÓI", { showStoryMenu = false; showAudioExportDialog = true }, normalColor = ReferencePurple, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp))
                 ReferenceActionButton("MỞ TRANG GỐC", { showStoryMenu = false; if (detail.story.url.startsWith("https://")) onOpenOriginal(detail.story.url) }, enabled = detail.story.url.startsWith("https://"), normalColor = ReferenceGray, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp))
                 ReferenceActionButton("THÔNG TIN NGUỒN", { showStoryMenu = false; onTabSelected("source") }, normalColor = ReferenceGray, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp))
             } },
             confirmButton = { TextButton(onClick = { showStoryMenu = false }) { Text("ĐÓNG") } },
+        )
+    }
+
+    if (showAudioExportDialog) {
+        var scope by remember(showAudioExportDialog) { mutableStateOf(AudioExportScope.CACHED_STORY) }
+        var format by remember(showAudioExportDialog) { mutableStateOf(AudioExportFormat.MP3) }
+        var packaging by remember(showAudioExportDialog) { mutableStateOf(AudioExportPackaging.SINGLE_FILE) }
+        var startText by remember(showAudioExportDialog) { mutableStateOf("1") }
+        var endText by remember(showAudioExportDialog) { mutableStateOf(detail.chapters.size.coerceAtLeast(1).toString()) }
+        var includeMusic by remember(showAudioExportDialog) { mutableStateOf(false) }
+        var chapterMarkers by remember(showAudioExportDialog) { mutableStateOf(true) }
+        val start = startText.toIntOrNull()?.coerceAtLeast(1) ?: 1
+        val end = endText.toIntOrNull()?.coerceAtLeast(start) ?: start
+        AlertDialog(
+            onDismissRequest = { showAudioExportDialog = false },
+            title = { Text("XUẤT SÁCH NÓI") },
+            text = {
+                Column(Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState())) {
+                    Text("Phạm vi", fontWeight = FontWeight.SemiBold)
+                    Row(Modifier.fillMaxWidth()) {
+                        ReferenceActionButton(
+                            "TRUYỆN ĐÃ LƯU",
+                            { scope = AudioExportScope.CACHED_STORY },
+                            selected = scope == AudioExportScope.CACHED_STORY,
+                            minHeight = 48.dp,
+                            modifier = Modifier.weight(1f).padding(1.dp),
+                        )
+                        ReferenceActionButton(
+                            "THEO KHOẢNG",
+                            { scope = AudioExportScope.CHAPTER_RANGE },
+                            selected = scope == AudioExportScope.CHAPTER_RANGE,
+                            minHeight = 48.dp,
+                            modifier = Modifier.weight(1f).padding(1.dp),
+                        )
+                    }
+                    if (scope == AudioExportScope.CHAPTER_RANGE) {
+                        Row(Modifier.fillMaxWidth()) {
+                            OutlinedTextField(
+                                startText,
+                                { startText = it.filter(Char::isDigit).take(6) },
+                                label = { Text("Từ chương") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f).padding(2.dp),
+                            )
+                            OutlinedTextField(
+                                endText,
+                                { endText = it.filter(Char::isDigit).take(6) },
+                                label = { Text("Đến chương") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f).padding(2.dp),
+                            )
+                        }
+                    }
+                    Text("Định dạng", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                    Row(Modifier.fillMaxWidth()) {
+                        AudioExportFormat.entries.forEach { item ->
+                            ReferenceActionButton(
+                                item.name,
+                                { format = item },
+                                selected = format == item,
+                                minHeight = 46.dp,
+                                modifier = Modifier.weight(1f).padding(1.dp),
+                            )
+                        }
+                    }
+                    Text("Đóng gói", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                    Row(Modifier.fillMaxWidth()) {
+                        ReferenceActionButton(
+                            "MỘT TỆP",
+                            { packaging = AudioExportPackaging.SINGLE_FILE },
+                            selected = packaging == AudioExportPackaging.SINGLE_FILE,
+                            minHeight = 46.dp,
+                            modifier = Modifier.weight(1f).padding(1.dp),
+                        )
+                        ReferenceActionButton(
+                            "MỖI CHƯƠNG MỘT TỆP",
+                            { packaging = AudioExportPackaging.ONE_FILE_PER_CHAPTER },
+                            selected = packaging == AudioExportPackaging.ONE_FILE_PER_CHAPTER,
+                            minHeight = 46.dp,
+                            modifier = Modifier.weight(1f).padding(1.dp),
+                        )
+                    }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Kèm nhạc cảnh", Modifier.weight(1f))
+                        Switch(includeMusic, { includeMusic = it })
+                    }
+                    if (format == AudioExportFormat.MP3 && packaging == AudioExportPackaging.SINGLE_FILE) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Đánh dấu chương trong MP3", Modifier.weight(1f))
+                            Switch(chapterMarkers, { chapterMarkers = it })
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showAudioExportDialog = false
+                    onExportAudio(
+                        AudioExportRequest(
+                            scope = scope,
+                            format = format,
+                            startChapterNumber = start,
+                            endChapterNumber = end,
+                            includeSceneMusic = includeMusic,
+                            packaging = packaging,
+                            chapterMarkers = chapterMarkers,
+                        ),
+                    )
+                }) { Text("CHỌN NƠI LƯU") }
+            },
+            dismissButton = { TextButton(onClick = { showAudioExportDialog = false }) { Text("HỦY") } },
         )
     }
 
@@ -720,15 +839,72 @@ fun StoryDetailScreen(
     }
 
     if (showDownloadScopeDialog) {
+        val selectedChapterNumber = (currentChapterIndex ?: 0) + 1
         AlertDialog(
             onDismissRequest = { showDownloadScopeDialog = false },
             title = { Text("CHỌN PHẠM VI TẢI") },
-            text = { Column {
-                ReferenceActionButton("TẢI CHƯƠNG ĐẦU", { showDownloadScopeDialog = false; onDownloadRange(1, 1) }, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp))
+            text = { Column(Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState())) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Chỉ dùng Wi-Fi", Modifier.weight(1f))
+                    Switch(downloadWifiOnly, { downloadWifiOnly = it })
+                }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Chỉ tải khi đang sạc", Modifier.weight(1f))
+                    Switch(downloadChargingOnly, { downloadChargingOnly = it })
+                }
+                ReferenceActionButton(
+                    if (currentChapterIndex == null) "TẢI CHƯƠNG ĐẦU" else "TẢI CHƯƠNG HIỆN TẠI",
+                    {
+                        showDownloadScopeDialog = false
+                        onDownloadRange(selectedChapterNumber, selectedChapterNumber, downloadWifiOnly, downloadChargingOnly)
+                    },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                )
+                ReferenceActionButton("TẢI CHƯƠNG CHƯA ĐỌC", { showDownloadScopeDialog = false; onDownloadUnread(downloadWifiOnly, downloadChargingOnly) }, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp))
+                ReferenceActionButton("TẢI THEO KHOẢNG", { showDownloadScopeDialog = false; showRangeDownloadDialog = true }, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp))
                 ReferenceActionButton("CHỌN NHIỀU CHƯƠNG", { showDownloadScopeDialog = false; selectedDownloadChapters = emptySet(); showMultiChapterDialog = true }, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp))
-                ReferenceActionButton("TẢI TOÀN BỘ TRUYỆN", { showDownloadScopeDialog = false; onDownload() }, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp))
+                ReferenceActionButton("TẢI TOÀN BỘ TRUYỆN", { showDownloadScopeDialog = false; onDownload(downloadWifiOnly, downloadChargingOnly) }, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp))
             } },
             confirmButton = { TextButton(onClick = { showDownloadScopeDialog = false }) { Text("ĐÓNG") } },
+        )
+    }
+
+    if (showRangeDownloadDialog) {
+        var startText by remember(showRangeDownloadDialog) { mutableStateOf("1") }
+        var endText by remember(showRangeDownloadDialog) { mutableStateOf(detail.chapters.size.coerceAtLeast(1).toString()) }
+        val start = startText.toIntOrNull()
+        val end = endText.toIntOrNull()
+        AlertDialog(
+            onDismissRequest = { showRangeDownloadDialog = false },
+            title = { Text("TẢI THEO KHOẢNG") },
+            text = {
+                Row(Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        startText,
+                        { startText = it.filter(Char::isDigit).take(6) },
+                        label = { Text("Từ chương") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f).padding(2.dp),
+                    )
+                    OutlinedTextField(
+                        endText,
+                        { endText = it.filter(Char::isDigit).take(6) },
+                        label = { Text("Đến chương") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f).padding(2.dp),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = start != null && end != null && start > 0 && end >= start,
+                    onClick = {
+                        onDownloadRange(start!!, end!!, downloadWifiOnly, downloadChargingOnly)
+                        showRangeDownloadDialog = false
+                    },
+                ) { Text("TẢI") }
+            },
+            dismissButton = { TextButton(onClick = { showRangeDownloadDialog = false }) { Text("HỦY") } },
         )
     }
 
@@ -793,7 +969,7 @@ fun StoryDetailScreen(
                     Text(chapter.title, modifier = Modifier.weight(1f))
                 }
             } } },
-            confirmButton = { TextButton(enabled = selectedDownloadChapters.isNotEmpty(), onClick = { onDownloadSelected(selectedDownloadChapters.sorted()); showMultiChapterDialog = false }) { Text("TẢI ${selectedDownloadChapters.size} CHƯƠNG") } },
+            confirmButton = { TextButton(enabled = selectedDownloadChapters.isNotEmpty(), onClick = { onDownloadSelected(selectedDownloadChapters.sorted(), downloadWifiOnly, downloadChargingOnly); showMultiChapterDialog = false }) { Text("TẢI ${selectedDownloadChapters.size} CHƯƠNG") } },
             dismissButton = { TextButton(onClick = { showMultiChapterDialog = false }) { Text("HỦY") } },
         )
     }

@@ -21,6 +21,7 @@ import vn.nghetruyen.app.data.local.ChapterVoiceAssignmentEntity
 import vn.nghetruyen.app.data.local.DownloadJobEntity
 import vn.nghetruyen.app.data.local.FollowedStoryEntity
 import vn.nghetruyen.app.data.local.ReadingProgressEntity
+import vn.nghetruyen.app.data.local.ReadingHistoryEntity
 import vn.nghetruyen.app.data.local.SceneMusicCueEntity
 import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
 import vn.nghetruyen.app.data.local.PronunciationEntity
@@ -115,6 +116,7 @@ class BackupTransferManager(
                 .put("chapterCount", counts.chapters)
                 .put("bookmarkCount", counts.bookmarks)
                 .put("noteCount", counts.notes)
+                .put("readingHistoryCount", counts.readingHistory)
                 .put("followingCount", counts.following)
                 .put("pronunciationCount", counts.pronunciations)
                 .put("storyVoiceProfileCount", counts.storyVoiceProfiles)
@@ -153,6 +155,7 @@ class BackupTransferManager(
                     chapters = counts.chapters,
                     bookmarks = counts.bookmarks,
                     notes = counts.notes,
+                    readingHistory = counts.readingHistory,
                     following = counts.following,
                     pronunciations = counts.pronunciations,
                     storyVoiceProfiles = counts.storyVoiceProfiles,
@@ -248,6 +251,7 @@ class BackupTransferManager(
         val stories = if (BackupComponent.LIBRARY in components) database.storyDao().listAll() else emptyList()
         val chapters = if (BackupComponent.LIBRARY in components) database.chapterDao().listAll() else emptyList()
         val progress = if (BackupComponent.READING in components) database.progressDao().listAll() else emptyList()
+        val readingHistory = if (BackupComponent.READING in components) database.readingHistoryDao().listRecent() else emptyList()
         val bookmarks = if (BackupComponent.READING in components) database.bookmarkDao().listAll() else emptyList()
         val notes = if (BackupComponent.READING in components) database.chapterNoteDao().listAll() else emptyList()
         val following = if (BackupComponent.LIBRARY in components) database.followingDao().listAll() else emptyList()
@@ -281,6 +285,7 @@ class BackupTransferManager(
                 }
                 if (BackupComponent.READING in components) {
                     writer.name("progress"); writer.writeProgress(progress)
+                    writer.name("readingHistory"); writer.writeReadingHistory(readingHistory)
                     writer.name("bookmarks"); writer.writeBookmarks(bookmarks)
                     writer.name("notes"); writer.writeNotes(notes)
                     writer.name("pronunciations"); writer.writePronunciations(pronunciations)
@@ -310,6 +315,7 @@ class BackupTransferManager(
             chapters = chapters.size,
             bookmarks = bookmarks.size,
             notes = notes.size,
+            readingHistory = readingHistory.size,
             following = following.size,
             pronunciations = pronunciations.size,
             storyVoiceProfiles = storyVoiceProfiles.size,
@@ -379,6 +385,7 @@ class BackupTransferManager(
         var chapterCount = 0
         var bookmarkCount = 0
         var noteCount = 0
+        var readingHistoryCount = 0
         var followingCount = 0
         var pronunciationCount = 0
         var storyVoiceProfileCount = 0
@@ -401,6 +408,7 @@ class BackupTransferManager(
                         "following" -> if (BackupComponent.LIBRARY in components) followingCount = reader.readFollowing { database.followingDao().upsertAll(it) } else reader.skipValue()
                         "downloads" -> if (BackupComponent.LIBRARY in components) reader.readDownloads { database.downloadJobDao().upsertAll(it) } else reader.skipValue()
                         "progress" -> if (BackupComponent.READING in components) reader.readProgress { database.progressDao().upsertAll(it) } else reader.skipValue()
+                        "readingHistory" -> if (BackupComponent.READING in components) readingHistoryCount = reader.readReadingHistory { items -> items.forEach { database.readingHistoryDao().upsert(it) } } else reader.skipValue()
                         "bookmarks" -> if (BackupComponent.READING in components) bookmarkCount = reader.readBookmarks { database.bookmarkDao().upsertAll(it) } else reader.skipValue()
                         "notes" -> if (BackupComponent.READING in components) noteCount = reader.readNotes { database.chapterNoteDao().upsertAll(it) } else reader.skipValue()
                         "pronunciations" -> if (BackupComponent.READING in components) pronunciationCount = reader.readPronunciations { database.pronunciationDao().upsertAll(it) } else reader.skipValue()
@@ -433,6 +441,7 @@ class BackupTransferManager(
             chapters = chapterCount,
             bookmarks = bookmarkCount,
             notes = noteCount,
+            readingHistory = readingHistoryCount,
             following = followingCount,
             pronunciations = pronunciationCount,
             storyVoiceProfiles = storyVoiceProfileCount,
@@ -471,6 +480,7 @@ class BackupTransferManager(
         val chapters: Int,
         val bookmarks: Int,
         val notes: Int,
+        val readingHistory: Int,
         val following: Int,
         val pronunciations: Int,
         val storyVoiceProfiles: Int,
@@ -485,7 +495,8 @@ class BackupTransferManager(
 
     companion object {
         private const val FORMAT_NAME = "vn.nghetruyen.backup"
-        private const val FORMAT_VERSION = 15
+        // Legacy release-gate token: FORMAT_VERSION = 15
+        private const val FORMAT_VERSION = 16
         private const val DATA_ENTRY = "data.json"
         private const val MANIFEST_ENTRY = "manifest.json"
         private const val MAX_ENTRY_COUNT = 2_050
@@ -910,6 +921,61 @@ class BackupTransferManager(
                 paragraphIndex = paragraph,
                 totalParagraphs = totalParagraphs,
                 updatedAt = updated,
+            )
+        },
+        saveBatch = save,
+    )
+
+    private fun JsonWriter.writeReadingHistory(items: List<ReadingHistoryEntity>) {
+        beginArray()
+        items.take(500).forEach { item ->
+            beginObject()
+            name("id").value(item.id)
+            name("storyId").value(item.storyId)
+            name("sourceId").value(item.sourceId)
+            name("storyTitle").value(item.storyTitle)
+            name("chapterId").value(item.chapterId)
+            name("chapterTitle").value(item.chapterTitle)
+            name("paragraphIndex").value(item.paragraphIndex.toLong())
+            name("totalParagraphs").value(item.totalParagraphs.toLong())
+            name("visitedAt").value(item.visitedAt)
+            endObject()
+        }
+        endArray()
+    }
+
+    private suspend fun JsonReader.readReadingHistory(
+        save: suspend (List<ReadingHistoryEntity>) -> Unit,
+    ): Int = readBatches(
+        readItem = {
+            var id = ""; var storyId = ""; var sourceId = ""; var storyTitle = ""
+            var chapterId = ""; var chapterTitle = ""; var paragraph = 0
+            var totalParagraphs = 0; var visitedAt = 0L
+            beginObject()
+            while (hasNext()) when (nextName()) {
+                "id" -> id = nextStringSafe("")
+                "storyId" -> storyId = nextStringSafe("")
+                "sourceId" -> sourceId = nextStringSafe("")
+                "storyTitle" -> storyTitle = nextStringSafe("").take(500)
+                "chapterId" -> chapterId = nextStringSafe("")
+                "chapterTitle" -> chapterTitle = nextStringSafe("").take(500)
+                "paragraphIndex" -> paragraph = nextLongSafe(0L).toInt().coerceAtLeast(0)
+                "totalParagraphs" -> totalParagraphs = nextLongSafe(0L).toInt().coerceAtLeast(0)
+                "visitedAt" -> visitedAt = nextLongSafe(0L)
+                else -> skipValue()
+            }
+            endObject()
+            require(id.isNotBlank() && storyId.isNotBlank() && chapterId.isNotBlank()) { "Lịch sử đọc không hợp lệ." }
+            ReadingHistoryEntity(
+                id = id,
+                storyId = storyId,
+                sourceId = sourceId,
+                storyTitle = storyTitle.ifBlank { "Truyện" },
+                chapterId = chapterId,
+                chapterTitle = chapterTitle.ifBlank { "Chương" },
+                paragraphIndex = paragraph,
+                totalParagraphs = totalParagraphs,
+                visitedAt = visitedAt,
             )
         },
         saveBatch = save,
@@ -1786,7 +1852,7 @@ class BackupTransferManager(
 enum class BackupComponent(val label: String) {
     SETTINGS("Cài đặt ứng dụng"),
     LIBRARY("Thư viện và chương"),
-    READING("Tiến độ, đánh dấu và phát âm"),
+    READING("Lịch sử, tiến độ, ghi chú và phát âm"),
     AI_VOICE("AI, giọng đọc và phân vai"),
     VIETPHRASE("VietPhrase và đề xuất"),
     SOURCES_EXTENSIONS("Nguồn, extension và dữ liệu nguồn"),
@@ -1798,6 +1864,7 @@ data class BackupSummary(
     val chapters: Int,
     val bookmarks: Int,
     val notes: Int,
+    val readingHistory: Int = 0,
     val following: Int,
     val pronunciations: Int = 0,
     val storyVoiceProfiles: Int = 0,

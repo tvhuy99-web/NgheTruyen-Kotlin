@@ -2,6 +2,9 @@ from pathlib import Path
 import tempfile, subprocess, shutil
 ROOT=Path(__file__).resolve().parents[1]
 K=shutil.which('kotlinc')
+if not K:
+ print('AUDIO_EXPORT_STATIC_SKIPPED: kotlinc not found')
+ raise SystemExit(0)
 lib=Path(K).resolve().parents[1]/'lib/kotlinx-coroutines-core-jvm.jar'
 def w(root,path,text):
  p=root/path;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(text);return p
@@ -77,6 +80,11 @@ class NgheTruyenApplication:Context(){ val container=Container() }
 class Container { val libraryRepository=vn.nghetruyen.app.data.repository.LibraryRepository(); val settingsRepository=vn.nghetruyen.app.data.settings.SettingsRepository() }
 object R { object drawable { const val ic_stat_reader=1 } }
 '''),
+ w(t,'vn/nghetruyen/app/ui/reference/ReferenceVoiceRoleExtras.kt','''package vn.nghetruyen.app.ui.reference
+import android.content.Context
+data class ReferenceVoiceRoleExtra(val processingMethod:String="system",val sonicAccurate:Boolean=false)
+object ReferenceVoiceRoleExtras { fun load(context:Context,roleId:String?)=ReferenceVoiceRoleExtra() }
+'''),
  w(t,'vn/nghetruyen/app/core/model/Models.kt','''package vn.nghetruyen.app.core.model
 enum class DownloadState { QUEUED,RUNNING,COMPLETED,FAILED,CANCELLED }
 enum class AudioExportFormat(val extension:String,val mimeType:String){ WAV("wav","audio/wav"), M4A("m4a","audio/mp4"), MP3("mp3","audio/mpeg") }
@@ -96,13 +104,13 @@ data class ChapterEntity(val id:String="",val storyId:String="",val chapterIndex
 data class AudioExportJobEntity(val id:String,val storyId:String,val storyTitle:String,val chapterId:String?,val destinationUri:String,val outputFormat:String="WAV",val mimeType:String="audio/wav",val scope:String="CACHED_STORY",val startChapterIndex:Int=-1,val endChapterIndex:Int=Int.MAX_VALUE,val includeSceneMusic:Boolean=false,val packaging:String="SINGLE_FILE",val chapterMarkers:Boolean=true,val author:String="",val sourceFingerprint:String="",val stage:String="QUEUED",val state:String,val completedSegments:Int,val totalSegments:Int,val errorMessage:String?,val createdAt:Long=0,val updatedAt:Long)
 '''),
  w(t,'vn/nghetruyen/app/data/settings/Settings.kt','''package vn.nghetruyen.app.data.settings
-data class AppSettings(val ttsRate:Float=1f,val ttsPitch:Float=1f,val ttsVolume:Float=1f,val ttsEnginePackage:String?=null,val ttsVoiceName:String?=null,val ttsLanguageTag:String="vi-VN",val backgroundMusicVolume:Float=0.18f,val backgroundMusicDuckFactor:Float=0.25f,val sceneMusicCrossfadeMillis:Int=1600,val sceneMusicTargetLufs:Float=-18f,val sonicProcessingEnabled:Boolean=true,val sonicDefaultSpeed:Float=1f,val sonicDefaultPitch:Float=1f)
+data class AppSettings(val ttsRate:Float=1f,val ttsPitch:Float=1f,val ttsVolume:Float=1f,val ttsEnginePackage:String?=null,val ttsVoiceName:String?=null,val ttsLanguageTag:String="vi-VN",val backgroundMusicVolume:Float=0.18f,val backgroundMusicDuckFactor:Float=0.25f,val sceneMusicCrossfadeMillis:Int=1600,val sceneMusicTargetLufs:Float=-18f,val sonicProcessingEnabled:Boolean=true,val sonicAccurateMode:Boolean=false,val sonicDefaultSpeed:Float=1f,val sonicDefaultPitch:Float=1f,val autoVoiceCastEnabled:Boolean=true)
 class SettingsRepository { suspend fun snapshot()=AppSettings() }
 '''),
  w(t,'vn/nghetruyen/app/data/repository/Repo.kt','''package vn.nghetruyen.app.data.repository
 import vn.nghetruyen.app.data.local.*
 import vn.nghetruyen.app.core.model.DownloadState
-class LibraryRepository { suspend fun getAudioExportJob(id:String):AudioExportJobEntity?=null; suspend fun updateAudioExportJob(j:AudioExportJobEntity){}; suspend fun listExportableChapters(s:String)=emptyList<ChapterEntity>(); suspend fun listExportableChapters(s:String,a:Int,b:Int)=emptyList<ChapterEntity>(); suspend fun getChapter(id:String):ChapterEntity?=null; suspend fun listEnabledPronunciations()=emptyList<PronunciationEntity>(); suspend fun getStoryTtsProfile(id:String):StoryTtsProfileEntity?=null; suspend fun listVoiceRoles(id:String)=emptyList<VoiceRoleEntity>(); suspend fun listVoiceAssignments(id:String)=emptyList<ChapterVoiceAssignmentEntity>(); suspend fun getChapterTransform(id:String,kind:String):ChapterTransformEntity?=null; suspend fun loadCachedChapter(id:String):vn.nghetruyen.app.core.model.ChapterContent?=null; suspend fun listSceneMusicCues(id:String)=emptyList<SceneMusicCueEntity>(); suspend fun getSceneMusicTrack(id:String):SceneMusicTrackEntity?=null; suspend fun updateAudioExportProgress(a:String,b:Int,c:Int,d:DownloadState,e:String?){} }
+class LibraryRepository { suspend fun getAudioExportJob(id:String):AudioExportJobEntity?=null; suspend fun updateAudioExportJob(j:AudioExportJobEntity){}; suspend fun listExportableChapters(s:String)=emptyList<ChapterEntity>(); suspend fun listExportableChapters(s:String,a:Int,b:Int)=emptyList<ChapterEntity>(); suspend fun getChapter(id:String):ChapterEntity?=null; suspend fun listEnabledPronunciations()=emptyList<PronunciationEntity>(); suspend fun getStoryTtsProfile(id:String):StoryTtsProfileEntity?=null; suspend fun listVoiceRoles(id:String)=emptyList<VoiceRoleEntity>(); suspend fun listEffectiveVoiceRoles(id:String,enabled:Boolean)=emptyList<VoiceRoleEntity>(); suspend fun listVoiceAssignments(id:String)=emptyList<ChapterVoiceAssignmentEntity>(); suspend fun getChapterTransform(id:String,kind:String):ChapterTransformEntity?=null; suspend fun loadCachedChapter(id:String):vn.nghetruyen.app.core.model.ChapterContent?=null; suspend fun listSceneMusicCues(id:String)=emptyList<SceneMusicCueEntity>(); suspend fun getSceneMusicTrack(id:String):SceneMusicTrackEntity?=null; suspend fun updateAudioExportProgress(a:String,b:Int,c:Int,d:DownloadState,e:String?){} }
 '''),
  w(t,'vn/nghetruyen/app/playback/Playback.kt','''package vn.nghetruyen.app.playback
 import vn.nghetruyen.app.data.local.PronunciationEntity
@@ -122,7 +130,7 @@ import java.io.File
 object Pcm16WaveConverter { fun convert(a:File,b:File,g:Float=1f)=WaveFileAssembler.inspect(a) }
 object M4aAacEncoder { fun encode(a:File,b:File,bitrate:Int=96000){} }
 ''')]
- files += [ROOT/'app/src/main/java/vn/nghetruyen/app/ai/ChapterAiWorkflow.kt',ROOT/'app/src/main/java/vn/nghetruyen/app/audio/AudioExportEngine.kt',ROOT/'app/src/main/java/vn/nghetruyen/app/audio/WaveFileAssembler.kt',ROOT/'app/src/main/java/vn/nghetruyen/app/audio/TtsFileSynthesizer.kt',ROOT/'app/src/main/java/vn/nghetruyen/app/audio/AudioExportScheduler.kt',ROOT/'app/src/main/java/vn/nghetruyen/app/audio/Id3v23Writer.kt',ROOT/'app/src/main/java/vn/nghetruyen/app/audio/Mp3LameEncoder.kt',ROOT/'app/src/main/java/vn/nghetruyen/app/audio/Pcm16SceneMixer.kt',ROOT/'app/src/main/java/vn/nghetruyen/app/audio/SonicPcmProcessor.kt',ROOT/'app/src/main/java/vn/nghetruyen/app/audio/PcmLoudnessEstimator.kt',ROOT/'app/src/main/java/vn/nghetruyen/app/playback/VoiceExpressionProcessor.kt',ROOT/'app/src/main/java/vn/nghetruyen/app/audio/AndroidAudioTrackDecoder.kt',ROOT/'app/src/main/java/vn/nghetruyen/app/audio/AudioExportWorker.kt']
+ files += [ROOT/'app/src/main/java/vn/nghetruyen/app/ai/ChapterAiWorkflow.kt',ROOT/'app/src/main/java/vn/nghetruyen/app/audio/AudioExportEngine.kt',ROOT/'app/src/main/java/vn/nghetruyen/app/audio/WaveFileAssembler.kt',ROOT/'app/src/main/java/vn/nghetruyen/app/audio/TtsFileSynthesizer.kt',ROOT/'app/src/main/java/vn/nghetruyen/app/audio/AudioExportScheduler.kt',ROOT/'app/src/main/java/vn/nghetruyen/app/audio/Id3v23Writer.kt',ROOT/'app/src/main/java/vn/nghetruyen/app/audio/Mp3LameEncoder.kt',ROOT/'app/src/main/java/vn/nghetruyen/app/audio/Pcm16SceneMixer.kt',ROOT/'app/src/main/java/vn/nghetruyen/app/audio/ReferenceSonicRuntime.kt',ROOT/'app/src/main/java/vn/nghetruyen/app/audio/SonicPcmProcessor.kt',ROOT/'app/src/main/java/vn/nghetruyen/app/audio/PcmLoudnessEstimator.kt',ROOT/'app/src/main/java/vn/nghetruyen/app/playback/VoiceExpressionProcessor.kt',ROOT/'app/src/main/java/vn/nghetruyen/app/audio/AndroidAudioTrackDecoder.kt',ROOT/'app/src/main/java/vn/nghetruyen/app/audio/AudioExportWorker.kt']
  cmd=[K,*map(str,files),'-cp',str(lib),'-d',str(t/'out.jar')]
  r=subprocess.run(cmd,text=True,capture_output=True)
  

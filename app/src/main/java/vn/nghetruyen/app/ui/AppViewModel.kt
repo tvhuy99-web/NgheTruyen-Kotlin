@@ -73,6 +73,7 @@ import vn.nghetruyen.app.data.local.StoryEntity
 import vn.nghetruyen.app.data.local.OfflineStoryStorage
 import vn.nghetruyen.app.data.local.PronunciationEntity
 import vn.nghetruyen.app.data.local.ReadingProgressEntity
+import vn.nghetruyen.app.data.local.ReadingHistoryEntity
 import vn.nghetruyen.app.data.local.StorageUsage
 import vn.nghetruyen.app.data.local.StoryTtsProfileEntity
 import vn.nghetruyen.app.data.local.StoryAiProfileEntity
@@ -165,6 +166,7 @@ data class MainUiState(
     val message: String? = null,
     val readingStories: List<StoryEntity> = emptyList(),
     val readingProgress: Map<String, ReadingProgressEntity> = emptyMap(),
+    val readingHistory: List<ReadingHistoryEntity> = emptyList(),
     val downloadedStories: List<StoryEntity> = emptyList(),
     val bookmarks: List<BookmarkEntity> = emptyList(),
     val notes: List<ChapterNoteEntity> = emptyList(),
@@ -297,6 +299,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var commentsLoadJob: Job? = null
     private val storyCommentCache = StoryCommentCache()
     private var sourceCheckAllJob: Job? = null
+    private var readingPersistenceJob: Job? = null
+    private var lastPersistedReadingKey: String = ""
+    private var pendingReadingPersistenceKey: String = ""
     private var chapterSleepRemaining: Int? = null
     private var chapterSleepLastChapterId: String = ""
 
@@ -394,6 +399,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             container.libraryRepository.observeReadingProgress().collect { items ->
                 mutableState.update { it.copy(readingProgress = items.associateBy(ReadingProgressEntity::storyId)) }
+            }
+        }
+        viewModelScope.launch {
+            container.libraryRepository.observeReadingHistory().collect { items ->
+                mutableState.update { it.copy(readingHistory = items) }
             }
         }
         viewModelScope.launch {
@@ -532,6 +542,43 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     mutableState.update { it.copy(playback = playback) }
                 }
                 if (currentChapterId.isNotBlank()) chapterSleepLastChapterId = currentChapterId
+                scheduleReadingPersistence(playback)
+            }
+        }
+    }
+
+    private fun scheduleReadingPersistence(playback: PlaybackSnapshot) {
+        val content = state.value.chapterContent ?: return
+        if (playback.chapterId.isBlank() || playback.chapterId != content.chapter.id) return
+        val paragraphIndex = playback.paragraphIndex.coerceIn(0, content.paragraphs.lastIndex.coerceAtLeast(0))
+        val persistenceKey = "${content.chapter.id}:$paragraphIndex"
+        if (persistenceKey == lastPersistedReadingKey || persistenceKey == pendingReadingPersistenceKey) return
+        readingPersistenceJob?.cancel()
+        pendingReadingPersistenceKey = persistenceKey
+        readingPersistenceJob = viewModelScope.launch {
+            try {
+                delay(650)
+                val latestContent = state.value.chapterContent ?: return@launch
+                val latestPlayback = state.value.playback
+                if (latestContent.chapter.id != latestPlayback.chapterId) return@launch
+                val latestIndex = latestPlayback.paragraphIndex.coerceIn(0, latestContent.paragraphs.lastIndex.coerceAtLeast(0))
+                container.libraryRepository.saveProgress(
+                    storyId = latestContent.chapter.storyId,
+                    chapterId = latestContent.chapter.id,
+                    paragraphIndex = latestIndex,
+                    totalParagraphs = latestContent.paragraphs.size,
+                )
+                val story = state.value.storyDetail?.story
+                container.libraryRepository.recordReadingHistory(
+                    sourceId = latestPlayback.sourceId.ifBlank { story?.sourceId.orEmpty() },
+                    storyTitle = story?.title.orEmpty(),
+                    chapter = latestContent.chapter,
+                    paragraphIndex = latestIndex,
+                    totalParagraphs = latestContent.paragraphs.size,
+                )
+                lastPersistedReadingKey = "${latestContent.chapter.id}:$latestIndex"
+            } finally {
+                if (pendingReadingPersistenceKey == persistenceKey) pendingReadingPersistenceKey = ""
             }
         }
     }
@@ -652,6 +699,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 content.chapter.id,
                 snapshot.playback.paragraphIndex,
                 content.paragraphs.size,
+            )
+            val story = snapshot.storyDetail?.story
+            container.libraryRepository.recordReadingHistory(
+                sourceId = snapshot.playback.sourceId.ifBlank { story?.sourceId.orEmpty() },
+                storyTitle = story?.title.orEmpty(),
+                chapter = content.chapter,
+                paragraphIndex = snapshot.playback.paragraphIndex,
+                totalParagraphs = content.paragraphs.size,
             )
             showMessage("Đã lưu vị trí đọc tại đoạn ${snapshot.playback.paragraphIndex + 1}.")
         }
@@ -1955,6 +2010,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             },
                         )
                     }
+                    container.libraryRepository.recordReadingHistory(
+                        sourceId = sourceId,
+                        storyTitle = detail?.story?.title.orEmpty(),
+                        chapter = enriched.chapter,
+                        paragraphIndex = startIndex,
+                        totalParagraphs = enriched.paragraphs.size,
+                    )
                     when {
                         autoTranslate -> when (val translated = resolveAiTranslation(enriched, forceRefresh = false)) {
                             is AppResult.Success -> showChapterVariant(
@@ -1963,12 +2025,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                                 "Đã chuẩn bị bản dịch AI; playback đã sẵn sàng.",
                             )
                             is AppResult.Failure -> {
-                                PlaybackQueueStore.setPreparation(
-                                    PlaybackPreparationState.FAILED,
-                                    "Dịch AI thất bại: ${translated.message}. Chọn BẢN GỐC để cho phép phát nội dung gốc.",
+                                showChapterVariant(
+                                    enriched,
+                                    ChapterTextMode.ORIGINAL,
+                                    "Dịch AI thất bại: ${translated.message}. Đã tiếp tục bằng bản gốc.",
                                 )
-                                mutableState.update { current -> current.copy(aiBusy = false, message = translated.message) }
-                                ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
                             }
                         }
                         aiProfile?.autoRunOnOpen == true && aiProfile.mode == "IMPROVE" -> improveVietPhraseForCurrentChapter()
@@ -2031,17 +2092,28 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun downloadSelectedChapters(chapterNumbers: List<Int>) {
+    fun downloadSelectedChapters(
+        chapterNumbers: List<Int>,
+        wifiOnly: Boolean = false,
+        chargingOnly: Boolean = false,
+    ) {
         val selected = chapterNumbers.filter { it > 0 }.distinct().sorted()
         if (selected.isEmpty()) {
             showMessage("Chưa chọn chương để tải.")
             return
         }
-        selected.forEach { chapterNumber -> downloadChapterRange(chapterNumber, chapterNumber) }
+        selected.forEach { chapterNumber ->
+            downloadChapterRange(chapterNumber, chapterNumber, wifiOnly, chargingOnly)
+        }
         showMessage("Đã thêm ${selected.size} chương đã chọn vào hàng đợi tải.")
     }
 
-    fun downloadChapterRange(startChapterNumber: Int, endChapterNumber: Int) {
+    fun downloadChapterRange(
+        startChapterNumber: Int,
+        endChapterNumber: Int,
+        wifiOnly: Boolean = false,
+        chargingOnly: Boolean = false,
+    ) {
         val detail = state.value.storyDetail ?: return
         if (detail.story.sourceId == "offline") {
             showMessage("Truyện nhập từ tệp đã có sẵn ngoại tuyến.")
@@ -2057,6 +2129,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             selectionMode = DownloadSelectionMode.RANGE,
             startChapterIndex = startChapterNumber - 1,
             endChapterIndex = endChapterNumber - 1,
+            wifiOnly = wifiOnly,
+            chargingOnly = chargingOnly,
         )
         queueDownload(
             request,
@@ -2065,7 +2139,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    fun downloadUnreadChapters() {
+    fun downloadUnreadChapters(
+        wifiOnly: Boolean = false,
+        chargingOnly: Boolean = false,
+    ) {
         val detail = state.value.storyDetail ?: return
         if (detail.story.sourceId == "offline") {
             showMessage("Truyện nhập từ tệp đã có sẵn ngoại tuyến.")
@@ -2080,6 +2157,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 storyId = detail.story.id,
                 selectionMode = DownloadSelectionMode.UNREAD,
                 startChapterIndex = firstUnread,
+                wifiOnly = wifiOnly,
+                chargingOnly = chargingOnly,
             )
             queueDownload(
                 request,
@@ -2580,7 +2659,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun downloadCurrentStory() {
+    fun downloadCurrentStory(
+        wifiOnly: Boolean = false,
+        chargingOnly: Boolean = false,
+    ) {
         val detail = state.value.storyDetail ?: return
         if (detail.story.sourceId == "offline") {
             showMessage("Truyện nhập từ tệp đã có sẵn ngoại tuyến.")
@@ -2590,6 +2672,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             sourceId = detail.story.sourceId,
             storyId = detail.story.id,
             selectionMode = DownloadSelectionMode.ALL,
+            wifiOnly = wifiOnly,
+            chargingOnly = chargingOnly,
         )
         queueDownload(
             request,
@@ -2634,6 +2718,23 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun retryDownload(jobId: String) = resumeDownload(jobId)
+
+    fun prioritizeDownload(jobId: String) {
+        viewModelScope.launch {
+            val job = container.libraryRepository.getDownloadJob(jobId) ?: return@launch
+            container.libraryRepository.updateDownloadJob(
+                id = job.id,
+                storyId = job.storyId,
+                sourceId = job.sourceId,
+                state = DownloadState.QUEUED,
+                completedChapters = job.completedChapters,
+                totalChapters = job.totalChapters,
+                errorMessage = null,
+            )
+            container.downloadScheduler.prioritize(DownloadRequest.from(job))
+            showMessage("Đã đưa tác vụ tải lên ưu tiên cao.")
+        }
+    }
 
     fun retryFailedChapter(failureId: String) {
         val failure = state.value.downloadFailures.firstOrNull { it.id == failureId } ?: return
@@ -2853,6 +2954,58 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 ChapterSummary(chapter.id, chapter.storyId, chapter.chapterIndex, chapter.title, chapter.remoteUrl),
                 bookmark.paragraphIndex,
             )
+        }
+    }
+
+    fun openReadingHistory(item: ReadingHistoryEntity) {
+        viewModelScope.launch {
+            val story = container.libraryRepository.getStory(item.storyId)
+            val chapter = container.libraryRepository.getChapter(item.chapterId)
+            if (story == null || chapter == null) {
+                showMessage("Mục lịch sử không còn nội dung đã lưu để mở.")
+                return@launch
+            }
+            val summary = StorySummary(
+                id = story.id,
+                sourceId = if (story.isOffline) "offline" else story.sourceId,
+                title = story.title,
+                author = story.author,
+                coverUrl = story.coverUrl,
+                description = story.description,
+                url = story.remoteUrl,
+            )
+            val cachedChapters = container.libraryRepository.listOfflineChapters(story.id).map {
+                ChapterSummary(it.id, it.storyId, it.chapterIndex, it.title, it.remoteUrl)
+            }
+            val remoteDetail = if (!story.isOffline) {
+                when (val result = container.sourceRegistry.get(story.sourceId)?.story(story.remoteUrl)) {
+                    is AppResult.Success -> result.value
+                    else -> null
+                }
+            } else null
+            mutableState.update {
+                it.copy(
+                    destination = Destination.Story,
+                    rootTab = RootTab.LIBRARY,
+                    storyDetail = remoteDetail ?: StoryDetail(
+                        story = summary,
+                        status = if (story.isOffline) "Ngoại tuyến" else "Bản đã lưu gần đây",
+                        chapters = cachedChapters,
+                    ),
+                    continueAvailable = true,
+                )
+            }
+            openChapterAt(
+                ChapterSummary(chapter.id, chapter.storyId, chapter.chapterIndex, chapter.title, chapter.remoteUrl),
+                item.paragraphIndex,
+            )
+        }
+    }
+
+    fun clearReadingHistory() {
+        viewModelScope.launch {
+            container.libraryRepository.clearReadingHistory()
+            showMessage("Đã xóa lịch sử đọc.")
         }
     }
 
@@ -3250,12 +3403,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             PlaybackQueueStore.setPreparation(PlaybackPreparationState.PREPARING, "Đang chuẩn bị bản dịch AI trước khi phát…")
             when (val result = resolveAiTranslation(original, forceRefresh)) {
                 is AppResult.Failure -> {
-                    PlaybackQueueStore.setPreparation(
-                        PlaybackPreparationState.FAILED,
-                        "Dịch AI thất bại: ${result.message}. Chọn BẢN GỐC để cho phép phát nội dung gốc.",
+                    showChapterVariant(
+                        original,
+                        ChapterTextMode.ORIGINAL,
+                        "Dịch AI thất bại: ${result.message}. Đã tiếp tục bằng bản gốc.",
                     )
-                    mutableState.update { it.copy(aiBusy = false, message = result.message) }
-                    ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
                 }
                 is AppResult.Success -> showChapterVariant(
                     result.value,
@@ -3494,13 +3646,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun importVietPhrase(uri: Uri) {
         viewModelScope.launch {
-            mutableState.update { it.copy(loading = true, pendingVietPhraseImport = null, message = "Đang nhập dữ liệu VietPhrase…") }
-            when (val result = container.vietPhraseTransferManager.importFrom(uri)) {
+            mutableState.update { it.copy(loading = true, pendingVietPhraseImport = null, message = "Đang kiểm tra dữ liệu VietPhrase…") }
+            when (val result = container.vietPhraseTransferManager.previewFrom(uri)) {
                 is AppResult.Success -> mutableState.update {
                     it.copy(
                         loading = false,
-                        pendingVietPhraseImport = null,
-                        message = "Đã nhập ${result.value} quy tắc VietPhrase.",
+                        pendingVietPhraseImport = result.value,
+                        message = "Đã kiểm tra ${result.value.incomingCount} mục. Hãy xác nhận trước khi áp dụng.",
                     )
                 }
                 is AppResult.Failure -> mutableState.update { it.copy(loading = false, message = result.message) }
@@ -3583,6 +3735,31 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             )
                 .onSuccess { showMessage("Đã thêm quy tắc ${kind.name}.") }
                 .onFailure { showMessage(it.message ?: "Không thêm được VietPhrase.") }
+        }
+    }
+    fun updateVietPhrase(
+        id: Long,
+        source: String,
+        target: String,
+        priority: Int,
+        kind: VietPhraseDictionaryKind,
+        scope: VietPhraseScope,
+        storyId: String?,
+        ignoreCase: Boolean,
+    ) {
+        viewModelScope.launch {
+            container.libraryRepository.updateVietPhrase(
+                id = id,
+                source = source,
+                target = target,
+                priority = priority,
+                kind = kind,
+                scope = scope,
+                storyId = storyId,
+                ignoreCase = ignoreCase,
+            )
+                .onSuccess { showMessage("Đã cập nhật quy tắc ${kind.name}.") }
+                .onFailure { showMessage(it.message ?: "Không cập nhật được VietPhrase.") }
         }
     }
     fun setVietPhraseEnabled(id: Long, enabled: Boolean) { viewModelScope.launch { container.libraryRepository.setVietPhraseEnabled(id, enabled) } }

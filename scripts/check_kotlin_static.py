@@ -56,6 +56,7 @@ data class PronunciationEntity(val id:Long=0,val original:String,val replacement
             str(ROOT / "app/src/main/java/vn/nghetruyen/app/downloads/StoryDownloadPlanner.kt"),
             str(ROOT / "app/src/main/java/vn/nghetruyen/app/downloads/DownloadBatchPlanner.kt"),
             str(ROOT / "app/src/main/java/vn/nghetruyen/app/downloads/ChapterRangeSelector.kt"),
+            str(ROOT / "app/src/main/java/vn/nghetruyen/app/sources/ReferenceSearchRuntime.kt"),
             str(ROOT / "app/src/main/java/vn/nghetruyen/app/sources/StorySearch.kt"),
             str(ROOT / "app/src/main/java/vn/nghetruyen/app/sources/HostRequestGovernor.kt"),
             str(ROOT / "app/src/main/java/vn/nghetruyen/app/following/FollowingUpdateDetector.kt"),

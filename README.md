@@ -1,5 +1,21 @@
 # Nghe Truyện, bản viết lại Kotlin sạch
 
+## Phiên bản 2.9.0, hoàn thiện parity hành vi với XPK
+
+Bản này đưa những năng lực đã có trong backend Kotlin ra luồng sản phẩm thật và sửa các khác biệt hành vi quan trọng so với XPK:
+
+- Route sản xuất dùng màn Cá nhân đầy đủ nhưng bố cục đã được rút gọn; TTS/Sonic, tai nghe, cache, theo dõi định kỳ, nhạc cảnh, backup, nguồn và chẩn đoán đều có đường vào thật.
+- Khi dịch AI tự động hoặc thủ công lỗi, Reader trở lại bản gốc ở trạng thái sẵn sàng thay vì khóa nút phát.
+- Reader có ghi chú thật, đọc cuộn hoặc từng đoạn, mọi thông số hiển thị, áp dụng/cải thiện VietPhrase và lập phân vai/nhạc cảnh AI.
+- Tủ truyện có tab ghi chú riêng và lịch sử theo chương/đoạn/thời gian, tìm kiếm, mở lại và xóa độc lập với tiến độ đọc.
+- Tải truyện hỗ trợ chương hiện tại, chưa đọc, khoảng, chọn nhiều hoặc toàn bộ; giữ điều kiện Wi-Fi/sạc và có thao tác ưu tiên.
+- Xuất sách nói hỗ trợ chương, truyện đã lưu hoặc khoảng; WAV/M4A/MP3, một tệp hoặc từng chương, nhạc cảnh và marker MP3.
+- VietPhrase có xem trước/xác nhận nhập, thêm/sửa/bật/tắt/xóa quy tắc, bật/tắt từng dictionary, rollback snapshot và duyệt đề xuất AI.
+- Room schema 22 thêm lịch sử đọc; backup format 16 giữ tối đa 500 mục lịch sử và tiếp tục loại API key/cookie/secret.
+- Phiên bản ứng dụng: `2.9.0-xpk-parity`, versionCode 33.
+
+Gate parity, migration SQL, Kotlin core, audio export và VietPhrase transfer đã đạt. APK/AAB, Compose/Room build và kiểm thử thiết bị Android thật vẫn cần Gradle 8.13, Android SDK Platform 36 và thiết bị phù hợp.
+
 ## Phiên bản 2.8.0, hoàn tất ưu tiên 2: điều phối AI và hồ sơ giọng
 
 Bản này giữ toàn bộ Priority 1 và hoàn thiện chuỗi AI trước playback:

@@ -18,7 +18,10 @@ def main():
  with tempfile.TemporaryDirectory(prefix='nghe_p4_transfer_') as td:
   r=Path(td)
   pure=sorted((ROOT/'app/src/main/java/vn/nghetruyen/app/ai/vietphrase').glob('*.kt'))
-  pure=[p for p in pure if p.name not in {'VietPhraseEntityMapper.kt','VietPhraseOnlineUpdater.kt'}]
+  pure=[p for p in pure if p.name not in {
+   'ReferenceVietPhraseRuntime.kt','VietPhraseDiagnosticExporter.kt',
+   'VietPhraseEntityMapper.kt','VietPhraseOnlineUpdater.kt',
+  }]
   core=r/'core.jar';run([K,*map(str,pure),'-d',str(core)],240)
   f=[]
   f += [w(r,'android/net/Uri.kt','''package android.net
@@ -46,6 +49,9 @@ suspend fun <T> withContext(ctx:Any,block:suspend ()->T):T=block()
 ''')]
   f += [w(r,'vn/nghetruyen/app/data/local/Viet.kt',r'''package vn.nghetruyen.app.data.local
 data class VietPhraseSnapshotEntity(val id:String,val label:String,val checksum:String,val ruleCount:Int,val payload:ByteArray,val createdAt:Long)
+''')]
+  f += [w(r,'vn/nghetruyen/app/ai/vietphrase/ReferenceVietPhraseRuntime.kt',r'''package vn.nghetruyen.app.ai.vietphrase
+object ReferenceVietPhraseRuntime { fun consumeImportKind():VietPhraseDictionaryKind?=null }
 ''')]
   f += [w(r,'vn/nghetruyen/app/data/repository/Repo.kt',r'''package vn.nghetruyen.app.data.repository
 import vn.nghetruyen.app.ai.vietphrase.*

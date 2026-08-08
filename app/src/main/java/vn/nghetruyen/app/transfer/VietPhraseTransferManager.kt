@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import vn.nghetruyen.app.ai.vietphrase.ReferenceVietPhraseRuntime
 import vn.nghetruyen.app.ai.vietphrase.VietPhraseBinaryDictionaryCodec
 import vn.nghetruyen.app.ai.vietphrase.VietPhraseBundleCodec
 import vn.nghetruyen.app.ai.vietphrase.VietPhraseDictionaryCodec
@@ -40,9 +41,10 @@ class VietPhraseTransferManager(
         uri: Uri,
         forcedKind: VietPhraseDictionaryKind? = null,
     ): AppResult<ImportPreview> = withContext(Dispatchers.IO) {
+        val effectiveKind = forcedKind ?: ReferenceVietPhraseRuntime.consumeImportKind()
         try {
             val name = displayName(uri).ifBlank { uri.lastPathSegment.orEmpty().substringAfterLast('/') }
-                .ifBlank { forcedKind?.fileName ?: "VietPhrase.txt" }
+                .ifBlank { effectiveKind?.fileName ?: "VietPhrase.txt" }
             val bytes = readBounded(uri)
             val lower = name.lowercase()
             val rules: List<VietPhraseRule>
@@ -51,7 +53,7 @@ class VietPhraseTransferManager(
             val warnings: List<String>
             val dictionaryStates: List<VietPhrasePersistenceArchiveCodec.DictionaryState>
             if (bytes.size >= 4 && bytes[0] == 'P'.code.toByte() && bytes[1] == 'K'.code.toByte()) {
-                require(forcedKind == null) { "Hãy dùng NHẬP FILE ZIP để nhập gói nhiều từ điển." }
+                require(effectiveKind == null) { "Hãy dùng NHẬP FILE ZIP để nhập gói nhiều từ điển." }
                 val bundle = VietPhraseBundleCodec.decodeZip(bytes)
                 rules = bundle.rules
                 format = "ZIP_BUNDLE"
@@ -60,13 +62,13 @@ class VietPhraseTransferManager(
                 dictionaryStates = bundle.dictionaryStates
             } else if (lower.endsWith(".dic") || lower.endsWith(".dat")) {
                 val decoded = VietPhraseBinaryDictionaryCodec.decode(bytes, name)
-                rules = if (forcedKind == null) decoded.rules else decoded.rules.map { it.copy(kind = forcedKind) }
+                rules = if (effectiveKind == null) decoded.rules else decoded.rules.map { it.copy(kind = effectiveKind) }
                 format = decoded.format.name
                 duplicates = decoded.duplicateCount
                 warnings = decoded.warnings
                 dictionaryStates = emptyList()
             } else {
-                val kind = forcedKind ?: VietPhraseDictionaryKind.fromFileName(name) ?: VietPhraseDictionaryKind.VIET_PHRASE
+                val kind = effectiveKind ?: VietPhraseDictionaryKind.fromFileName(name) ?: VietPhraseDictionaryKind.VIET_PHRASE
                 val decoded = VietPhraseDictionaryCodec.decode(bytes, name, kind)
                 rules = decoded.rules
                 format = "TEXT_${decoded.delimiter.replace("\t", "TAB")}" 
@@ -98,7 +100,6 @@ class VietPhraseTransferManager(
         }
     }
 
-    /** Compatibility helper for callers that intentionally skip UI preview. */
     suspend fun importFrom(
         uri: Uri,
         forcedKind: VietPhraseDictionaryKind? = null,

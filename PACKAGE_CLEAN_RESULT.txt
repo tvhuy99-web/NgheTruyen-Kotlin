@@ -1,0 +1,8 @@
+STATUS=success
+SOURCE_SHA=c1531a8ac97130a03d0c2d6cb88e5a85a6998bde
+RUN_ID=31248088710
+RUN_ATTEMPT=1
+ARTIFACT_ID=9019168011
+ARTIFACT_NAME=NgheTruyen-main-debug-apk
+DELETED_BRANCHES=agent/reference-ui-position-parity,agent/stable-debug-signing,agent/talkback-settings-reader
+78aba53ef7de13460895eabfab3b13b0d7809bb9a95844ea7e7375c4ba4a3a06  app/build/outputs/apk/debug/app-debug.apk

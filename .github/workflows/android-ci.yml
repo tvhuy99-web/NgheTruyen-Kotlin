@@ -22,9 +22,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: agent/compact-ui-parity
 
       - name: Apply one-shot compact label patch
-        if: github.event_name == 'push' && github.ref == 'refs/heads/agent/compact-ui-parity' && github.actor != 'github-actions[bot]'
+        if: github.event_name == 'pull_request' && github.head_ref == 'agent/compact-ui-parity' && github.actor != 'github-actions[bot]'
         run: |
           python3 - <<'PY'
           from pathlib import Path

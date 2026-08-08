@@ -89,13 +89,13 @@ object SonicPcmProcessor {
         if (abs(speed - 1f) < 0.005f) return input
         val inputFrames = input.size / channels
         if (inputFrames < 512) return resizeFrames(input, channels, max(1, (inputFrames / speed).roundToInt()))
-        val window = (sampleRate * if (accurate) 50 else 36 / 1000)
+        val window = (sampleRate * (if (accurate) 50 else 36) / 1000)
             .coerceIn(384, if (accurate) 3072 else 2048)
             .coerceAtMost(inputFrames)
         val overlap = (window / if (accurate) 3 else 4).coerceAtLeast(64)
         val synthesisHop = window - overlap
         val analysisHop = synthesisHop * speed
-        val search = (sampleRate * if (accurate) 14 else 7 / 1000).coerceIn(32, overlap)
+        val search = (sampleRate * (if (accurate) 14 else 7) / 1000).coerceIn(32, overlap)
         val estimatedFrames = max(window, (inputFrames / speed).roundToInt() + window)
         val output = FloatArray(estimatedFrames * channels)
         var outputFrames = window

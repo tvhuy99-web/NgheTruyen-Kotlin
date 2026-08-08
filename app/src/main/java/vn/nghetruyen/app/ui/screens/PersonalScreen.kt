@@ -180,7 +180,6 @@ fun PersonalScreen(
     onOpenSourceDiagnosticBrowser: (String) -> Unit,
     onClearSourceSession: (String) -> Unit,
 ) {
-    // NAVIGATION_AUDIT_V3_PERSONAL: reference-style hierarchical navigation.
     var personalPage by remember { mutableStateOf("home") }
     var showSettingsDialog by remember { mutableStateOf(false) }
     var showAiSettingsDialog by remember { mutableStateOf(false) }
@@ -527,7 +526,6 @@ fun PersonalScreen(
             confirmButton = { TextButton(onClick = { showSettingsDialog = false }) { Text("ĐÓNG") } },
         )
     }
-
 
     if (showAiSettingsDialog) {
         AiReferenceSettingsDialog(
@@ -1316,7 +1314,6 @@ private fun SourceDiagnosticsSection(
     }
 }
 
-
 private val MEDIA_ACTION_ORDER = listOf("TOGGLE", "NEXT", "PREVIOUS", "PLAY", "PAUSE", "FORWARD", "REWIND", "STOP")
 
 private fun nextMediaAction(current: String): String {
@@ -1357,19 +1354,14 @@ private fun ReferenceVoiceCastSettingsCard(
     var editDraft by remember { mutableStateOf<VoiceRoleDraft?>(null) }
 
     Card(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 5.dp)) {
-        Column(Modifier.padding(16.dp)) {
+        Column(Modifier.padding(12.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Bật mặc định cho truyện dùng cấu hình chung", Modifier.weight(1f))
+                Text("Bật mặc định", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
                 Switch(checked = state.autoVoiceCastEnabled, onCheckedChange = onAutoVoiceCastChange)
             }
-            Text(
-                "Bộ hồ sơ này được dùng làm fallback cho phát TTS, phân vai AI và xuất âm thanh khi truyện chưa có vai riêng.",
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
-            )
             roles.forEach { role ->
-                Card(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
-                    Column(Modifier.padding(10.dp)) {
+                Card(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                    Column(Modifier.padding(8.dp)) {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Text(if (role.isNarrator) "Người kể chuyện" else role.roleName, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
                             Switch(
@@ -1378,7 +1370,7 @@ private fun ReferenceVoiceCastSettingsCard(
                                 enabled = !role.isNarrator,
                             )
                         }
-                        role.description.takeIf(String::isNotBlank)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                        Text((role.enginePackage ?: "Hệ thống") + " • " + (role.voiceName ?: "Mặc định"), style = MaterialTheme.typography.bodySmall)
                         Row(Modifier.fillMaxWidth()) {
                             Button(onClick = {
                                 editDraft = VoiceRoleDraft(
@@ -1400,9 +1392,6 @@ private fun ReferenceVoiceCastSettingsCard(
                                     enabled = role.enabled,
                                 )
                             }, modifier = Modifier.weight(1f).padding(2.dp)) { Text("SỬA") }
-                            if (!role.isNarrator) {
-                                Button(onClick = { onDeleteGlobalVoiceRole(role.id) }, modifier = Modifier.weight(1f).padding(2.dp)) { Text("XÓA") }
-                            }
                         }
                     }
                 }
@@ -1417,10 +1406,13 @@ private fun ReferenceVoiceCastSettingsCard(
                         rate = state.playback.rate,
                         pitch = state.playback.pitch,
                         volume = state.ttsVolume,
+                        sonicSpeed = state.sonicDefaultSpeed,
+                        sonicPitch = state.sonicDefaultPitch,
+                        processingMethod = if (state.sonicProcessingEnabled) "sonic" else "system",
                     )
                 },
                 enabled = roles.size < 10,
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
             ) { Text("THÊM GIỌNG") }
             Button(
                 onClick = onRestoreGlobalVoiceProfiles,
@@ -1430,58 +1422,19 @@ private fun ReferenceVoiceCastSettingsCard(
     }
 
     editDraft?.let { draft ->
-        AlertDialog(
-            onDismissRequest = { editDraft = null },
-            title = { Text(if (draft.originalRoleId == null) "THÊM GIỌNG" else "SỬA HỒ SƠ GIỌNG") },
-            text = {
-                Column(Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState())) {
-                    OutlinedTextField(
-                        value = draft.roleName,
-                        onValueChange = { if (!draft.isNarrator) editDraft = draft.copy(roleName = it.take(80)) },
-                        label = { Text("Tên hồ sơ") },
-                        enabled = !draft.isNarrator,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    OutlinedTextField(
-                        value = draft.description,
-                        onValueChange = { editDraft = draft.copy(description = it.take(1000)) },
-                        label = { Text("Mô tả để AI nhận diện vai") },
-                        minLines = 3,
-                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-                    )
-                    OutlinedTextField(
-                        value = draft.aliases,
-                        onValueChange = { editDraft = draft.copy(aliases = it.take(500)) },
-                        label = { Text("Bí danh, phân cách bằng dấu phẩy") },
-                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-                    )
-                    Text("Bộ đọc: ${draft.enginePackage ?: "mặc định"}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
-                    Text("Giọng: ${draft.voiceName ?: "mặc định"} • ${draft.languageTag}", style = MaterialTheme.typography.bodySmall)
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Tốc độ ${"%.2f".format(draft.rate)}×", Modifier.weight(1f))
-                        TextButton(onClick = { editDraft = draft.copy(rate = (draft.rate - 0.05f).coerceAtLeast(0.5f)) }) { Text("−") }
-                        TextButton(onClick = { editDraft = draft.copy(rate = (draft.rate + 0.05f).coerceAtMost(2f)) }) { Text("+") }
-                    }
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Cao độ ${"%.2f".format(draft.pitch)}×", Modifier.weight(1f))
-                        TextButton(onClick = { editDraft = draft.copy(pitch = (draft.pitch - 0.05f).coerceAtLeast(0.5f)) }) { Text("−") }
-                        TextButton(onClick = { editDraft = draft.copy(pitch = (draft.pitch + 0.05f).coerceAtMost(2f)) }) { Text("+") }
-                    }
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Âm lượng ${"%.0f".format(draft.volume * 100)}%", Modifier.weight(1f))
-                        TextButton(onClick = { editDraft = draft.copy(volume = (draft.volume - 0.05f).coerceAtLeast(0.05f)) }) { Text("−") }
-                        TextButton(onClick = { editDraft = draft.copy(volume = (draft.volume + 0.05f).coerceAtMost(1f)) }) { Text("+") }
-                    }
-                    Button(onClick = { onPreviewGlobalVoiceRole(draft) }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) { Text("NGHE THỬ") }
-                }
+        vn.nghetruyen.app.ui.components.GlobalVoiceRoleEditorDialog(
+            draft = draft,
+            engines = state.ttsEngines,
+            onDraftChange = { editDraft = it },
+            onPreview = onPreviewGlobalVoiceRole,
+            onSave = {
+                onSaveGlobalVoiceRole(it)
+                editDraft = null
             },
-            confirmButton = {
-                TextButton(
-                    enabled = draft.roleName.isNotBlank(),
-                    onClick = { onSaveGlobalVoiceRole(draft); editDraft = null },
-                ) { Text("LƯU") }
-            },
-            dismissButton = { TextButton(onClick = { editDraft = null }) { Text("HỦY") } },
+            onDelete = if (!draft.isNarrator && draft.originalRoleId != null) {
+                { onDeleteGlobalVoiceRole(draft.originalRoleId); editDraft = null }
+            } else null,
+            onDismiss = { editDraft = null },
         )
     }
 }
@@ -1795,7 +1748,6 @@ private fun PronunciationCard(
         )
     }
 }
-
 
 @Composable
 private fun VietPhraseCard(
@@ -2486,7 +2438,6 @@ private fun AiReferenceSettingsDialog(
         )
     }
 }
-
 
 @Composable
 private fun SceneMusicLibraryCard(

@@ -61,6 +61,7 @@ import vn.nghetruyen.app.data.settings.AiProvider
 import vn.nghetruyen.app.sources.StorySearch
 import vn.nghetruyen.app.ui.MainUiState
 import vn.nghetruyen.app.ui.reference.ReferenceVoiceRoleExtras
+import vn.nghetruyen.app.ui.components.GlobalVoiceRoleEditorDialog
 import vn.nghetruyen.app.ui.components.LoadingRow
 import vn.nghetruyen.app.ui.components.ReferenceActionButton
 import vn.nghetruyen.app.ui.components.ReferenceDivider
@@ -699,19 +700,17 @@ fun StoryDetailScreen(
                 Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
                     privateRoles.forEach { role ->
                         ReferenceActionButton(
-                            text = role.roleName + role.description.takeIf(String::isNotBlank)?.let { "\n$it" }.orEmpty(),
+                            text = role.roleName + "\n" + (role.enginePackage ?: "Hệ thống") + " • " + (role.voiceName ?: "Mặc định"),
                             onClick = {
                                 roleDraft = role.toDraft(context)
                                 showVoiceRoleDialog = true
-                                onLoadRoleVoices(role.enginePackage)
                             },
                             normalColor = ReferencePanelBackground,
                             normalContentColor = ReferenceText,
                             modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
                         )
                     }
-                    ReferenceActionButton("THÊM VAI HOẶC NHÂN VẬT", { roleDraft = defaultRoleDraft(); showVoiceRoleDialog = true; onLoadRoleVoices(roleDraft.enginePackage) }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
-                    Text("Đây là bộ hồ sơ độc lập của truyện hiện tại. Bạn có thể tự đặt tên nhân vật, tên gọi khác và mô tả nhận diện. Thay đổi ở đây không ảnh hưởng cấu hình chung hoặc truyện khác.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 6.dp))
+                    ReferenceActionButton("THÊM VAI HOẶC NHÂN VẬT", { roleDraft = defaultRoleDraft(); showVoiceRoleDialog = true }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
                     ReferenceActionButton("SAO CHÉP LẠI TỪ CẤU HÌNH CHUNG", { copyGlobalConfirm = true }, normalColor = ReferenceGray, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
                     ReferenceActionButton("KHÔI PHỤC 7 HỒ SƠ MẪU", { restorePrivateConfirm = true }, normalColor = ReferenceGray, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
                 }
@@ -721,72 +720,25 @@ fun StoryDetailScreen(
     }
 
     if (showVoiceRoleDialog) {
-        val engines = listOf<TtsEngineOption?>(null) + state.ttsEngines
-        var engineExpanded by remember { mutableStateOf(false) }
-        var languageExpanded by remember { mutableStateOf(false) }
-        var voiceExpanded by remember { mutableStateOf(false) }
-        val roleVoices = state.roleEditorVoices
-        val languages = roleVoices.map { it.languageTag }.filter(String::isNotBlank).distinct().sorted()
-        val filteredVoices = roleVoices.filter { roleDraft.languageTag.isBlank() || it.languageTag == roleDraft.languageTag }
-        AlertDialog(
-            onDismissRequest = { showVoiceRoleDialog = false },
-            title = { Text("HỒ SƠ GIỌNG RIÊNG") },
-            text = {
-                Column(Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState())) {
-                    if (roleDraft.isNarrator) {
-                        Text("Người kể chuyện", fontWeight = FontWeight.SemiBold)
-                        Text("Người kể chuyện luôn được bật", style = MaterialTheme.typography.bodySmall)
-                    } else {
-                        OutlinedTextField(roleDraft.roleName, { roleDraft = roleDraft.copy(roleName = it.take(80)) }, label = { Text("Tên vai hoặc tên nhân vật") }, modifier = Modifier.fillMaxWidth())
-                        OutlinedTextField(roleDraft.description, { roleDraft = roleDraft.copy(description = it.take(1_000)) }, label = { Text("Mô tả để AI nhận biết") }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Text("Bật hồ sơ này", Modifier.weight(1f))
-                            Switch(roleDraft.enabled, { roleDraft = roleDraft.copy(enabled = it) })
-                        }
-                    }
-                    Text("Bộ đọc TTS", modifier = Modifier.padding(top = 8.dp))
-                    Button(onClick = { engineExpanded = true }, modifier = Modifier.fillMaxWidth()) { Text(roleDraft.enginePackage ?: "Mặc định hệ thống") }
-                    DropdownMenu(expanded = engineExpanded, onDismissRequest = { engineExpanded = false }) {
-                        engines.forEach { engine -> DropdownMenuItem(
-                            text = { Text(engine?.label ?: "Mặc định hệ thống") },
-                            onClick = { roleDraft = roleDraft.copy(enginePackage = engine?.packageName, voiceName = null); engineExpanded = false; onLoadRoleVoices(engine?.packageName) },
-                        ) }
-                    }
-                    Text("Ngôn ngữ", modifier = Modifier.padding(top = 8.dp))
-                    Button(onClick = { languageExpanded = true }, modifier = Modifier.fillMaxWidth()) { Text(roleDraft.languageTag.ifBlank { "vi-VN" }) }
-                    DropdownMenu(expanded = languageExpanded, onDismissRequest = { languageExpanded = false }) {
-                        (if (languages.isEmpty()) listOf("vi-VN") else languages).forEach { lang -> DropdownMenuItem(text = { Text(lang) }, onClick = { roleDraft = roleDraft.copy(languageTag = lang, voiceName = null); languageExpanded = false }) }
-                    }
-                    Text("Giọng nói", modifier = Modifier.padding(top = 8.dp))
-                    Button(onClick = { voiceExpanded = true }, modifier = Modifier.fillMaxWidth(), enabled = filteredVoices.isNotEmpty()) { Text(roleDraft.voiceName ?: "Giọng mặc định") }
-                    DropdownMenu(expanded = voiceExpanded, onDismissRequest = { voiceExpanded = false }) {
-                        DropdownMenuItem(text = { Text("Giọng mặc định") }, onClick = { roleDraft = roleDraft.copy(voiceName = null); voiceExpanded = false })
-                        filteredVoices.forEach { voice -> DropdownMenuItem(text = { Text(voice.displayName) }, onClick = { roleDraft = roleDraft.copy(voiceName = voice.name, languageTag = voice.languageTag); voiceExpanded = false }) }
-                    }
-                    Text("Phương pháp xử lý", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
-                    Row(Modifier.fillMaxWidth()) {
-                        TextButton({ roleDraft = roleDraft.copy(processingMethod = "system", volume = roleDraft.volume.coerceAtMost(1f)) }, Modifier.weight(1f)) { Text((if (roleDraft.processingMethod != "sonic") "✓ " else "") + "Android, tối đa 100%") }
-                        TextButton({ roleDraft = roleDraft.copy(processingMethod = "sonic") }, Modifier.weight(1f)) { Text((if (roleDraft.processingMethod == "sonic") "✓ " else "") + "Sonic, tối đa 200%") }
-                    }
-                    if (roleDraft.processingMethod == "sonic") {
-                        Text("Chế độ Sonic", fontWeight = FontWeight.SemiBold)
-                        Row(Modifier.fillMaxWidth()) {
-                            TextButton({ roleDraft = roleDraft.copy(sonicAccurate = false) }, Modifier.weight(1f)) { Text((if (!roleDraft.sonicAccurate) "✓ " else "") + "Nhanh") }
-                            TextButton({ roleDraft = roleDraft.copy(sonicAccurate = true) }, Modifier.weight(1f)) { Text((if (roleDraft.sonicAccurate) "✓ " else "") + "Chính xác") }
-                        }
-                    }
-                    ReferenceFloatSlider("Tốc độ", roleDraft.rate, 0.25f, 3f) { roleDraft = roleDraft.copy(rate = it) }
-                    ReferenceFloatSlider("Cao độ", roleDraft.pitch, 0.5f, 2f) { roleDraft = roleDraft.copy(pitch = it) }
-                    ReferenceFloatSlider("Âm lượng", roleDraft.volume, 0f, if (roleDraft.processingMethod == "sonic") 2f else 1f, percent = true) { roleDraft = roleDraft.copy(volume = it) }
-                    ReferenceActionButton("NGHE THỬ", { onPreviewVoiceRole(roleDraft) }, normalColor = ReferenceGray, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
-                }
+        GlobalVoiceRoleEditorDialog(
+            draft = roleDraft,
+            engines = state.ttsEngines,
+            title = "HỒ SƠ GIỌNG RIÊNG",
+            onDraftChange = { roleDraft = it },
+            onPreview = onPreviewVoiceRole,
+            onSave = { saved ->
+                onSaveVoiceRole(
+                    if (saved.isNarrator) saved.copy(roleName = "Người kể chuyện", enabled = true) else saved,
+                )
+                showVoiceRoleDialog = false
             },
-            confirmButton = { TextButton(enabled = roleDraft.isNarrator || (roleDraft.roleName.isNotBlank() && roleDraft.description.isNotBlank() && !roleDraft.voiceName.isNullOrBlank()), onClick = { onSaveVoiceRole(roleDraft.copy(roleName = if (roleDraft.isNarrator) "Người kể chuyện" else roleDraft.roleName)); showVoiceRoleDialog = false }) { Text("LƯU HỒ SƠ") } },
-            dismissButton = { Row {
-                if (!roleDraft.isNarrator && roleDraft.originalRoleId != null) TextButton(onClick = { deletePrivateRole = privateRoles.firstOrNull { it.id == roleDraft.originalRoleId }; showVoiceRoleDialog = false }) { Text("XÓA HỒ SƠ") }
-                else if (roleDraft.isNarrator) TextButton(onClick = {}) { Text("NGƯỜI KỂ CHUYỆN BẮT BUỘC") }
-                TextButton(onClick = { showVoiceRoleDialog = false }) { Text("HỦY") }
-            } },
+            onDelete = if (!roleDraft.isNarrator && roleDraft.originalRoleId != null) {
+                {
+                    deletePrivateRole = privateRoles.firstOrNull { it.id == roleDraft.originalRoleId }
+                    showVoiceRoleDialog = false
+                }
+            } else null,
+            onDismiss = { showVoiceRoleDialog = false },
         )
     }
 

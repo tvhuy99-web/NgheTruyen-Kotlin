@@ -38,7 +38,7 @@ require('app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt',
 require('app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt',
         'PHÂN VAI AI', 'ĐANG CHUẨN BỊ', 'AI LỖI')
 require('app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt',
-        'THÊM VAI HOẶC NHÂN VẬT', 'onPreviewVoiceRole', 'enginePackage',
+        'THÊM VAI', 'onPreviewVoiceRole', 'enginePackage',
         'voiceName', 'expressionStrength', 'sonicSpeed', 'sonicPitch')
 require('app/src/main/java/vn/nghetruyen/app/core/model/Models.kt',
         'data class VoiceRoleDraft', 'originalRoleId', 'enginePackage',

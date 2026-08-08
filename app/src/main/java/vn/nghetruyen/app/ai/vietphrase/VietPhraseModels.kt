@@ -64,6 +64,7 @@ data class VietPhraseOptions(
     val oneMeaning: Boolean = true,
     val normalizePunctuation: Boolean = true,
     val capitalizeSentences: Boolean = true,
+    val fallbackHanViet: Boolean = true,
     val traceLimit: Int = 2_000,
 )
 

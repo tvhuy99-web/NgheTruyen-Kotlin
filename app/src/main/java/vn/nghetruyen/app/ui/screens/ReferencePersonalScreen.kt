@@ -121,7 +121,7 @@ fun ReferencePersonalScreen(
     onCheckVietPhraseOnline: () -> Unit,
     onInstallRecommendedVietPhrase: () -> Unit,
     onVietPhraseEnabledChange: (Long, Boolean) -> Unit,
-    onVietPhraseDictionaryEnabledChange: (VietPhraseDictionaryKind, Boolean) -> Unit,
+    onVietPhraseDictionaryEnabledChange: (String, Boolean) -> Unit,
     onDeleteVietPhrase: (Long) -> Unit,
     onConfirmVietPhraseImport: () -> Unit,
     onCancelVietPhraseImport: () -> Unit,
@@ -558,7 +558,7 @@ private fun VietPhraseReferenceDialog(
         VietPhraseDictionaryKind.VIET_PHRASE,
         VietPhraseDictionaryKind.PRONOUNS,
         VietPhraseDictionaryKind.LUAT_NHAN,
-        VietPhraseDictionaryKind.CHINESE_PHIEN_AM_WORDS,
+        VietPhraseDictionaryKind.PHIEN_AM,
         VietPhraseDictionaryKind.LAC_VIET,
         VietPhraseDictionaryKind.AI_REPLACE,
     )
@@ -967,8 +967,8 @@ private fun InstalledExtensionsReferenceDialog(
     )
     selected?.let { id ->
         state.sourcePacks.firstOrNull { it.id == id }?.let { pack ->
-            val update = state.sourceRepositoryPackages.firstOrNull { it.sourceId == pack.sourceId && it.status == "UPDATE_AVAILABLE" && it.canInstall }
-            val source = state.sources.firstOrNull { it.id == pack.sourceId }
+            val update = state.sourceRepositoryPackages.firstOrNull { it.sourceId == pack.id && it.status == "UPDATE_AVAILABLE" && it.canInstall }
+            val source = state.sources.firstOrNull { it.id == pack.id }
             AlertDialog(
                 onDismissRequest = { selected = null },
                 title = { Text(pack.name) },

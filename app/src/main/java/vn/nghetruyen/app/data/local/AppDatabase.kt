@@ -649,6 +649,9 @@ interface PronunciationDao {
     @Query("SELECT * FROM tts_pronunciations ORDER BY LENGTH(original) DESC, original COLLATE NOCASE ASC")
     suspend fun listAll(): List<PronunciationEntity>
 
+    @Query("SELECT * FROM tts_pronunciations WHERE id = :id LIMIT 1")
+    suspend fun get(id: Long): PronunciationEntity?
+
     @Query("SELECT * FROM tts_pronunciations WHERE enabled = 1 ORDER BY LENGTH(original) DESC, original COLLATE NOCASE ASC")
     suspend fun listEnabled(): List<PronunciationEntity>
 

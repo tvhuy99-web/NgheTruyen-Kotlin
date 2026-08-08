@@ -9,7 +9,7 @@ object ReferenceVietPhraseRuntime {
     private const val KEY_FALLBACK = "fallback_hanviet"
 
     @Volatile
-    var enabled: Boolean = true
+    var enabled: Boolean = false
         private set
 
     @Volatile
@@ -21,7 +21,7 @@ object ReferenceVietPhraseRuntime {
 
     fun load(context: Context) {
         val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        enabled = prefs.getBoolean(KEY_ENABLED, true)
+        enabled = prefs.getBoolean(KEY_ENABLED, false)
         fallbackHanViet = prefs.getBoolean(KEY_FALLBACK, true)
     }
 

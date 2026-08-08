@@ -1729,9 +1729,15 @@ class ReaderPlaybackService : Service() {
             }
 
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                resumeAfterTransientFocusLoss = PlaybackQueueStore.state.value.isPlaying
                 hasAudioFocus = false
-                pauseInternal(abandonFocus = false, preserveResumeIntent = true)
+                if (interruptionMode == AudioInterruptionMode.PAUSE) {
+                    resumeAfterTransientFocusLoss = PlaybackQueueStore.state.value.isPlaying
+                    pauseInternal(abandonFocus = false, preserveResumeIntent = true)
+                } else {
+                    resumeAfterTransientFocusLoss = false
+                    transitionMessage = "Đang tiếp tục đọc khi âm thanh khác phát xen."
+                    updateNotification()
+                }
             }
 
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {

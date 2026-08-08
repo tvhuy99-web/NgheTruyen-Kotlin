@@ -388,6 +388,24 @@ class LibraryRepository(private val db: AppDatabase) {
         )
     }
 
+    suspend fun updatePronunciation(id: Long, original: String, replacement: String): Result<Unit> = runCatching {
+        val current = requireNotNull(db.pronunciationDao().get(id)) { "Không tìm thấy cách đọc." }
+        val cleanOriginal = original.trim()
+        val cleanReplacement = replacement.trim()
+        require(cleanOriginal.isNotEmpty() && cleanReplacement.isNotEmpty()) { "Hãy nhập đầy đủ từ gốc và cách đọc." }
+        require(cleanOriginal.length <= 120) { "Từ gốc quá dài." }
+        require(cleanReplacement.length <= 240) { "Cách đọc quá dài." }
+        db.pronunciationDao().upsert(
+            current.copy(
+                original = cleanOriginal,
+                replacement = cleanReplacement,
+                enabled = true,
+                updatedAt = System.currentTimeMillis(),
+            ),
+        )
+        Unit
+    }
+
     suspend fun setPronunciationEnabled(id: Long, enabled: Boolean) {
         db.pronunciationDao().setEnabled(id, enabled, System.currentTimeMillis())
     }
@@ -762,6 +780,16 @@ class LibraryRepository(private val db: AppDatabase) {
 
     suspend fun setVietPhraseDictionaryEnabled(id: String, enabled: Boolean) =
         db.vietPhraseDictionaryStateDao().setEnabled(id, enabled)
+
+    suspend fun deleteVietPhraseDictionary(kind: VietPhraseDictionaryKind) = db.withTransaction {
+        db.vietPhraseDao().deleteDictionary(kind.name, VietPhraseScope.GLOBAL.name, null)
+        db.vietPhraseDictionaryStateDao().deleteKinds(listOf(kind.name))
+    }
+
+    suspend fun clearAllVietPhraseDictionaries() = db.withTransaction {
+        db.vietPhraseDao().deleteAll()
+        db.vietPhraseDictionaryStateDao().deleteAll()
+    }
 
     suspend fun previewVietPhraseImport(
         incoming: List<VietPhraseRule>,

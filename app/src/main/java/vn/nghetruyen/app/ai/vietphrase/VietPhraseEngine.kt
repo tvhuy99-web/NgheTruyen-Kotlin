@@ -39,9 +39,20 @@ class VietPhraseEngine(
         .toList()
 
     private val baseLiteralRules = normalizedRules
-        .filter { it.kind != VietPhraseDictionaryKind.AI_REPLACE && it.matchMode == VietPhraseMatchMode.LITERAL }
+        .filter {
+            it.kind != VietPhraseDictionaryKind.AI_REPLACE &&
+                it.kind != VietPhraseDictionaryKind.PHIEN_AM &&
+                it.matchMode == VietPhraseMatchMode.LITERAL
+        }
         .sortedWith(RULE_ORDER)
     private val baseLiteralTrie = buildTrie(baseLiteralRules)
+
+    // ChinesePhienAmWords is the legacy Hán-Việt fallback, not a peer dictionary layer.
+    // It is only consulted when no normal phrase/rule matched the current source span.
+    private val fallbackHanVietRules = normalizedRules
+        .filter { it.kind == VietPhraseDictionaryKind.PHIEN_AM && it.matchMode == VietPhraseMatchMode.LITERAL }
+        .sortedWith(RULE_ORDER)
+    private val fallbackHanVietTrie = buildTrie(fallbackHanVietRules)
 
     private val captureRules = baseLiteralRules
         .filter { it.kind == VietPhraseDictionaryKind.NAMES || it.kind == VietPhraseDictionaryKind.PRONOUNS }
@@ -112,9 +123,20 @@ class VietPhraseEngine(
                 } else if (options.traceLimit > 0) truncated = true
                 cursor = direct.end
             } else {
-                val raw = text.substring(cursor, cursor + chLength)
-                base.append(if (options.normalizePunctuation) PUNCTUATION[raw] ?: raw else raw)
-                cursor += chLength
+                val fallback = if (options.fallbackHanViet) bestLiteral(text, cursor, fallbackHanVietTrie, options) else null
+                if (fallback != null) {
+                    val replacement = resolveMeaning(fallback.replacement, fallback.rule.kind, options.oneMeaning)
+                    appendSmart(base, replacement)
+                    counts[fallback.rule.kind] = (counts[fallback.rule.kind] ?: 0) + 1
+                    if (options.traceLimit > 0 && trace.size < options.traceLimit) {
+                        trace += VietPhraseTraceEntry(cursor, fallback.end, text.substring(cursor, fallback.end), replacement, fallback.rule.kind, fallback.rule.id)
+                    } else if (options.traceLimit > 0) truncated = true
+                    cursor = fallback.end
+                } else {
+                    val raw = text.substring(cursor, cursor + chLength)
+                    base.append(if (options.normalizePunctuation) PUNCTUATION[raw] ?: raw else raw)
+                    cursor += chLength
+                }
             }
         }
 

@@ -113,6 +113,7 @@ fun PersonalScreen(
     onBackgroundMusicVolumeChange: (Float) -> Unit,
     onBackgroundMusicDuckChange: (Float) -> Unit,
     onAddPronunciation: (String, String) -> Unit,
+    onUpdatePronunciation: (Long, String, String) -> Unit,
     onPronunciationEnabledChange: (Long, Boolean) -> Unit,
     onDeletePronunciation: (Long) -> Unit,
     onAddVietPhrase: (String, String, Int, VietPhraseDictionaryKind, VietPhraseScope, String?, Boolean) -> Unit,
@@ -128,6 +129,11 @@ fun PersonalScreen(
     onRollbackVietPhrase: (String) -> Unit,
     onAcceptVietPhraseSuggestion: (String, String) -> Unit,
     onRejectVietPhraseSuggestion: (String) -> Unit,
+    onPrepareVietPhraseImport: (VietPhraseDictionaryKind?) -> Unit,
+    onDeleteVietPhraseDictionary: (VietPhraseDictionaryKind) -> Unit,
+    onClearAllVietPhrase: () -> Unit,
+    onVietPhraseMasterEnabledChange: (Boolean) -> Unit,
+    onVietPhraseFallbackChange: (Boolean) -> Unit,
     onRefreshAiModels: (AiProvider, String, String) -> Unit,
     onSaveAiSettings: (AiOnlineSettings, String?, String?) -> Unit,
     onSelectSceneMusic: () -> Unit,
@@ -144,6 +150,9 @@ fun PersonalScreen(
     onOpenAudioExport: (AudioExportJobEntity) -> Unit,
     onRunPerformanceDiagnostics: () -> Unit,
     onBackupComponentChange: (BackupComponent, Boolean) -> Unit,
+    onBackupComponentsChange: (Set<BackupComponent>) -> Unit,
+    onRefreshBackupLog: () -> Boolean,
+    onClearBackupLog: () -> Unit,
     onExportBackup: () -> Unit,
     onRestoreBackup: () -> Unit,
     onClearDownloadedStories: () -> Unit,
@@ -177,6 +186,7 @@ fun PersonalScreen(
     var showClearDownloadsDialog by remember { mutableStateOf(false) }
     var showFactoryResetFirst by remember { mutableStateOf(false) }
     var showFactoryResetFinal by remember { mutableStateOf(false) }
+    var backupScopeOperation by remember { mutableStateOf<String?>(null) }
     var showAddRepositoryDialog by remember { mutableStateOf(false) }
     var repositoryName by remember { mutableStateOf("") }
     var repositoryUrl by remember { mutableStateOf("") }
@@ -250,26 +260,21 @@ fun PersonalScreen(
             PronunciationCard(
                 rules = state.pronunciations,
                 onAdd = onAddPronunciation,
-                onEnabledChange = onPronunciationEnabledChange,
+                onUpdate = onUpdatePronunciation,
                 onDelete = onDeletePronunciation,
             )
         }
         "settings_vietphrase" -> PersonalSubPage("VIETPHRASE / CHUYỂN NGỮ", "QUAY LẠI CÀI ĐẶT", { returnToSettings() }) {
             VietPhraseCard(
                 state = state,
-                onAdd = onAddVietPhrase,
                 onImport = onImportVietPhrase,
                 onExport = onExportVietPhrase,
-                onCheckOnline = onCheckVietPhraseOnline,
-                onInstallRecommended = onInstallRecommendedVietPhrase,
-                onEnabledChange = onVietPhraseEnabledChange,
-                onDictionaryEnabledChange = onVietPhraseDictionaryEnabledChange,
-                onDelete = onDeleteVietPhrase,
-                onConfirmImport = onConfirmVietPhraseImport,
-                onCancelImport = onCancelVietPhraseImport,
-                onRollback = onRollbackVietPhrase,
-                onAcceptSuggestion = onAcceptVietPhraseSuggestion,
-                onRejectSuggestion = onRejectVietPhraseSuggestion,
+                onPrepareImport = onPrepareVietPhraseImport,
+                onDeleteDictionary = onDeleteVietPhraseDictionary,
+                onClearAll = onClearAllVietPhrase,
+                onEnabledChange = onVietPhraseMasterEnabledChange,
+                onFallbackChange = onVietPhraseFallbackChange,
+                onDownloadRecommended = onInstallRecommendedVietPhrase,
             )
         }
         "settings_automation" -> PersonalSubPage("PHÂN VAI TTS BẰNG AI", "QUAY LẠI CÀI ĐẶT", { returnToSettings() }) {
@@ -293,7 +298,7 @@ fun PersonalScreen(
                         onInterruptionModeChange(if (enabled) AudioInterruptionMode.CONTINUE_DUCKED else AudioInterruptionMode.PAUSE)
                     }
                     Text(
-                        "Mặc định tắt. Khi bật, TTS tiếp tục ở mức âm lượng giảm khi Android báo gián đoạn âm thanh tạm thời.",
+                        "Mặc định tắt. Khi bật, TTS không tự tạm dừng khi Android báo gián đoạn âm thanh tạm thời. Truyện có thể phát chồng lên chuông, thông báo hoặc âm thanh cuộc gọi.",
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(top = 6.dp),
                     )
@@ -492,14 +497,16 @@ fun PersonalScreen(
                         when (target) {
                             "settings_ai" -> showAiSettingsDialog = true
                             "settings_other" -> showOtherSettingsDialog = true
-                            "settings_backup_log" -> showBackupLogDialog = true
+                            "settings_backup_log" -> {
+                                if (onRefreshBackupLog()) showBackupLogDialog = true else showSettingsDialog = true
+                            }
                             "settings_clear_downloads" -> showClearDownloadsDialog = true
                             "settings_factory_reset" -> showFactoryResetFirst = true
                             else -> personalPage = target
                         }
                     },
-                    onExportBackup = onExportBackup,
-                    onRestoreBackup = onRestoreBackup,
+                    onExportBackup = { backupScopeOperation = "backup" },
+                    onRestoreBackup = { backupScopeOperation = "restore" },
                 )
             },
             confirmButton = { TextButton(onClick = { showSettingsDialog = false }) { Text("ĐÓNG") } },
@@ -534,7 +541,7 @@ fun PersonalScreen(
                         )
                     }
                     Text(
-                        "Mặc định tắt. Khi bật, ứng dụng cố gắng tiếp tục đọc ở mức âm lượng giảm khi có gián đoạn âm thanh tạm thời.",
+                        "Mặc định tắt. Khi bật, TTS không tự tạm dừng khi Android báo gián đoạn âm thanh tạm thời. Truyện có thể phát chồng lên chuông, thông báo hoặc âm thanh cuộc gọi.",
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(top = 8.dp),
                     )
@@ -551,27 +558,56 @@ fun PersonalScreen(
             onDismissRequest = { showBackupLogDialog = false; showSettingsDialog = true },
             title = { Text("NHẬT KÝ SAO LƯU VÀ KHÔI PHỤC") },
             text = {
-                Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
-                    if (state.backupHistory.isEmpty()) {
-                        Text("Chưa có lần sao lưu hoặc khôi phục nào được ghi nhận.")
-                    } else {
-                        val formatter = remember { SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()) }
-                        state.backupHistory.forEachIndexed { index, entry ->
-                            if (index > 0) HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                            Text(
-                                "${if (entry.operation == "RESTORE") "KHÔI PHỤC" else "SAO LƯU"} • ${if (entry.success) "THÀNH CÔNG" else "THẤT BẠI"}",
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                            Text(formatter.format(Date(entry.timestampEpochMs)), style = MaterialTheme.typography.bodySmall)
-                            Text(entry.summary, modifier = Modifier.padding(top = 3.dp))
-                            if (entry.components.isNotEmpty()) Text("Nhóm: ${entry.components.joinToString()}", style = MaterialTheme.typography.bodySmall)
-                            entry.errorCode?.let { Text("Mã lỗi: $it", style = MaterialTheme.typography.bodySmall) }
-                        }
-                    }
-                }
+                Text(
+                    "Tệp: ${state.backupLogPath}\n\n${state.backupLogText.takeLast(40_000)}",
+                    modifier = Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()),
+                )
             },
             confirmButton = {
                 TextButton(onClick = { showBackupLogDialog = false; showSettingsDialog = true }) { Text("ĐÓNG") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    onClearBackupLog()
+                    showBackupLogDialog = false
+                    showSettingsDialog = true
+                }) { Text("XÓA NHẬT KÝ") }
+            },
+        )
+    }
+
+    backupScopeOperation?.let { operation ->
+        val scopes = listOf(
+            "TẤT CẢ" to BackupComponent.entries.toSet(),
+            "CÀI ĐẶT CHUNG, GIỌNG ĐỌC VÀ AI" to setOf(BackupComponent.SETTINGS, BackupComponent.AI_VOICE),
+            "DỮ LIỆU ĐỌC, DẤU TRANG, TỪ ĐIỂN VÀ TRUYỆN ĐÃ TẢI" to setOf(BackupComponent.LIBRARY, BackupComponent.READING),
+            "NHẠC NỀN" to setOf(BackupComponent.SCENE_MUSIC),
+            "VIETPHRASE" to setOf(BackupComponent.VIETPHRASE),
+            "TIỆN ÍCH VÀ NGUỒN TRUYỆN" to setOf(BackupComponent.SOURCES_EXTENSIONS),
+        )
+        AlertDialog(
+            onDismissRequest = { backupScopeOperation = null; showSettingsDialog = true },
+            title = { Text(if (operation == "backup") "CHỌN DỮ LIỆU SAO LƯU" else "CHỌN DỮ LIỆU KHÔI PHỤC") },
+            text = {
+                Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
+                    scopes.forEach { (label, components) ->
+                        ReferenceActionButton(
+                            text = label,
+                            onClick = {
+                                onBackupComponentsChange(components)
+                                backupScopeOperation = null
+                                if (operation == "backup") onExportBackup() else onRestoreBackup()
+                            },
+                            normalColor = ReferencePanelBackground,
+                            normalContentColor = ReferenceText,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                        )
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { backupScopeOperation = null; showSettingsDialog = true }) { Text("HỦY") }
             },
         )
     }
@@ -1630,72 +1666,72 @@ private fun BackgroundMusicCard(
 private fun PronunciationCard(
     rules: List<PronunciationEntity>,
     onAdd: (String, String) -> Unit,
-    onEnabledChange: (Long, Boolean) -> Unit,
+    onUpdate: (Long, String, String) -> Unit,
     onDelete: (Long) -> Unit,
 ) {
+    var addOpen by remember { mutableStateOf(false) }
+    var selected by remember { mutableStateOf<PronunciationEntity?>(null) }
+    var editOpen by remember { mutableStateOf(false) }
+    var editingId by remember { mutableStateOf<Long?>(null) }
     var original by remember { mutableStateOf("") }
     var replacement by remember { mutableStateOf("") }
-    var showAllRules by remember { mutableStateOf(false) }
-    val visibleRules = if (showAllRules) rules else rules.take(MAX_VISIBLE_PRONUNCIATIONS)
-    Card(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 5.dp)) {
-        Column(Modifier.padding(16.dp)) {
-            Text("Từ điển phát âm", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text(
-                "Quy tắc được áp dụng cục bộ trước khi gửi văn bản cho TTS. Chuỗi dài hơn được ưu tiên và kết quả không bị thay thế lặp lại.",
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(top = 4.dp),
-            )
-            OutlinedTextField(
-                value = original,
-                onValueChange = { original = it.take(120) },
-                label = { Text("Từ hoặc cụm từ") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            )
-            OutlinedTextField(
-                value = replacement,
-                onValueChange = { replacement = it.take(240) },
-                label = { Text("Cách đọc thay thế") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-            )
-            Button(
-                onClick = {
-                    onAdd(original, replacement)
-                    if (original.isNotBlank() && replacement.isNotBlank()) {
-                        original = ""
-                        replacement = ""
-                    }
-                },
-                enabled = original.isNotBlank() && replacement.isNotBlank(),
-                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-            ) { Text("THÊM QUY TẮC") }
 
-            visibleRules.forEach { rule ->
-                HorizontalDivider(Modifier.padding(vertical = 7.dp))
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(rule.original, fontWeight = FontWeight.SemiBold)
-                        Text("Đọc thành: ${rule.replacement}", style = MaterialTheme.typography.bodySmall)
-                    }
-                    Switch(
-                        checked = rule.enabled,
-                        onCheckedChange = { onEnabledChange(rule.id, it) },
-                    )
-                    Button(onClick = { onDelete(rule.id) }, modifier = Modifier.padding(start = 4.dp)) {
-                        Text("XÓA")
-                    }
-                }
-            }
-            if (rules.size > MAX_VISIBLE_PRONUNCIATIONS) {
-                Button(
-                    onClick = { showAllRules = !showAllRules },
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                ) {
-                    Text(if (showAllRules) "THU GỌN QUY TẮC" else "HIỂN THỊ TẤT CẢ ${rules.size} QUY TẮC")
-                }
-            }
+    Column(Modifier.fillMaxWidth()) {
+        ReferenceActionButton(
+            text = "＋ THÊM CÁCH ĐỌC",
+            onClick = { original = ""; replacement = ""; addOpen = true },
+            normalColor = ReferencePanelBackground,
+            normalContentColor = ReferenceText,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 3.dp),
+        )
+        rules.forEach { row ->
+            ReferenceActionButton(
+                text = "${row.original} → ${row.replacement}",
+                onClick = { selected = row },
+                normalColor = ReferencePanelBackground,
+                normalContentColor = ReferenceText,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
+            )
         }
+    }
+
+    if (addOpen) {
+        AlertDialog(
+            onDismissRequest = { addOpen = false },
+            title = { Text("THÊM CÁCH ĐỌC") },
+            text = { Column {
+                OutlinedTextField(original, { original = it.take(120) }, placeholder = { Text("Từ hoặc cụm từ gốc") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(replacement, { replacement = it.take(240) }, placeholder = { Text("TTS sẽ đọc thành") }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+            } },
+            confirmButton = { TextButton(onClick = { onAdd(original, replacement); addOpen = false }) { Text("LƯU") } },
+            dismissButton = { TextButton(onClick = { addOpen = false }) { Text("HỦY") } },
+        )
+    }
+
+    selected?.let { row ->
+        AlertDialog(
+            onDismissRequest = { selected = null },
+            title = { Text("${row.original} → ${row.replacement}") },
+            text = { Column {
+                ReferenceActionButton("SỬA", { editingId = row.id; original = row.original; replacement = row.replacement; editOpen = true; selected = null }, Modifier.fillMaxWidth())
+                ReferenceActionButton("XÓA", { onDelete(row.id); selected = null }, Modifier.fillMaxWidth().padding(top = 4.dp))
+            } },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { selected = null }) { Text("ĐÓNG") } },
+        )
+    }
+
+    if (editOpen) {
+        AlertDialog(
+            onDismissRequest = { editOpen = false },
+            title = { Text("SỬA CÁCH ĐỌC") },
+            text = { Column {
+                OutlinedTextField(original, { original = it.take(120) }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(replacement, { replacement = it.take(240) }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+            } },
+            confirmButton = { TextButton(onClick = { editingId?.let { onUpdate(it, original, replacement) }; editOpen = false }) { Text("LƯU") } },
+            dismissButton = { TextButton(onClick = { editOpen = false }) { Text("HỦY") } },
+        )
     }
 }
 
@@ -1703,169 +1739,103 @@ private fun PronunciationCard(
 @Composable
 private fun VietPhraseCard(
     state: MainUiState,
-    onAdd: (String, String, Int, VietPhraseDictionaryKind, VietPhraseScope, String?, Boolean) -> Unit,
     onImport: () -> Unit,
     onExport: () -> Unit,
-    onCheckOnline: () -> Unit,
-    onInstallRecommended: () -> Unit,
-    onEnabledChange: (Long, Boolean) -> Unit,
-    onDictionaryEnabledChange: (String, Boolean) -> Unit,
-    onDelete: (Long) -> Unit,
-    onConfirmImport: () -> Unit,
-    onCancelImport: () -> Unit,
-    onRollback: (String) -> Unit,
-    onAcceptSuggestion: (String, String) -> Unit,
-    onRejectSuggestion: (String) -> Unit,
+    onPrepareImport: (VietPhraseDictionaryKind?) -> Unit,
+    onDeleteDictionary: (VietPhraseDictionaryKind) -> Unit,
+    onClearAll: () -> Unit,
+    onEnabledChange: (Boolean) -> Unit,
+    onFallbackChange: (Boolean) -> Unit,
+    onDownloadRecommended: () -> Unit,
 ) {
-    val rules = state.vietPhraseRules
-    var source by remember { mutableStateOf("") }
-    var target by remember { mutableStateOf("") }
-    var priority by remember { mutableStateOf("0") }
-    var selectedKind by remember { mutableStateOf(VietPhraseDictionaryKind.VIET_PHRASE) }
-    var selectedScope by remember { mutableStateOf(VietPhraseScope.GLOBAL) }
-    var storyId by remember { mutableStateOf("") }
-    var ignoreCase by remember { mutableStateOf(false) }
-    var showAll by remember { mutableStateOf(false) }
-    val visible = if (showAll) rules else rules.take(24)
-    Card(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 5.dp)) {
-        Column(Modifier.padding(16.dp)) {
-            Text("VietPhrase nâng cao", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text("Bảy lớp từ điển, scope theo truyện, preview/diff, snapshot rollback và import TXT/DIC/DAT/ZIP. Mọi xử lý diễn ra trên thiết bị.", style = MaterialTheme.typography.bodySmall)
-            Row(Modifier.fillMaxWidth().padding(top = 5.dp)) {
-                Button(onImport, Modifier.weight(1f).padding(2.dp)) { Text("NHẬP / XEM TRƯỚC") }
-                Button(onExport, Modifier.weight(1f).padding(2.dp), enabled = rules.isNotEmpty()) { Text("XUẤT ZIP") }
-            }
-            Row(Modifier.fillMaxWidth()) {
-                Button(
-                    onClick = onCheckOnline,
-                    enabled = !state.vietPhraseOnlineBusy,
-                    modifier = Modifier.weight(1f).padding(2.dp),
-                ) { Text(if (state.vietPhraseOnlineBusy) "ĐANG KIỂM TRA" else "TÌM BẢN ONLINE") }
-                Button(
-                    onClick = onInstallRecommended,
-                    enabled = !state.vietPhraseOnlineBusy,
-                    modifier = Modifier.weight(1f).padding(2.dp),
-                ) { Text("TẢI VÀ CẬP NHẬT") }
-            }
-            if (state.vietPhraseOnlineStatus.isNotBlank()) {
-                Text(state.vietPhraseOnlineStatus, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
-            }
-            Text(
-                "Chỉ tải qua HTTPS từ nguồn được tin cậy; kiểm tra dung lượng, kiểu tệp và checksum trước khi nhập. Luôn tạo snapshot để rollback.",
-                style = MaterialTheme.typography.bodySmall,
-            )
+    val orderedKinds = listOf(
+        VietPhraseDictionaryKind.NAMES,
+        VietPhraseDictionaryKind.VIET_PHRASE,
+        VietPhraseDictionaryKind.PRONOUNS,
+        VietPhraseDictionaryKind.LUAT_NHAN,
+        VietPhraseDictionaryKind.PHIEN_AM,
+        VietPhraseDictionaryKind.LAC_VIET,
+        VietPhraseDictionaryKind.AI_REPLACE,
+    )
+    var selectedKind by remember { mutableStateOf<VietPhraseDictionaryKind?>(null) }
+    var deleteKind by remember { mutableStateOf<VietPhraseDictionaryKind?>(null) }
+    var clearAllConfirm by remember { mutableStateOf(false) }
+    var downloadConfirm by remember { mutableStateOf(false) }
 
-            state.pendingVietPhraseImport?.let { preview ->
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                Text("Bản xem trước: ${preview.sourceName}", fontWeight = FontWeight.SemiBold)
-                Text(
-                    "${preview.sourceFormat} • nhận ${preview.incomingCount} • trùng ${preview.duplicateCount} • " +
-                        "thêm ${preview.plan.diff.added.size} • sửa ${preview.plan.diff.changed.size} • xóa ${preview.plan.diff.removed.size}",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                Text("Xung đột: ${preview.errorCount} lỗi, ${preview.warningCount} cảnh báo. Dữ liệu chưa thay đổi.", style = MaterialTheme.typography.bodySmall)
-                preview.plan.conflicts.take(8).forEach { conflict ->
-                    Text("${conflict.severity}: ${conflict.message}", style = MaterialTheme.typography.bodySmall)
-                }
-                preview.warnings.take(4).forEach { warning -> Text("Cảnh báo: $warning", style = MaterialTheme.typography.bodySmall) }
-                Row(Modifier.fillMaxWidth()) {
-                    Button(onConfirmImport, Modifier.weight(1f).padding(2.dp), enabled = preview.plan.canCommit) { Text("XÁC NHẬN NHẬP") }
-                    Button(onCancelImport, Modifier.weight(1f).padding(2.dp)) { Text("HỦY") }
-                }
-            }
-
-            if (state.vietPhraseDictionaryStates.isNotEmpty()) {
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                Text("Bộ từ điển đã nhập", fontWeight = FontWeight.SemiBold)
-                state.vietPhraseDictionaryStates.take(12).forEach { dictionary ->
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            "${dictionary.kind} • ${dictionary.scope}${dictionary.storyId.takeIf(String::isNotBlank)?.let { " • $it" }.orEmpty()} • ${dictionary.entryCount} mục • ${dictionary.sourceFormat}",
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Switch(dictionary.enabled, { onDictionaryEnabledChange(dictionary.id, it) })
-                    }
-                }
-            }
-
-            OutlinedTextField(source, { source = it.take(2_000) }, label = { Text("Cụm nguồn") }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
-            OutlinedTextField(target, { target = it.take(4_000) }, label = { Text("Cụm tiếng Việt") }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
-            OutlinedTextField(priority, { priority = it.filter { ch -> ch == '-' || ch.isDigit() }.take(4) }, label = { Text("Ưu tiên -999 đến 999") }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
-            Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
-                Button(
-                    onClick = {
-                        val kinds = VietPhraseDictionaryKind.entries
-                        selectedKind = kinds[(kinds.indexOf(selectedKind) + 1) % kinds.size]
-                    },
-                    modifier = Modifier.weight(1f).padding(2.dp),
-                ) { Text("LOẠI: ${selectedKind.name}") }
-                Button(
-                    onClick = { selectedScope = if (selectedScope == VietPhraseScope.GLOBAL) VietPhraseScope.STORY else VietPhraseScope.GLOBAL },
-                    modifier = Modifier.weight(1f).padding(2.dp),
-                ) { Text("PHẠM VI: ${selectedScope.name}") }
-            }
-            if (selectedScope == VietPhraseScope.STORY) {
-                OutlinedTextField(storyId, { storyId = it.trim().take(500) }, label = { Text("Story ID bắt buộc") }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
-            }
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Không phân biệt hoa thường", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-                Switch(ignoreCase, { ignoreCase = it })
-            }
-            Button(
-                onClick = {
-                    onAdd(source, target, priority.toIntOrNull() ?: 0, selectedKind, selectedScope, storyId.ifBlank { null }, ignoreCase)
-                    if (source.isNotBlank() && target.isNotBlank()) { source = ""; target = ""; priority = "0" }
-                },
-                enabled = source.isNotBlank() && target.isNotBlank() && (selectedScope == VietPhraseScope.GLOBAL || storyId.isNotBlank()),
-                modifier = Modifier.fillMaxWidth().padding(top = 5.dp),
-            ) { Text("THÊM ${selectedKind.name}") }
-
-            visible.forEach { rule ->
-                HorizontalDivider(Modifier.padding(vertical = 6.dp))
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("${rule.source} → ${rule.target}", fontWeight = FontWeight.SemiBold)
-                        Text("${rule.kind} • ${rule.scope}${rule.storyId.takeIf(String::isNotBlank)?.let { " • $it" }.orEmpty()} • ưu tiên ${rule.priority}", style = MaterialTheme.typography.bodySmall)
-                    }
-                    Switch(rule.enabled, { onEnabledChange(rule.id, it) })
-                    Button({ onDelete(rule.id) }, Modifier.padding(start = 4.dp)) { Text("XÓA") }
-                }
-            }
-            if (rules.size > 24) Button({ showAll = !showAll }, Modifier.fillMaxWidth().padding(top = 6.dp)) {
-                Text(if (showAll) "THU GỌN" else "HIỆN TẤT CẢ ${rules.size} QUY TẮC")
-            }
-
-            val pendingSuggestions = state.vietPhraseSuggestions.filter { it.status == "PENDING" }
-            if (pendingSuggestions.isNotEmpty()) {
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                Text("Suggestion AIReplace chờ duyệt", fontWeight = FontWeight.SemiBold)
-                pendingSuggestions.take(12).forEach { suggestion ->
-                    var edited by remember(suggestion.id, suggestion.editedTarget) { mutableStateOf(suggestion.editedTarget) }
-                    Text(suggestion.source, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 5.dp))
-                    OutlinedTextField(edited, { edited = it.take(4_000) }, label = { Text("Kết quả sau khi duyệt") }, modifier = Modifier.fillMaxWidth())
-                    if (suggestion.reason.isNotBlank()) Text(suggestion.reason, style = MaterialTheme.typography.bodySmall)
-                    Row(Modifier.fillMaxWidth()) {
-                        Button({ onAcceptSuggestion(suggestion.id, edited) }, Modifier.weight(1f).padding(2.dp), enabled = edited.isNotBlank()) { Text("CHẤP NHẬN") }
-                        Button({ onRejectSuggestion(suggestion.id) }, Modifier.weight(1f).padding(2.dp)) { Text("TỪ CHỐI") }
-                    }
-                }
-            }
-
-            if (state.vietPhraseSnapshots.isNotEmpty()) {
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                Text("Snapshot rollback", fontWeight = FontWeight.SemiBold)
-                state.vietPhraseSnapshots.take(8).forEach { snapshot ->
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(snapshot.label)
-                            Text("${snapshot.ruleCount} quy tắc • ${snapshot.checksum.take(12)}", style = MaterialTheme.typography.bodySmall)
-                        }
-                        Button({ onRollback(snapshot.id) }) { Text("ROLLBACK") }
-                    }
-                }
-            }
+    fun status(kind: VietPhraseDictionaryKind): String {
+        val states = state.vietPhraseDictionaryStates.filter { it.kind == kind.name && it.scope == VietPhraseScope.GLOBAL.name }
+        val stateCount = states.sumOf { it.entryCount }
+        val ruleCount = state.vietPhraseRules.count { it.kind == kind.name && it.scope == VietPhraseScope.GLOBAL.name }
+        val count = maxOf(stateCount, ruleCount)
+        return when {
+            count > 0 -> String.format(Locale.getDefault(), "%,d từ", count).replace(',', '.')
+            kind == VietPhraseDictionaryKind.AI_REPLACE -> "Áp dụng ở bước cuối"
+            else -> "Chưa thiết lập"
         }
+    }
+
+    Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("Bật VietPhrase", Modifier.weight(1f))
+            Switch(state.vietPhraseEnabled, onEnabledChange)
+        }
+        ReferenceActionButton("NHẬP FILE ZIP", { onPrepareImport(null); onImport() }, Modifier.fillMaxWidth().padding(top = 8.dp))
+        ReferenceActionButton("XUẤT TỪ ĐIỂN ZIP", onExport, Modifier.fillMaxWidth().padding(top = 4.dp))
+        orderedKinds.forEach { kind ->
+            ReferenceActionButton(
+                text = "${kind.fileName}\n${status(kind)}",
+                onClick = { selectedKind = kind },
+                normalColor = ReferencePanelBackground,
+                normalContentColor = ReferenceText,
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            )
+        }
+        ReferenceActionButton("XÓA TẤT CẢ", { clearAllConfirm = true }, Modifier.fillMaxWidth().padding(top = 8.dp))
+        ReferenceActionButton("TẢI TỰ ĐỘNG TỪ MẠNG", { downloadConfirm = true }, Modifier.fillMaxWidth().padding(top = 4.dp))
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Dùng Hán Việt khi không tìm thấy cụm", Modifier.weight(1f))
+            Switch(state.vietPhraseFallbackHanViet, onFallbackChange)
+        }
+    }
+
+    selectedKind?.let { kind ->
+        AlertDialog(
+            onDismissRequest = { selectedKind = null },
+            title = { Text(kind.fileName) },
+            text = { Column {
+                ReferenceActionButton("NHẬP / THAY THẾ (TXT hoặc DIC)", { selectedKind = null; onPrepareImport(kind); onImport() }, Modifier.fillMaxWidth())
+                ReferenceActionButton("XÓA DỮ LIỆU FILE NÀY", { selectedKind = null; deleteKind = kind }, Modifier.fillMaxWidth().padding(top = 4.dp))
+            } },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { selectedKind = null }) { Text("ĐÓNG") } },
+        )
+    }
+    deleteKind?.let { kind ->
+        AlertDialog(
+            onDismissRequest = { deleteKind = null },
+            title = { Text("XÓA ${kind.fileName}") },
+            text = { Text("Xóa dữ liệu của file này?") },
+            confirmButton = { TextButton(onClick = { onDeleteDictionary(kind); deleteKind = null }) { Text("XÓA") } },
+            dismissButton = { TextButton(onClick = { deleteKind = null }) { Text("HỦY") } },
+        )
+    }
+    if (clearAllConfirm) {
+        AlertDialog(
+            onDismissRequest = { clearAllConfirm = false },
+            title = { Text("XÓA TOÀN BỘ VIETPHRASE") },
+            text = { Text("Xóa tất cả dữ liệu VietPhrase?") },
+            confirmButton = { TextButton(onClick = { onClearAll(); clearAllConfirm = false }) { Text("XÓA") } },
+            dismissButton = { TextButton(onClick = { clearAllConfirm = false }) { Text("HỦY") } },
+        )
+    }
+    if (downloadConfirm) {
+        AlertDialog(
+            onDismissRequest = { downloadConfirm = false },
+            title = { Text("TẢI TỰ ĐỘNG TỪ MẠNG") },
+            text = { Text("Tải và cài bộ dữ liệu VietPhrase từ mạng?") },
+            confirmButton = { TextButton(onClick = { onDownloadRecommended(); downloadConfirm = false }) { Text("TẢI") } },
+            dismissButton = { TextButton(onClick = { downloadConfirm = false }) { Text("HỦY") } },
+        )
     }
 }
 

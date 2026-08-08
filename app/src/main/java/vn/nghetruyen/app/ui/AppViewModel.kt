@@ -30,6 +30,7 @@ import vn.nghetruyen.app.ai.ChapterAiWorkflow
 import vn.nghetruyen.app.ai.TranslationRequest
 import vn.nghetruyen.app.ai.VietPhraseImprovementRequest
 import vn.nghetruyen.app.ai.vietphrase.VietPhraseEngine
+import vn.nghetruyen.app.ai.vietphrase.ReferenceVietPhraseRuntime
 import vn.nghetruyen.app.ai.vietphrase.VietPhraseDictionaryKind
 import vn.nghetruyen.app.ai.vietphrase.VietPhraseScope
 import vn.nghetruyen.app.ai.vietphrase.VietPhraseOptions
@@ -217,8 +218,12 @@ data class MainUiState(
     val pendingVietPhraseImport: VietPhraseTransferManager.ImportPreview? = null,
     val vietPhraseOnlineBusy: Boolean = false,
     val vietPhraseOnlineStatus: String = "",
+    val vietPhraseEnabled: Boolean = false,
+    val vietPhraseFallbackHanViet: Boolean = true,
     val backupComponents: Set<BackupComponent> = BackupComponent.entries.toSet(),
     val backupHistory: List<BackupHistoryEntry> = emptyList(),
+    val backupLogPath: String = "",
+    val backupLogText: String = "",
     val sceneMusicTracks: List<SceneMusicTrackEntity> = emptyList(),
     val aiOnline: AiOnlineSettings = AiOnlineSettings(),
     val aiHasApiKey: Boolean = false,
@@ -257,6 +262,7 @@ data class MainUiState(
 class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application as NgheTruyenApplication
     private val container = app.container
+    private val referenceVietPhraseRuntime = ReferenceVietPhraseRuntime.also { it.load(application) }
     private val mutableState = MutableStateFlow(
         MainUiState(
             sources = container.sourceRegistry.descriptors(),
@@ -268,6 +274,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             sourceDiagnostics = container.sourcePlatformManager.diagnosticSummaries(),
             sourceTraces = container.sourcePlatformManager.diagnosticTraces(),
             backupHistory = container.backupHistoryStore.entries(),
+            backupLogPath = container.backupHistoryStore.logPath(),
+            backupLogText = container.backupHistoryStore.logText(),
+            vietPhraseEnabled = referenceVietPhraseRuntime.enabled,
+            vietPhraseFallbackHanViet = referenceVietPhraseRuntime.fallbackHanViet,
         ),
     )
     val state: StateFlow<MainUiState> = mutableState.asStateFlow()
@@ -516,6 +526,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             container.libraryRepository.savePronunciation(original, replacement)
                 .onSuccess { showMessage("Đã lưu quy tắc phát âm.") }
                 .onFailure { showMessage(it.message ?: "Không lưu được quy tắc phát âm.") }
+        }
+    }
+
+    fun updatePronunciation(id: Long, original: String, replacement: String) {
+        viewModelScope.launch {
+            container.libraryRepository.updatePronunciation(id, original, replacement)
+                .onSuccess { showMessage("Đã cập nhật.") }
+                .onFailure { showMessage(it.message ?: "Không thể cập nhật cách đọc.") }
         }
     }
 
@@ -1839,9 +1857,26 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         savedParagraphIndex = savedProgress?.paragraphIndex,
                     )
                     val autoTranslate = aiProfile?.autoRunOnOpen == true && aiProfile.mode == "TRANSLATE"
+                    val initialVietPhraseContent = if (referenceVietPhraseRuntime.enabled && !autoTranslate) {
+                        val rules = container.libraryRepository.listEnabledVietPhrase(enriched.chapter.storyId)
+                        if (rules.isEmpty()) null else {
+                            val engine = withContext(Dispatchers.Default) { VietPhraseEngine(rules) }
+                            val options = VietPhraseOptions(
+                                storyId = enriched.chapter.storyId,
+                                fallbackHanViet = referenceVietPhraseRuntime.fallbackHanViet,
+                                traceLimit = 0,
+                            )
+                            val translated = withContext(Dispatchers.Default) {
+                                enriched.paragraphs.map { engine.translate(it, options) }
+                            }
+                            enriched.copy(paragraphs = translated)
+                        }
+                    } else null
+                    val initialContent = initialVietPhraseContent ?: enriched
+                    val initialTextMode = if (initialVietPhraseContent != null) ChapterTextMode.VIETPHRASE else ChapterTextMode.ORIGINAL
                     PlaybackQueueStore.loadContent(
                         sourceId = sourceId,
-                        content = enriched,
+                        content = initialContent,
                         startIndex = startIndex,
                         rate = profile?.rate ?: settings.playback.rate,
                         pitch = profile?.pitch ?: settings.playback.pitch,
@@ -1853,11 +1888,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             destination = Destination.Reader,
                             loading = false,
                             aiBusy = autoTranslate,
-                            chapterContent = enriched,
+                            chapterContent = initialContent,
                             originalChapterContent = enriched,
-                            chapterTextMode = ChapterTextMode.ORIGINAL,
+                            chapterTextMode = initialTextMode,
                             continueAvailable = true,
-                            message = if (autoTranslate) "Đang chuẩn bị bản dịch AI trước khi phát…" else it.message,
+                            message = when {
+                                autoTranslate -> "Đang chuẩn bị bản dịch AI trước khi phát…"
+                                initialVietPhraseContent != null -> "Đã áp dụng VietPhrase."
+                                else -> it.message
+                            },
                         )
                     }
                     when {
@@ -2829,6 +2868,31 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
 
+    fun setBackupComponents(components: Set<BackupComponent>) {
+        val normalized = components.ifEmpty { BackupComponent.entries.toSet() }
+        mutableState.update { it.copy(backupComponents = normalized) }
+    }
+
+    fun refreshBackupLog(): Boolean {
+        val path = container.backupHistoryStore.logPath()
+        val text = container.backupHistoryStore.logText()
+        mutableState.update { it.copy(backupLogPath = path, backupLogText = text) }
+        if (text.isBlank()) showMessage("Chưa có nhật ký sao lưu hoặc khôi phục.")
+        return text.isNotBlank()
+    }
+
+    fun clearBackupLog() {
+        container.backupHistoryStore.clear()
+        mutableState.update {
+            it.copy(
+                backupHistory = emptyList(),
+                backupLogPath = container.backupHistoryStore.logPath(),
+                backupLogText = "",
+                message = "Đã xóa nhật ký sao lưu và khôi phục.",
+            )
+        }
+    }
+
     fun setBackupComponentEnabled(component: BackupComponent, enabled: Boolean) {
         mutableState.update { current ->
             val next = if (enabled) current.backupComponents + component else current.backupComponents - component
@@ -2838,6 +2902,35 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     "Cần chọn ít nhất một nhóm dữ liệu."
                 } else current.message,
             )
+        }
+    }
+
+    fun setVietPhraseMasterEnabled(enabled: Boolean) {
+        ReferenceVietPhraseRuntime.setEnabled(getApplication(), enabled)
+        mutableState.update { it.copy(vietPhraseEnabled = enabled) }
+        showMessage(if (enabled) "Đã bật VietPhrase." else "Đã tắt VietPhrase.")
+    }
+
+    fun setVietPhraseFallbackHanViet(enabled: Boolean) {
+        ReferenceVietPhraseRuntime.setFallbackHanViet(getApplication(), enabled)
+        mutableState.update { it.copy(vietPhraseFallbackHanViet = enabled) }
+    }
+
+    fun prepareVietPhraseImport(kind: VietPhraseDictionaryKind?) {
+        ReferenceVietPhraseRuntime.prepareImport(kind)
+    }
+
+    fun deleteVietPhraseDictionary(kind: VietPhraseDictionaryKind) {
+        viewModelScope.launch {
+            container.libraryRepository.deleteVietPhraseDictionary(kind)
+            showMessage("Đã xóa bộ dữ liệu.")
+        }
+    }
+
+    fun clearAllVietPhraseDictionaries() {
+        viewModelScope.launch {
+            container.libraryRepository.clearAllVietPhraseDictionaries()
+            showMessage("Đã xóa toàn bộ dữ liệu VietPhrase.")
         }
     }
 
@@ -2885,11 +2978,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 is AppResult.Success -> {
                     val message = "Đã sao lưu ${result.value.components.size} nhóm dữ liệu, ${result.value.stories} truyện và ${result.value.chapters} chương."
                     container.backupHistoryStore.record("BACKUP", true, message, components = result.value.components.map { it.name })
-                    mutableState.update { it.copy(loading = false, message = message, backupHistory = container.backupHistoryStore.entries()) }
+                    mutableState.update { it.copy(loading = false, message = message, backupHistory = container.backupHistoryStore.entries(), backupLogPath = container.backupHistoryStore.logPath(), backupLogText = container.backupHistoryStore.logText()) }
                 }
                 is AppResult.Failure -> {
                     container.backupHistoryStore.record("BACKUP", false, result.message, result.code, selected.map { it.name })
-                    mutableState.update { it.copy(loading = false, message = result.message, backupHistory = container.backupHistoryStore.entries()) }
+                    mutableState.update { it.copy(loading = false, message = result.message, backupHistory = container.backupHistoryStore.entries(), backupLogPath = container.backupHistoryStore.logPath(), backupLogText = container.backupHistoryStore.logText()) }
                 }
             }
         }
@@ -2903,11 +2996,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 is AppResult.Success -> {
                     val message = "Đã khôi phục ${result.value.components.size} nhóm dữ liệu, ${result.value.stories} truyện và ${result.value.chapters} chương."
                     container.backupHistoryStore.record("RESTORE", true, message, components = result.value.components.map { it.name })
-                    mutableState.update { it.copy(loading = false, message = message, backupHistory = container.backupHistoryStore.entries()) }
+                    mutableState.update { it.copy(loading = false, message = message, backupHistory = container.backupHistoryStore.entries(), backupLogPath = container.backupHistoryStore.logPath(), backupLogText = container.backupHistoryStore.logText()) }
                 }
                 is AppResult.Failure -> {
                     container.backupHistoryStore.record("RESTORE", false, result.message, result.code, selected.map { it.name })
-                    mutableState.update { it.copy(loading = false, message = result.message, backupHistory = container.backupHistoryStore.entries()) }
+                    mutableState.update { it.copy(loading = false, message = result.message, backupHistory = container.backupHistoryStore.entries(), backupLogPath = container.backupHistoryStore.logPath(), backupLogText = container.backupHistoryStore.logText()) }
                 }
             }
         }
@@ -2923,7 +3016,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             mutableState.update { it.copy(aiBusy = true, message = "Đang áp dụng VietPhrase cục bộ…") }
             val engine = withContext(Dispatchers.Default) { VietPhraseEngine(rules) }
-            val options = VietPhraseOptions(storyId = original.chapter.storyId, traceLimit = 0)
+            val options = VietPhraseOptions(storyId = original.chapter.storyId, fallbackHanViet = state.value.vietPhraseFallbackHanViet, traceLimit = 0)
             val transformed = withContext(Dispatchers.Default) { original.paragraphs.map { engine.translate(it, options) } }
             val content = original.copy(paragraphs = transformed)
             container.libraryRepository.saveChapterTransform(
@@ -3029,7 +3122,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             mutableState.update { it.copy(aiBusy = true, message = "Đang tạo bản VietPhrase và nhờ AI tìm mục cần sửa…") }
             val engine = withContext(Dispatchers.Default) { VietPhraseEngine(rules) }
-            val options = VietPhraseOptions(storyId = original.chapter.storyId, traceLimit = 0)
+            val options = VietPhraseOptions(storyId = original.chapter.storyId, fallbackHanViet = state.value.vietPhraseFallbackHanViet, traceLimit = 0)
             val vietPhraseParagraphs = withContext(Dispatchers.Default) {
                 original.paragraphs.map { engine.translate(it, options) }
             }
@@ -3329,13 +3422,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun importVietPhrase(uri: Uri) {
         viewModelScope.launch {
-            mutableState.update { it.copy(loading = true, pendingVietPhraseImport = null, message = "Đang phân tích VietPhrase…") }
-            when (val result = container.vietPhraseTransferManager.previewFrom(uri)) {
+            mutableState.update { it.copy(loading = true, pendingVietPhraseImport = null, message = "Đang nhập dữ liệu VietPhrase…") }
+            when (val result = container.vietPhraseTransferManager.importFrom(uri)) {
                 is AppResult.Success -> mutableState.update {
                     it.copy(
                         loading = false,
-                        pendingVietPhraseImport = result.value,
-                        message = "Đã tạo bản xem trước ${result.value.incomingCount} quy tắc; hãy kiểm tra diff và xung đột.",
+                        pendingVietPhraseImport = null,
+                        message = "Đã nhập ${result.value} quy tắc VietPhrase.",
                     )
                 }
                 is AppResult.Failure -> mutableState.update { it.copy(loading = false, message = result.message) }

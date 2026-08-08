@@ -71,30 +71,29 @@ fun GlobalVoiceRoleEditorDialog(
         loadingVoices = true
         voices = emptyList()
         val listener = TextToSpeech.OnInitListener { status ->
-            val activeTts = tts
-            val loaded = if (status == TextToSpeech.SUCCESS && activeTts != null) {
-                activeTts.voices.orEmpty()
-                    .map { voice ->
-                        TtsVoiceOption(
-                            name = voice.name,
-                            displayName = voice.name,
-                            languageTag = voice.locale?.toLanguageTag().orEmpty(),
-                            networkRequired = voice.isNetworkConnectionRequired,
-                            quality = voice.quality,
-                            enginePackage = draft.enginePackage,
-                        )
-                    }
-                    .sortedWith(
-                        compareBy<TtsVoiceOption> { it.networkRequired }
-                            .thenByDescending { it.quality }
-                            .thenBy { it.displayName.lowercase() },
-                    )
-            } else {
-                emptyList()
-            }
             mainHandler.post {
                 if (!disposed) {
-                    voices = loaded
+                    val activeTts = tts
+                    voices = if (status == TextToSpeech.SUCCESS && activeTts != null) {
+                        activeTts.voices.orEmpty()
+                            .map { voice ->
+                                TtsVoiceOption(
+                                    name = voice.name,
+                                    displayName = voice.name,
+                                    languageTag = voice.locale?.toLanguageTag().orEmpty(),
+                                    networkRequired = voice.isNetworkConnectionRequired,
+                                    quality = voice.quality,
+                                    enginePackage = draft.enginePackage,
+                                )
+                            }
+                            .sortedWith(
+                                compareBy<TtsVoiceOption> { it.networkRequired }
+                                    .thenByDescending { it.quality }
+                                    .thenBy { it.displayName.lowercase() },
+                            )
+                    } else {
+                        emptyList()
+                    }
                     loadingVoices = false
                 }
             }

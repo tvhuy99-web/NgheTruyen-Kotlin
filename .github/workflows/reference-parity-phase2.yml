@@ -53,6 +53,27 @@ jobs:
       - name: Apply reference parity phase 2
         run: python3 scripts/apply_reference_parity_phase2.py
 
+      - name: Align reference twin screens with current models
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/ReferencePersonalScreen.kt')
+          text = path.read_text()
+          replacements = [
+              ('onVietPhraseDictionaryEnabledChange: (VietPhraseDictionaryKind, Boolean) -> Unit',
+               'onVietPhraseDictionaryEnabledChange: (String, Boolean) -> Unit'),
+              ('VietPhraseDictionaryKind.CHINESE_PHIEN_AM_WORDS', 'VietPhraseDictionaryKind.PHIEN_AM'),
+              ('pack.sourceId', 'pack.id'),
+          ]
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f'ReferencePersonalScreen token missing: {old}')
+              text = text.replace(old, new)
+          path.write_text(text)
+          print('REFERENCE_TWIN_MODELS_ALIGNED')
+          PY
+
       - name: Align release validator with XPK hierarchy
         shell: bash
         run: |
@@ -107,6 +128,9 @@ jobs:
           assert 'var enabled: Boolean = false' in runtime
           playback = Path('app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt').read_text()
           assert 'Đang tiếp tục đọc khi âm thanh khác phát xen.' in playback
+          twin = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/ReferencePersonalScreen.kt').read_text()
+          assert 'CHINESE_PHIEN_AM_WORDS' not in twin
+          assert 'pack.sourceId' not in twin
           print('REFERENCE_PARITY_PHASE2_ASSERTIONS_OK')
           PY
 

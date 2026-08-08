@@ -425,8 +425,11 @@ class OnlineAiServices(
     ): AppResult<String> = withContext(Dispatchers.IO) {
         val validation = validateConfiguration(config)
         if (validation != null) return@withContext validation
-        val apiKey = credentialStore.apiKey(config.provider)
-            ?: return@withContext failure("AI_KEY_MISSING", "Chưa lưu API key cho ${providerLabel(config.provider)}.")
+        val apiKey = when (config.provider) {
+            AiProvider.GEMINI -> credentialStore.apiKey(config.provider)?.trim()?.takeIf(String::isNotBlank)
+                ?: return@withContext failure("AI_KEY_MISSING", "Chưa lưu API key cho ${providerLabel(config.provider)}.")
+            AiProvider.OPENAI_COMPATIBLE -> credentialStore.apiKey(config.provider)?.trim().orEmpty()
+        }
         val permit = when (val reserved = requestGovernor.reserve(prompt.length)) {
             is AppResult.Failure -> return@withContext reserved
             is AppResult.Success -> reserved.value
@@ -436,75 +439,125 @@ class OnlineAiServices(
                 requestGovernor.finish(permit, 0, 0, "AI_CONFIGURATION_INVALID")
                 return@withContext failure("AI_CONFIGURATION_INVALID", it.message ?: "Cấu hình AI không hợp lệ.")
             }
+        val candidates = if (config.provider == AiProvider.OPENAI_COMPATIBLE) {
+            listOf(requestData) + requestData.alternatives
+        } else {
+            listOf(requestData)
+        }
         var retries = 0
         var lastFailure: AppResult.Failure? = null
         for (attempt in 0..permit.maxRetries) {
-            val builder = Request.Builder()
-                .url(requestData.url)
-                .header("Accept", "application/json")
-            requestData.headers.forEach { (name, value) -> builder.header(name, value) }
-            val request = builder.post(requestData.body.toRequestBody(JSON_MEDIA_TYPE)).build()
-            try {
-                val call = client.newCall(request)
-                call.timeout().timeout(config.global.timeoutMillis.toLong(), TimeUnit.MILLISECONDS)
-                val response = call.execute()
-                var retryAfterMillis: Long? = null
-                var shouldRetry = false
-                response.use {
-                    if (response.isRedirect) {
-                        lastFailure = failure("AI_REDIRECT_BLOCKED", "Endpoint AI trả redirect; yêu cầu URL API trực tiếp.")
-                    } else {
-                        val raw = response.body?.charStream()?.use { reader ->
-                            buildString {
-                                val buffer = CharArray(8_192)
-                                while (length <= MAX_RESPONSE_CHARS) {
-                                    val count = reader.read(buffer, 0, minOf(buffer.size, MAX_RESPONSE_CHARS + 1 - length))
-                                    if (count < 0) break
-                                    append(buffer, 0, count)
-                                }
-                            }
-                        }.orEmpty()
-                        if (raw.length > MAX_RESPONSE_CHARS) {
-                            lastFailure = failure("AI_RESPONSE_TOO_LARGE", "Phản hồi AI vượt giới hạn an toàn.")
-                        } else if (response.isSuccessful) {
-                            val content = runCatching { extractContent(config.provider, raw) }
-                                .getOrElse {
-                                    lastFailure = failure("AI_BAD_RESPONSE", it.message ?: "Không đọc được nội dung phản hồi AI.")
-                                    ""
-                                }
-                            if (content.isNotBlank()) {
-                                requestGovernor.finish(permit, content.length, retries, null)
-                                return@withContext AppResult.Success(content.trim())
-                            }
-                            if (lastFailure == null) lastFailure = failure("AI_EMPTY_RESPONSE", "AI trả về nội dung trống.")
+            var shouldRetry = false
+            var retryAfterMillis: Long? = null
+            candidateLoop@ for ((candidateIndex, candidateData) in candidates.withIndex()) {
+                val builder = Request.Builder()
+                    .url(candidateData.url)
+                    .header("Accept", "application/json")
+                candidateData.headers.forEach { (name, value) -> builder.header(name, value) }
+                val request = builder.post(candidateData.body.toRequestBody(JSON_MEDIA_TYPE)).build()
+                var fallbackToNext = false
+                try {
+                    val call = client.newCall(request)
+                    call.timeout().timeout(config.global.timeoutMillis.toLong(), TimeUnit.MILLISECONDS)
+                    val response = call.execute()
+                    response.use {
+                        if (response.isRedirect) {
+                            lastFailure = failure("AI_REDIRECT_BLOCKED", "Endpoint AI trả redirect; yêu cầu URL API trực tiếp.")
                         } else {
-                            val detail = extractError(config.provider, raw)
-                            lastFailure = failure("AI_HTTP_${response.code}", detail?.take(400) ?: "Nhà cung cấp AI trả lỗi HTTP ${response.code}.")
-                            shouldRetry = attempt < permit.maxRetries && response.code in RETRYABLE_HTTP_CODES
-                            retryAfterMillis = response.header("Retry-After")?.toLongOrNull()?.times(1_000L)
+                            val raw = response.body?.charStream()?.use { reader ->
+                                buildString {
+                                    val buffer = CharArray(8_192)
+                                    while (length <= MAX_RESPONSE_CHARS) {
+                                        val count = reader.read(buffer, 0, minOf(buffer.size, MAX_RESPONSE_CHARS + 1 - length))
+                                        if (count < 0) break
+                                        append(buffer, 0, count)
+                                    }
+                                }
+                            }.orEmpty()
+                            if (raw.length > MAX_RESPONSE_CHARS) {
+                                lastFailure = failure("AI_RESPONSE_TOO_LARGE", "Phản hồi AI vượt giới hạn an toàn.")
+                            } else if (response.isSuccessful) {
+                                val content = runCatching { extractContent(config.provider, raw) }
+                                    .getOrElse {
+                                        lastFailure = failure("AI_BAD_RESPONSE", it.message ?: "Không đọc được nội dung phản hồi AI.")
+                                        ""
+                                    }
+                                if (content.isNotBlank()) {
+                                    requestGovernor.finish(permit, content.length, retries, null)
+                                    return@withContext AppResult.Success(content.trim())
+                                }
+                                if (lastFailure == null) lastFailure = failure("AI_EMPTY_RESPONSE", "AI trả về nội dung trống.")
+                            } else {
+                                val detail = extractError(config.provider, raw)
+                                lastFailure = failure("AI_HTTP_${response.code}", detail?.take(400) ?: "Nhà cung cấp AI trả lỗi HTTP ${response.code}.")
+                                fallbackToNext = config.provider == AiProvider.OPENAI_COMPATIBLE &&
+                                    response.code in OPENAI_ENDPOINT_FALLBACK_HTTP_CODES &&
+                                    candidateIndex < candidates.lastIndex
+                                if (!fallbackToNext) {
+                                    shouldRetry = attempt < permit.maxRetries && response.code in RETRYABLE_HTTP_CODES
+                                    retryAfterMillis = response.header("Retry-After")?.toLongOrNull()?.times(1_000L)
+                                }
+                            }
                         }
                     }
+                    if (fallbackToNext) continue@candidateLoop
+                } catch (error: IOException) {
+                    lastFailure = failure("AI_NETWORK_ERROR", error.message ?: "Không kết nối được nhà cung cấp AI.", error)
+                    if (attempt < permit.maxRetries) {
+                        shouldRetry = true
+                    }
+                } catch (error: Exception) {
+                    lastFailure = failure("AI_NETWORK_ERROR", error.message ?: "Không kết nối được nhà cung cấp AI.", error)
                 }
-                if (shouldRetry) {
-                    retries += 1
-                    delay(retryDelayMillis(permit.retryBaseDelayMillis, attempt, retryAfterMillis))
-                    continue
-                }
-            } catch (error: IOException) {
-                lastFailure = failure("AI_NETWORK_ERROR", error.message ?: "Không kết nối được nhà cung cấp AI.", error)
-                if (attempt < permit.maxRetries) {
-                    retries += 1
-                    delay(retryDelayMillis(permit.retryBaseDelayMillis, attempt, null))
-                    continue
-                }
-            } catch (error: Exception) {
-                lastFailure = failure("AI_NETWORK_ERROR", error.message ?: "Không kết nối được nhà cung cấp AI.", error)
+                break@candidateLoop
+            }
+            if (shouldRetry) {
+                retries += 1
+                delay(retryDelayMillis(permit.retryBaseDelayMillis, attempt, retryAfterMillis))
+                continue
             }
             break
         }
         val result = lastFailure ?: failure("AI_UNKNOWN_ERROR", "Yêu cầu AI thất bại.")
         requestGovernor.finish(permit, 0, retries, result.code)
         result
+    }
+
+    private fun openAiCandidateUrls(value: String): List<String> {
+        val original = value.trim()
+        if (original.isBlank()) return emptyList()
+        val tailIndex = original.indexOfFirst { it == '?' || it == '#' }
+        val path = if (tailIndex >= 0) original.substring(0, tailIndex) else original
+        val tail = if (tailIndex >= 0) original.substring(tailIndex) else ""
+        val base = path.trimEnd('/')
+        if (base.isBlank()) return emptyList()
+        val lower = base.lowercase()
+        val out = mutableListOf<String>()
+        val seen = linkedSetOf<String>()
+        fun append(candidate: String) {
+            val clean = candidate.trimEnd('/')
+            if (clean.isBlank()) return
+            val url = clean + tail
+            if (seen.add(url)) out += url
+        }
+        append(base)
+        when {
+            lower.endsWith("/responses") -> {
+                append(base.dropLast("/responses".length) + "/chat/completions")
+            }
+            lower.endsWith("/chat/completions") -> {
+                append(base.dropLast("/chat/completions".length) + "/responses")
+            }
+            else -> {
+                append("$base/chat/completions")
+                append("$base/responses")
+                if (!lower.endsWith("/v1")) {
+                    append("$base/v1/chat/completions")
+                    append("$base/v1/responses")
+                }
+            }
+        }
+        return out
     }
 
     private fun buildRequest(
@@ -515,17 +568,32 @@ class OnlineAiServices(
         jsonMode: Boolean,
     ): AiHttpRequest = when (config.provider) {
         AiProvider.OPENAI_COMPATIBLE -> {
-            val body = JSONObject()
-                .put("model", config.model)
-                .put("temperature", config.temperature.toDouble())
-                .put("max_tokens", maxOutputTokens)
-                .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", prompt)))
-                .toString()
-            AiHttpRequest(
-                url = config.endpoint,
-                headers = mapOf("Authorization" to "Bearer $apiKey"),
-                body = body,
-            )
+            val urls = openAiCandidateUrls(config.endpoint)
+            require(urls.isNotEmpty()) { "Chưa nhập URL API" }
+            val headers = buildMap {
+                if (apiKey.isNotBlank()) put("Authorization", "Bearer $apiKey")
+            }
+            val requests = urls.map { url ->
+                val path = url.substringBefore('?').substringBefore('#').trimEnd('/').lowercase()
+                val body = if (path.endsWith("/responses")) {
+                    JSONObject()
+                        .put("model", config.model)
+                        .put("input", prompt)
+                        .toString()
+                } else {
+                    JSONObject()
+                        .put("model", config.model)
+                        .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", prompt)))
+                        .put("temperature", config.temperature.toDouble())
+                        .toString()
+                }
+                AiHttpRequest(
+                    url = url,
+                    headers = headers,
+                    body = body,
+                )
+            }
+            requests.first().copy(alternatives = requests.drop(1))
         }
         AiProvider.GEMINI -> {
             val geminiModel = config.model.removePrefix("models/").trim()
@@ -554,23 +622,7 @@ class OnlineAiServices(
     }
 
     private fun extractContent(provider: AiProvider, raw: String): String = when (provider) {
-        AiProvider.OPENAI_COMPATIBLE -> {
-            val root = JSONObject(raw)
-            root.optJSONObject("error")?.optString("message")?.takeIf(String::isNotBlank)?.let { error(it) }
-            val content = root.getJSONArray("choices").getJSONObject(0).getJSONObject("message").get("content")
-            when (content) {
-                is String -> content
-                is JSONArray -> buildString {
-                    for (index in 0 until content.length()) {
-                        content.optJSONObject(index)?.optString("text")?.takeIf(String::isNotBlank)?.let {
-                            if (isNotEmpty()) append('\n')
-                            append(it)
-                        }
-                    }
-                }
-                else -> error("Nhà cung cấp OpenAI-compatible không trả nội dung dạng text.")
-            }
-        }
+        AiProvider.OPENAI_COMPATIBLE -> extractOpenAiContent(raw)
         AiProvider.GEMINI -> {
             val root = JSONObject(raw)
             root.optJSONObject("error")?.optString("message")?.takeIf(String::isNotBlank)?.let { error(it) }
@@ -590,6 +642,58 @@ class OnlineAiServices(
                 }
             }
         }
+    }
+
+    private fun extractOpenAiContent(raw: String): String {
+        val root = JSONObject(raw)
+        root.optJSONObject("error")?.let { errorObject ->
+            errorObject.optString("message").takeIf(String::isNotBlank)
+                ?: errorObject.optString("code").takeIf(String::isNotBlank)
+        }?.let { error(it) }
+
+        root.optJSONArray("choices")?.optJSONObject(0)?.let { choice ->
+            val finishReason = choice.optString("finish_reason")
+            require(finishReason.isBlank() || finishReason == "stop") {
+                if (finishReason == "length") "Phản hồi bị cắt vì đạt giới hạn đầu ra của model"
+                else "Model kết thúc phản hồi với lý do: $finishReason"
+            }
+            val content = choice.optJSONObject("message")?.opt("content")
+            val text = when (content) {
+                is String -> content
+                is JSONArray -> buildString {
+                    for (index in 0 until content.length()) {
+                        content.optJSONObject(index)?.optString("text")?.takeIf(String::isNotBlank)?.let {
+                            if (isNotEmpty()) append('\n')
+                            append(it)
+                        }
+                    }
+                }
+                else -> ""
+            }
+            if (text.isNotBlank()) return text
+        }
+
+        when (val status = root.optString("status")) {
+            "incomplete" -> {
+                val reason = root.optJSONObject("incomplete_details")?.optString("reason").orEmpty().ifBlank { "incomplete" }
+                error(if (reason == "max_output_tokens") "Phản hồi bị cắt vì đạt giới hạn đầu ra của model" else "Responses API chưa hoàn tất: $reason")
+            }
+            "failed" -> error("Responses API báo thất bại")
+        }
+        root.optString("output_text").takeIf(String::isNotBlank)?.let { return it }
+        val output = root.optJSONArray("output") ?: JSONArray()
+        val text = buildString {
+            for (outputIndex in 0 until output.length()) {
+                val parts = output.optJSONObject(outputIndex)?.optJSONArray("content") ?: continue
+                for (partIndex in 0 until parts.length()) {
+                    parts.optJSONObject(partIndex)?.optString("text")?.takeIf(String::isNotBlank)?.let {
+                        if (isNotEmpty()) append('\n')
+                        append(it)
+                    }
+                }
+            }
+        }
+        return text.takeIf(String::isNotBlank) ?: error("OpenAI-compatible API không trả nội dung")
     }
 
     private fun extractError(provider: AiProvider, raw: String): String? = runCatching {
@@ -745,6 +849,7 @@ class OnlineAiServices(
         val url: String,
         val headers: Map<String, String>,
         val body: String,
+        val alternatives: List<AiHttpRequest> = emptyList(),
     )
 
     companion object {
@@ -765,6 +870,7 @@ class OnlineAiServices(
             Giá trị 0 là hợp lệ. Không đẩy cả ba thông số cùng cực đại và không tạo thay đổi giật cục giữa các câu liền nhau của cùng người nói.
         """.trimIndent()
         private val SUGGESTION_TYPES = setOf("word", "phrase", "sentence")
+        private val OPENAI_ENDPOINT_FALLBACK_HTTP_CODES = setOf(404, 405)
         private val RETRYABLE_HTTP_CODES = setOf(408, 425, 429, 500, 502, 503, 504)
     }
 }

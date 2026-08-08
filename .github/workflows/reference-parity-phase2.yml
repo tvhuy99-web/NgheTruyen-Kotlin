@@ -38,19 +38,22 @@ jobs:
       - name: Apply reference parity phase 2
         run: python3 scripts/apply_reference_parity_phase2.py
 
-      - name: Align release validator with XPK reader menu
+      - name: Align release validator with XPK hierarchy
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
           path = Path('scripts/validate_release.py')
           text = path.read_text()
-          old = '''    require_text(\n        "app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt",\n        "Tìm trong chương",\n        "SAO CHÉP ĐOẠN",\n        "SAO CHÉP CHƯƠNG",\n        "ReaderThemeMode.SEPIA",\n        "keepScreenOn",\n        "lineHeightPercent",\n        "VIETPHRASE",\n        "DỊCH LẠI",\n        "DÀN DỰNG AI",\n        "PHÂN VAI AI",\n        "NHẠC CẢNH",\n    )\n'''
-          new = '''    require_text(\n        "app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt",\n        "TÌM TRONG CHƯƠNG",\n        "SAO CHÉP CHƯƠNG",\n        "ReaderThemeMode.SEPIA",\n        "keepScreenOn",\n        "lineHeightPercent",\n        "VIETPHRASE",\n        "DỊCH AI",\n        "PHÂN VAI AI",\n        "XEM NHẬT KÝ",\n    )\n'''
-          if text.count(old) != 1:
-              raise SystemExit('Reader validator block not found exactly once')
-          path.write_text(text.replace(old, new, 1))
-          print('REFERENCE_READER_VALIDATOR_ALIGNED')
+          replacements = [
+          ('''    require_text(\n        "app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt",\n        "Tìm trong chương",\n        "SAO CHÉP ĐOẠN",\n        "SAO CHÉP CHƯƠNG",\n        "ReaderThemeMode.SEPIA",\n        "keepScreenOn",\n        "lineHeightPercent",\n        "VIETPHRASE",\n        "DỊCH LẠI",\n        "DÀN DỰNG AI",\n        "PHÂN VAI AI",\n        "NHẠC CẢNH",\n    )\n''', '''    require_text(\n        "app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt",\n        "TÌM TRONG CHƯƠNG",\n        "SAO CHÉP CHƯƠNG",\n        "ReaderThemeMode.SEPIA",\n        "keepScreenOn",\n        "lineHeightPercent",\n        "VIETPHRASE",\n        "DỊCH AI",\n        "PHÂN VAI AI",\n        "XEM NHẬT KÝ",\n    )\n'''),
+          ('''    require_text(\n        "app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt",\n        "Tìm chương theo tên hoặc số",\n        "CHỌN PHẠM VI TẢI",\n        "CHỌN NHIỀU CHƯƠNG",\n        "TẢI TOÀN BỘ TRUYỆN",\n        "NẠP TOÀN BỘ MỤC LỤC",\n        "MỞ TRANG GỐC",\n        "BÌNH LUẬN",\n        "TẢI LẠI",\n        "state.storyComments",\n        "Vai giọng thủ công",\n        "Xuất sách nói",\n        "Trộn nhạc cảnh",\n    )\n''', '''    require_text(\n        "app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt",\n        "TÌM CHƯƠNG",\n        "Nhập tên chương hoặc số chương",\n        "CHỌN PHẠM VI TẢI",\n        "CHỌN NHIỀU CHƯƠNG",\n        "TẢI TOÀN BỘ TRUYỆN",\n        "NẠP TOÀN BỘ MỤC LỤC",\n        "MỞ TRANG GỐC",\n        "BÌNH LUẬN",\n        "TẢI LẠI",\n        "state.storyComments",\n        "THIẾT LẬP AI CHO TRUYỆN NÀY",\n        "PHÂN VAI TTS CHO TRUYỆN NÀY",\n        "BỘ GIỌNG RIÊNG CỦA TRUYỆN",\n    )\n''')]
+          for old, new in replacements:
+              if text.count(old) != 1:
+                  raise SystemExit('Validator parity block not found exactly once')
+              text = text.replace(old, new, 1)
+          path.write_text(text)
+          print('REFERENCE_VALIDATOR_ALIGNED')
           PY
 
       - name: Assert exact reference-facing options

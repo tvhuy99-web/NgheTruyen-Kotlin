@@ -3,6 +3,10 @@ package vn.nghetruyen.app.transfer
 import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.UUID
 
 data class BackupHistoryEntry(
@@ -16,7 +20,9 @@ data class BackupHistoryEntry(
 )
 
 class BackupHistoryStore(context: Context) {
-    private val preferences = context.applicationContext.getSharedPreferences("backup_history_v1", Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
+    private val preferences = appContext.getSharedPreferences("backup_history_v1", Context.MODE_PRIVATE)
+    private val logFile = File(appContext.filesDir, "diagnostics/backup_restore.log")
 
     @Synchronized
     fun entries(): List<BackupHistoryEntry> = decode(preferences.getString(KEY, null))
@@ -40,11 +46,45 @@ class BackupHistoryStore(context: Context) {
         )
         val updated = (listOf(entry) + entries()).distinctBy(BackupHistoryEntry::id).take(MAX_ENTRIES)
         preferences.edit().putString(KEY, encode(updated)).apply()
+        appendTextLog(entry)
         return entry
     }
 
     @Synchronized
-    fun clear() { preferences.edit().remove(KEY).apply() }
+    fun logPath(): String = logFile.absolutePath
+
+    @Synchronized
+    fun logText(): String {
+        if (logFile.isFile) {
+            return runCatching { logFile.readText() }.getOrDefault("").takeLast(MAX_LOG_CHARS)
+        }
+        return entries().sortedBy(BackupHistoryEntry::timestampEpochMs).joinToString("\n") { formatEntry(it) }
+    }
+
+    @Synchronized
+    fun clear() {
+        preferences.edit().remove(KEY).apply()
+        runCatching { if (logFile.exists()) logFile.delete() }
+    }
+
+    private fun appendTextLog(entry: BackupHistoryEntry) {
+        runCatching {
+            logFile.parentFile?.mkdirs()
+            logFile.appendText(formatEntry(entry) + "\n")
+            if (logFile.length() > MAX_LOG_BYTES) {
+                val trimmed = logFile.readText().takeLast(MAX_LOG_CHARS)
+                logFile.writeText(trimmed.substringAfter('\n', trimmed))
+            }
+        }
+    }
+
+    private fun formatEntry(item: BackupHistoryEntry): String {
+        val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ROOT).format(Date(item.timestampEpochMs))
+        val state = if (item.success) "THÀNH CÔNG" else "THẤT BẠI"
+        val componentText = item.components.takeIf(List<String>::isNotEmpty)?.joinToString(", ")?.let { " | $it" }.orEmpty()
+        val errorText = item.errorCode?.takeIf(String::isNotBlank)?.let { " | $it" }.orEmpty()
+        return "$stamp | ${item.operation} | $state$errorText$componentText | ${item.summary}"
+    }
 
     private fun encode(items: List<BackupHistoryEntry>): String = JSONArray().apply {
         items.forEach { item ->
@@ -84,5 +124,7 @@ class BackupHistoryStore(context: Context) {
     companion object {
         private const val KEY = "entries"
         private const val MAX_ENTRIES = 100
+        private const val MAX_LOG_BYTES = 512 * 1024L
+        private const val MAX_LOG_CHARS = 400_000
     }
 }

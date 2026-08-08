@@ -20,19 +20,25 @@ object StorySearch {
         healthBySource: Map<String, SourceHealth>,
         query: String = "",
         sortMode: SearchSortMode = SearchSortMode.RELEVANCE,
+        groupDuplicates: Boolean = ReferenceSearchRuntime.groupDuplicates,
     ): List<StorySummary> {
         val normalizedQuery = normalize(query)
-        val selected = results
-            .groupBy(::dedupeKey)
-            .values
-            .map { duplicates ->
-                duplicates.maxWithOrNull(
-                    compareBy<StorySummary> { score(it, normalizedQuery, healthBySource[it.sourceId]) }
-                        .thenByDescending { it.description.length }
-                        .thenByDescending { it.url.length }
-                        .thenBy { it.sourceId },
-                ) ?: duplicates.first()
-            }
+        val scopedResults = results.filter { ReferenceSearchRuntime.accepts(it.sourceId) }
+        val selected = if (groupDuplicates) {
+            scopedResults
+                .groupBy(::dedupeKey)
+                .values
+                .map { duplicates ->
+                    duplicates.maxWithOrNull(
+                        compareBy<StorySummary> { score(it, normalizedQuery, healthBySource[it.sourceId]) }
+                            .thenByDescending { it.description.length }
+                            .thenByDescending { it.url.length }
+                            .thenBy { it.sourceId },
+                    ) ?: duplicates.first()
+                }
+        } else {
+            scopedResults.distinctBy { story -> story.url.ifBlank { "${story.sourceId}:${story.id}" } }
+        }
 
         return when (sortMode) {
             SearchSortMode.RELEVANCE -> selected.sortedWith(

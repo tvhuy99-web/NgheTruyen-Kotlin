@@ -20,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.role
@@ -71,6 +72,7 @@ fun ReferenceActionButton(
 ) {
     val background = if (selected) selectedColor else normalColor
     val foreground = if (selected) Color.White else normalContentColor
+    val hasCustomAccessibilityLabel = accessibilityLabel.trim() != text.trim()
     Button(
         onClick = onClick,
         enabled = enabled,
@@ -88,7 +90,9 @@ fun ReferenceActionButton(
                 if (roleValue == Role.Tab || selected) {
                     this.selected = selected
                 }
-                contentDescription = accessibilityLabel + if (selected) ", đang chọn" else ""
+                if (hasCustomAccessibilityLabel) {
+                    contentDescription = accessibilityLabel
+                }
             },
     ) {
         Text(
@@ -96,6 +100,7 @@ fun ReferenceActionButton(
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.SemiBold,
             textAlign = TextAlign.Center,
+            modifier = if (hasCustomAccessibilityLabel) Modifier.clearAndSetSemantics { } else Modifier,
         )
     }
 }

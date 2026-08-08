@@ -7,8 +7,8 @@ import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.getValue
@@ -18,13 +18,14 @@ import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import vn.nghetruyen.app.audio.AudioExportPackaging
 import vn.nghetruyen.app.audio.AudioExportRequest
+import vn.nghetruyen.app.audio.ReferenceAudioExportRuntime
 import vn.nghetruyen.app.core.model.AudioExportFormat
+import vn.nghetruyen.app.core.model.ReaderMode
 import vn.nghetruyen.app.following.FollowingUpdateWorker
 import vn.nghetruyen.app.playback.ReaderVolumeKeyPolicy
 import vn.nghetruyen.app.ui.AppViewModel
 import vn.nghetruyen.app.ui.Destination
-import vn.nghetruyen.app.core.model.ReaderMode
-import vn.nghetruyen.app.ui.NgheTruyenApp
+import vn.nghetruyen.app.ui.ReferenceNgheTruyenApp
 import vn.nghetruyen.app.ui.theme.NgheTruyenTheme
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -201,9 +202,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
             val launchBackupRestore = remember(backupRestoreLauncher) {
-                {
-                    backupRestoreLauncher.launch(arrayOf("application/zip", "application/octet-stream", "text/plain", "text/x-lua"))
-                }
+                { backupRestoreLauncher.launch(arrayOf("application/zip", "application/octet-stream", "text/plain", "text/x-lua")) }
             }
             val launchVietPhraseImport = remember(vietPhraseImportLauncher) {
                 { vietPhraseImportLauncher.launch(arrayOf("text/plain", "text/tab-separated-values", "application/zip", "application/octet-stream")) }
@@ -226,25 +225,31 @@ class MainActivity : ComponentActivity() {
             val launchSourceTrustRotation = remember(sourceTrustRotationLauncher) {
                 { sourceTrustRotationLauncher.launch(arrayOf("application/json", "application/octet-stream")) }
             }
-            val launchAudioExport: (AudioExportRequest) -> Unit =
-                remember(wavExportLauncher, m4aExportLauncher, mp3ExportLauncher, audioExportDirectoryLauncher, runWithNotificationPermission) {
-                    { request ->
-                        runWithNotificationPermission {
-                            val normalized = request.normalized()
-                            pendingAudioExportRequest = normalized
-                            if (normalized.packaging == AudioExportPackaging.ONE_FILE_PER_CHAPTER) {
-                                audioExportDirectoryLauncher.launch(null)
-                            } else {
-                                val name = viewModel.audioExportSuggestedName(normalized)
-                                when (normalized.format) {
-                                    AudioExportFormat.WAV -> wavExportLauncher.launch(name)
-                                    AudioExportFormat.M4A -> m4aExportLauncher.launch(name)
-                                    AudioExportFormat.MP3 -> mp3ExportLauncher.launch(name)
-                                }
+            val launchAudioExport: (AudioExportRequest) -> Unit = remember(
+                wavExportLauncher,
+                m4aExportLauncher,
+                mp3ExportLauncher,
+                audioExportDirectoryLauncher,
+                runWithNotificationPermission,
+            ) {
+                { request ->
+                    runWithNotificationPermission {
+                        val normalized = request.normalized()
+                        pendingAudioExportRequest = normalized
+                        if (normalized.packaging == AudioExportPackaging.ONE_FILE_PER_CHAPTER) {
+                            audioExportDirectoryLauncher.launch(null)
+                        } else {
+                            val name = ReferenceAudioExportRuntime.consumeNextFileName()
+                                ?: viewModel.audioExportSuggestedName(normalized)
+                            when (normalized.format) {
+                                AudioExportFormat.WAV -> wavExportLauncher.launch(name)
+                                AudioExportFormat.M4A -> m4aExportLauncher.launch(name)
+                                AudioExportFormat.MP3 -> mp3ExportLauncher.launch(name)
                             }
                         }
                     }
                 }
+            }
             val launchBackgroundMusic = remember(backgroundMusicLauncher) {
                 { backgroundMusicLauncher.launch(arrayOf("audio/*")) }
             }
@@ -252,7 +257,7 @@ class MainActivity : ComponentActivity() {
                 { sceneMusicLauncher.launch(arrayOf("audio/*")) }
             }
             NgheTruyenTheme {
-                NgheTruyenApp(
+                ReferenceNgheTruyenApp(
                     viewModel = viewModel,
                     onImportFile = launchImport,
                     onExportBackup = launchBackupExport,
@@ -271,7 +276,6 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-
 
     override fun onResume() {
         super.onResume()

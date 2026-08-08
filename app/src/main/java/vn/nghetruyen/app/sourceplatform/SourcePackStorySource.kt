@@ -15,6 +15,9 @@ import vn.nghetruyen.app.sources.BuiltInSourcePackBridge
 import vn.nghetruyen.app.sources.SourceCommentCapability
 import vn.nghetruyen.app.sources.SourceDescriptor
 import vn.nghetruyen.app.sources.SourceImplementationKind
+import vn.nghetruyen.app.sources.SourceUiActionDescriptor
+import vn.nghetruyen.app.sources.SourceUiActionResult
+import vn.nghetruyen.app.sources.SourceUiSurface
 import vn.nghetruyen.app.sources.StorySource
 import vn.nghetruyen.source.api.JsonValue
 import vn.nghetruyen.source.api.SourceActionName
@@ -96,6 +99,15 @@ class SourcePackStorySource(
             SourceRuntimeMode.VBOOK_JS_COMPAT -> SourceImplementationKind.VBOOK
             SourceRuntimeMode.NATIVE_LUA_COMPAT -> SourceImplementationKind.NATIVE_LUA
         },
+        uiActions = (builtInDelegate?.descriptor?.uiActions.orEmpty() + pack.manifest.uiActions.map { action ->
+            SourceUiActionDescriptor(
+                id = action.id,
+                label = action.label,
+                surfaces = action.contexts.map { SourceUiSurface.valueOf(it.name) }.toSet(),
+                group = action.group,
+                order = action.order,
+            )
+        }).distinctBy { it.id },
     )
 
     override suspend fun home(page: Int): AppResult<List<StorySummary>> {
@@ -138,6 +150,38 @@ class SourcePackStorySource(
         ) ?: return@guarded AppResult.Success(emptyList())
         AppResult.Success(suggestionItems(result).take(MAX_SUGGESTIONS))
     }
+    }
+
+    override suspend fun runUiAction(
+        actionId: String,
+        surface: SourceUiSurface,
+        currentUrl: String?,
+        storyId: String?,
+        chapterId: String?,
+    ): AppResult<SourceUiActionResult> = guarded {
+        val action = descriptor.uiActions.firstOrNull { it.id == actionId && surface in it.surfaces }
+            ?: return@guarded AppResult.Failure("SOURCE_UI_ACTION_NOT_FOUND", "Action giao diện không tồn tại ở màn hình này.")
+        val value = execute(
+            SourceActionName.UI_ACTION,
+            JsonValue.Obj(linkedMapOf(
+                "id" to JsonValue.Str(action.id),
+                "context" to JsonValue.Str(surface.name),
+                "url" to JsonValue.Str(currentUrl.orEmpty()),
+                "storyId" to JsonValue.Str(storyId.orEmpty()),
+                "chapterId" to JsonValue.Str(chapterId.orEmpty()),
+            )),
+        ) ?: return@guarded AppResult.Failure("SOURCE_UI_ACTION_HANDLER_MISSING", "Gói nguồn thiếu handler uiAction.")
+        val outcome = when (value) {
+            is JsonValue.Str -> SourceUiActionResult(message = value.value.take(1000))
+            is JsonValue.Obj -> SourceUiActionResult(
+                message = value.string("message").orEmpty().take(1000),
+                openUrl = value.string("openUrl")?.take(4096),
+                refresh = (value.values["refresh"] as? JsonValue.Bool)?.value ?: false,
+            )
+            JsonValue.Null -> SourceUiActionResult()
+            else -> return@guarded typeFailure("Kết quả uiAction phải là string, object hoặc null.")
+        }
+        AppResult.Success(outcome)
     }
 
     override suspend fun search(query: String, page: Int): AppResult<List<StorySummary>> {

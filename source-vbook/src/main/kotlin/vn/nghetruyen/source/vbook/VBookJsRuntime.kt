@@ -709,7 +709,7 @@ class VBookJsRuntime(
             SourceActionName.DETAIL, SourceActionName.LATEST_CHAPTER, SourceActionName.TOC, SourceActionName.CHAPTER -> arrayOf(js(request.input["url"]))
             SourceActionName.COMMENTS -> arrayOf(js(request.input["url"]), page.toString())
             SourceActionName.SUGGESTIONS -> arrayOf(js(request.input["query"] ?: request.input["url"]), page.toString())
-            SourceActionName.LOGIN -> arrayOf(js(request.input))
+            SourceActionName.LOGIN, SourceActionName.UI_ACTION -> arrayOf(js(request.input))
             SourceActionName.TOC_PAGES -> arrayOf(
                 js(request.input["url"]),
                 js(request.input["pageToken"] ?: JsonValue.Str(page.toString())),

@@ -63,6 +63,13 @@ object SourceManifestWriter {
                 "maxOutputBytes" to num(action.maxOutputBytes),
             ))
         })),
+        "uiActions" to JsonValue.Arr(manifest.uiActions.map { action -> JsonValue.Obj(linkedMapOf(
+            "id" to JsonValue.Str(action.id),
+            "label" to JsonValue.Str(action.label),
+            "contexts" to strings(action.contexts.map { it.name }.sorted()),
+            "group" to JsonValue.Str(action.group),
+            "order" to num(action.order),
+        )) }),
         "privacy" to JsonValue.Obj(linkedMapOf(
             "sendsContentToThirdParty" to JsonValue.Bool(manifest.privacy.sendsContentToThirdParty),
             "thirdParties" to strings(manifest.privacy.thirdParties),

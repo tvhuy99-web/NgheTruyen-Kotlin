@@ -20,18 +20,18 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import vn.nghetruyen.app.audio.AudioExportRequest
 import vn.nghetruyen.app.audio.AudioExportScope
 import vn.nghetruyen.app.core.model.AudioExportFormat
-import vn.nghetruyen.app.ui.screens.ExploreScreen
-import vn.nghetruyen.app.ui.screens.LibraryScreen
-import vn.nghetruyen.app.ui.screens.PersonalScreen
-import vn.nghetruyen.app.ui.screens.ReaderScreen
-import vn.nghetruyen.app.ui.screens.StoryDetailScreen
+import vn.nghetruyen.app.sources.SourceUiSurface
 import vn.nghetruyen.app.ui.components.ReferenceDivider
 import vn.nghetruyen.app.ui.components.ReferenceScreenBackground
-import vn.nghetruyen.app.sources.SourceUiSurface
 import vn.nghetruyen.app.ui.components.ReferenceTabButton
+import vn.nghetruyen.app.ui.screens.ExploreScreen
+import vn.nghetruyen.app.ui.screens.LibraryScreen
+import vn.nghetruyen.app.ui.screens.ReaderScreen
+import vn.nghetruyen.app.ui.screens.ReferencePersonalScreen
+import vn.nghetruyen.app.ui.screens.StoryDetailScreen
 
 @Composable
-fun NgheTruyenApp(
+fun ReferenceNgheTruyenApp(
     viewModel: AppViewModel,
     onImportFile: () -> Unit,
     onExportBackup: () -> Unit,
@@ -64,7 +64,7 @@ fun NgheTruyenApp(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             if (state.destination == Destination.Root) {
-                PrimaryBottomBar(selected = state.rootTab, onSelect = viewModel::setRootTab)
+                ReferencePrimaryBottomBar(selected = state.rootTab, onSelect = viewModel::setRootTab)
             }
         },
         containerColor = ReferenceScreenBackground,
@@ -91,7 +91,9 @@ fun NgheTruyenApp(
                         onStoryClick = viewModel::openStory,
                         onOpenSourceLogin = viewModel::openSourceLogin,
                         onCheckSource = viewModel::checkSource,
-                        onSourceUiAction = { sourceId, actionId -> viewModel.runSourceUiAction(sourceId, actionId, SourceUiSurface.EXPLORE) },
+                        onSourceUiAction = { sourceId, actionId ->
+                            viewModel.runSourceUiAction(sourceId, actionId, SourceUiSurface.EXPLORE)
+                        },
                     )
                     RootTab.LIBRARY -> LibraryScreen(
                         state = state,
@@ -111,7 +113,7 @@ fun NgheTruyenApp(
                         onDeleteNote = viewModel::deleteNote,
                         onFollowingClick = viewModel::openFollowedStory,
                     )
-                    RootTab.PERSONAL -> PersonalScreen(
+                    RootTab.PERSONAL -> ReferencePersonalScreen(
                         state = state,
                         onRateChange = viewModel::setTtsRate,
                         onPitchChange = viewModel::setTtsPitch,
@@ -158,7 +160,6 @@ fun NgheTruyenApp(
                         onBackgroundMusicVolumeChange = viewModel::setBackgroundMusicVolume,
                         onBackgroundMusicDuckChange = viewModel::setBackgroundMusicDuckFactor,
                         onAddPronunciation = viewModel::addPronunciation,
-                        onUpdatePronunciation = viewModel::updatePronunciation,
                         onPronunciationEnabledChange = viewModel::setPronunciationEnabled,
                         onDeletePronunciation = viewModel::deletePronunciation,
                         onAddVietPhrase = viewModel::addVietPhrase,
@@ -174,11 +175,6 @@ fun NgheTruyenApp(
                         onRollbackVietPhrase = viewModel::rollbackVietPhrase,
                         onAcceptVietPhraseSuggestion = viewModel::acceptVietPhraseSuggestion,
                         onRejectVietPhraseSuggestion = viewModel::rejectVietPhraseSuggestion,
-                        onPrepareVietPhraseImport = viewModel::prepareVietPhraseImport,
-                        onDeleteVietPhraseDictionary = viewModel::deleteVietPhraseDictionary,
-                        onClearAllVietPhrase = viewModel::clearAllVietPhraseDictionaries,
-                        onVietPhraseMasterEnabledChange = viewModel::setVietPhraseMasterEnabled,
-                        onVietPhraseFallbackChange = viewModel::setVietPhraseFallbackHanViet,
                         onRefreshAiModels = viewModel::refreshAiModels,
                         onSaveAiSettings = viewModel::saveReferenceAiSettings,
                         onSelectSceneMusic = onSelectSceneMusic,
@@ -195,9 +191,6 @@ fun NgheTruyenApp(
                         onOpenAudioExport = viewModel::openAudioExport,
                         onRunPerformanceDiagnostics = viewModel::runPerformanceDiagnostics,
                         onBackupComponentChange = viewModel::setBackupComponentEnabled,
-                        onBackupComponentsChange = viewModel::setBackupComponents,
-                        onRefreshBackupLog = viewModel::refreshBackupLog,
-                        onClearBackupLog = viewModel::clearBackupLog,
                         onExportBackup = onExportBackup,
                         onRestoreBackup = onRestoreBackup,
                         onClearDownloadedStories = viewModel::clearAllDownloadedStories,
@@ -255,7 +248,9 @@ fun NgheTruyenApp(
                     onOpenOriginal = viewModel::openExternalUrl,
                     onCheckSource = viewModel::checkSource,
                     onOpenSourceLogin = viewModel::openSourceLogin,
-                    onSourceUiAction = { sourceId, actionId -> viewModel.runSourceUiAction(sourceId, actionId, SourceUiSurface.STORY) },
+                    onSourceUiAction = { sourceId, actionId ->
+                        viewModel.runSourceUiAction(sourceId, actionId, SourceUiSurface.STORY)
+                    },
                 )
                 Destination.Reader -> ReaderScreen(
                     state = state,
@@ -316,7 +311,9 @@ fun NgheTruyenApp(
                     onSelectSceneMusic = onSelectSceneMusic,
                     onOpenSourceLogin = viewModel::openSourceLogin,
                     onCheckSource = viewModel::checkSource,
-                    onSourceUiAction = { sourceId, actionId -> viewModel.runSourceUiAction(sourceId, actionId, SourceUiSurface.READER) },
+                    onSourceUiAction = { sourceId, actionId ->
+                        viewModel.runSourceUiAction(sourceId, actionId, SourceUiSurface.READER)
+                    },
                     onMessage = viewModel::readerActionMessage,
                 )
             }
@@ -325,7 +322,7 @@ fun NgheTruyenApp(
 }
 
 @Composable
-private fun PrimaryBottomBar(
+private fun ReferencePrimaryBottomBar(
     selected: RootTab,
     onSelect: (RootTab) -> Unit,
 ) {
@@ -344,10 +341,10 @@ private fun PrimaryBottomBar(
                 text = label,
                 selected = selected == tab,
                 onClick = { onSelect(tab) },
-                accessibilityLabel = "Tab ${label.lowercase()}",
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(1.dp),
+                accessibilityLabel = label,
+                minHeight = 62.dp,
+                unselectedColor = ReferenceDivider,
+                modifier = Modifier.weight(1f).padding(1.dp),
             )
         }
     }

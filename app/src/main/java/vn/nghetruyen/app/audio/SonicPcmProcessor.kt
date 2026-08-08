@@ -21,31 +21,42 @@ import kotlin.math.roundToInt
 object SonicPcmProcessor {
     private const val MAX_PCM_BYTES = 64L * 1024L * 1024L
 
-    fun process(source: File, destination: File, speed: Float, pitch: Float): WaveSegment {
+    fun process(source: File, destination: File, speed: Float, pitch: Float, accurate: Boolean = ReferenceSonicRuntime.accurateMode): WaveSegment {
         val wave = WaveFileAssembler.inspect(source)
         if (wave.audioFormat != 1 || wave.bitsPerSample != 16 || wave.channelCount !in 1..2) {
             throw IOException("Sonic chỉ hỗ trợ WAV PCM16 mono hoặc stereo.")
         }
         if (wave.dataLength > MAX_PCM_BYTES) throw IOException("Đoạn PCM quá lớn để xử lý Sonic an toàn.")
-        val normalizedSpeed = speed.coerceIn(0.5f, 2f)
+        val normalizedSpeed = speed.coerceIn(0.25f, 3f)
         val normalizedPitch = pitch.coerceIn(0.5f, 2f)
-        if (abs(normalizedSpeed - 1f) < 0.005f && abs(normalizedPitch - 1f) < 0.005f) {
+        val gain = ReferenceSonicRuntime.outputGain.coerceIn(0f, 2f)
+        if (
+            abs(normalizedSpeed - 1f) < 0.005f &&
+            abs(normalizedPitch - 1f) < 0.005f &&
+            abs(gain - 1f) < 0.005f
+        ) {
             source.copyTo(destination, overwrite = true)
             return WaveFileAssembler.inspect(destination)
         }
         val samples = readPcm16(wave)
         val pitched = resample(samples, wave.channelCount, normalizedPitch)
-        val stretchSpeed = (normalizedSpeed / normalizedPitch).coerceIn(0.25f, 4f)
+        val stretchSpeed = (normalizedSpeed / normalizedPitch).coerceIn(0.125f, 6f)
         val stretched = timeStretch(
             pitched,
             channels = wave.channelCount,
             sampleRate = wave.sampleRate.toInt(),
             speed = stretchSpeed,
+            accurate = accurate,
         )
         val originalFrames = samples.size / wave.channelCount
         val targetFrames = max(1, (originalFrames / normalizedSpeed).roundToInt())
         val exact = resizeFrames(stretched, wave.channelCount, targetFrames)
-        writePcm16(destination, wave.channelCount, wave.sampleRate.toInt(), exact)
+        val gained = if (abs(gain - 1f) < 0.005f) exact else ShortArray(exact.size) { index ->
+            (exact[index].toFloat() * gain).roundToInt()
+                .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+                .toShort()
+        }
+        writePcm16(destination, wave.channelCount, wave.sampleRate.toInt(), gained)
         return WaveFileAssembler.inspect(destination)
     }
 
@@ -68,15 +79,23 @@ object SonicPcmProcessor {
         return output
     }
 
-    private fun timeStretch(input: ShortArray, channels: Int, sampleRate: Int, speed: Float): ShortArray {
+    private fun timeStretch(
+        input: ShortArray,
+        channels: Int,
+        sampleRate: Int,
+        speed: Float,
+        accurate: Boolean,
+    ): ShortArray {
         if (abs(speed - 1f) < 0.005f) return input
         val inputFrames = input.size / channels
         if (inputFrames < 512) return resizeFrames(input, channels, max(1, (inputFrames / speed).roundToInt()))
-        val window = (sampleRate * 40 / 1000).coerceIn(384, 2048).coerceAtMost(inputFrames)
-        val overlap = (window / 4).coerceAtLeast(64)
+        val window = (sampleRate * (if (accurate) 50 else 36) / 1000)
+            .coerceIn(384, if (accurate) 3072 else 2048)
+            .coerceAtMost(inputFrames)
+        val overlap = (window / if (accurate) 3 else 4).coerceAtLeast(64)
         val synthesisHop = window - overlap
         val analysisHop = synthesisHop * speed
-        val search = (sampleRate * 8 / 1000).coerceIn(32, overlap)
+        val search = (sampleRate * (if (accurate) 14 else 7) / 1000).coerceIn(32, overlap)
         val estimatedFrames = max(window, (inputFrames / speed).roundToInt() + window)
         val output = FloatArray(estimatedFrames * channels)
         var outputFrames = window
@@ -87,7 +106,7 @@ object SonicPcmProcessor {
         while (outputFrames + synthesisHop < estimatedFrames) {
             val expected = analysisPosition.roundToInt()
             if (expected + window >= inputFrames) break
-            val candidate = findBestOffset(input, channels, expected, search, overlap, output, outputFrames)
+            val candidate = findBestOffset(input, channels, expected, search, overlap, output, outputFrames, accurate)
             val outStart = outputFrames - overlap
             for (frame in 0 until overlap) {
                 val mix = frame.toFloat() / overlap.toFloat()
@@ -119,6 +138,7 @@ object SonicPcmProcessor {
         overlap: Int,
         output: FloatArray,
         outputFrames: Int,
+        accurate: Boolean,
     ): Int {
         val inputFrames = input.size / channels
         var best = expected.coerceIn(0, inputFrames - overlap - 1)
@@ -126,6 +146,8 @@ object SonicPcmProcessor {
         val outStart = outputFrames - overlap
         val low = max(0, expected - search)
         val high = min(inputFrames - overlap - 1, expected + search)
+        val candidateStep = if (accurate) 1 else 2
+        val frameStep = if (accurate) 1 else 2
         var candidate = low
         while (candidate <= high) {
             var dot = 0.0
@@ -142,11 +164,11 @@ object SonicPcmProcessor {
                 dot += outMono * inMono
                 aa += outMono * outMono
                 bb += inMono * inMono
-                frame += 2
+                frame += frameStep
             }
             val score = if (aa > 1.0 && bb > 1.0) dot / kotlin.math.sqrt(aa * bb) else Double.NEGATIVE_INFINITY
             if (score > bestScore) { bestScore = score; best = candidate }
-            candidate += 2
+            candidate += candidateStep
         }
         return best
     }

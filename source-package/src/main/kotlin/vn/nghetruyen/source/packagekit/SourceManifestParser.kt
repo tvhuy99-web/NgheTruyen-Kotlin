@@ -16,6 +16,8 @@ import vn.nghetruyen.source.api.SourceNetworkCapability
 import vn.nghetruyen.source.api.SourcePrivacyDisclosure
 import vn.nghetruyen.source.api.SourceRuntimeMode
 import vn.nghetruyen.source.api.SourceRuntimePolicy
+import vn.nghetruyen.source.api.SourceUiActionContext
+import vn.nghetruyen.source.api.SourceUiActionSpec
 import vn.nghetruyen.source.api.SourceWebSocketCapability
 
 object SourceManifestParser {
@@ -44,6 +46,7 @@ object SourceManifestParser {
             redirectOrigins = root.stringList("redirectOrigins").toSet(),
             capabilities = parseCapabilities(root.obj("capabilities") ?: JsonValue.Obj()),
             actions = parseActions(root.requiredObj("actions")),
+            uiActions = parseUiActions(root.array("uiActions")),
             privacy = parsePrivacy(root.obj("privacy")),
             fixtures = parseFixtures(root.array("fixtures")),
         )
@@ -121,6 +124,18 @@ object SourceManifestParser {
         }
     }
 
+    private fun parseUiActions(value: JsonValue.Arr?): List<SourceUiActionSpec> = value?.values.orEmpty().map { item ->
+        val obj = item as? JsonValue.Obj ?: error("SOURCE_UI_ACTION_INVALID")
+        obj.requireOnly(UI_ACTION_KEYS, "uiActions")
+        SourceUiActionSpec(
+            id = obj.requiredString("id"),
+            label = obj.requiredString("label"),
+            contexts = obj.stringList("contexts").map { enumValue<SourceUiActionContext>(it, "uiActions.contexts") }.toSet(),
+            group = obj.string("group").orEmpty(),
+            order = obj.int("order") ?: 0,
+        )
+    }
+
     private fun parsePrivacy(value: JsonValue.Obj?): SourcePrivacyDisclosure {
         value?.requireOnly(PRIVACY_KEYS, "privacy")
         return SourcePrivacyDisclosure(
@@ -163,7 +178,7 @@ object SourceManifestParser {
     private val ROOT_KEYS = setOf(
         "schemaVersion", "id", "name", "description", "author", "version", "apiVersion",
         "minAppVersion", "maxAppVersion", "locale", "contentType", "adult", "runtime",
-        "urlPatterns", "origins", "redirectOrigins", "capabilities", "actions", "privacy", "fixtures",
+        "urlPatterns", "origins", "redirectOrigins", "capabilities", "actions", "uiActions", "privacy", "fixtures",
     )
     private val RUNTIME_KEYS = setOf("mode", "entry", "instructionBudget", "memoryBudgetBytes", "actionTimeoutMs")
     private val CAPABILITY_KEYS = setOf("network", "cookies", "browser", "storageBytes", "crypto", "websocket")
@@ -171,6 +186,7 @@ object SourceManifestParser {
     private val BROWSER_KEYS = setOf("navigate", "domSnapshot", "click", "input", "requestMetadata", "serviceWorkerCapture", "pageJavaScript")
     private val WEBSOCKET_KEYS = setOf("enabled", "maxMessageBytes", "maxLifetimeMs")
     private val ACTION_KEYS = setOf("entry", "timeoutMs", "maxOutputBytes")
+    private val UI_ACTION_KEYS = setOf("id", "label", "contexts", "group", "order")
     private val PRIVACY_KEYS = setOf("sendsContentToThirdParty", "thirdParties", "note")
     private val FIXTURE_KEYS = setOf("name", "action", "input", "fixture", "expected")
 }

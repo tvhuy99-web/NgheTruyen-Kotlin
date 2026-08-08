@@ -36,6 +36,7 @@ import vn.nghetruyen.app.playback.PronunciationProcessor
 import vn.nghetruyen.app.playback.ReaderTextChunker
 import vn.nghetruyen.app.playback.VoiceRoleResolver
 import vn.nghetruyen.app.playback.VoiceExpressionProcessor
+import vn.nghetruyen.app.ui.reference.ReferenceVoiceRoleExtras
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
@@ -81,7 +82,8 @@ class AudioExportWorker(
             if (chapters.isEmpty()) throw IOException("Chưa có nội dung chương để xuất. Hãy mở hoặc tải truyện trước.")
 
             val rules = container.libraryRepository.listEnabledPronunciations()
-            val roles = container.libraryRepository.listVoiceRoles(job.storyId).filter(VoiceRoleEntity::enabled)
+            val settings = container.settingsRepository.snapshot()
+            val roles = container.libraryRepository.listEffectiveVoiceRoles(job.storyId, settings.autoVoiceCastEnabled)
             val contentByChapter = LinkedHashMap<String, vn.nghetruyen.app.core.model.ChapterContent>()
             val assignmentsByChapter = LinkedHashMap<String, Map<Int, ChapterVoiceAssignmentEntity>>()
             for (chapter in chapters) {
@@ -99,7 +101,6 @@ class AudioExportWorker(
                 throw IOException("Bản xuất có quá nhiều đoạn. Hãy chia truyện thành nhiều khoảng chương.")
             }
 
-            val settings = container.settingsRepository.snapshot()
             val profile = container.libraryRepository.getStoryTtsProfile(job.storyId)
             val musicPlan = loadMusicPlan(job, chapters)
             val fingerprint = exportFingerprint(job, chunks, settings, profile, roles, rules, musicPlan)
@@ -253,7 +254,7 @@ class AudioExportWorker(
                     val aiPitchMultiplier = (1f + (assigned?.pitchAdjustPct ?: 0f) / 100f).coerceIn(0.5f, 1.5f)
                     val aiVolumeMultiplier = (1f + (assigned?.volumeAdjustPct ?: 0f) / 100f).coerceIn(0.2f, 2f)
                     val voice = roleVoice.copy(
-                        rate = (roleVoice.rate * expression.rateMultiplier * aiRateMultiplier).coerceIn(0.5f, 2f),
+                        rate = (roleVoice.rate * expression.rateMultiplier * aiRateMultiplier).coerceIn(0.25f, 3f),
                         pitch = (roleVoice.pitch * expression.pitchMultiplier * aiPitchMultiplier).coerceIn(0.5f, 2f),
                     )
                     val desiredEngine = role?.enginePackage?.takeIf(String::isNotBlank) ?: baseEngine
@@ -271,17 +272,16 @@ class AudioExportWorker(
                     val rawOutput = File(workDir, "raw-${index.toString().padStart(6, '0')}.wav")
                     val pcmOutput = File(workDir, "gain-${index.toString().padStart(6, '0')}.wav")
                     synthesizer!!.synthesize(spoken, rawOutput, "${job.id}:$index")
+                    val roleExtra = role?.let { ReferenceVoiceRoleExtras.load(applicationContext, it.id) }
+                    val useSonic = roleExtra?.processingMethod?.equals("sonic") ?: settings.sonicProcessingEnabled
+                    val accurateSonic = roleExtra?.sonicAccurate ?: settings.sonicAccurateMode
                     val volume = ((role?.volume ?: profile?.volume ?: settings.ttsVolume) * expression.volumeMultiplier * aiVolumeMultiplier)
-                        .coerceIn(0.05f, 1f)
+                        .coerceIn(0f, if (useSonic) 2f else 1f)
                     Pcm16WaveConverter.convert(rawOutput, pcmOutput, volume)
-                    val sonicSpeed = ((role?.sonicSpeed ?: settings.sonicDefaultSpeed) * expression.sonicSpeedMultiplier)
-                        .coerceIn(0.5f, 2f)
-                    val sonicPitch = ((role?.sonicPitch ?: settings.sonicDefaultPitch) * expression.sonicPitchMultiplier)
-                        .coerceIn(0.5f, 2f)
-                    if (settings.sonicProcessingEnabled &&
-                        (kotlin.math.abs(sonicSpeed - 1f) >= 0.015f || kotlin.math.abs(sonicPitch - 1f) >= 0.015f)
-                    ) {
-                        SonicPcmProcessor.process(pcmOutput, normalizedOutput, sonicSpeed, sonicPitch)
+                    val sonicSpeed = if (useSonic) ((role?.sonicSpeed ?: settings.sonicDefaultSpeed) * expression.sonicSpeedMultiplier).coerceIn(0.25f, 3f) else 1f
+                    val sonicPitch = if (useSonic) ((role?.sonicPitch ?: settings.sonicDefaultPitch) * expression.sonicPitchMultiplier).coerceIn(0.5f, 2f) else 1f
+                    if (useSonic) {
+                        SonicPcmProcessor.process(pcmOutput, normalizedOutput, sonicSpeed, sonicPitch, accurateSonic)
                     } else {
                         pcmOutput.copyTo(normalizedOutput, overwrite = true)
                     }
@@ -564,9 +564,11 @@ class AudioExportWorker(
         pronunciationRules.sortedBy { it.original }.forEach { add(listOf(it.original, it.replacement, it.enabled).joinToString("|")) }
         add(listOf(profile?.enginePackage, profile?.voiceName, profile?.languageTag, profile?.rate, profile?.pitch, profile?.volume).joinToString("|"))
         roles.sortedBy { it.id }.forEach {
+            val extra = ReferenceVoiceRoleExtras.load(applicationContext, it.id)
             add(listOf(
                 it.id, it.enginePackage, it.voiceName, it.languageTag, it.rate, it.pitch, it.volume,
                 it.expression, it.expressionStrength, it.sonicSpeed, it.sonicPitch, it.enabled,
+                extra.processingMethod, extra.sonicAccurate,
             ).joinToString("|"))
         }
         chunks.forEach { add("${it.chapterId}|${it.paragraphIndex}|${it.text}") }

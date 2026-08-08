@@ -2,11 +2,13 @@ package vn.nghetruyen.app.ai
 
 import vn.nghetruyen.app.core.common.AppResult
 import vn.nghetruyen.app.core.model.ChapterContent
+import vn.nghetruyen.app.core.model.GLOBAL_VOICE_PROFILE_STORY_ID
 import vn.nghetruyen.app.core.model.TtsVoiceOption
 import vn.nghetruyen.app.data.local.ChapterTransformEntity
 import vn.nghetruyen.app.data.local.ChapterVoiceAssignmentEntity
 import vn.nghetruyen.app.data.local.SceneMusicCueEntity
 import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
+import vn.nghetruyen.app.data.local.VoiceRoleEntity
 import vn.nghetruyen.app.data.repository.LibraryRepository
 import vn.nghetruyen.app.data.settings.SettingsRepository
 import vn.nghetruyen.app.playback.TtsVoiceCatalog
@@ -35,12 +37,17 @@ class NarrationPlanCoordinator(
         activeTrackId: String? = null,
     ): Result {
         if (!voice && !music) return Result(false, false, emptyList())
+        val storyVoice = storyVoiceSettings(content.chapter.storyId)
+        val voiceAllowed = voice && storyVoice.mode != StoryVoiceCastMode.OFF
+        if (!voiceAllowed && !music) {
+            return Result(false, false, listOf("Phân vai TTS đang tắt cho truyện này."))
+        }
         val tracks = if (music) library.listEnabledSceneMusicTracks() else emptyList()
-        val voiceNeeded = voice && needsVoicePlan(content, force)
+        val voiceNeeded = voiceAllowed && needsVoicePlan(content, force)
         val musicNeeded = music && needsMusicPlan(content, tracks, force)
         if (!voiceNeeded && !musicNeeded) return Result(false, false, emptyList())
 
-        if (voice && music) {
+        if (voiceAllowed && music) {
             if (tracks.isEmpty()) {
                 val voiceOutcome = if (voiceNeeded) ensureVoicePlan(content, force) else AppResult.Success(false)
                 return when (voiceOutcome) {
@@ -91,7 +98,24 @@ class NarrationPlanCoordinator(
         return Result(voiceCreated, musicCreated, warnings.distinct())
     }
 
+    private suspend fun storyVoiceSettings(storyId: String): StoryVoiceCastReferenceSettings =
+        library.getStoryAiProfile(storyId)?.let { StoryVoiceCastReferenceCodec.decode(it.voiceCastNote) }
+            ?: StoryVoiceCastReferenceSettings()
+
+    private suspend fun effectiveRoles(storyId: String, appSettings: vn.nghetruyen.app.data.settings.AppSettings): List<VoiceRoleEntity> {
+        return when (storyVoiceSettings(storyId).mode) {
+            StoryVoiceCastMode.OFF -> emptyList()
+            StoryVoiceCastMode.PRIVATE -> library.listVoiceRoles(storyId).filter(VoiceRoleEntity::enabled)
+            StoryVoiceCastMode.GLOBAL -> if (appSettings.autoVoiceCastEnabled) {
+                library.listVoiceRoles(GLOBAL_VOICE_PROFILE_STORY_ID).filter(VoiceRoleEntity::enabled)
+            } else {
+                emptyList()
+            }
+        }
+    }
+
     private suspend fun needsVoicePlan(content: ChapterContent, force: Boolean): Boolean {
+        if (storyVoiceSettings(content.chapter.storyId).mode == StoryVoiceCastMode.OFF) return false
         if (force) return true
         val sourceHash = ChapterAiWorkflow.sha256(content.paragraphs)
         val cached = library.getChapterTransform(content.chapter.id, ChapterAiWorkflow.KIND_VOICE_CAST)
@@ -111,6 +135,9 @@ class NarrationPlanCoordinator(
     }
 
     private suspend fun ensureVoicePlan(content: ChapterContent, force: Boolean): AppResult<Boolean> {
+        if (storyVoiceSettings(content.chapter.storyId).mode == StoryVoiceCastMode.OFF) {
+            return AppResult.Failure("VOICE_CAST_DISABLED", "Phân vai TTS đang tắt cho truyện này.")
+        }
         if (!needsVoicePlan(content, force)) return AppResult.Success(false)
         return when (val result = ai.planVoiceCast(
             content.chapter.storyId,
@@ -151,53 +178,66 @@ class NarrationPlanCoordinator(
 
     private suspend fun persistVoicePlan(content: ChapterContent, plan: VoiceCastPlan) {
         val appSettings = settings.snapshot()
-        val existing = library.listVoiceRoles(content.chapter.storyId)
-            .associateBy { it.roleName.trim().lowercase(Locale.ROOT) }
+        val storyMode = storyVoiceSettings(content.chapter.storyId).mode
+        val existingRoles = effectiveRoles(content.chapter.storyId, appSettings)
+        val existing = existingRoles.associateBy { it.roleName.trim().lowercase(Locale.ROOT) }
         val voices = when (val scan = voiceCatalog.load(appSettings.ttsEnginePackage)) {
             is AppResult.Success -> scan.value
             is AppResult.Failure -> emptyList()
         }
-        plan.roles.forEach { role ->
-            val key = role.character.trim().lowercase(Locale.ROOT)
-            val current = existing[key]
-            val narrator = role.character.equals(NARRATOR, ignoreCase = true)
-            val allocated = current?.voiceName?.let { name -> voices.firstOrNull { it.name == name } }
-                ?: allocateVoice(role.character, narrator, voices, appSettings.ttsVoiceName)
-            val variation = voiceVariation(role.character, narrator)
-            val aliases = (current?.aliasesCsv.orEmpty().split(',') + role.aliases)
-                .map(String::trim)
-                .filter(String::isNotBlank)
-                .distinctBy { it.lowercase(Locale.ROOT) }
-                .take(20)
-                .joinToString(",")
-            library.saveVoiceRole(
-                storyId = content.chapter.storyId,
-                roleName = role.character,
-                aliasesCsv = aliases,
-                voiceName = allocated?.name ?: current?.voiceName ?: appSettings.ttsVoiceName,
-                languageTag = allocated?.languageTag ?: current?.languageTag ?: appSettings.ttsLanguageTag,
-                rate = current?.rate ?: (appSettings.ttsRate * variation.first).coerceIn(0.5f, 2f),
-                pitch = current?.pitch ?: (appSettings.ttsPitch * variation.second).coerceIn(0.5f, 2f),
-                volume = current?.volume ?: appSettings.ttsVolume,
-                isNarrator = narrator,
-                enginePackage = current?.enginePackage ?: appSettings.ttsEnginePackage,
-                expression = current?.expression ?: role.expression,
-                expressionStrength = current?.expressionStrength ?: if (narrator) 0.25f else 0.65f,
-                sonicSpeed = current?.sonicSpeed ?: appSettings.sonicDefaultSpeed,
-                sonicPitch = current?.sonicPitch ?: appSettings.sonicDefaultPitch,
-                enabled = current?.enabled ?: true,
-            ).getOrThrow()
+        if (storyMode == StoryVoiceCastMode.PRIVATE) {
+            plan.roles.forEach { role ->
+                val key = role.character.trim().lowercase(Locale.ROOT)
+                val current = existing[key]
+                val narrator = role.character.equals(NARRATOR, ignoreCase = true)
+                val allocated = current?.voiceName?.let { name -> voices.firstOrNull { it.name == name } }
+                    ?: allocateVoice(role.character, narrator, voices, appSettings.ttsVoiceName)
+                val variation = voiceVariation(role.character, narrator)
+                val aliases = (current?.aliasesCsv.orEmpty().split(',') + role.aliases)
+                    .map(String::trim)
+                    .filter(String::isNotBlank)
+                    .distinctBy { it.lowercase(Locale.ROOT) }
+                    .take(20)
+                    .joinToString(",")
+                library.saveVoiceRole(
+                    storyId = content.chapter.storyId,
+                    roleName = role.character,
+                    aliasesCsv = aliases,
+                    voiceName = allocated?.name ?: current?.voiceName ?: appSettings.ttsVoiceName,
+                    languageTag = allocated?.languageTag ?: current?.languageTag ?: appSettings.ttsLanguageTag,
+                    rate = current?.rate ?: (appSettings.ttsRate * variation.first).coerceIn(0.25f, 3f),
+                    pitch = current?.pitch ?: (appSettings.ttsPitch * variation.second).coerceIn(0.5f, 2f),
+                    volume = current?.volume ?: appSettings.ttsVolume,
+                    isNarrator = narrator,
+                    enginePackage = current?.enginePackage ?: appSettings.ttsEnginePackage,
+                    expression = current?.expression ?: role.expression,
+                    expressionStrength = current?.expressionStrength ?: if (narrator) 0.25f else 0.65f,
+                    sonicSpeed = current?.sonicSpeed ?: appSettings.sonicDefaultSpeed,
+                    sonicPitch = current?.sonicPitch ?: appSettings.sonicDefaultPitch,
+                    enabled = current?.enabled ?: true,
+                ).getOrThrow()
+            }
         }
-        val allowed = plan.roles.map { it.character.lowercase(Locale.ROOT) }.toSet()
+        val allowedRoles = if (existingRoles.isNotEmpty()) {
+            existingRoles.map { it.roleName.lowercase(Locale.ROOT) }.toSet()
+        } else {
+            plan.roles.map { it.character.lowercase(Locale.ROOT) }.toSet()
+        }
         val assignments = plan.assignments
-            .filter { it.paragraphIndex in content.paragraphs.indices && it.character.lowercase(Locale.ROOT) in allowed }
+            .filter { it.paragraphIndex in content.paragraphs.indices }
+            .filter { assignment -> storyMode == StoryVoiceCastMode.PRIVATE || assignment.character.lowercase(Locale.ROOT) in allowedRoles }
             .map { assignment ->
+                val roleName = if (storyMode == StoryVoiceCastMode.GLOBAL && assignment.character.lowercase(Locale.ROOT) !in allowedRoles) {
+                    NARRATOR
+                } else {
+                    assignment.character
+                }
                 ChapterVoiceAssignmentEntity(
                     id = stableId(content.chapter.id, assignment.paragraphIndex.toString()),
                     storyId = content.chapter.storyId,
                     chapterId = content.chapter.id,
                     paragraphIndex = assignment.paragraphIndex,
-                    roleName = assignment.character,
+                    roleName = roleName,
                     confidence = assignment.confidence.coerceIn(0f, 1f),
                     speedAdjustPct = assignment.speedAdjustPct,
                     pitchAdjustPct = assignment.pitchAdjustPct,
@@ -216,7 +256,7 @@ class NarrationPlanCoordinator(
                 provider = provider,
                 model = model,
                 sourceSha256 = ChapterAiWorkflow.sha256(content.paragraphs),
-                transformedText = "roles=${plan.roles.size};assignments=${assignments.size};unified=1",
+                transformedText = "roles=${plan.roles.size};assignments=${assignments.size};mode=${storyMode.name}",
                 updatedAt = System.currentTimeMillis(),
             ),
         )

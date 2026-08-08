@@ -82,6 +82,7 @@ data class VoiceRoleDraft(
     val roleName: String,
     val originalRoleId: String? = null,
     val aliases: String = "",
+    val description: String = "",
     val isNarrator: Boolean = false,
     val enginePackage: String? = null,
     val voiceName: String? = null,
@@ -93,6 +94,8 @@ data class VoiceRoleDraft(
     val expressionStrength: Float = 0.5f,
     val sonicSpeed: Float = 1f,
     val sonicPitch: Float = 1f,
+    val processingMethod: String = "system",
+    val sonicAccurate: Boolean = false,
     val enabled: Boolean = true,
 )
 

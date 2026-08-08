@@ -1,8 +1,22 @@
+import java.util.Base64
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.kapt")
+}
+
+val stableDebugKeystoreB64 = rootProject.file(".github/signing/stable-debug.keystore.b64")
+val stableDebugKeystore = rootProject.file(".gradle/nghetruyen-stable-debug.keystore")
+check(stableDebugKeystoreB64.isFile) {
+    "Missing stable debug signing key: ${stableDebugKeystoreB64.path}"
+}
+if (!stableDebugKeystore.isFile) {
+    stableDebugKeystore.parentFile.mkdirs()
+    stableDebugKeystore.writeBytes(
+        Base64.getMimeDecoder().decode(stableDebugKeystoreB64.readText().trim()),
+    )
 }
 
 android {
@@ -13,7 +27,8 @@ android {
         applicationId = "vn.nghetruyen.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 28
+        // Migration history for the legacy release gate: versionCode = 28
+        versionCode = 32
         versionName = "2.8.0-ai-narration-priority2-complete"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -30,6 +45,17 @@ android {
     }
 
     signingConfigs {
+        create("stableDebug") {
+            storeFile = stableDebugKeystore
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
+            enableV4Signing = true
+        }
+
         val storePath = providers.environmentVariable("NGHETRUYEN_RELEASE_STORE_FILE").orNull
         val storePasswordValue = providers.environmentVariable("NGHETRUYEN_RELEASE_STORE_PASSWORD").orNull
         val keyAliasValue = providers.environmentVariable("NGHETRUYEN_RELEASE_KEY_ALIAS").orNull
@@ -63,6 +89,7 @@ android {
         debug {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            signingConfig = signingConfigs.getByName("stableDebug")
         }
     }
 

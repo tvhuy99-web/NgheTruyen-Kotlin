@@ -7,6 +7,8 @@ import vn.nghetruyen.app.core.model.ChapterSummary
 import vn.nghetruyen.app.core.model.DownloadSelectionMode
 import vn.nghetruyen.app.core.model.DownloadState
 import vn.nghetruyen.app.core.model.ImportedBook
+import vn.nghetruyen.app.core.model.DEFAULT_GLOBAL_VOICE_PROFILES
+import vn.nghetruyen.app.core.model.GLOBAL_VOICE_PROFILE_STORY_ID
 import vn.nghetruyen.app.core.model.StorySummary
 import vn.nghetruyen.app.data.local.AppDatabase
 import vn.nghetruyen.app.data.local.AiUsageDailyEntity
@@ -386,6 +388,24 @@ class LibraryRepository(private val db: AppDatabase) {
         )
     }
 
+    suspend fun updatePronunciation(id: Long, original: String, replacement: String): Result<Unit> = runCatching {
+        val current = requireNotNull(db.pronunciationDao().get(id)) { "Không tìm thấy cách đọc." }
+        val cleanOriginal = original.trim()
+        val cleanReplacement = replacement.trim()
+        require(cleanOriginal.isNotEmpty() && cleanReplacement.isNotEmpty()) { "Hãy nhập đầy đủ từ gốc và cách đọc." }
+        require(cleanOriginal.length <= 120) { "Từ gốc quá dài." }
+        require(cleanReplacement.length <= 240) { "Cách đọc quá dài." }
+        db.pronunciationDao().upsert(
+            current.copy(
+                original = cleanOriginal,
+                replacement = cleanReplacement,
+                enabled = true,
+                updatedAt = System.currentTimeMillis(),
+            ),
+        )
+        Unit
+    }
+
     suspend fun setPronunciationEnabled(id: Long, enabled: Boolean) {
         db.pronunciationDao().setEnabled(id, enabled, System.currentTimeMillis())
     }
@@ -416,9 +436,9 @@ class LibraryRepository(private val db: AppDatabase) {
         db.storyTtsProfileDao().upsert(
             StoryTtsProfileEntity(
                 storyId = storyId,
-                rate = rate.coerceIn(0.5f, 2.0f),
+                rate = rate.coerceIn(0.25f, 3.0f),
                 pitch = pitch.coerceIn(0.5f, 2.0f),
-                volume = volume.coerceIn(0.05f, 1.0f),
+                volume = volume.coerceIn(0f, 2.0f),
                 enginePackage = enginePackage?.takeIf(String::isNotBlank),
                 voiceName = voiceName?.takeIf(String::isNotBlank),
                 languageTag = languageTag.ifBlank { "vi-VN" },
@@ -438,6 +458,53 @@ class LibraryRepository(private val db: AppDatabase) {
     suspend fun listVoiceRoles(storyId: String): List<VoiceRoleEntity> =
         db.voiceRoleDao().listForStory(storyId)
 
+    suspend fun listEffectiveVoiceRoles(storyId: String, includeGlobal: Boolean = true): List<VoiceRoleEntity> {
+        val local = db.voiceRoleDao().listForStory(storyId).filter(VoiceRoleEntity::enabled)
+        if (!includeGlobal || storyId == GLOBAL_VOICE_PROFILE_STORY_ID) return local
+        val global = db.voiceRoleDao().listForStory(GLOBAL_VOICE_PROFILE_STORY_ID).filter(VoiceRoleEntity::enabled)
+        if (local.isEmpty()) return global
+        val overridden = local.map { it.roleName.trim().lowercase(Locale.ROOT) }.toSet()
+        return local + global.filter { it.roleName.trim().lowercase(Locale.ROOT) !in overridden }
+    }
+
+    suspend fun ensureGlobalVoiceProfiles() {
+        if (db.voiceRoleDao().listForStory(GLOBAL_VOICE_PROFILE_STORY_ID).isEmpty()) restoreGlobalVoiceProfiles()
+    }
+
+    suspend fun restoreGlobalVoiceProfiles(): List<VoiceRoleEntity> = db.withTransaction {
+        val existing = db.voiceRoleDao().listForStory(GLOBAL_VOICE_PROFILE_STORY_ID)
+        val byName = existing.associateBy { it.roleName.trim().lowercase(Locale.ROOT) }
+        val defaultNames = DEFAULT_GLOBAL_VOICE_PROFILES.map { it.name.lowercase(Locale.ROOT) }.toSet()
+        val now = System.currentTimeMillis()
+        val defaults = DEFAULT_GLOBAL_VOICE_PROFILES.map { seed ->
+            val old = byName[seed.name.lowercase(Locale.ROOT)]
+            VoiceRoleEntity(
+                id = old?.id ?: UUID.nameUUIDFromBytes("$GLOBAL_VOICE_PROFILE_STORY_ID\u0000${seed.name.lowercase(Locale.ROOT)}".toByteArray()).toString(),
+                storyId = GLOBAL_VOICE_PROFILE_STORY_ID,
+                roleName = seed.name,
+                aliasesCsv = old?.aliasesCsv.orEmpty(),
+                description = seed.description,
+                enginePackage = old?.enginePackage,
+                voiceName = old?.voiceName,
+                languageTag = old?.languageTag?.ifBlank { "vi-VN" } ?: "vi-VN",
+                rate = old?.rate ?: 1f,
+                pitch = old?.pitch ?: 1f,
+                volume = old?.volume ?: 1f,
+                expression = old?.expression ?: "NEUTRAL",
+                expressionStrength = old?.expressionStrength ?: 0.5f,
+                sonicSpeed = old?.sonicSpeed ?: 1f,
+                sonicPitch = old?.sonicPitch ?: 1f,
+                isNarrator = seed.narrator,
+                enabled = true,
+                updatedAt = now,
+            )
+        }
+        val custom = existing.filter { it.roleName.trim().lowercase(Locale.ROOT) !in defaultNames }.take((10 - defaults.size).coerceAtLeast(0))
+        db.voiceRoleDao().deleteForStory(GLOBAL_VOICE_PROFILE_STORY_ID)
+        db.voiceRoleDao().upsertAll(defaults + custom)
+        defaults + custom
+    }
+
     suspend fun saveVoiceRole(
         storyId: String,
         roleName: String,
@@ -454,6 +521,7 @@ class LibraryRepository(private val db: AppDatabase) {
         sonicSpeed: Float = 1.0f,
         sonicPitch: Float = 1.0f,
         enabled: Boolean = true,
+        description: String = "",
     ): Result<String> = runCatching {
         require(storyId.isNotBlank()) { "Thiếu mã truyện." }
         val cleanName = roleName.trim().take(80)
@@ -466,15 +534,16 @@ class LibraryRepository(private val db: AppDatabase) {
                 storyId = storyId,
                 roleName = cleanName,
                 aliasesCsv = aliasesCsv.trim().take(500),
+                description = description.trim().take(1000),
                 enginePackage = enginePackage?.takeIf(String::isNotBlank),
                 voiceName = voiceName?.takeIf(String::isNotBlank),
                 languageTag = languageTag.ifBlank { "vi-VN" },
-                rate = rate.coerceIn(0.5f, 2.0f),
+                rate = rate.coerceIn(0.25f, 3.0f),
                 pitch = pitch.coerceIn(0.5f, 2.0f),
-                volume = volume.coerceIn(0.05f, 1.0f),
+                volume = volume.coerceIn(0f, 2.0f),
                 expression = expression.trim().uppercase(Locale.ROOT).takeIf { it in setOf("NEUTRAL", "CALM", "WARM", "SAD", "TENSE", "ANGRY", "EXCITED", "WHISPER") } ?: "NEUTRAL",
                 expressionStrength = expressionStrength.coerceIn(0f, 1f),
-                sonicSpeed = sonicSpeed.coerceIn(0.5f, 2.0f),
+                sonicSpeed = sonicSpeed.coerceIn(0.25f, 3.0f),
                 sonicPitch = sonicPitch.coerceIn(0.5f, 2.0f),
                 isNarrator = isNarrator,
                 enabled = enabled,
@@ -711,6 +780,16 @@ class LibraryRepository(private val db: AppDatabase) {
 
     suspend fun setVietPhraseDictionaryEnabled(id: String, enabled: Boolean) =
         db.vietPhraseDictionaryStateDao().setEnabled(id, enabled)
+
+    suspend fun deleteVietPhraseDictionary(kind: VietPhraseDictionaryKind) = db.withTransaction {
+        db.vietPhraseDao().deleteDictionary(kind.name, VietPhraseScope.GLOBAL.name, null)
+        db.vietPhraseDictionaryStateDao().deleteKinds(listOf(kind.name))
+    }
+
+    suspend fun clearAllVietPhraseDictionaries() = db.withTransaction {
+        db.vietPhraseDao().deleteAll()
+        db.vietPhraseDictionaryStateDao().deleteAll()
+    }
 
     suspend fun previewVietPhraseImport(
         incoming: List<VietPhraseRule>,

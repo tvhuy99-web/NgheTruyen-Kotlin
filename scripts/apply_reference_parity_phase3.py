@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 
 phase6 = Path('scripts/apply_reference_parity_phase6.py').resolve()
 phase6_text = phase6.read_text()
@@ -10,7 +11,8 @@ exec(phase6_text.replace(old_anchor, new_anchor, 1), {'__name__': '__main__', '_
 
 reader = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt').read_text()
 db = Path('app/src/main/java/vn/nghetruyen/app/data/local/AppDatabase.kt').read_text()
-exporter = Path('app/src/main/java/vn/nghetruyen/app/ai/vietphrase/VietPhraseDiagnosticExporter.kt').read_text()
+exporter_path = Path('app/src/main/java/vn/nghetruyen/app/ai/vietphrase/VietPhraseDiagnosticExporter.kt')
+exporter = exporter_path.read_text()
 
 music_tokens = [
     'DANH SÁCH NHẠC NỀN', 'Tìm theo tên bài', 'THÊM BÀI', 'DÁN MÔ TẢ',
@@ -28,7 +30,6 @@ assert 'tagsCsv.length > 300' in reader
 assert 'musicLibraryDraft.size > 500' in reader
 assert 'orderIndex ASC, title COLLATE NOCASE' in db
 assert 'suspend fun deleteAll()' in db
-
 for token in [
     'vietphrase_diagnostic_', 'README.txt', 'summary.txt', 'source.txt', 'translated.txt', 'trace.tsv',
     'NHẬT KÝ VIETPHRASE - NGHE TRUYỆN', 'TRACE_LIMIT = 20_000',
@@ -42,4 +43,17 @@ for token in [
 for token in ['TÌM TRONG CHƯƠNG', 'lineHeightPercent', 'DỊCH AI', 'PHÂN VAI AI', 'XEM NHẬT KÝ']:
     assert token in reader, f'core reader regression: {token}'
 assert 'showVietPhraseLogDialog' not in reader
+
+product_files = [
+    'app/src/main/java/vn/nghetruyen/app/data/local/AppDatabase.kt',
+    'app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt',
+    str(exporter_path),
+]
+subprocess.run(['git', 'config', 'user.name', 'reference-parity-bot'], check=True)
+subprocess.run(['git', 'config', 'user.email', 'reference-parity-bot@users.noreply.github.com'], check=True)
+subprocess.run(['git', 'add', '--', *product_files], check=True)
+if subprocess.run(['git', 'diff', '--cached', '--quiet']).returncode != 0:
+    subprocess.run(['git', 'commit', '-m', 'fix: match reference music library and VietPhrase diagnostics'], check=True)
+    subprocess.run(['git', 'push', 'origin', 'HEAD:agent/reference-ui-position-parity'], check=True)
+
 print('REFERENCE_READER_MUSIC_VIETPHRASE_ASSERTIONS_OK')

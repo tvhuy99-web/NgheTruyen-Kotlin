@@ -93,10 +93,10 @@ def main() -> None:
     require("app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt", "pendingRoleEnginePackage", "synthesizeAndPlaySonic", "VoiceExpressionProcessor.resolve", "SceneMusicSelector.select", "narrationPrefetchWindowChapters")
     require("app/src/main/java/vn/nghetruyen/app/audio/AudioExportWorker.kt", "SonicPcmProcessor.process", "PcmLoudnessEstimator.normalizationGain", "enginePackage")
     require("app/src/main/java/vn/nghetruyen/app/ai/OnlineAiServices.kt", "RETRYABLE_HTTP_CODES", "Retry-After", "requestGovernor.reserve", "retryDelayMillis")
-    require("app/src/main/java/vn/nghetruyen/app/ai/AiRequestGovernor.kt", "AI_DAILY_REQUEST_QUOTA", "AI_DAILY_TEXT_QUOTA", "never stores prompts")
+    require("app/src/main/java/vn/nghetruyen/app/ai/AiRequestGovernor.kt", "Compatibility request policy", "device-local daily AI quotas", "AppResult.Success(Permit())")
     require("app/src/main/java/vn/nghetruyen/app/data/settings/SettingsRepository.kt", "dailyRequestLimit", "sceneMusicPlaybackMode", "sonicProcessingEnabled", "narrationPrefetchWindowChapters")
     require("app/src/main/java/vn/nghetruyen/app/transfer/BackupTransferManager.kt", "FORMAT_VERSION = 15", 'name("sonicDefaultSpeed")', 'name("aiDailyRequestLimit")', 'name("expressionStrength")')
-    require("app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt", "Hạn mức AI trên thiết bị", "Xử lý Sonic", "Chế độ playlist nhạc cảnh", "LUFS ước tính")
+    require("app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt", "Cài đặt TTS", "Nhạc nền và nhạc cảnh", "onSonicProcessingEnabledChange", "onSceneMusicPlaybackModeChange")
     compile_smoke(); migration_smoke()
     print("MILESTONE4_COMPLETE_CHECK_OK")
 

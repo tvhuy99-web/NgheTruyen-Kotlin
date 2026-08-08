@@ -3,6 +3,14 @@ from pathlib import Path
 phase5 = Path('scripts/apply_reference_parity_phase5.py').resolve()
 exec(phase5.read_text(), {'__name__': '__main__', '__file__': str(phase5)})
 
+validator_path = Path('scripts/validate_release.py')
+validator = validator_path.read_text()
+old_hint = '        "Nhập tên chương hoặc số chương",\n'
+new_hint = '        "Nhập tên, số chương hoặc vài ký tự liên quan",\n        "Hãy nhập tên hoặc số chương.",\n'
+if validator.count(old_hint) != 1:
+    raise SystemExit(f'validator chapter hint: expected 1 occurrence, found {validator.count(old_hint)}')
+validator_path.write_text(validator.replace(old_hint, new_hint, 1))
+
 library = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/LibraryScreen.kt').read_text()
 story = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt').read_text()
 db = Path('app/src/main/java/vn/nghetruyen/app/data/local/AppDatabase.kt').read_text()

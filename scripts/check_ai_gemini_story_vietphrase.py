@@ -97,7 +97,7 @@ def main() -> int:
     )
     require(
         "app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt",
-        "CẢI THIỆN VP",
+        "TẠO NHẬT KÝ VIETPHRASE",
     )
     require(
         "app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt",

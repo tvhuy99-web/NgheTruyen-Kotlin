@@ -15,7 +15,17 @@ class VietPhraseFileCodecTest {
 
     @Test fun escapedTabsAndNewlinesRoundTrip() {
         val encoded = VietPhraseFileCodec.encode(
-            listOf(VietPhraseEntity(1, "A\\B", "X\tY\nZ", 3, true, 0, 0)),
+            listOf(
+                VietPhraseEntity(
+                    id = 1,
+                    source = "A\\B",
+                    target = "X\tY\nZ",
+                    priority = 3,
+                    enabled = true,
+                    createdAt = 0L,
+                    updatedAt = 0L,
+                ),
+            ),
         )
         val decoded = VietPhraseFileCodec.decode(encoded).single()
         assertEquals("A\\B", decoded.source)

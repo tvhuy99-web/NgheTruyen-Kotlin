@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: reference-parity-phase1-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   parity:
     if: github.actor != 'github-actions[bot]'
@@ -23,11 +27,12 @@ jobs:
           python-version: '3.12'
       - name: Apply reference parity phase 1
         run: |
-          python3 scripts/apply_reference_parity_phase1.py
-          python3 scripts/apply_reference_parity_phase1_fix.py
+          set -o pipefail
+          (python3 scripts/apply_reference_parity_phase1.py && python3 scripts/apply_reference_parity_phase1_fix.py) 2>&1 | tee /tmp/reference-phase1-apply.log
       - name: Assert reference menu hierarchy
         run: |
-          python3 - <<'PY'
+          set -o pipefail
+          python3 - <<'PY' 2>&1 | tee /tmp/reference-phase1-assert.log
           from pathlib import Path
           explore = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/ExploreScreen.kt').read_text()
           library = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/LibraryScreen.kt').read_text()
@@ -41,14 +46,39 @@ jobs:
           print('REFERENCE_PHASE1_UI_ASSERTIONS_OK')
           PY
       - name: Validate release wiring
-        run: python3 scripts/validate_release.py --wiring-only
+        run: |
+          set -o pipefail
+          python3 scripts/validate_release.py --wiring-only 2>&1 | tee /tmp/reference-phase1-validator.log
       - name: Compile Kotlin
-        run: bash ./gradlew :app:compileDebugKotlin --no-daemon
+        run: |
+          set -o pipefail
+          bash ./gradlew :app:compileDebugKotlin --no-daemon 2>&1 | tee /tmp/reference-phase1-compile.log
+      - name: Commit failure diagnostics
+        if: failure()
+        run: |
+          mkdir -p ci
+          {
+            echo '=== APPLY ==='
+            cat /tmp/reference-phase1-apply.log 2>/dev/null || true
+            echo '=== ASSERT ==='
+            cat /tmp/reference-phase1-assert.log 2>/dev/null || true
+            echo '=== VALIDATOR ==='
+            cat /tmp/reference-phase1-validator.log 2>/dev/null || true
+            echo '=== COMPILE ==='
+            cat /tmp/reference-phase1-compile.log 2>/dev/null || true
+          } > ci/reference-parity-phase1-failure.log
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ci/reference-parity-phase1-failure.log
+          git commit -m "ci: record reference parity phase 1 failure" || true
+          git push origin HEAD:agent/reference-ui-position-parity || true
       - name: Commit product changes and remove temporary tooling
+        if: success()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm scripts/apply_reference_parity_phase1.py scripts/apply_reference_parity_phase1_fix.py .github/workflows/reference-parity-phase1.yml
+          rm -f ci/reference-parity-phase1-failure.log
           git add -A
           if git diff --cached --quiet; then
             echo "No changes to commit"

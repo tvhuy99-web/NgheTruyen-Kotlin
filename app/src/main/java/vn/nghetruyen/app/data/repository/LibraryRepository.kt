@@ -812,7 +812,7 @@ class LibraryRepository(private val db: AppDatabase) {
         val dao = db.vietPhraseDao()
         val existing = dao.get(id) ?: error("Quy tắc VietPhrase không còn tồn tại.")
         val matchMode = when {
-            existing.matchMode == VietPhraseMatchMode.REGEX.name -> VietPhraseMatchMode.REGEX.name
+            existing.matchMode == "REGEX" -> "REGEX"
             Regex("\\{\\d+}").containsMatchIn(cleanSource) -> VietPhraseMatchMode.TEMPLATE.name
             else -> VietPhraseMatchMode.LITERAL.name
         }

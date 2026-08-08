@@ -16,6 +16,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      EXPECTED_DEBUG_CERT_SHA256: 534bf882c96a59ccf4310d18d02b14b62aa68e2beff3b6d05bf308e9909eb2f4
 
     steps:
       - name: Checkout
@@ -38,8 +40,24 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
+      - name: Install validation dependencies
+        run: python3 -m pip install --disable-pip-version-check beautifulsoup4 cryptography
+
       - name: Run Milestone 0 gate
-        run: ./scripts/m0_gate.sh
+        run: bash scripts/m0_gate.sh
+
+      - name: Verify stable debug APK signature
+        shell: bash
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          APKSIGNER="${ANDROID_HOME}/build-tools/36.0.0/apksigner"
+          test -f "${APK}"
+          test -x "${APKSIGNER}"
+          "${APKSIGNER}" verify --verbose --print-certs "${APK}"
+          ACTUAL_CERT_SHA256="$("${APKSIGNER}" verify --print-certs "${APK}" | awk -F': ' '/certificate SHA-256 digest:/ {print tolower($NF); exit}')"
+          echo "Expected certificate: ${EXPECTED_DEBUG_CERT_SHA256}"
+          echo "Actual certificate:   ${ACTUAL_CERT_SHA256}"
+          test "${ACTUAL_CERT_SHA256}" = "${EXPECTED_DEBUG_CERT_SHA256}"
 
       - name: Upload build outputs
         if: always()

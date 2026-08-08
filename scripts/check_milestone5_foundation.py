@@ -142,7 +142,13 @@ def main() -> None:
     require("app/src/main/java/vn/nghetruyen/app/diagnostics/PerformanceDiagnostics.kt", "Debug.getPss", "chapterSearchP95Millis", "10_000")
     require("app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt", "resumeAudioExport", "AudioExportRequest", "runPerformanceDiagnostics")
     require("app/src/main/java/vn/nghetruyen/app/MainActivity.kt", "audioExportDirectoryLauncher", "OpenDocumentTree", "AudioExportRequest")
-    require("app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt", "Xuất sách nói", "Mỗi chương một tệp", "Trộn nhạc cảnh", "chapter marker")
+    require(
+        "app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt",
+        "XUẤT SÁCH NÓI",
+        "AudioExportPackaging.ONE_FILE_PER_CHAPTER",
+        "includeSceneMusic = includeMusic",
+        "chapterMarkers = chapterMarkers",
+    )
     require("THIRD_PARTY_NOTICES.md", "java-lame 1.0.0", "LGPL")
     require("app/src/test/java/vn/nghetruyen/app/audio/Mp3LameEncoderTest.kt", "encodesPcm16WaveWithId3AndMp3Frames", "0xe0")
     require("app/src/test/java/vn/nghetruyen/app/audio/Id3v23WriterChapterTest.kt", "writesOrderedChapterAndTableOfContentsFrames", "CHAP", "CTOC")

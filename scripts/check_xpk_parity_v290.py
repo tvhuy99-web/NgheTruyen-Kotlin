@@ -229,10 +229,16 @@ def main() -> int:
         "display.layoutMode == ReaderLayoutMode.SCROLL",
         "showNoteDialog = true",
         "ÁP DỤNG VIETPHRASE",
-        "AI CẢI THIỆN VIETPHRASE",
-        "AI PHÂN VAI + NHẠC CẢNH",
+        "CẢI THIỆN VIETPHRASE",
+        "PHÂN VAI + NHẠC",
         "TIẾP TỤC BẰNG BẢN GỐC",
         "AudioExportRequest(",
+    )
+    forbid(
+        "app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt",
+        "QUAY LẠI",
+        "AI CẢI THIỆN VIETPHRASE",
+        "AI PHÂN VAI + NHẠC CẢNH",
     )
     require(
         "app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt",
@@ -244,6 +250,10 @@ def main() -> int:
         "AudioExportPackaging.ONE_FILE_PER_CHAPTER",
         "Đánh dấu chương trong MP3",
     )
+    forbid(
+        "app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt",
+        "QUAY LẠI",
+    )
     require(
         "app/src/main/java/vn/nghetruyen/app/ui/screens/LibraryScreen.kt",
         "LibrarySection.NOTES -> state.notes.size",
@@ -254,9 +264,9 @@ def main() -> int:
     )
     require(
         "app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt",
-        "TAI NGHE, SONIC & TỰ ĐỘNG",
-        "BẢN KHÔI PHỤC",
-        "GỢI Ý AI CHỜ DUYỆT",
+        "TAI NGHE & TỰ ĐỘNG",
+        "KHÔI PHỤC (",
+        "GỢI Ý AI (",
         "SỬA QUY TẮC",
         "onUpdateRule(",
         "XÁC NHẬN NHẬP",
@@ -267,8 +277,11 @@ def main() -> int:
     )
     forbid(
         "app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt",
+        "QUAY LẠI",
         "chưa được nối vào nút này",
         "chưa được kích hoạt",
+        "TAI NGHE, SONIC & TỰ ĐỘNG",
+        "GỢI Ý AI CHỜ DUYỆT",
     )
     require(
         "app/src/main/java/vn/nghetruyen/app/data/local/AppDatabase.kt",

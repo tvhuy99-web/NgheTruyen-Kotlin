@@ -6,6 +6,12 @@ on:
       - agent/reference-ui-position-parity
     paths:
       - .github/workflows/reference-parity-phase2.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/reference-parity-phase2.yml
+      - scripts/apply_reference_parity_phase2.py
   workflow_dispatch:
 
 permissions:
@@ -76,9 +82,11 @@ jobs:
         run: bash ./gradlew :app:compileDebugKotlin --no-daemon
 
       - name: Remove temporary phase tooling
+        if: github.event_name != 'pull_request'
         run: rm -f scripts/apply_reference_parity_phase2.py .github/workflows/reference-parity-phase2.yml
 
       - name: Commit verified product changes
+        if: github.event_name != 'pull_request'
         shell: bash
         run: |
           git config user.name "github-actions[bot]"

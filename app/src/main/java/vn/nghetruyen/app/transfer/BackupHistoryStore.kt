@@ -81,7 +81,7 @@ class BackupHistoryStore(context: Context) {
     private fun formatEntry(item: BackupHistoryEntry): String {
         val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ROOT).format(Date(item.timestampEpochMs))
         val state = if (item.success) "THÀNH CÔNG" else "THẤT BẠI"
-        val componentText = item.components.takeIf(List<String>::isNotEmpty)?.joinToString(", ")?.let { " | $it" }.orEmpty()
+        val componentText = item.components.takeIf { it.isNotEmpty() }?.joinToString(", ")?.let { " | $it" }.orEmpty()
         val errorText = item.errorCode?.takeIf(String::isNotBlank)?.let { " | $it" }.orEmpty()
         return "$stamp | ${item.operation} | $state$errorText$componentText | ${item.summary}"
     }

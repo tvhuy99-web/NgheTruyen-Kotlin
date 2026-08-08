@@ -2038,7 +2038,7 @@ private fun VietPhraseCard(
     if (showSnapshots) {
         AlertDialog(
             onDismissRequest = { showSnapshots = false },
-            title = { Text("BẢN KHÔI PHỤC") },
+            title = { Text("KHÔI PHỤC") },
             text = {
                 Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
                     latestSnapshots.take(30).forEach { snapshot ->

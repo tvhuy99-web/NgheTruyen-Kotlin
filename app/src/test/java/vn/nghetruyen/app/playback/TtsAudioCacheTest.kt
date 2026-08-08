@@ -1,6 +1,7 @@
 package vn.nghetruyen.app.playback
 
 import java.io.File
+import kotlin.io.path.createTempDirectory
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -8,7 +9,7 @@ import org.junit.Test
 
 class TtsAudioCacheTest {
     @Test fun checksumDetectsTamperingAndLruRemainsBounded() {
-        val dir = createTempDir(prefix = "tts-cache-")
+        val dir = createTempDirectory("tts-cache-").toFile()
         try {
             val cache = TtsAudioCache(dir, TtsAudioCache.MIN_LIMIT_BYTES)
             val key = key("hello")

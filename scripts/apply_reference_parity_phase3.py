@@ -1,8 +1,24 @@
 from pathlib import Path
+import subprocess
 
 # Reuse the already-proven phase-3 verification job as a runner for phase 4.
 phase4 = Path('scripts/apply_reference_parity_phase4.py').resolve()
 exec(phase4.read_text(), {'__name__': '__main__', '__file__': str(phase4)})
+
+product_files = [
+    'app/src/main/java/vn/nghetruyen/app/sourceplatform/SourcePlatformModels.kt',
+    'app/src/main/java/vn/nghetruyen/app/sourceplatform/SourcePlatformManager.kt',
+    'app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt',
+    'app/src/main/java/vn/nghetruyen/app/ui/screens/ReferencePersonalScreen.kt',
+    'app/src/main/java/vn/nghetruyen/app/ui/ReferenceNgheTruyenApp.kt',
+    'app/src/main/java/vn/nghetruyen/app/MainActivity.kt',
+]
+subprocess.run(['git', 'config', 'user.name', 'reference-parity-bot'], check=True)
+subprocess.run(['git', 'config', 'user.email', 'reference-parity-bot@users.noreply.github.com'], check=True)
+subprocess.run(['git', 'add', '--', *product_files], check=True)
+if subprocess.run(['git', 'diff', '--cached', '--quiet']).returncode != 0:
+    subprocess.run(['git', 'commit', '-m', 'fix: match reference installed extension actions'], check=True)
+    subprocess.run(['git', 'push', 'origin', 'HEAD:agent/reference-ui-position-parity'], check=True)
 
 ui = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/ReferencePersonalScreen.kt').read_text()
 manager = Path('app/src/main/java/vn/nghetruyen/app/sourceplatform/SourcePlatformManager.kt').read_text()

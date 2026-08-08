@@ -1,7 +1,8 @@
 from pathlib import Path
 
 # Reuse the already-proven phase-3 verification job as a runner for phase 4.
-exec(Path('scripts/apply_reference_parity_phase4.py').read_text(), {'__name__': '__main__'})
+phase4 = Path('scripts/apply_reference_parity_phase4.py').resolve()
+exec(phase4.read_text(), {'__name__': '__main__', '__file__': str(phase4)})
 
 ui = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/ReferencePersonalScreen.kt').read_text()
 manager = Path('app/src/main/java/vn/nghetruyen/app/sourceplatform/SourcePlatformManager.kt').read_text()

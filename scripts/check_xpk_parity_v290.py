@@ -237,8 +237,8 @@ def main() -> int:
     forbid(
         "app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt",
         "QUAY LẠI",
-        "CẢI THIỆN VIETPHRASE",
-        "PHÂN VAI + NHẠC CẢNH",
+        "AI CẢI THIỆN VIETPHRASE",
+        "AI PHÂN VAI + NHẠC CẢNH",
     )
     require(
         "app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt",
@@ -280,8 +280,9 @@ def main() -> int:
         "QUAY LẠI",
         "chưa được nối vào nút này",
         "chưa được kích hoạt",
-        "TAI NGHE & TỰ ĐỘNG",
-        "GỢI Ý AI",
+        "TAI NGHE, SONIC & TỰ ĐỘNG",
+        "GỢI Ý AI CHỜ DUYỆT",
+        "BẢN KHÔI PHỤC",
     )
     require(
         "app/src/main/java/vn/nghetruyen/app/data/local/AppDatabase.kt",

@@ -157,6 +157,9 @@ fun ReferencePersonalScreen(
     onCancelSourcePackInstall: () -> Unit,
     onSourcePackEnabledChange: (String, Boolean) -> Unit,
     onRollbackSourcePack: (String) -> Unit,
+    onUpdateSourcePack: (String) -> Unit,
+    onExportSourcePack: (String, String) -> Unit,
+    onRemoveSourcePack: (String) -> Unit,
     onEnrollSourceTrustKey: (String, String, String, String) -> Unit,
     onRevokeSourceTrustKey: (String) -> Unit,
     onInspectSourceSelector: (String, String, String) -> Unit,
@@ -376,7 +379,9 @@ fun ReferencePersonalScreen(
             state = state,
             onEnabledChange = onSourcePackEnabledChange,
             onCheckSource = onCheckSource,
-            onPrepareUpdate = onPrepareRepositorySourceInstall,
+            onUpdate = onUpdateSourcePack,
+            onExport = onExportSourcePack,
+            onRemove = onRemoveSourcePack,
             onDismiss = { showExtensionsInstalled = false },
         )
     }
@@ -979,11 +984,14 @@ private fun InstalledExtensionsReferenceDialog(
     state: MainUiState,
     onEnabledChange: (String, Boolean) -> Unit,
     onCheckSource: (String) -> Unit,
-    onPrepareUpdate: (String, String) -> Unit,
+    onUpdate: (String) -> Unit,
+    onExport: (String, String) -> Unit,
+    onRemove: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
     var selected by remember { mutableStateOf<String?>(null) }
+    var deleteTarget by remember { mutableStateOf<vn.nghetruyen.app.sourceplatform.SourcePackUiInfo?>(null) }
     val visible = state.sourcePacks.filter { query.isBlank() || it.name.contains(query, true) || it.id.contains(query, true) }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1007,11 +1015,22 @@ private fun InstalledExtensionsReferenceDialog(
                     if (pack.runtimeMode == "VBOOK_JS_COMPAT") SettingsButton("TƯƠNG THÍCH") { selected = null }
                     if (pack.runtimeMode == "NATIVE_LUA_COMPAT" && source != null) SettingsButton("KIỂM TRA NATIVE") { onCheckSource(source.id); selected = null }
                     if (source != null) SettingsButton("KIỂM TRA NGUỒN") { onCheckSource(source.id); selected = null }
-                    if (update != null) SettingsButton("CẬP NHẬT") { onPrepareUpdate(update.repositoryId, update.sourceId); selected = null }
+                    SettingsButton("CẬP NHẬT") { onUpdate(pack.id); selected = null }
+                    SettingsButton("XUẤT") { onExport(pack.id, pack.name); selected = null }
+                    if (pack.removable) SettingsButton("XÓA") { selected = null; deleteTarget = pack }
                 } },
                 confirmButton = { TextButton(onClick = { selected = null }) { Text("ĐÓNG") } },
             )
         }
+    }
+    deleteTarget?.let { pack ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("XÓA TIỆN ÍCH") },
+            text = { Text("Xóa ${pack.name}? Dữ liệu truyện đã tải sẽ được giữ lại.") },
+            confirmButton = { TextButton(onClick = { onRemove(pack.id); deleteTarget = null }) { Text("XÓA") } },
+            dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("HỦY") } },
+        )
     }
 }
 

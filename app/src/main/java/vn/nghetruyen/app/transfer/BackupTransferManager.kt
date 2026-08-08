@@ -883,6 +883,7 @@ class BackupTransferManager(
             name("storyId").value(item.storyId)
             name("chapterId").value(item.chapterId)
             name("paragraphIndex").value(item.paragraphIndex.toLong())
+            name("totalParagraphs").value(item.totalParagraphs.toLong())
             name("updatedAt").value(item.updatedAt)
             endObject()
         }
@@ -891,18 +892,25 @@ class BackupTransferManager(
 
     private suspend fun JsonReader.readProgress(save: suspend (List<ReadingProgressEntity>) -> Unit): Int = readBatches(
         readItem = {
-            var storyId = ""; var chapterId = ""; var paragraph = 0; var updated = 0L
+            var storyId = ""; var chapterId = ""; var paragraph = 0; var totalParagraphs = 0; var updated = 0L
             beginObject()
             while (hasNext()) when (nextName()) {
                 "storyId" -> storyId = nextStringSafe("")
                 "chapterId" -> chapterId = nextStringSafe("")
                 "paragraphIndex" -> paragraph = nextLongSafe(0L).toInt().coerceAtLeast(0)
+                "totalParagraphs" -> totalParagraphs = nextLongSafe(0L).toInt().coerceAtLeast(0)
                 "updatedAt" -> updated = nextLongSafe(0L)
                 else -> skipValue()
             }
             endObject()
             require(storyId.isNotBlank() && chapterId.isNotBlank()) { "Tiến độ đọc không hợp lệ." }
-            ReadingProgressEntity(storyId, chapterId, paragraph, updated)
+            ReadingProgressEntity(
+                storyId = storyId,
+                chapterId = chapterId,
+                paragraphIndex = paragraph,
+                totalParagraphs = totalParagraphs,
+                updatedAt = updated,
+            )
         },
         saveBatch = save,
     )

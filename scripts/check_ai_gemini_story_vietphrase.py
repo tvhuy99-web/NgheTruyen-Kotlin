@@ -90,19 +90,19 @@ def main() -> int:
     )
     require(
         "app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt",
-        "AI riêng cho truyện",
-        "Prompt dịch riêng",
-        "Prompt cải thiện",
-        "Tự chạy chế độ đã chọn khi mở chương",
+        "AI RIÊNG CHO TRUYỆN",
+        "Lời nhắc riêng khi dịch",
+        "Lời nhắc riêng khi cải thiện VietPhrase",
+        "Tự động dịch khi mở chương",
     )
     require(
         "app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt",
-        "CẢI THIỆN VP",
+        "TẠO NHẬT KÝ VIETPHRASE",
     )
     require(
-        "app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt",
-        "GEMINI NATIVE",
-        "TẢI DANH SÁCH MODEL GEMINI",
+        "app/src/main/java/vn/nghetruyen/app/ui/screens/ReferencePersonalScreen.kt",
+        "Google Gemini",
+        "TẢI DS",
     )
     require(
         "app/src/main/java/vn/nghetruyen/app/transfer/BackupTransferManager.kt",

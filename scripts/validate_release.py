@@ -375,7 +375,8 @@ def main() -> None:
     require_text(
         "app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt",
         "TÌM CHƯƠNG",
-        "Nhập tên chương hoặc số chương",
+        "Nhập tên, số chương hoặc vài ký tự liên quan",
+        "Hãy nhập tên hoặc số chương.",
         "CHỌN PHẠM VI TẢI",
         "CHỌN NHIỀU CHƯƠNG",
         "TẢI TOÀN BỘ TRUYỆN",

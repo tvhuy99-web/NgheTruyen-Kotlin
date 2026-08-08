@@ -72,6 +72,7 @@ import vn.nghetruyen.app.data.local.FollowedStoryEntity
 import vn.nghetruyen.app.data.local.StoryEntity
 import vn.nghetruyen.app.data.local.OfflineStoryStorage
 import vn.nghetruyen.app.data.local.PronunciationEntity
+import vn.nghetruyen.app.data.local.ReadingProgressEntity
 import vn.nghetruyen.app.data.local.StorageUsage
 import vn.nghetruyen.app.data.local.StoryTtsProfileEntity
 import vn.nghetruyen.app.data.local.StoryAiProfileEntity
@@ -163,6 +164,7 @@ data class MainUiState(
     val loading: Boolean = false,
     val message: String? = null,
     val readingStories: List<StoryEntity> = emptyList(),
+    val readingProgress: Map<String, ReadingProgressEntity> = emptyMap(),
     val downloadedStories: List<StoryEntity> = emptyList(),
     val bookmarks: List<BookmarkEntity> = emptyList(),
     val notes: List<ChapterNoteEntity> = emptyList(),
@@ -173,6 +175,7 @@ data class MainUiState(
     val autoPlayNextChapter: Boolean = true,
     val continueAvailable: Boolean = false,
     val offlineStorage: Map<String, OfflineStoryStorage> = emptyMap(),
+    val downloadedChapterIds: Set<String> = emptySet(),
     val storageUsage: StorageUsage = StorageUsage(0, 0, 0, 0),
     val ttsEngines: List<TtsEngineOption> = emptyList(),
     val ttsVoices: List<TtsVoiceOption> = emptyList(),
@@ -389,6 +392,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         viewModelScope.launch {
+            container.libraryRepository.observeReadingProgress().collect { items ->
+                mutableState.update { it.copy(readingProgress = items.associateBy(ReadingProgressEntity::storyId)) }
+            }
+        }
+        viewModelScope.launch {
             container.libraryRepository.observeOffline().collect { items ->
                 mutableState.update { it.copy(downloadedStories = items) }
             }
@@ -421,6 +429,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             container.libraryRepository.observeOfflineStorage().collect { items ->
                 mutableState.update { it.copy(offlineStorage = items.associateBy(OfflineStoryStorage::storyId)) }
+            }
+        }
+        viewModelScope.launch {
+            container.libraryRepository.observeDownloadedChapterIds().collect { ids ->
+                mutableState.update { it.copy(downloadedChapterIds = ids.toSet()) }
             }
         }
         viewModelScope.launch {
@@ -638,6 +651,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 content.chapter.storyId,
                 content.chapter.id,
                 snapshot.playback.paragraphIndex,
+                content.paragraphs.size,
             )
             showMessage("Đã lưu vị trí đọc tại đoạn ${snapshot.playback.paragraphIndex + 1}.")
         }
@@ -1091,6 +1105,45 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     showMessage("Đã rollback nguồn về phiên bản trước.")
                 }
                 .onFailure { showMessage(it.message ?: "Không có phiên bản để rollback.") }
+        }
+    }
+
+    fun updateSourcePack(sourceId: String) {
+        val update = state.value.sourceRepositoryPackages.firstOrNull {
+            it.sourceId == sourceId && it.status == "UPDATE_AVAILABLE" && it.canInstall
+        }
+        if (update == null) {
+            showMessage("Không có bản cập nhật.")
+            return
+        }
+        prepareRepositorySourceInstall(update.repositoryId, update.sourceId)
+    }
+
+    fun exportSourcePack(sourceId: String, destination: Uri) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val resolver = getApplication<Application>().contentResolver
+                    resolver.openOutputStream(destination, "w")?.use { output ->
+                        container.sourcePlatformManager.exportInstalledPack(sourceId, output).getOrThrow()
+                    } ?: error("Không mở được tệp xuất tiện ích.")
+                }
+            }.onSuccess {
+                showMessage("Đã xuất tiện ích.")
+            }.onFailure { error ->
+                showMessage(error.message ?: "Không xuất được tiện ích.")
+            }
+        }
+    }
+
+    fun removeSourcePack(sourceId: String) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { container.sourcePlatformManager.removeInstalledPack(sourceId) }
+                .onSuccess {
+                    refreshSourcePlatformState()
+                    showMessage("Đã xóa tiện ích. Dữ liệu truyện đã tải được giữ lại.")
+                }
+                .onFailure { error -> showMessage(error.message ?: "Không xóa được tiện ích.") }
         }
     }
 

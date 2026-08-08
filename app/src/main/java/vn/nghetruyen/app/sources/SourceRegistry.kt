@@ -12,7 +12,7 @@ class SourceRegistry(
     sessionStore: SourceSessionStore = InMemorySourceSessionStore(),
     sourcePackSources: List<StorySource> = emptyList(),
 ) {
-    private val legacySources = sources ?: defaultSources(sessionStore)
+    private val legacySources = (sources ?: defaultSources(sessionStore)).distinctBy { it.descriptor.id }
     @Volatile
     private var byId: Map<String, StorySource> = merge(sourcePackSources)
 

@@ -36,9 +36,9 @@ require('app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt',
         'usedUnifiedRequest', 'ai.planNarration', 'buildContinuityContext',
         'loadPreviousCachedChapter', 'activeTrackId', 'persistVoicePlan', 'persistMusicPlan')
 require('app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt',
-        'DÀN DỰNG AI', 'ĐANG CHUẨN BỊ', 'AI LỖI')
+        'PHÂN VAI AI', 'ĐANG CHUẨN BỊ', 'AI LỖI')
 require('app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt',
-        'THÊM HỒ SƠ VAI', 'onPreviewVoiceRole', 'enginePackage',
+        'THÊM VAI HOẶC NHÂN VẬT', 'onPreviewVoiceRole', 'enginePackage',
         'voiceName', 'expressionStrength', 'sonicSpeed', 'sonicPitch')
 require('app/src/main/java/vn/nghetruyen/app/core/model/Models.kt',
         'data class VoiceRoleDraft', 'originalRoleId', 'enginePackage',

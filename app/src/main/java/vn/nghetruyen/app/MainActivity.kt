@@ -94,6 +94,14 @@ class MainActivity : ComponentActivity() {
             ) { uri ->
                 if (uri != null) viewModel.prepareSourcePack(uri)
             }
+            var pendingSourcePackExportId by remember { mutableStateOf<String?>(null) }
+            val sourcePackExportLauncher = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.CreateDocument("application/zip"),
+            ) { uri ->
+                val sourceId = pendingSourcePackExportId
+                pendingSourcePackExportId = null
+                if (uri != null && sourceId != null) viewModel.exportSourcePack(sourceId, uri)
+            }
             val sourceTrustRotationLauncher = rememberLauncherForActivityResult(
                 contract = ActivityResultContracts.OpenDocument(),
             ) { uri ->
@@ -222,6 +230,13 @@ class MainActivity : ComponentActivity() {
             val launchSourcePackInstall = remember(sourcePackInstallLauncher) {
                 { sourcePackInstallLauncher.launch(arrayOf("application/zip", "application/octet-stream", "text/plain", "text/x-lua")) }
             }
+            val launchSourcePackExport: (String, String) -> Unit = remember(sourcePackExportLauncher) {
+                { sourceId, displayName ->
+                    pendingSourcePackExportId = sourceId
+                    val safeName = displayName.replace(Regex("[\\/:*?\"<>|]"), "_").trim().ifBlank { "extension" }
+                    sourcePackExportLauncher.launch("$safeName.ntsource")
+                }
+            }
             val launchSourceTrustRotation = remember(sourceTrustRotationLauncher) {
                 { sourceTrustRotationLauncher.launch(arrayOf("application/json", "application/octet-stream")) }
             }
@@ -268,6 +283,7 @@ class MainActivity : ComponentActivity() {
                     onSelectBackgroundMusic = launchBackgroundMusic,
                     onSelectSceneMusic = launchSceneMusic,
                     onInstallSourcePack = launchSourcePackInstall,
+                    onExportSourcePack = launchSourcePackExport,
                     onImportSourceTrustRotation = launchSourceTrustRotation,
                     onExportSourceDiagnostics = launchSourceDiagnosticsExport,
                     onTogglePlayback = launchPlayback,

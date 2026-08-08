@@ -22,6 +22,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -118,6 +119,7 @@ fun StoryDetailScreen(
 
     var chapterQuery by remember(detail.story.id) { mutableStateOf("") }
     var showChapterSearchDialog by remember(detail.story.id) { mutableStateOf(false) }
+    var chapterSearchError by remember(detail.story.id) { mutableStateOf(false) }
     var showChapterSortDialog by remember(detail.story.id) { mutableStateOf(false) }
     var showDownloadScopeDialog by remember(detail.story.id) { mutableStateOf(false) }
     var showMultiChapterDialog by remember(detail.story.id) { mutableStateOf(false) }
@@ -735,8 +737,20 @@ fun StoryDetailScreen(
         AlertDialog(
             onDismissRequest = { showChapterSearchDialog = false },
             title = { Text("TÌM CHƯƠNG") },
-            text = { OutlinedTextField(draft, { draft = it.take(120) }, placeholder = { Text("Nhập tên chương hoặc số chương") }, singleLine = true, modifier = Modifier.fillMaxWidth()) },
-            confirmButton = { TextButton(onClick = { chapterQuery = draft; showChapterSearchDialog = false }) { Text("TÌM") } },
+            text = { Column {
+                OutlinedTextField(
+                    draft,
+                    { draft = it.take(120); chapterSearchError = false },
+                    placeholder = { Text("Nhập tên, số chương hoặc vài ký tự liên quan") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (chapterSearchError) Text("Hãy nhập tên hoặc số chương.", color = MaterialTheme.colorScheme.error)
+            } },
+            confirmButton = { TextButton(onClick = {
+                if (draft.trim().isBlank()) chapterSearchError = true
+                else { chapterQuery = draft; chapterSearchError = false; showChapterSearchDialog = false }
+            }) { Text("TÌM") } },
             dismissButton = { Row {
                 TextButton(onClick = { chapterQuery = ""; showChapterSearchDialog = false }) { Text("HIỆN TẤT CẢ") }
                 TextButton(onClick = { showChapterSearchDialog = false }) { Text("HỦY") }
@@ -749,8 +763,20 @@ fun StoryDetailScreen(
             onDismissRequest = { showChapterSortDialog = false },
             title = { Text("SẮP XẾP DANH SÁCH CHƯƠNG") },
             text = { Column {
-                ReferenceActionButton("CŨ NHẤT TRƯỚC", { onChapterSortDescendingChange(false); showChapterSortDialog = false }, modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp))
-                ReferenceActionButton("MỚI NHẤT TRƯỚC", { onChapterSortDescendingChange(true); showChapterSortDialog = false }, modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp))
+                Row(
+                    Modifier.fillMaxWidth().clickable { onChapterSortDescendingChange(false); showChapterSortDialog = false },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(selected = !state.chapterSortDescending, onClick = { onChapterSortDescendingChange(false); showChapterSortDialog = false })
+                    Text("CŨ NHẤT TRƯỚC")
+                }
+                Row(
+                    Modifier.fillMaxWidth().clickable { onChapterSortDescendingChange(true); showChapterSortDialog = false },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(selected = state.chapterSortDescending, onClick = { onChapterSortDescendingChange(true); showChapterSortDialog = false })
+                    Text("MỚI NHẤT TRƯỚC")
+                }
             } },
             confirmButton = { TextButton(onClick = { showChapterSortDialog = false }) { Text("ĐÓNG") } },
         )

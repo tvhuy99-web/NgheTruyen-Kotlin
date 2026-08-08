@@ -51,6 +51,7 @@ data class ReadingProgressEntity(
     @PrimaryKey val storyId: String,
     val chapterId: String,
     val paragraphIndex: Int,
+    @ColumnInfo(defaultValue = "0") val totalParagraphs: Int = 0,
     val updatedAt: Long,
 )
 
@@ -557,6 +558,9 @@ interface ProgressDao {
     suspend fun get(storyId: String): ReadingProgressEntity?
 
     @Query("SELECT * FROM reading_progress ORDER BY updatedAt DESC")
+    fun observeAll(): Flow<List<ReadingProgressEntity>>
+
+    @Query("SELECT * FROM reading_progress ORDER BY updatedAt DESC")
     suspend fun listAll(): List<ReadingProgressEntity>
 
     @Query("DELETE FROM reading_progress WHERE storyId = :storyId")
@@ -1056,7 +1060,7 @@ interface ChapterDownloadFailureDao {
         DownloadJobEntity::class,
         ChapterDownloadFailureEntity::class,
     ],
-    version = 19,
+    version = 20,
     // Legacy wiring validator token: version = 18
     exportSchema = true,
 )
@@ -1674,6 +1678,12 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_19_20 = object : Migration(19, 20) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE reading_progress ADD COLUMN totalParagraphs INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun create(context: Context): AppDatabase = Room.databaseBuilder(
             context.applicationContext,
             AppDatabase::class.java,
@@ -1697,6 +1707,7 @@ abstract class AppDatabase : RoomDatabase() {
             MIGRATION_16_17,
             MIGRATION_17_18,
             MIGRATION_18_19,
+            MIGRATION_19_20,
         ).build()
     }
 }

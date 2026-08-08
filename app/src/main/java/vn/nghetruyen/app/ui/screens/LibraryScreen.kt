@@ -77,7 +77,7 @@ fun LibraryScreen(
     val itemCount = when (state.librarySection) {
         LibrarySection.READING -> state.readingStories.size
         LibrarySection.DOWNLOADED -> state.downloadedStories.size
-        LibrarySection.BOOKMARKS, LibrarySection.NOTES -> state.bookmarks.size + state.notes.size
+        LibrarySection.BOOKMARKS, LibrarySection.NOTES -> state.bookmarks.map(BookmarkEntity::storyId).distinct().size
         LibrarySection.FOLLOWING -> state.following.size
     }
     val sectionName = when (state.librarySection) {
@@ -102,7 +102,15 @@ fun LibraryScreen(
         .let { stories ->
             when (readingSort) {
                 "title" -> stories.sortedBy { it.title.lowercase() }
-                "progress" -> stories.sortedByDescending { it.updatedAt }
+                "progress" -> stories.sortedWith(
+                    compareByDescending<StoryEntity> { story ->
+                        state.readingProgress[story.id]?.let { progress ->
+                            if (progress.totalParagraphs > 0)
+                                (progress.paragraphIndex + 1).toDouble() / progress.totalParagraphs.toDouble()
+                            else 0.0
+                        } ?: 0.0
+                    }.thenByDescending { story -> state.readingProgress[story.id]?.updatedAt ?: 0L },
+                )
                 else -> stories.sortedByDescending { it.updatedAt }
             }
         }
@@ -117,11 +125,15 @@ fun LibraryScreen(
             }
         }
     val visibleBookmarks = state.bookmarks
+        .groupBy(BookmarkEntity::storyId)
+        .mapNotNull { (_, values) ->
+            values.sortedWith(
+                compareByDescending<BookmarkEntity> { !it.label.startsWith("Truyện:") }
+                    .thenByDescending(BookmarkEntity::createdAt),
+            ).firstOrNull()
+        }
         .filter { needle.isBlank() || it.label.lowercase().contains(needle) || it.storyId.lowercase().contains(needle) }
         .let { values -> if (bookmarkSort == "title") values.sortedBy { it.label.lowercase() } else values.sortedByDescending { it.createdAt } }
-    val visibleNotes = state.notes
-        .filter { needle.isBlank() || it.text.lowercase().contains(needle) || it.storyId.lowercase().contains(needle) }
-        .let { values -> if (bookmarkSort == "title") values.sortedBy { it.text.lowercase() } else values.sortedByDescending { it.updatedAt } }
     val followingVisible = state.following.filter {
         needle.isBlank() || it.title.lowercase().contains(needle) ||
             it.sourceId.lowercase().contains(needle) || it.latestKnownChapter.lowercase().contains(needle)
@@ -207,13 +219,10 @@ fun LibraryScreen(
             LibrarySection.BOOKMARKS, LibrarySection.NOTES -> {
                 LibraryControl("TÌM TRUYỆN") { showSearch = true }
                 LibraryControl("SẮP XẾP: ${if (bookmarkSort == "title") "TÊN A-Z" else "MỚI ĐÁNH DẤU"}") { showSort = true }
-                BookmarkAndNoteList(
+                BookmarkList(
                     bookmarks = visibleBookmarks,
-                    notes = visibleNotes,
                     onBookmarkOpen = onBookmarkClick,
                     onBookmarkDelete = onDeleteBookmark,
-                    onNoteOpen = onNoteClick,
-                    onNoteDelete = onDeleteNote,
                 )
             }
 
@@ -397,56 +406,28 @@ private fun DownloadJobControls(
 }
 
 @Composable
-private fun BookmarkAndNoteList(
+private fun BookmarkList(
     bookmarks: List<BookmarkEntity>,
-    notes: List<ChapterNoteEntity>,
     onBookmarkOpen: (BookmarkEntity) -> Unit,
     onBookmarkDelete: (String) -> Unit,
-    onNoteOpen: (ChapterNoteEntity) -> Unit,
-    onNoteDelete: (String) -> Unit,
 ) {
-    if (bookmarks.isEmpty() && notes.isEmpty()) {
-        Text("Chưa có đánh dấu hoặc ghi chú.", modifier = Modifier.padding(16.dp))
+    if (bookmarks.isEmpty()) {
+        Text("Chưa có truyện đã đánh dấu.", modifier = Modifier.padding(16.dp))
         return
     }
     LazyColumn(modifier = Modifier.fillMaxSize()) {
-        if (bookmarks.isNotEmpty()) {
-            item(key = "bookmark-heading") {
-                Text("ĐÁNH DẤU • ${bookmarks.size}", fontWeight = FontWeight.Bold, modifier = Modifier.fillMaxWidth().padding(12.dp))
-            }
-            items(bookmarks, key = { "bookmark:${it.id}" }) { item ->
-                Card(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).clickable { onBookmarkOpen(item) },
-                ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        Text(item.label.ifBlank { "Đánh dấu đoạn ${item.paragraphIndex + 1}" }, fontWeight = FontWeight.SemiBold)
-                        Text("Đoạn ${item.paragraphIndex + 1}")
-                        ReferenceActionButton(
-                            text = "XÓA ĐÁNH DẤU",
-                            onClick = { onBookmarkDelete(item.id) },
-                            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-                        )
-                    }
-                }
-            }
-        }
-        if (notes.isNotEmpty()) {
-            item(key = "note-heading") {
-                Text("GHI CHÚ • ${notes.size}", fontWeight = FontWeight.Bold, modifier = Modifier.fillMaxWidth().padding(12.dp))
-            }
-            items(notes, key = { "note:${it.id}" }) { item ->
-                Card(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).clickable { onNoteOpen(item) },
-                ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        Text("Ghi chú đoạn ${item.paragraphIndex + 1}", fontWeight = FontWeight.SemiBold)
-                        Text(item.text)
-                        ReferenceActionButton(
-                            text = "XÓA GHI CHÚ",
-                            onClick = { onNoteDelete(item.id) },
-                            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-                        )
-                    }
+        items(bookmarks, key = { "bookmark:${it.id}" }) { item ->
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).clickable { onBookmarkOpen(item) },
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(item.label.removePrefix("Truyện: ").ifBlank { "Đánh dấu đoạn ${item.paragraphIndex + 1}" }, fontWeight = FontWeight.SemiBold)
+                    if (!item.label.startsWith("Truyện:")) Text("Đoạn ${item.paragraphIndex + 1}")
+                    ReferenceActionButton(
+                        text = "XÓA ĐÁNH DẤU",
+                        onClick = { onBookmarkDelete(item.id) },
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                    )
                 }
             }
         }

@@ -72,6 +72,7 @@ import vn.nghetruyen.app.data.local.FollowedStoryEntity
 import vn.nghetruyen.app.data.local.StoryEntity
 import vn.nghetruyen.app.data.local.OfflineStoryStorage
 import vn.nghetruyen.app.data.local.PronunciationEntity
+import vn.nghetruyen.app.data.local.ReadingProgressEntity
 import vn.nghetruyen.app.data.local.StorageUsage
 import vn.nghetruyen.app.data.local.StoryTtsProfileEntity
 import vn.nghetruyen.app.data.local.StoryAiProfileEntity
@@ -163,6 +164,7 @@ data class MainUiState(
     val loading: Boolean = false,
     val message: String? = null,
     val readingStories: List<StoryEntity> = emptyList(),
+    val readingProgress: Map<String, ReadingProgressEntity> = emptyMap(),
     val downloadedStories: List<StoryEntity> = emptyList(),
     val bookmarks: List<BookmarkEntity> = emptyList(),
     val notes: List<ChapterNoteEntity> = emptyList(),
@@ -386,6 +388,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             container.libraryRepository.observeReading().collect { items ->
                 mutableState.update { it.copy(readingStories = items) }
+            }
+        }
+        viewModelScope.launch {
+            container.libraryRepository.observeReadingProgress().collect { items ->
+                mutableState.update { it.copy(readingProgress = items.associateBy(ReadingProgressEntity::storyId)) }
             }
         }
         viewModelScope.launch {
@@ -638,6 +645,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 content.chapter.storyId,
                 content.chapter.id,
                 snapshot.playback.paragraphIndex,
+                content.paragraphs.size,
             )
             showMessage("Đã lưu vị trí đọc tại đoạn ${snapshot.playback.paragraphIndex + 1}.")
         }

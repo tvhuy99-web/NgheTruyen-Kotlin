@@ -58,6 +58,7 @@ data class CacheTrimResult(
 
 class LibraryRepository(private val db: AppDatabase) {
     fun observeReading(): Flow<List<StoryEntity>> = db.storyDao().observeReading()
+    fun observeReadingProgress(): Flow<List<ReadingProgressEntity>> = db.progressDao().observeAll()
     fun observeOffline(): Flow<List<StoryEntity>> = db.storyDao().observeOffline()
     fun observeBookmarks(): Flow<List<BookmarkEntity>> = db.bookmarkDao().observeAll()
     fun observeNotes(): Flow<List<ChapterNoteEntity>> = db.chapterNoteDao().observeAll()
@@ -307,12 +308,14 @@ class LibraryRepository(private val db: AppDatabase) {
 
     suspend fun getProgress(storyId: String): ReadingProgressEntity? = db.progressDao().get(storyId)
 
-    suspend fun saveProgress(storyId: String, chapterId: String, paragraphIndex: Int) {
+    suspend fun saveProgress(storyId: String, chapterId: String, paragraphIndex: Int, totalParagraphs: Int = 0) {
+        val previous = db.progressDao().get(storyId)
         db.progressDao().save(
             ReadingProgressEntity(
                 storyId = storyId,
                 chapterId = chapterId,
                 paragraphIndex = paragraphIndex.coerceAtLeast(0),
+                totalParagraphs = totalParagraphs.takeIf { it > 0 } ?: previous?.totalParagraphs ?: 0,
                 updatedAt = System.currentTimeMillis(),
             ),
         )

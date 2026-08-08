@@ -146,7 +146,7 @@ fun ExploreScreen(
             text = "TÌM KIẾM",
             onClick = ::openReferenceSearch,
             normalColor = ReferencePurple,
-            accessibilityLabel = "Mở tìm kiếm truyện",
+            accessibilityLabel = "TÌM KIẾM",
             modifier = Modifier.fillMaxWidth().padding(horizontal = 3.dp, vertical = 2.dp),
         )
         Column(
@@ -161,7 +161,7 @@ fun ExploreScreen(
                 enabled = !state.searchAllSources,
                 normalColor = ReferenceDivider,
                 normalContentColor = ReferenceText,
-                accessibilityLabel = "Chọn nguồn truyện đang khám phá. Hiện tại ${selectedSource?.displayName ?: "chưa chọn"}",
+                accessibilityLabel = "NGUỒN: ${selectedSource?.displayName ?: "CHƯA CHỌN"}",
                 modifier = Modifier.fillMaxWidth(),
             )
             DropdownMenu(
@@ -242,7 +242,7 @@ fun ExploreScreen(
                             text = "TRANG CHỦ",
                             selected = state.exploreMode == ExploreMode.HOME,
                             onClick = onHomeSelected,
-                            accessibilityLabel = "Danh mục Trang chủ",
+                            accessibilityLabel = "TRANG CHỦ",
                             minHeight = 54.dp,
                             unselectedColor = ReferenceDivider,
                             unselectedContentColor = ReferenceText,
@@ -254,7 +254,7 @@ fun ExploreScreen(
                             text = category.uppercase(),
                             selected = selected,
                             onClick = { onCategorySelected(category) },
-                            accessibilityLabel = "Danh mục $category",
+                            accessibilityLabel = category,
                             minHeight = 54.dp,
                             unselectedColor = ReferenceDivider,
                             unselectedContentColor = ReferenceText,
@@ -282,7 +282,7 @@ fun ExploreScreen(
         if (state.loading) LoadingRow()
         if (state.searchAllSources && state.totalSearchSourceCount > 0) {
             Text(
-                "Đã nhận phản hồi ${state.searchedSourceCount}/${state.totalSearchSourceCount} nguồn",
+                "NGUỒN: ${state.searchedSourceCount}/${state.totalSearchSourceCount}",
                 color = ReferenceSecondaryText,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
             )
@@ -310,7 +310,7 @@ fun ExploreScreen(
                             text = "TẢI THÊM • TRANG ${state.explorePage + 1}",
                             onClick = onLoadMore,
                             enabled = !state.loading,
-                            accessibilityLabel = "Tải thêm truyện, trang ${state.explorePage + 1}",
+                            accessibilityLabel = "TẢI THÊM • TRANG ${state.explorePage + 1}",
                             modifier = Modifier.fillMaxWidth().padding(8.dp),
                         )
                     }
@@ -328,7 +328,7 @@ fun ExploreScreen(
                     OutlinedTextField(
                         value = searchQueryDraft,
                         onValueChange = { searchQueryDraft = it.take(240) },
-                        placeholder = { Text("Nhập tên truyện hoặc dán link...") },
+                        placeholder = { Text("Tên truyện hoặc link") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -393,7 +393,7 @@ fun ExploreScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Checkbox(checked = searchGroupDraft, onCheckedChange = { searchGroupDraft = it })
-                            Text("Gom truyện trùng tên")
+                            Text("Gom truyện trùng")
                         }
                     }
                 }

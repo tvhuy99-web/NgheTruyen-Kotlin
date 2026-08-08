@@ -179,7 +179,7 @@ fun LibraryScreen(
                     text = label,
                     selected = selected,
                     onClick = { onSectionSelected(section) },
-                    accessibilityLabel = "Tủ truyện, ${label.lowercase()}",
+                    accessibilityLabel = label,
                     minHeight = 50.dp,
                     unselectedColor = ReferenceDivider,
                     unselectedContentColor = ReferenceText,
@@ -259,11 +259,11 @@ fun LibraryScreen(
 
     if (showSearch) {
         val meta = when (state.librarySection) {
-            LibrarySection.READING -> "TÌM TRONG ĐANG ĐỌC" to "Nhập tên truyện, chương hoặc vài ký tự liên quan"
-            LibrarySection.DOWNLOADED -> "TÌM TRUYỆN ĐÃ TẢI" to "Nhập tên truyện hoặc vài ký tự liên quan"
-            LibrarySection.BOOKMARKS -> "TÌM TRUYỆN ĐÃ ĐÁNH DẤU" to "Nhập tên truyện, chương hoặc vài ký tự liên quan"
+            LibrarySection.READING -> "TÌM TRONG ĐANG ĐỌC" to "Tên truyện hoặc chương"
+            LibrarySection.DOWNLOADED -> "TÌM TRUYỆN ĐÃ TẢI" to "Tên truyện"
+            LibrarySection.BOOKMARKS -> "TÌM TRUYỆN ĐÃ ĐÁNH DẤU" to "Tên truyện hoặc chương"
             LibrarySection.NOTES -> "TÌM GHI CHÚ" to "Nhập nội dung ghi chú"
-            LibrarySection.FOLLOWING -> "TÌM TRUYỆN ĐANG THEO DÕI" to "Nhập tên truyện, nguồn hoặc vài ký tự liên quan"
+            LibrarySection.FOLLOWING -> "TÌM TRUYỆN ĐANG THEO DÕI" to "Tên truyện hoặc nguồn"
         }
         var draft by remember(showSearch) { mutableStateOf(query) }
         AlertDialog(

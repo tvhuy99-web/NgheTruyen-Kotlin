@@ -1,7 +1,12 @@
 from pathlib import Path
 
 phase6 = Path('scripts/apply_reference_parity_phase6.py').resolve()
-exec(phase6.read_text(), {'__name__': '__main__', '__file__': str(phase6)})
+phase6_text = phase6.read_text()
+old_anchor = 'start = text.index("    if (showMusicLibrary) {")'
+new_anchor = 'start = text.index("\\n    if (showMusicLibrary) {\\n        AlertDialog(") + 1'
+if phase6_text.count(old_anchor) != 1:
+    raise SystemExit(f'phase6 music anchor: expected 1 occurrence, found {phase6_text.count(old_anchor)}')
+exec(phase6_text.replace(old_anchor, new_anchor, 1), {'__name__': '__main__', '__file__': str(phase6)})
 
 reader = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt').read_text()
 db = Path('app/src/main/java/vn/nghetruyen/app/data/local/AppDatabase.kt').read_text()
@@ -34,5 +39,7 @@ for token in [
     'SAO CHÉP ĐƯỜNG DẪN', 'VietPhraseDiagnosticExporter',
 ]:
     assert token in reader, token
+for token in ['TÌM TRONG CHƯƠNG', 'lineHeightPercent', 'DỊCH AI', 'PHÂN VAI AI', 'XEM NHẬT KÝ']:
+    assert token in reader, f'core reader regression: {token}'
 assert 'showVietPhraseLogDialog' not in reader
 print('REFERENCE_READER_MUSIC_VIETPHRASE_ASSERTIONS_OK')

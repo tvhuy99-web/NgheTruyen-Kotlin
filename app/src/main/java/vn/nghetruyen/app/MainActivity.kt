@@ -25,7 +25,7 @@ import vn.nghetruyen.app.following.FollowingUpdateWorker
 import vn.nghetruyen.app.playback.ReaderVolumeKeyPolicy
 import vn.nghetruyen.app.ui.AppViewModel
 import vn.nghetruyen.app.ui.Destination
-import vn.nghetruyen.app.ui.NgheTruyenApp
+import vn.nghetruyen.app.ui.ReferenceNgheTruyenApp
 import vn.nghetruyen.app.ui.theme.NgheTruyenTheme
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -257,7 +257,7 @@ class MainActivity : ComponentActivity() {
                 { sceneMusicLauncher.launch(arrayOf("audio/*")) }
             }
             NgheTruyenTheme {
-                NgheTruyenApp(
+                ReferenceNgheTruyenApp(
                     viewModel = viewModel,
                     onImportFile = launchImport,
                     onExportBackup = launchBackupExport,

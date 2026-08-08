@@ -66,6 +66,7 @@ class LibraryRepository(private val db: AppDatabase) {
     fun observeDownloads(): Flow<List<DownloadJobEntity>> = db.downloadJobDao().observeAll()
     fun observeDownloadFailures(): Flow<List<ChapterDownloadFailureEntity>> = db.chapterDownloadFailureDao().observeAll()
     fun observeOfflineStorage(): Flow<List<OfflineStoryStorage>> = db.chapterDao().observeOfflineStorage()
+    fun observeDownloadedChapterIds(): Flow<List<String>> = db.chapterDao().observeDownloadedIds()
     fun observeStorageUsage(): Flow<StorageUsage> = db.chapterDao().observeStorageUsage()
     fun observePronunciations(): Flow<List<PronunciationEntity>> = db.pronunciationDao().observeAll()
     fun observeVietPhraseRules(): Flow<List<VietPhraseEntity>> = db.vietPhraseDao().observeAll()
@@ -208,10 +209,13 @@ class LibraryRepository(private val db: AppDatabase) {
      * complete story is available offline.
      */
     suspend fun cacheChapter(content: ChapterContent) {
-        db.chapterDao().upsert(content.toEntity())
+        val existingDownloadedAt = db.chapterDao().get(content.chapter.id)?.downloadedAt
+        db.chapterDao().upsert(content.toEntity(downloadedAt = existingDownloadedAt))
     }
 
-    suspend fun saveDownloadedChapter(content: ChapterContent) = cacheChapter(content)
+    suspend fun saveDownloadedChapter(content: ChapterContent) {
+        db.chapterDao().upsert(content.toEntity(downloadedAt = System.currentTimeMillis()))
+    }
 
     suspend fun markStoryDownloaded(story: StorySummary) {
         db.storyDao().upsert(
@@ -424,7 +428,7 @@ class LibraryRepository(private val db: AppDatabase) {
         db.chapterDao().listDownloadedIds(storyId).toHashSet()
 
     suspend fun hasDownloadedChapter(chapterId: String): Boolean =
-        !db.chapterDao().get(chapterId)?.content.isNullOrBlank()
+        db.chapterDao().get(chapterId)?.let { it.downloadedAt != null && !it.content.isNullOrBlank() } == true
 
     suspend fun saveStoryTtsProfile(
         storyId: String,
@@ -676,14 +680,14 @@ class LibraryRepository(private val db: AppDatabase) {
         )
     }
 
-    private fun ChapterContent.toEntity() = ChapterEntity(
+    private fun ChapterContent.toEntity(downloadedAt: Long? = null) = ChapterEntity(
         id = chapter.id,
         storyId = chapter.storyId,
         chapterIndex = chapter.index,
         title = chapter.title,
         remoteUrl = chapter.url.ifBlank { chapter.id },
         content = paragraphs.joinToString(PARAGRAPH_SEPARATOR),
-        downloadedAt = System.currentTimeMillis(),
+        downloadedAt = downloadedAt,
     )
 
     private suspend fun ChapterEntity.toContentWithNeighbors(): ChapterContent? {

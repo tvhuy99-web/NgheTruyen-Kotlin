@@ -997,7 +997,7 @@ fun ReaderScreen(
     if (showChapterInfoDialog) {
         val chapterPosition = storyDetail?.chapters?.indexOfFirst { it.id == content.chapter.id }?.takeIf { it >= 0 }?.plus(1)
         val total = storyDetail?.chapters?.size ?: 0
-        val offline = state.offlineStorage[storyId]?.chapterCount?.let { it > 0 } == true
+        val offline = content.chapter.id in state.downloadedChapterIds
         AlertDialog(
             onDismissRequest = { showChapterInfoDialog = false },
             title = { Text("THÔNG TIN CHƯƠNG") },

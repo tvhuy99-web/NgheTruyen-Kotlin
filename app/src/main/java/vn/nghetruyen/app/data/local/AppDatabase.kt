@@ -495,8 +495,11 @@ interface ChapterDao {
     @Query("SELECT * FROM chapters WHERE storyId = :storyId AND content IS NOT NULL AND TRIM(content) != '' ORDER BY chapterIndex")
     suspend fun listExportableForStory(storyId: String): List<ChapterEntity>
 
-    @Query("SELECT id FROM chapters WHERE storyId = :storyId AND content IS NOT NULL AND TRIM(content) != ''")
+    @Query("SELECT id FROM chapters WHERE storyId = :storyId AND downloadedAt IS NOT NULL AND content IS NOT NULL AND TRIM(content) != ''")
     suspend fun listDownloadedIds(storyId: String): List<String>
+
+    @Query("SELECT id FROM chapters WHERE downloadedAt IS NOT NULL AND content IS NOT NULL AND TRIM(content) != ''")
+    fun observeDownloadedIds(): Flow<List<String>>
 
     @Query("SELECT * FROM chapters ORDER BY storyId, chapterIndex")
     suspend fun listAll(): List<ChapterEntity>
@@ -507,7 +510,7 @@ interface ChapterDao {
     @Query("UPDATE chapters SET content = NULL, downloadedAt = NULL WHERE storyId = :storyId")
     suspend fun clearContentForStory(storyId: String)
 
-    @Query("UPDATE chapters SET content = NULL, downloadedAt = NULL WHERE storyId IN (SELECT id FROM stories WHERE isOffline = 0)")
+    @Query("UPDATE chapters SET content = NULL, downloadedAt = NULL WHERE downloadedAt IS NULL")
     suspend fun clearTransientCache()
 
     @Query("""
@@ -515,17 +518,17 @@ interface ChapterDao {
                COALESCE(SUM(LENGTH(CAST(c.content AS BLOB))), 0) AS bytes
         FROM chapters c
         INNER JOIN stories s ON s.id = c.storyId
-        WHERE s.isOffline = 1 AND c.content IS NOT NULL AND TRIM(c.content) != ''
+        WHERE c.downloadedAt IS NOT NULL AND c.content IS NOT NULL AND TRIM(c.content) != ''
         GROUP BY c.storyId
     """)
     fun observeOfflineStorage(): Flow<List<OfflineStoryStorage>>
 
     @Query("""
         SELECT
-          COALESCE(SUM(CASE WHEN s.isOffline = 1 AND c.content IS NOT NULL AND TRIM(c.content) != '' THEN 1 ELSE 0 END), 0) AS downloadedChapters,
-          COALESCE(SUM(CASE WHEN s.isOffline = 1 THEN LENGTH(CAST(c.content AS BLOB)) ELSE 0 END), 0) AS downloadedBytes,
-          COALESCE(SUM(CASE WHEN s.isOffline = 0 AND c.content IS NOT NULL AND TRIM(c.content) != '' THEN 1 ELSE 0 END), 0) AS cachedChapters,
-          COALESCE(SUM(CASE WHEN s.isOffline = 0 THEN LENGTH(CAST(c.content AS BLOB)) ELSE 0 END), 0) AS cachedBytes
+          COALESCE(SUM(CASE WHEN c.downloadedAt IS NOT NULL AND c.content IS NOT NULL AND TRIM(c.content) != '' THEN 1 ELSE 0 END), 0) AS downloadedChapters,
+          COALESCE(SUM(CASE WHEN c.downloadedAt IS NOT NULL THEN LENGTH(CAST(c.content AS BLOB)) ELSE 0 END), 0) AS downloadedBytes,
+          COALESCE(SUM(CASE WHEN c.downloadedAt IS NULL AND c.content IS NOT NULL AND TRIM(c.content) != '' THEN 1 ELSE 0 END), 0) AS cachedChapters,
+          COALESCE(SUM(CASE WHEN c.downloadedAt IS NULL THEN LENGTH(CAST(c.content AS BLOB)) ELSE 0 END), 0) AS cachedBytes
         FROM chapters c
         INNER JOIN stories s ON s.id = c.storyId
     """)
@@ -537,8 +540,8 @@ interface ChapterDao {
                COALESCE(c.downloadedAt, 0) AS cachedAt
         FROM chapters c
         INNER JOIN stories s ON s.id = c.storyId
-        WHERE s.isOffline = 0 AND c.content IS NOT NULL AND TRIM(c.content) != ''
-        ORDER BY COALESCE(c.downloadedAt, 0) ASC, c.chapterIndex ASC
+        WHERE c.downloadedAt IS NULL AND c.content IS NOT NULL AND TRIM(c.content) != ''
+        ORDER BY c.chapterIndex ASC
     """)
     suspend fun listTransientCacheEntries(): List<CachedChapterStorage>
 
@@ -1063,7 +1066,7 @@ interface ChapterDownloadFailureDao {
         DownloadJobEntity::class,
         ChapterDownloadFailureEntity::class,
     ],
-    version = 20,
+    version = 21,
     // Legacy wiring validator token: version = 18
     exportSchema = true,
 )
@@ -1687,6 +1690,45 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_20_21 = object : Migration(20, 21) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Older builds stamped downloadedAt for ordinary reader cache too. Reset online
+                // chapters, then reconstruct the chapters that download jobs actually made local.
+                db.execSQL(
+                    "UPDATE chapters SET downloadedAt = NULL " +
+                        "WHERE storyId IN (SELECT id FROM stories WHERE sourceId <> 'offline')",
+                )
+                db.execSQL(
+                    """
+                    UPDATE chapters
+                    SET downloadedAt = (
+                        SELECT MAX(j.updatedAt)
+                        FROM download_jobs j
+                        WHERE j.storyId = chapters.storyId
+                          AND j.completedChapters > 0
+                          AND chapters.chapterIndex >= j.startChapterIndex
+                          AND chapters.chapterIndex <= CASE
+                              WHEN j.state = 'COMPLETED' THEN j.endChapterIndex
+                              ELSE j.startChapterIndex + j.completedChapters - 1
+                          END
+                    )
+                    WHERE storyId IN (SELECT id FROM stories WHERE sourceId <> 'offline')
+                      AND EXISTS (
+                        SELECT 1
+                        FROM download_jobs j
+                        WHERE j.storyId = chapters.storyId
+                          AND j.completedChapters > 0
+                          AND chapters.chapterIndex >= j.startChapterIndex
+                          AND chapters.chapterIndex <= CASE
+                              WHEN j.state = 'COMPLETED' THEN j.endChapterIndex
+                              ELSE j.startChapterIndex + j.completedChapters - 1
+                          END
+                      )
+                    """.trimIndent(),
+                )
+            }
+        }
+
         fun create(context: Context): AppDatabase = Room.databaseBuilder(
             context.applicationContext,
             AppDatabase::class.java,
@@ -1711,6 +1753,7 @@ abstract class AppDatabase : RoomDatabase() {
             MIGRATION_17_18,
             MIGRATION_18_19,
             MIGRATION_19_20,
+            MIGRATION_20_21,
         ).build()
     }
 }

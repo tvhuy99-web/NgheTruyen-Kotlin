@@ -175,6 +175,7 @@ data class MainUiState(
     val autoPlayNextChapter: Boolean = true,
     val continueAvailable: Boolean = false,
     val offlineStorage: Map<String, OfflineStoryStorage> = emptyMap(),
+    val downloadedChapterIds: Set<String> = emptySet(),
     val storageUsage: StorageUsage = StorageUsage(0, 0, 0, 0),
     val ttsEngines: List<TtsEngineOption> = emptyList(),
     val ttsVoices: List<TtsVoiceOption> = emptyList(),
@@ -428,6 +429,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             container.libraryRepository.observeOfflineStorage().collect { items ->
                 mutableState.update { it.copy(offlineStorage = items.associateBy(OfflineStoryStorage::storyId)) }
+            }
+        }
+        viewModelScope.launch {
+            container.libraryRepository.observeDownloadedChapterIds().collect { ids ->
+                mutableState.update { it.copy(downloadedChapterIds = ids.toSet()) }
             }
         }
         viewModelScope.launch {

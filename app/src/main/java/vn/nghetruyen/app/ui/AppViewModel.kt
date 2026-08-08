@@ -1094,6 +1094,45 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun updateSourcePack(sourceId: String) {
+        val update = state.value.sourceRepositoryPackages.firstOrNull {
+            it.sourceId == sourceId && it.status == "UPDATE_AVAILABLE" && it.canInstall
+        }
+        if (update == null) {
+            showMessage("Không có bản cập nhật.")
+            return
+        }
+        prepareRepositorySourceInstall(update.repositoryId, update.sourceId)
+    }
+
+    fun exportSourcePack(sourceId: String, destination: Uri) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val resolver = getApplication<Application>().contentResolver
+                    resolver.openOutputStream(destination, "w")?.use { output ->
+                        container.sourcePlatformManager.exportInstalledPack(sourceId, output).getOrThrow()
+                    } ?: error("Không mở được tệp xuất tiện ích.")
+                }
+            }.onSuccess {
+                showMessage("Đã xuất tiện ích.")
+            }.onFailure { error ->
+                showMessage(error.message ?: "Không xuất được tiện ích.")
+            }
+        }
+    }
+
+    fun removeSourcePack(sourceId: String) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { container.sourcePlatformManager.removeInstalledPack(sourceId) }
+                .onSuccess {
+                    refreshSourcePlatformState()
+                    showMessage("Đã xóa tiện ích. Dữ liệu truyện đã tải được giữ lại.")
+                }
+                .onFailure { error -> showMessage(error.message ?: "Không xóa được tiện ích.") }
+        }
+    }
+
     private fun refreshSourcePlatformState() {
         container.sourceRegistry.refreshSourcePacks(container.sourcePlatformManager.activeStorySources())
         mutableState.update { current ->

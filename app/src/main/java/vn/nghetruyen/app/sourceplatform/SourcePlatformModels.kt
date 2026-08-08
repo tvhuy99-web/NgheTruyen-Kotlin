@@ -13,6 +13,7 @@ data class SourcePackUiInfo(
     val runtimeMode: String,
     val commentCapability: String,
     val commentFixtureCount: Int,
+    val removable: Boolean = true,
 )
 
 data class SourceInstallPreview(

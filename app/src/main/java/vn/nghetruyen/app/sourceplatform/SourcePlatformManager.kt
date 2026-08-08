@@ -9,6 +9,7 @@ import vn.nghetruyen.source.api.SourcePermissionDiff
 import vn.nghetruyen.source.api.SourcePlatformResult
 import vn.nghetruyen.source.api.SourceCapabilityBrokers
 import vn.nghetruyen.source.api.SourceRuntimeMode
+import vn.nghetruyen.source.api.SourceManifest
 import vn.nghetruyen.source.network.OkHttpSourceWebSocketBroker
 import vn.nghetruyen.source.network.PartitionedSourceCookieJar
 import vn.nghetruyen.source.runtime.FileSourceStorageBroker
@@ -39,11 +40,14 @@ import vn.nghetruyen.source.store.SourcePackStore
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.InputStream
+import java.io.OutputStream
 import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.UUID
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 class SourcePlatformManager(
     context: Context,
@@ -112,6 +116,7 @@ class SourcePlatformManager(
     private val repositoryVerifier = SourceRepositoryVerifier(diagnostics)
     private val repositoryHttpClient = SourceRepositoryHttpClient()
     private val repositories = linkedMapOf<String, CachedRepository>()
+    private val builtinSourceIds = linkedSetOf<String>()
     private var pendingPack: VerifiedSourcePack? = null
     private var pendingWarnings: List<String> = emptyList()
 
@@ -143,6 +148,7 @@ class SourcePlatformManager(
                 else -> "DIRECT_HTML_FALLBACK"
             },
             commentFixtureCount = active?.manifest?.fixtures?.count { it.action == vn.nghetruyen.source.api.SourceActionName.COMMENTS } ?: 0,
+            removable = installed.sourceId !in builtinSourceIds,
         )
     }
 
@@ -283,6 +289,23 @@ class SourcePlatformManager(
         }
     }
 
+    fun removeInstalledPack(sourceId: String): Result<Unit> = runCatching {
+        require(sourceId !in builtinSourceIds) { "Không thể xóa tiện ích nguồn tích hợp." }
+        require(store.remove(sourceId)) { "Không tìm thấy tiện ích để xóa." }
+    }
+
+    fun exportInstalledPack(sourceId: String, output: OutputStream): Result<Unit> = runCatching {
+        val pack = store.readActivePack(sourceId) ?: error("Không tìm thấy gói tiện ích đang hoạt động.")
+        ZipOutputStream(output.buffered()).use { zip ->
+            pack.entries.toSortedMap().forEach { (entryPath, bytes) ->
+                SourceManifest.requireSafeRelativePath(entryPath)
+                zip.putNextEntry(ZipEntry(entryPath).apply { time = 0L })
+                zip.write(bytes)
+                zip.closeEntry()
+            }
+        }
+    }
+
     fun diagnosticsSnapshot(sourceId: String? = null): List<DiagnosticEvent> = diagnostics.snapshot(sourceId)
 
     fun diagnosticTraces(limit: Int = 20): List<SourceTraceUi> = SourceTraceExplorer.summarize(diagnostics.snapshot())
@@ -350,6 +373,7 @@ class SourcePlatformManager(
                         is SourcePlatformResult.Success -> result.value
                         is SourcePlatformResult.Failure -> error("${result.error.code}: ${result.error.message}")
                     }
+                    builtinSourceIds += pack.manifest.id
                     validateCompatibility(pack)
                     selfTest(pack)
                     val existing = store.load(pack.manifest.id)

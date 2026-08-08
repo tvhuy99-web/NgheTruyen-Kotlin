@@ -1,5 +1,5 @@
 name: Build APK
-# Reference parity v4.1 final clean-build trigger.
+# One-time packaging run after merging auxiliary branches.
 
 on:
   workflow_dispatch:
@@ -101,6 +101,21 @@ jobs:
             app/build/outputs/apk/debug/app-debug.apk
             app-debug.apk.sha256
 
+      - name: Remove merged auxiliary branches
+        id: cleanup_branches
+        shell: bash
+        run: |
+          set -euo pipefail
+          for branch in \
+            agent/reference-ui-position-parity \
+            agent/stable-debug-signing \
+            agent/talkback-settings-reader
+          do
+            if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+              git push origin --delete "$branch"
+            fi
+          done
+
       - name: Record build result
         if: always()
         shell: bash
@@ -121,8 +136,10 @@ jobs:
             echo "VALIDATE_OUTCOME=${{ steps.validate.outcome }}"
             echo "BUILD_OUTCOME=${{ steps.build.outcome }}"
             echo "UPLOAD_OUTCOME=${{ steps.upload_apk.outcome }}"
+            echo "CLEANUP_OUTCOME=${{ steps.cleanup_branches.outcome }}"
             echo "ARTIFACT_ID=${{ steps.upload_apk.outputs.artifact-id }}"
             echo "ARTIFACT_NAME=NgheTruyen-v2.8.0-debug-apk"
+            echo "DELETED_BRANCHES=agent/reference-ui-position-parity,agent/stable-debug-signing,agent/talkback-settings-reader"
             if [[ -n "${CHECKSUM_LINE}" ]]; then
               echo "${CHECKSUM_LINE}"
             fi

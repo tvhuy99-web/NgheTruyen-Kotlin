@@ -8,11 +8,7 @@ import vn.nghetruyen.source.api.SourceTranslationBroker
 import vn.nghetruyen.source.api.SourceTranslationRequest
 import vn.nghetruyen.source.api.SourceTranslationResponse
 
-/**
- * Keeps vBook's offline Quick Translator ABI separate from generic translate-extension/AI brokers.
- * The JS compatibility prelude serializes Qt extras into [QUICK_TRANSLATOR_PREFIX] because the
- * legacy host bridge only had an `instruction` string. The marker is removed before delegation.
- */
+/** Keeps vBook's offline Quick Translator ABI separate from generic translation/AI brokers. */
 class VBookTranslationBrokerRouter(
     private val generic: SourceTranslationBroker,
     private val quick: SourceTranslationBroker,
@@ -21,14 +17,20 @@ class VBookTranslationBrokerRouter(
         manifest: SourceManifest,
         request: SourceTranslationRequest,
     ): SourcePlatformResult<SourceTranslationResponse> {
-        if (!request.instruction.startsWith(QUICK_TRANSLATOR_PREFIX)) {
+        val target = request.targetLanguage.trim().lowercase()
+        val markedQuickRequest = request.instruction.startsWith(QUICK_TRANSLATOR_PREFIX)
+        if (!markedQuickRequest && target !in QUICK_TARGETS) {
             return generic.translate(manifest, request)
         }
-        val encoded = request.instruction.removePrefix(QUICK_TRANSLATOR_PREFIX)
-        val options = parseOptions(encoded)
+        val options = if (markedQuickRequest) {
+            parseOptions(request.instruction.removePrefix(QUICK_TRANSLATOR_PREFIX))
+        } else {
+            request.options
+        }
         return quick.translate(
             manifest,
             request.copy(
+                targetLanguage = target.ifBlank { "vp" },
                 instruction = "",
                 options = options,
             ),
@@ -53,5 +55,6 @@ class VBookTranslationBrokerRouter(
 
     companion object {
         const val QUICK_TRANSLATOR_PREFIX = "__NGHE_VBOOK_QT_V1__:"
+        val QUICK_TARGETS = setOf("vp", "hv")
     }
 }

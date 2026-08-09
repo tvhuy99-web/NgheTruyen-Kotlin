@@ -7,6 +7,7 @@ import com.nghetruyen.source.platform.SourceFailure
 import com.nghetruyen.source.platform.SourceFailureCode
 import com.nghetruyen.source.platform.SourceTrustState
 import com.nghetruyen.source.store.SourceArtifactActivator
+import com.nghetruyen.source.store.SourceArtifactArchive
 import com.nghetruyen.source.store.SourceArtifactLifecycle
 import com.nghetruyen.source.store.SourceArtifactRegistry
 import vn.nghetruyen.source.vbook.VBookCandidate
@@ -14,13 +15,6 @@ import vn.nghetruyen.source.vbook.VBookCandidateValidation
 import vn.nghetruyen.source.vbook.VBookCandidateValidator
 import vn.nghetruyen.source.vbook.VBookPackageReader
 import vn.nghetruyen.source.vbook.VBookScriptPayloadDecoder
-
-/** Immutable archive for original extension bytes. Implementations may be file-, database- or blob-backed. */
-interface SourceArtifactArchive {
-    fun stage(descriptor: SourceArtifactDescriptor, originalBytes: ByteArray)
-    fun contains(artifactId: String): Boolean
-    fun sha256(artifactId: String): String?
-}
 
 enum class VBookUpdateDisposition {
     ACTIVATED,

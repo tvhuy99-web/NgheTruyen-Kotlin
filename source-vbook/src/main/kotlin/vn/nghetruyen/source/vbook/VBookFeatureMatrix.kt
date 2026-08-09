@@ -85,6 +85,7 @@ object VBookEngineFeatureMatrix {
             VBookFeature.FETCH_BASE64,
             VBookFeature.FETCH_BLOB,
             VBookFeature.FETCH_REQUEST_INFO,
+            VBookFeature.LEGACY_HTTP_SOURCE,
             VBookFeature.HTML_DOM,
             VBookFeature.LOCAL_CONFIG,
             VBookFeature.LOCAL_STORAGE,
@@ -99,9 +100,13 @@ object VBookEngineFeatureMatrix {
             VBookFeature.SCRIPT_EXECUTE -> VBookFeatureSupport(
                 feature,
                 VBookFeatureImplementationLevel.IMPLEMENTED,
-                if (feature in setOf(VBookFeature.FETCH_CHARSET, VBookFeature.FETCH_BASE64, VBookFeature.FETCH_BLOB))
-                    "Implemented through VBookRawNetworkBroker: raw bytes are cached per response, binary methods use exact base64, and explicit charset decoding reuses the captured bytes without replaying the upstream request."
-                else "Implementation exists; certification remains a separate differential-test state.",
+                when {
+                    feature in setOf(VBookFeature.FETCH_CHARSET, VBookFeature.FETCH_BASE64, VBookFeature.FETCH_BLOB) ->
+                        "Implemented through VBookRawNetworkBroker: raw bytes are cached per response, binary methods use exact base64, and explicit charset decoding reuses the captured bytes without replaying the upstream request."
+                    feature == VBookFeature.LEGACY_HTTP_SOURCE ->
+                        "Implemented through VBookNetworkPolicy and SourceOriginPolicy: cleartext is derived per extension and only VBOOK_JS_COMPAT may enable it; public-address DNS restrictions remain enforced."
+                    else -> "Implementation exists; certification remains a separate differential-test state."
+                },
             )
 
             VBookFeature.FETCH_STATUS_TEXT -> VBookFeatureSupport(
@@ -114,12 +119,6 @@ object VBookEngineFeatureMatrix {
                 feature,
                 VBookFeatureImplementationLevel.PACKAGE_LAYER_PENDING,
                 "Plain source-tree/package execution is supported; encrypted distribution payload decoding is intentionally not guessed without a proven reference format.",
-            )
-
-            VBookFeature.LEGACY_HTTP_SOURCE -> VBookFeatureSupport(
-                feature,
-                VBookFeatureImplementationLevel.PARTIAL,
-                "Artifact parsing is supported; cleartext egress requires a vBook-specific, per-extension policy instead of globally weakening native-source HTTPS rules.",
             )
 
             VBookFeature.JS_FORBIDDEN_ASYNC_AWAIT,

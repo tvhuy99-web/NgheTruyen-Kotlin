@@ -29,6 +29,18 @@ class VBookContractModelTest {
     }
 
     @Test
+    fun signalFreeMinimalNovelDefaultsToCanonicalCurrentContract() {
+        val manifest = VBookManifestParser.parse(MINIMAL_CURRENT)
+        val detection = VBookContractDetector.detect(manifest)
+
+        assertEquals(VBookContractProfile.CURRENT_JS, detection.profile)
+        assertEquals(0, detection.currentScore)
+        assertEquals(0, detection.legacyScore)
+        assertTrue(detection.reasons.any { it.contains("canonical current") })
+        assertTrue(VBookRequiredScripts.missing(manifest, detection.profile).isEmpty())
+    }
+
+    @Test
     fun comicRequiresEitherPageOrChap() {
         val manifest = VBookManifestParser.parse(CURRENT.replace("\"novel\"", "\"comic\"").replace(",\n    \"chap\": \"chap.js\"", ""))
         val missing = VBookRequiredScripts.missing(manifest, VBookContractProfile.CURRENT_JS)
@@ -66,6 +78,20 @@ class VBookContractModelTest {
               "config": {
                 "DOMAIN": { "title": "Domain", "default": "https://site.example", "mode": "input", "format": "text" }
               }
+            }
+        """.trimIndent()
+
+        private val MINIMAL_CURRENT = """
+            {
+              "metadata": {
+                "name": "Minimal", "author": "Author", "version": 1,
+                "source": "https://minimal.example", "regexp": "minimal", "description": "",
+                "locale": "vi", "type": "novel"
+              },
+              "script": {
+                "search": "search.js", "detail": "detail.js", "toc": "toc.js", "chap": "chap.js"
+              },
+              "config": {}
             }
         """.trimIndent()
     }

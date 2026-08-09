@@ -35,6 +35,15 @@ object VBookDynamicActionCollector {
         }
 
         visit(root, 0)
-        return actions.distinctBy { listOf(it.scriptPath, it.input, it.title, it.data, it.type.orEmpty()) }
+        return actions.distinctBy {
+            listOf(
+                it.scriptPath,
+                it.input,
+                it.title,
+                it.data,
+                it.hasDataArgument.toString(),
+                it.type.orEmpty(),
+            )
+        }
     }
 }

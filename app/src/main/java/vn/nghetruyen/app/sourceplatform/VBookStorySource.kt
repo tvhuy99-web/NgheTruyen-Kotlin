@@ -16,6 +16,7 @@ import vn.nghetruyen.source.api.SourceCapabilityBrokers
 import vn.nghetruyen.source.api.SourcePlatformResult
 import vn.nghetruyen.source.runtime.SourceResourceProvider
 import vn.nghetruyen.source.vbook.VBookCompatibilityRuntime
+import vn.nghetruyen.source.vbook.VBookConfigReader
 import vn.nghetruyen.source.vbook.VBookContentType
 import vn.nghetruyen.source.vbook.VBookContinuation
 import vn.nghetruyen.source.vbook.VBookDynamicAction
@@ -38,12 +39,14 @@ class VBookStorySource(
     private val artifact: SourceArtifactDescriptor,
     packageBytes: ByteArray,
     brokers: SourceCapabilityBrokers,
+    private val configReader: VBookConfigReader = VBookConfigReader { emptyMap() },
 ) : StorySource {
     private val pkg: VBookPackage = VBookPackageReader.read(packageBytes)
     private val resources = PackageResources(pkg)
     private val plugin: VBookExtensionManifest = vn.nghetruyen.source.vbook.VBookManifestParser.parse(pkg.pluginJson())
     private val hostManifest = VBookHostManifestFactory.create(artifact.identity.canonicalKey(), plugin, resources)
     private val runtime = VBookCompatibilityRuntime(brokers)
+    private val configKey = artifact.identity.canonicalKey()
     private val pageCache = ConcurrentHashMap<PageKey, VBookCompatibilityRuntime.ExecutionResult>()
     private val chapterByUrl = ConcurrentHashMap<String, ChapterSummary>()
 
@@ -90,7 +93,11 @@ class VBookStorySource(
         val menu = executeDeclared(role, input = "")
         if (menu is AppResult.Failure) return menu
         val raw = (menu as AppResult.Success).value
-        val direct = VBookStoryNormalizer.stories(raw.data, plugin.metadata.source)
+        val direct = if (role == VBookScriptRole.EXPLORE) {
+            VBookStoryNormalizer.exploreStories(raw.data, plugin.metadata.source)
+        } else {
+            VBookStoryNormalizer.stories(raw.data, plugin.metadata.source)
+        }
         if (direct.isNotEmpty()) return AppResult.Success(direct.map(::storySummary))
         val action = chooseListAction(VBookStoryNormalizer.dynamicActions(raw.data)) ?: return search("", page)
         return when (val result = dynamicPage(action, page)) {
@@ -156,13 +163,18 @@ class VBookStorySource(
     override suspend fun chapter(url: String): AppResult<ChapterContent> {
         val result = executeDeclared(VBookScriptRole.CHAP, url)
         if (result is AppResult.Failure) return result
-        val body = VBookStoryNormalizer.chapterBody((result as AppResult.Success).value.data)
+        val executed = (result as AppResult.Success).value
+        val body = VBookStoryNormalizer.chapterBody(executed.data)
+        val resolvedTitle = body.title
+            .ifBlank { executed.continuation.token }
+            .ifBlank { chapterByUrl[url]?.title.orEmpty() }
+            .ifBlank { "Chương" }
         val known = chapterByUrl[url]
-        val chapter = known ?: ChapterSummary(
+        val chapter = known?.copy(title = resolvedTitle) ?: ChapterSummary(
             id = VBookStoryNormalizer.stableId(url),
             storyId = "",
             index = 0,
-            title = body.title.ifBlank { "Chương" },
+            title = resolvedTitle,
             url = url,
         )
         return AppResult.Success(
@@ -176,7 +188,7 @@ class VBookStorySource(
     }
 
     override suspend fun chapterPage(storyId: String, url: String, startIndex: Int): AppResult<ChapterPage> =
-        AppResult.Failure("VBOOK_TOC_PAGING_UNCERTIFIED", "Nguồn vBook này chưa chứng nhận phân trang mục lục.")
+        AppResult.Failure("VBOOK_TOC_PAGING_UNCERTIFIED", "vBook current toc(url) returns one chapter list; no reference contract for TOC pagination is claimed.")
 
     private fun executeDeclared(
         role: VBookScriptRole,
@@ -188,6 +200,7 @@ class VBookStorySource(
         role = role,
         input = input,
         continuation = continuation,
+        persistedConfig = configReader.read(configKey),
     )) {
         is SourcePlatformResult.Success -> AppResult.Success(result.value)
         is SourcePlatformResult.Failure -> AppResult.Failure(result.error.code.name, result.error.message, result.error.cause)
@@ -201,6 +214,7 @@ class VBookStorySource(
         resources = resources,
         scriptPath = action.scriptPath,
         args = action.invocation(continuation).args,
+        persistedConfig = configReader.read(configKey),
     )) {
         is SourcePlatformResult.Success -> AppResult.Success(result.value)
         is SourcePlatformResult.Failure -> AppResult.Failure(result.error.code.name, result.error.message, result.error.cause)

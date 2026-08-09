@@ -19,8 +19,8 @@ import vn.nghetruyen.source.api.SourceTranslationResponse
  *
  * `vp` uses the user's enabled VietPhrase dictionaries and `hv` uses only the Hán-Việt
  * (ChinesePhienAmWords) layer. Advanced vBook extras such as NER and traditional-to-simplified
- * conversion are deliberately not fabricated here; the compatibility matrix keeps those
- * subfeatures uncertified/partial until a reference-compatible backend exists.
+ * conversion are deliberately not fabricated here; candidate validation marks those subfeatures
+ * explicitly unsupported until a reference-compatible backend exists.
  */
 class AndroidVBookQuickTranslationBroker(
     private val libraryRepository: LibraryRepository,

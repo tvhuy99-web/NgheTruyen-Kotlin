@@ -154,6 +154,34 @@ class VBookCorpusAnalyzerTest {
     }
 
     @Test
+    fun scansCommentsSuggestionsAndUnsupportedStructuredConfig() {
+        val plugin = """
+            {
+              "metadata":{"name":"X","author":"A","version":1,"source":"https://x.example","description":"","locale":"vi","regexp":"x","type":"novel","nsfw":false},
+              "script":{"search":"search.js","detail":"detail.js","toc":"toc.js","chap":"chap.js","comment":"comment.js","suggests":"suggests.js"},
+              "config":{"TOKENS":{"title":"Tokens","mode":"input","format":"multiline","default":""},"search_filters":{"groups":[]}}
+            }
+        """.trimIndent()
+        val scripts = mapOf(
+            "src/search.js" to response("[]"),
+            "src/detail.js" to response("{}"),
+            "src/toc.js" to response("[]"),
+            "src/chap.js" to response("'text'"),
+            "src/comment.js" to response("[]"),
+            "src/suggests.js" to response("[]"),
+        )
+        val audit = VBookCorpusAnalyzer.audit("optional-roles", plugin, scripts)
+        assertTrue(VBookFeature.COMMENTS in audit.features)
+        assertTrue(VBookFeature.SUGGESTIONS in audit.features)
+        assertTrue(VBookFeature.CONFIG_UNSUPPORTED_DESCRIPTOR in audit.features)
+        assertFalse("suggests" in audit.unknownScriptRoles)
+
+        val validation = VBookCandidateValidator().validate(VBookCandidate("optional-roles", plugin, scripts))
+        assertEquals(vn.nghetruyen.source.api.SourceCompatibilityState.UNSUPPORTED, validation.state)
+        assertTrue(VBookFeature.CONFIG_UNSUPPORTED_DESCRIPTOR in validation.blockingFeatures)
+    }
+
+    @Test
     fun repositoryIndexAcceptsAllCatalogEntriesWithoutHardcodedOwners() {
         val rows = VBookRepositoryIndexParser.parse(
             """[

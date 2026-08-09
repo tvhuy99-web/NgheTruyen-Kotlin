@@ -31,6 +31,8 @@ class VBookStorySourceTest {
             installedAtEpochMs = 1,
         ).copy(state = SourceArtifactState.ACTIVE, activatedAtEpochMs = 2)
         val source = VBookStorySource(artifact, zip, SourceCapabilityBrokers())
+        assertTrue(source.descriptor.supportsComments)
+        assertTrue(source.descriptor.supportsSuggestions)
 
         val page1 = source.search("needle", 1) as AppResult.Success
         val page2 = source.search("needle", 2) as AppResult.Success
@@ -49,6 +51,17 @@ class VBookStorySourceTest {
         val chapter = source.chapter("https://x.example/story/needle/chapter-1") as AppResult.Success
         assertEquals(listOf("First paragraph", "Second paragraph"), chapter.value.paragraphs)
         assertTrue(chapter.value.nextChapterUrl.orEmpty().endsWith("/chapter-2"))
+
+        val suggestions = source.suggestions("needle") as AppResult.Success
+        assertEquals(listOf("Related needle"), suggestions.value)
+
+        val comments1 = source.commentsPage("https://x.example/story/needle") as AppResult.Success
+        assertEquals("Reader", comments1.value.comments.single().user)
+        assertEquals("comment@", comments1.value.comments.single().text)
+        assertEquals("now", comments1.value.comments.single().time)
+        val comments2 = source.commentsPage(requireNotNull(comments1.value.nextPageUrl)) as AppResult.Success
+        assertEquals("comment@cursor-2", comments2.value.comments.single().text)
+        assertEquals(null, comments2.value.nextPageUrl)
     }
 
     private fun packageZip(): ByteArray {
@@ -56,7 +69,7 @@ class VBookStorySourceTest {
             "plugin.json" to """
                 {
                   "metadata":{"name":"Fixture","author":"A","version":1,"source":"https://x.example","description":"","locale":"vi","regexp":"x","type":"novel","nsfw":false},
-                  "script":{"explore":"explore.js","search":"search.js","detail":"detail.js","toc":"toc.js","chap":"chap.js"},
+                  "script":{"explore":"explore.js","search":"search.js","detail":"detail.js","toc":"toc.js","chap":"chap.js","comment":"comment.js","suggest":"suggest.js"},
                   "config":{}
                 }
             """.trimIndent(),
@@ -96,6 +109,17 @@ class VBookStorySourceTest {
                     content:'<script>bad()</script><p>First paragraph</p><p>Second paragraph</p>',
                     nextChapterUrl:'https://x.example/story/needle/chapter-2'
                   });
+                }
+            """.trimIndent(),
+            "src/comment.js" to """
+                function execute(input,next){
+                  var cursor=String(next||'');
+                  return Response.success([{name:'Reader',content:'comment@'+cursor,description:'now'}],cursor?'':'cursor-2');
+                }
+            """.trimIndent(),
+            "src/suggest.js" to """
+                function execute(input){
+                  return Response.success([{name:'Related '+input,link:'/story/related',host:'https://x.example'}]);
                 }
             """.trimIndent(),
         )

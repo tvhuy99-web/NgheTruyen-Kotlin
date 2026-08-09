@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import pathlib
 import subprocess
 import sys
 import tempfile
+import time
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DEFAULT_PLANS = [
@@ -54,11 +56,22 @@ def main() -> int:
                     ids.add(case_id)
                     merged_cases.append(case)
 
+        plan_hash = hashlib.sha256()
+        plan_names: list[str] = []
+        for plan in plans:
+            resolved = plan.resolve()
+            display = str(resolved.relative_to(ROOT) if resolved.is_relative_to(ROOT) else resolved)
+            plan_names.append(display)
+            plan_hash.update(display.encode("utf-8"))
+            plan_hash.update(b"\0")
+            plan_hash.update(resolved.read_bytes())
+            plan_hash.update(b"\0")
         payload = {
             "schema": 1,
-            "reference": "vbook-local-rest",
-            "server": args.server,
-            "plans": [str(plan.relative_to(ROOT) if plan.is_relative_to(ROOT) else plan) for plan in plans],
+            "referenceServer": args.server,
+            "capturedAtEpochMs": int(time.time() * 1000),
+            "planSha256": plan_hash.hexdigest(),
+            "plans": plan_names,
             "cases": merged_cases,
         }
         args.out.parent.mkdir(parents=True, exist_ok=True)

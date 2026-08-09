@@ -20,6 +20,19 @@ class VBookAbiTest {
     }
 
     @Test
+    fun commentsAndSuggestionsUseInputPlusOpaqueContinuation() {
+        listOf(VBookScriptRole.COMMENT, VBookScriptRole.SUGGEST).forEach { role ->
+            val invocation = VBookInvocationPlanner.current(
+                role = role,
+                scriptPath = role.manifestKey + ".js",
+                input = "story-or-query",
+                continuation = VBookContinuation("cursor+2"),
+            )
+            assertEquals(listOf("story-or-query", "cursor+2"), invocation.args)
+        }
+    }
+
+    @Test
     fun homeExploreGenreReceiveNoArgumentsInCurrentContract() {
         listOf(VBookScriptRole.HOME, VBookScriptRole.EXPLORE, VBookScriptRole.GENRE).forEach { role ->
             assertTrue(VBookInvocationPlanner.current(role, role.manifestKey + ".js").args.isEmpty())

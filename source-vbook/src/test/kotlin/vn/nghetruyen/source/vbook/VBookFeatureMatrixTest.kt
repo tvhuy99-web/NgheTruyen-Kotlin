@@ -13,6 +13,12 @@ class VBookFeatureMatrixTest {
     }
 
     @Test
+    fun unknownStructuredConfigIsExplicitlyUnsupported() {
+        val support = VBookEngineFeatureMatrix.support(VBookFeature.CONFIG_UNSUPPORTED_DESCRIPTOR)
+        assertEquals(VBookFeatureImplementationLevel.EXPLICITLY_UNSUPPORTED, support.implementation)
+    }
+
+    @Test
     fun implementedFeaturesStillBlockFullParityUntilReferenceCertified() {
         val report = VBookCorpusReport(
             extensionCount = 1,

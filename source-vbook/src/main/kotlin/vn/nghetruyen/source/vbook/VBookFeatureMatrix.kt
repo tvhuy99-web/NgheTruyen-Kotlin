@@ -71,6 +71,8 @@ object VBookEngineFeatureMatrix {
         VBookFeature.CONFIG_LEGACY_PRIMITIVE,
         VBookFeature.CONFIG_DESCRIPTOR,
         VBookFeature.CONFIG_CONNECTION_SETTINGS,
+        VBookFeature.COMMENTS,
+        VBookFeature.SUGGESTIONS,
         VBookFeature.DYNAMIC_SCRIPT_REFERENCE,
         VBookFeature.DYNAMIC_DATA_ARGUMENT,
         VBookFeature.DYNAMIC_LOAD,
@@ -113,6 +115,7 @@ object VBookEngineFeatureMatrix {
 
     private val explicitlyUnsupported = setOf(
         VBookFeature.CONTENT_UNKNOWN,
+        VBookFeature.CONFIG_UNSUPPORTED_DESCRIPTOR,
         VBookFeature.LOCAL_COOKIE_CLEARTEXT,
         VBookFeature.QUICK_TRANSLATOR_OPTIONS,
         VBookFeature.QUICK_TRANSLATOR_SEGMENTS,
@@ -166,6 +169,10 @@ object VBookEngineFeatureMatrix {
             "thread_num controls host concurrency; timeout provides the default request timeout; delay spaces real upstream request starts without delaying cached response conversions."
         VBookFeature.DYNAMIC_DATA_ARGUMENT ->
             "Initial dynamic invocation preserves explicit data as args[1], including an explicit empty string; subsequent pages replace args[1] with opaque data2."
+        VBookFeature.COMMENTS ->
+            "Declared comment scripts preserve opaque data2 pagination and normalize vBook name/content/description rows into the application comment model."
+        VBookFeature.SUGGESTIONS ->
+            "Declared suggest/suggests scripts are executed through the vBook ABI; string or story rows are normalized to bounded search suggestions."
         VBookFeature.LEGACY_HTTP_SOURCE ->
             "Cleartext is derived per extension and allowed only in VBOOK_JS_COMPAT while public-address DNS restrictions continue blocking private/LAN destinations."
         VBookFeature.HTML_COLLECTION_CALLBACKS ->
@@ -198,6 +205,8 @@ object VBookEngineFeatureMatrix {
     private fun unsupportedNote(feature: VBookFeature): String = when (feature) {
         VBookFeature.CONTENT_UNKNOWN ->
             "Unknown metadata.type is archived and audited but not activated. A new type or legacy dialect must be proven before the host assigns provider semantics."
+        VBookFeature.CONFIG_UNSUPPORTED_DESCRIPTOR ->
+            "A structured config object uses a descriptor contract the native editor does not understand. The package is quarantined instead of flattening or silently corrupting that value."
         VBookFeature.LOCAL_COOKIE_CLEARTEXT ->
             "Cleartext network access is sandboxed per extension, but localCookie.setCookie still enforces HTTPS. The corpus scanner exposes this exact combination so it blocks parity only when an extension actually requires it."
         VBookFeature.QUICK_TRANSLATOR_OPTIONS ->

@@ -19,6 +19,9 @@ enum class VBookFeature {
     CONFIG_LEGACY_PRIMITIVE,
     CONFIG_DESCRIPTOR,
     CONFIG_CONNECTION_SETTINGS,
+    CONFIG_UNSUPPORTED_DESCRIPTOR,
+    COMMENTS,
+    SUGGESTIONS,
     DYNAMIC_SCRIPT_REFERENCE,
     DYNAMIC_DATA_ARGUMENT,
     DYNAMIC_LOAD,
@@ -171,9 +174,16 @@ object VBookCorpusAnalyzer {
         }
         if (manifest.config.values.any(VBookConfigField::legacyPrimitive)) add(VBookFeature.CONFIG_LEGACY_PRIMITIVE, value = "primitive config")
         if (manifest.config.values.any { !it.legacyPrimitive }) add(VBookFeature.CONFIG_DESCRIPTOR, value = "descriptor config")
+        manifest.config.values.filter {
+            !it.legacyPrimitive && (it.mode == VBookConfigMode.UNKNOWN || it.format == VBookConfigFormat.UNKNOWN)
+        }.takeIf { it.isNotEmpty() }?.let { fields ->
+            add(VBookFeature.CONFIG_UNSUPPORTED_DESCRIPTOR, value = fields.joinToString { it.key })
+        }
         if (manifest.config.keys.any { it in VBookConfigValues.BUILT_IN_KEYS }) {
             add(VBookFeature.CONFIG_CONNECTION_SETTINGS, value = manifest.config.keys.filter { it in VBookConfigValues.BUILT_IN_KEYS }.sorted().joinToString())
         }
+        if (manifest.script(VBookScriptRole.COMMENT) != null) add(VBookFeature.COMMENTS, value = "script.comment")
+        if (manifest.script(VBookScriptRole.SUGGEST) != null) add(VBookFeature.SUGGESTIONS, value = "script.suggest")
 
         val dynamicScripts = linkedSetOf<String>()
         scripts.forEach { (path, code) ->

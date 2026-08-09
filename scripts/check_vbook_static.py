@@ -24,6 +24,8 @@ def main() -> None:
     runtime = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt")
     compatibility_runtime = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookCompatibilityRuntime.kt")
     feature_matrix = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookFeatureMatrix.kt")
+    contract_model = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookContractModel.kt")
+    corpus_analyzer = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookCorpusAnalyzer.kt")
     sandbox = read("source-js-sandbox/src/main/kotlin/com/nghetruyen/source/sandbox/JsSandbox.kt")
     boundary = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookRhinoValues.kt")
     importer = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookPluginImporter.kt")
@@ -39,6 +41,12 @@ def main() -> None:
     unified_manager = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/UnifiedSourcePlatformManager.kt")
     source_ui = read("app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt")
     config_ui = read("app/src/main/java/vn/nghetruyen/app/ui/screens/SourcePackConfigDialog.kt")
+    story_source = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/VBookStorySource.kt")
+    reference_capture = read("scripts/capture_vbook_reference.py")
+    reference_matrix = read("scripts/capture_vbook_reference_matrix.py")
+    compatibility_lab = read("scripts/run_vbook_compat_lab.py")
+    differential_coverage = read("scripts/check_vbook_differential_coverage.py")
+    provider_plan = read("scripts/vbook-reference-plan-providers.json")
 
     require(
         sandbox,
@@ -65,7 +73,29 @@ def main() -> None:
         'putProperty(scope, "WebSocket"',
     )
     require(compatibility_runtime, "vBook diagnostic wiring", "diagnostics: DiagnosticSink", "diagnostics,")
-    require(feature_matrix, "vBook feature truth", "EXPLICITLY_UNSUPPORTED", "VBookFeature.WEBSOCKET,")
+    require(
+        feature_matrix,
+        "vBook feature truth",
+        "EXPLICITLY_UNSUPPORTED",
+        "VBookFeature.WEBSOCKET,",
+        "VBookFeature.COMMENTS,",
+        "VBookFeature.SUGGESTIONS,",
+        "VBookFeature.CONFIG_UNSUPPORTED_DESCRIPTOR,",
+    )
+    require(
+        contract_model,
+        "vBook manifest contract",
+        'COMMENT("comment")',
+        'SUGGEST("suggest", setOf("suggests"))',
+        "VBookConfigFormat.MULTILINE",
+    )
+    require(
+        corpus_analyzer,
+        "vBook corpus classification",
+        "VBookFeature.CONFIG_UNSUPPORTED_DESCRIPTOR",
+        "VBookFeature.COMMENTS",
+        "VBookFeature.SUGGESTIONS",
+    )
     require(
         boundary,
         "vBook host boundary",
@@ -113,14 +143,43 @@ def main() -> None:
         require(rules, label, 'path="encrypted_vbook_secrets_v1.xml"', 'path="encrypted_vbook_config_v1.xml"')
     require(source_models, "unified source UI model", "val ecosystem: String", "val configFields: List<SourceConfigFieldUi>")
     require(unified_manager, "unified vBook diagnostics", "vBook.diagnosticsSnapshot(sourceId)", "vBook.clearDiagnostics()")
-    require(source_ui, "unified source UI", '"VBOOK" to "VBOOK"', 'text = "KIỂM TRA"', 'text = "CẤU HÌNH"', 'text = "ĐĂNG NHẬP"')
+    require(
+        source_ui,
+        "unified source UI",
+        '"VBOOK" to "VBOOK"',
+        'text = "KIỂM TRA"',
+        'text = "CẤU HÌNH"',
+        'text = "ĐĂNG NHẬP"',
+        'text = "KHÔI PHỤC PHIÊN BẢN TRƯỚC"',
+        'text = "NHẬT KÝ"',
+    )
     require(
         config_ui,
         "native vBook config editor",
         "PasswordVisualTransformation()",
         "field.sensitive && value.isBlank()",
         "Giá trị này sẽ được mã hóa",
+        'singleLine = field.format != "MULTILINE"',
     )
+    require(
+        story_source,
+        "vBook optional story roles",
+        "override suspend fun suggestions",
+        "override suspend fun commentsPage",
+        "VBookScriptRole.COMMENT",
+        "VBookScriptRole.SUGGEST",
+    )
+    require(reference_capture, "reference capture CLI", '"--plan"', "plan_path = args.plan_option or args.plan")
+    require(
+        reference_matrix,
+        "reference matrix schema",
+        '"referenceServer": args.server',
+        '"capturedAtEpochMs"',
+        '"planSha256": plan_hash.hexdigest()',
+    )
+    require(compatibility_lab, "complete vBook lab", '"scripts/capture_vbook_reference_matrix.py"', 'cmd.append("--resume")')
+    require(differential_coverage, "vBook differential states", 'METADATA_ONLY = "METADATA_ONLY"', "METADATA_ONLY,")
+    require(provider_plan, "S11 provider reference coverage", '"CONTENT_COMIC"', '"CONTENT_VIDEO"', '"CONTENT_AUDIO"', '"CONTENT_TTS"', '"CONTENT_TRANSLATE"')
     for forbidden in ("addJavascriptInterface", "ProcessBuilder(", "Class.forName("):
         assert forbidden not in runtime, f"Forbidden vBook bridge token: {forbidden}"
 

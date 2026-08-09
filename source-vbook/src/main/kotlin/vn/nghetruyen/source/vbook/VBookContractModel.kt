@@ -38,7 +38,7 @@ enum class VBookContentType {
     }
 }
 
-enum class VBookScriptRole(val manifestKey: String) {
+enum class VBookScriptRole(val manifestKey: String, val aliases: Set<String> = emptySet()) {
     HOME("home"),
     EXPLORE("explore"),
     GENRE("genre"),
@@ -51,15 +51,17 @@ enum class VBookScriptRole(val manifestKey: String) {
     VOICE("voice"),
     TTS("tts"),
     LANGUAGE("language"),
-    TRANSLATE("translate");
+    TRANSLATE("translate"),
+    COMMENT("comment"),
+    SUGGEST("suggest", setOf("suggests"));
 
     companion object {
-        fun from(key: String): VBookScriptRole? = entries.firstOrNull { it.manifestKey == key }
+        fun from(key: String): VBookScriptRole? = entries.firstOrNull { it.manifestKey == key || key in it.aliases }
     }
 }
 
 enum class VBookConfigMode { INPUT, SELECT, TOGGLE, UNKNOWN }
-enum class VBookConfigFormat { TEXT, NUMBER, SINGLE, MULTIPLE, UNKNOWN }
+enum class VBookConfigFormat { TEXT, NUMBER, SINGLE, MULTIPLE, MULTILINE, UNKNOWN }
 
 data class VBookMetadata(
     val name: String,
@@ -99,6 +101,7 @@ data class VBookExtensionManifest(
     val unknownTopLevel: Map<String, JsonValue>,
 ) {
     fun script(role: VBookScriptRole): String? = scripts[role.manifestKey]
+        ?: role.aliases.firstNotNullOfOrNull(scripts::get)
 
     fun allDeclaredScriptPaths(): Set<String> = scripts.values
         .map(VBookPaths::normalizeScriptPath)
@@ -182,6 +185,7 @@ object VBookManifestParser {
             "input" -> VBookConfigMode.INPUT
             "select" -> VBookConfigMode.SELECT
             "toggle" -> VBookConfigMode.TOGGLE
+            null -> if ("groups" in obj.values) VBookConfigMode.UNKNOWN else VBookConfigMode.INPUT
             else -> VBookConfigMode.UNKNOWN
         }
         val format = when (obj.string("format")?.lowercase()) {
@@ -189,6 +193,12 @@ object VBookManifestParser {
             "number" -> VBookConfigFormat.NUMBER
             "single" -> VBookConfigFormat.SINGLE
             "multiple" -> VBookConfigFormat.MULTIPLE
+            "multiline" -> VBookConfigFormat.MULTILINE
+            null -> when (mode) {
+                VBookConfigMode.INPUT -> VBookConfigFormat.TEXT
+                VBookConfigMode.SELECT, VBookConfigMode.TOGGLE -> VBookConfigFormat.SINGLE
+                VBookConfigMode.UNKNOWN -> VBookConfigFormat.UNKNOWN
+            }
             else -> VBookConfigFormat.UNKNOWN
         }
         val values = obj.array("values")?.values.orEmpty().map(::scalar)

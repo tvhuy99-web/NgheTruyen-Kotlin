@@ -32,6 +32,41 @@ class VBookProviderAbiFixtureTest {
     }
 
     @Test
+    fun mediaChapAndTrackReceiveOpaqueStringArguments() {
+        val runtime = VBookCompatibilityRuntime()
+        val videoSources = runtime.executeDeclared(
+            sourceManifest = manifest("fixture.vbook.video", SourceContentType.MIXED),
+            resources = resources("reference-fixtures/current-providers/video"),
+            role = VBookScriptRole.CHAP,
+            input = "https://example.invalid/video/a/episode-1",
+        ) as SourcePlatformResult.Success
+        val source = (videoSources.value.data as JsonValue.Arr).values.single() as JsonValue.Obj
+        assertEquals("video-token:https://example.invalid/video/a/episode-1", source.string("data"))
+
+        val videoTrack = runtime.executeDeclared(
+            sourceManifest = manifest("fixture.vbook.video", SourceContentType.MIXED),
+            resources = resources("reference-fixtures/current-providers/video"),
+            role = VBookScriptRole.TRACK,
+            input = "video-token:fixture",
+        ) as SourcePlatformResult.Success
+        assertEquals(
+            "https://media.example.invalid/video.m3u8?token=video-token:fixture",
+            (videoTrack.value.data as JsonValue.Obj).string("data"),
+        )
+
+        val audioTrack = runtime.executeDeclared(
+            sourceManifest = manifest("fixture.vbook.audio", SourceContentType.AUDIO),
+            resources = resources("reference-fixtures/current-providers/audio"),
+            role = VBookScriptRole.TRACK,
+            input = "https://example.invalid/audio/a/chapter-1",
+        ) as SourcePlatformResult.Success
+        assertEquals(
+            "https://media.example.invalid/audio.mp3?source=https://example.invalid/audio/a/chapter-1",
+            (audioTrack.value.data as JsonValue.Obj).string("data"),
+        )
+    }
+
+    @Test
     fun ttsReceivesTextAndVoiceId() {
         val runtime = VBookCompatibilityRuntime()
         val voices = runtime.executeDeclared(

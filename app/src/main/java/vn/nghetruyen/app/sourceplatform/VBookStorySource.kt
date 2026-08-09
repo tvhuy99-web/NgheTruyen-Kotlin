@@ -6,6 +6,7 @@ import vn.nghetruyen.app.core.model.ChapterContent
 import vn.nghetruyen.app.core.model.ChapterPage
 import vn.nghetruyen.app.core.model.ChapterSummary
 import vn.nghetruyen.app.core.model.SourceHealth
+import vn.nghetruyen.app.core.model.StoryCommentPage
 import vn.nghetruyen.app.core.model.StoryDetail
 import vn.nghetruyen.app.core.model.StorySummary
 import vn.nghetruyen.app.sources.SourceCommentCapability
@@ -13,6 +14,7 @@ import vn.nghetruyen.app.sources.SourceDescriptor
 import vn.nghetruyen.app.sources.SourceImplementationKind
 import vn.nghetruyen.app.sources.StorySource
 import vn.nghetruyen.source.api.SourceCapabilityBrokers
+import vn.nghetruyen.source.api.JsonValue
 import vn.nghetruyen.source.api.SourcePlatformResult
 import vn.nghetruyen.source.diagnostics.DiagnosticSink
 import vn.nghetruyen.source.runtime.SourceResourceProvider
@@ -28,6 +30,7 @@ import vn.nghetruyen.source.vbook.VBookPackageReader
 import vn.nghetruyen.source.vbook.VBookScriptRole
 import vn.nghetruyen.source.vbook.VBookStoryNormalizer
 import java.net.URI
+import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -67,10 +70,10 @@ class VBookStorySource(
         loginUrl = plugin.metadata.source.takeIf(String::isNotBlank),
         privacyNote = "Tiện ích vBook chạy trong sandbox; Internet công khai được phép nhưng localhost/LAN bị chặn.",
         allowedHosts = setOfNotNull(runCatching { URI(plugin.metadata.source).host }.getOrNull()),
-        supportsComments = false,
-        commentCapability = SourceCommentCapability.NONE,
+        supportsComments = plugin.script(VBookScriptRole.COMMENT) != null,
+        commentCapability = if (plugin.script(VBookScriptRole.COMMENT) != null) SourceCommentCapability.PAGED else SourceCommentCapability.NONE,
         supportsHome = plugin.script(VBookScriptRole.HOME) != null || plugin.script(VBookScriptRole.EXPLORE) != null,
-        supportsSuggestions = false,
+        supportsSuggestions = plugin.script(VBookScriptRole.SUGGEST) != null,
         implementationKind = SourceImplementationKind.VBOOK,
     )
 
@@ -83,6 +86,34 @@ class VBookStorySource(
             is AppResult.Success -> AppResult.Success(
                 result.value?.let { VBookStoryNormalizer.stories(it.data, plugin.metadata.source).map(::storySummary) }.orEmpty(),
             )
+        }
+    }
+
+    override suspend fun suggestions(query: String): AppResult<List<String>> {
+        if (plugin.script(VBookScriptRole.SUGGEST) == null) return AppResult.Success(emptyList())
+        val clean = query.trim()
+        if (clean.isBlank()) return AppResult.Success(emptyList())
+        return when (val result = executeDeclared(VBookScriptRole.SUGGEST, clean)) {
+            is AppResult.Failure -> result
+            is AppResult.Success -> AppResult.Success(suggestionStrings(result.value.data))
+        }
+    }
+
+    override suspend fun commentsPage(url: String): AppResult<StoryCommentPage> {
+        if (plugin.script(VBookScriptRole.COMMENT) == null) {
+            return AppResult.Failure("COMMENTS_UNSUPPORTED", "Tiện ích vBook này không khai báo comment.js.")
+        }
+        val request = runCatching { decodeCommentTarget(url) }
+            .getOrElse { return AppResult.Failure("VBOOK_COMMENT_CURSOR_INVALID", it.message.orEmpty(), it) }
+        return when (val result = executeDeclared(VBookScriptRole.COMMENT, request.first, request.second)) {
+            is AppResult.Failure -> result
+            is AppResult.Success -> {
+                val parsed = StoryCommentPayloadParser.parsePage(result.value.data)
+                val next = result.value.continuation.token.takeIf(String::isNotEmpty)?.let { token ->
+                    encodeCommentTarget(request.first, token)
+                }
+                AppResult.Success(parsed.copy(nextPageUrl = next))
+            }
         }
     }
 
@@ -158,6 +189,7 @@ class VBookStorySource(
                 genres = detail.genres,
                 status = detail.status,
                 chapters = chapters,
+                commentsUrl = detail.story.url.takeIf { plugin.script(VBookScriptRole.COMMENT) != null },
             ),
         )
     }
@@ -278,6 +310,46 @@ class VBookStorySource(
     private fun chooseListAction(actions: List<VBookDynamicAction>): VBookDynamicAction? =
         actions.firstOrNull { it.type.equals("list", ignoreCase = true) } ?: actions.firstOrNull()
 
+    private fun suggestionStrings(data: JsonValue): List<String> {
+        val values = when (data) {
+            is JsonValue.Arr -> data.values
+            is JsonValue.Obj -> data.array("items")?.values ?: data.array("data")?.values ?: listOf(data)
+            is JsonValue.Str -> listOf(data)
+            else -> emptyList()
+        }
+        return values.asSequence().mapNotNull { value ->
+            when (value) {
+                is JsonValue.Str -> value.value
+                is JsonValue.Obj -> value.string("name") ?: value.string("title")
+                else -> null
+            }?.trim()?.takeIf(String::isNotBlank)
+        }.distinct().take(MAX_SUGGESTIONS).toList()
+    }
+
+    private fun encodeCommentTarget(input: String, token: String): String {
+        require(input.length + token.length <= MAX_COMMENT_CURSOR_CHARS) { "VBOOK_COMMENT_CURSOR_TOO_LARGE" }
+        val payload = "${input.length}:$input$token".toByteArray(Charsets.UTF_8)
+        return COMMENT_CURSOR_PREFIX + Base64.getUrlEncoder().withoutPadding().encodeToString(payload)
+    }
+
+    private fun decodeCommentTarget(target: String): Pair<String, VBookContinuation> {
+        if (!target.startsWith(COMMENT_CURSOR_PREFIX)) return target to VBookContinuation()
+        val encoded = target.removePrefix(COMMENT_CURSOR_PREFIX)
+        require(encoded.length <= MAX_COMMENT_CURSOR_CHARS * 2) { "VBOOK_COMMENT_CURSOR_TOO_LARGE" }
+        val raw = Base64.getUrlDecoder().decode(encoded).toString(Charsets.UTF_8)
+        val separator = raw.indexOf(':')
+        require(separator in 1..10) { "VBOOK_COMMENT_CURSOR_INVALID" }
+        val inputLength = raw.substring(0, separator).toIntOrNull() ?: error("VBOOK_COMMENT_CURSOR_INVALID")
+        val start = separator + 1
+        require(inputLength in 0..MAX_COMMENT_CURSOR_CHARS && start + inputLength <= raw.length) {
+            "VBOOK_COMMENT_CURSOR_INVALID"
+        }
+        val input = raw.substring(start, start + inputLength)
+        val token = raw.substring(start + inputLength)
+        require(input.length + token.length <= MAX_COMMENT_CURSOR_CHARS) { "VBOOK_COMMENT_CURSOR_TOO_LARGE" }
+        return input to VBookContinuation(token)
+    }
+
     private fun storySummary(record: vn.nghetruyen.source.vbook.VBookStoryRecord): StorySummary = StorySummary(
         id = record.id,
         sourceId = descriptor.id,
@@ -306,5 +378,11 @@ class VBookStorySource(
             } ?: return null
             return bytes.takeIf { it.size <= maxBytes }?.copyOf()
         }
+    }
+
+    companion object {
+        private const val COMMENT_CURSOR_PREFIX = "vbook-comment:"
+        private const val MAX_COMMENT_CURSOR_CHARS = 64 * 1024
+        private const val MAX_SUGGESTIONS = 30
     }
 }

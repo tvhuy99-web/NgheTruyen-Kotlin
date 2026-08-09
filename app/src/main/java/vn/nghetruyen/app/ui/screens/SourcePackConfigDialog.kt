@@ -70,7 +70,7 @@ internal fun SourcePackConfigDialog(
                             supportingText = helper.takeIf(String::isNotBlank)?.let { text -> ({ Text(text) }) },
                             placeholder = if (field.sensitive && field.configured) ({ Text("Đã lưu") }) else null,
                             visualTransformation = if (field.sensitive) PasswordVisualTransformation() else VisualTransformation.None,
-                            singleLine = true,
+                            singleLine = field.format != "MULTILINE",
                             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                         )
                     }

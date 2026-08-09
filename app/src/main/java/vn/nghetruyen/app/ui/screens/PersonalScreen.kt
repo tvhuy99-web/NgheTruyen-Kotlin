@@ -889,6 +889,7 @@ private fun InstalledSourcesSection(
     var showSearch by remember { mutableStateOf(false) }
     var selectedPackId by remember { mutableStateOf<String?>(null) }
     var configurePackId by remember { mutableStateOf<String?>(null) }
+    var diagnosticPackId by remember { mutableStateOf<String?>(null) }
     var removePackId by remember { mutableStateOf<String?>(null) }
     val filtered = state.sourcePacks.filter { pack ->
         (ecosystemFilter == "ALL" || pack.ecosystem == ecosystemFilter) &&
@@ -1004,7 +1005,7 @@ private fun InstalledSourcesSection(
                         }
                         if (pack.canRollback) {
                             ReferenceActionButton(
-                                text = "ROLLBACK PHIÊN BẢN NGUỒN",
+                                text = "KHÔI PHỤC PHIÊN BẢN TRƯỚC",
                                 onClick = {
                                     onRollback(pack.id)
                                     selectedPackId = null
@@ -1016,6 +1017,14 @@ private fun InstalledSourcesSection(
                             text = "CẬP NHẬT",
                             onClick = {
                                 onUpdate(pack.id)
+                                selectedPackId = null
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        )
+                        ReferenceActionButton(
+                            text = "NHẬT KÝ",
+                            onClick = {
+                                diagnosticPackId = pack.id
                                 selectedPackId = null
                             },
                             modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
@@ -1055,6 +1064,37 @@ private fun InstalledSourcesSection(
                 onDismiss = { configurePackId = null },
             )
         }
+    }
+
+    diagnosticPackId?.let { sourceId ->
+        val pack = state.sourcePacks.firstOrNull { it.id == sourceId }
+        val events = state.sourceDiagnostics.filter { it.sourceId == sourceId }.take(50)
+        AlertDialog(
+            onDismissRequest = { diagnosticPackId = null },
+            title = { Text("NHẬT KÝ · ${pack?.name ?: sourceId}") },
+            text = {
+                Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                    if (events.isEmpty()) {
+                        Text("Chưa có sự kiện chẩn đoán cho tiện ích này.")
+                    } else {
+                        events.forEach { event ->
+                            val duration = event.durationMs?.let { " • ${it} ms" }.orEmpty()
+                            Text(
+                                "${event.severity} ${event.category}/${event.name}$duration",
+                                fontWeight = if (event.severity == "ERROR") FontWeight.SemiBold else FontWeight.Normal,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            Text(
+                                "trace ${event.traceId.take(12)}${event.detail.takeIf(String::isNotBlank)?.let { " • $it" }.orEmpty()}",
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.padding(bottom = 6.dp),
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { diagnosticPackId = null }) { Text("ĐÓNG") } },
+        )
     }
 
     removePackId?.let { packId ->

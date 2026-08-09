@@ -28,6 +28,12 @@ on:
       - 'gradlew'
       - 'scripts/check_source_engine_specificity.py'
       - 'scripts/check_vbook_static.py'
+      - 'scripts/check_vbook_differential_coverage.py'
+      - 'scripts/capture_vbook_reference.py'
+      - 'scripts/capture_vbook_reference_matrix.py'
+      - 'scripts/fetch_vbook_corpus.py'
+      - 'scripts/run_vbook_compat_lab.py'
+      - 'scripts/vbook-reference-plan*.json'
       - '.github/workflows/source-platform-vbook.yml'
   push:
     branches:
@@ -59,6 +65,12 @@ on:
       - 'gradlew'
       - 'scripts/check_source_engine_specificity.py'
       - 'scripts/check_vbook_static.py'
+      - 'scripts/check_vbook_differential_coverage.py'
+      - 'scripts/capture_vbook_reference.py'
+      - 'scripts/capture_vbook_reference_matrix.py'
+      - 'scripts/fetch_vbook_corpus.py'
+      - 'scripts/run_vbook_compat_lab.py'
+      - 'scripts/vbook-reference-plan*.json'
       - '.github/workflows/source-platform-vbook.yml'
   workflow_dispatch:
 
@@ -99,6 +111,7 @@ jobs:
           :source-network:test
           :source-repository:test
           :source-vbook:test
+          :app:testDebugUnitTest
           :app:compileDebugKotlin
           --stacktrace
 

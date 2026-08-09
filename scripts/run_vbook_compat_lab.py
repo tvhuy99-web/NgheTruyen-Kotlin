@@ -33,6 +33,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reference-server", help="vBook local REST server, e.g. http://127.0.0.1:8080")
     parser.add_argument("--skip-fetch", action="store_true", help="Reuse an existing strict corpus")
+    parser.add_argument("--resume-fetch", action="store_true", help="Reuse validated downloads while completing an interrupted corpus fetch")
     parser.add_argument("--skip-tests", action="store_true", help="Skip Gradle tests for diagnostics only")
     parser.add_argument("--allow-upstream-errors", action="store_true", help="Record incomplete corpus without treating acquisition as fatal")
     parser.add_argument("--allow-uncovered", action="append", default=[], help="Temporary reference coverage waiver")
@@ -42,6 +43,8 @@ def main() -> int:
     try:
         if not args.skip_fetch:
             cmd = [sys.executable, "scripts/fetch_vbook_corpus.py", "--out", str(CORPUS)]
+            if args.resume_fetch:
+                cmd.append("--resume")
             if args.allow_upstream_errors:
                 cmd.append("--allow-errors")
             run(cmd)
@@ -72,8 +75,7 @@ def main() -> int:
             env["VBOOK_REFERENCE_SERVER"] = args.reference_server
             run([
                 sys.executable,
-                "scripts/capture_vbook_reference.py",
-                "--plan", "scripts/vbook-reference-plan.json",
+                "scripts/capture_vbook_reference_matrix.py",
                 "--server", args.reference_server,
                 "--out", str(REFERENCE),
             ], env=env)

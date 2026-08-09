@@ -4,6 +4,7 @@
 This gate intentionally distinguishes three states:
 - PARTIAL/PACKAGE_LAYER_PENDING: implementation blocker, captures cannot make it green.
 - EXPLICITLY_UNSUPPORTED: known, quarantined behavior; never a silent unknown.
+- METADATA_ONLY: authoring/package metadata with no runtime behavior to certify.
 - IMPLEMENTED but uncovered: proof blocker, more reference cases are required.
 - IMPLEMENTED and covered: eligible for semantic comparison/certification.
 """
@@ -20,6 +21,7 @@ IMPLEMENTED = "IMPLEMENTED"
 PARTIAL = "PARTIAL"
 EXPLICITLY_UNSUPPORTED = "EXPLICITLY_UNSUPPORTED"
 PACKAGE_PENDING = "PACKAGE_LAYER_PENDING"
+METADATA_ONLY = "METADATA_ONLY"
 
 
 def load_json(path: pathlib.Path) -> dict:
@@ -50,7 +52,14 @@ def main() -> int:
             implementation = str(raw.get("implementation") or "").strip()
             if feature and count > 0:
                 feature_rows[feature] = raw
-                if implementation not in {IMPLEMENTED, PARTIAL, EXPLICITLY_UNSUPPORTED, PACKAGE_PENDING, REFERENCE_REJECTS}:
+                if implementation not in {
+                    IMPLEMENTED,
+                    PARTIAL,
+                    EXPLICITLY_UNSUPPORTED,
+                    PACKAGE_PENDING,
+                    METADATA_ONLY,
+                    REFERENCE_REJECTS,
+                }:
                     raise RuntimeError(f"CORPUS_IMPLEMENTATION_STATE_INVALID:{feature}:{implementation}")
 
         covered: dict[str, set[str]] = {}

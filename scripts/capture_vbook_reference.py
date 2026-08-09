@@ -155,12 +155,16 @@ def run(plan_path: pathlib.Path, output_path: pathlib.Path, server_override: str
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("plan", type=pathlib.Path)
+    parser.add_argument("plan", nargs="?", type=pathlib.Path, help="Reference plan JSON")
+    parser.add_argument("--plan", dest="plan_option", type=pathlib.Path, help="Reference plan JSON (named form)")
     parser.add_argument("--out", type=pathlib.Path, required=True)
     parser.add_argument("--server", default=None, help="Override plan.reference server URL")
     args = parser.parse_args()
+    plan_path = args.plan_option or args.plan
+    if plan_path is None:
+        parser.error("a plan path is required")
     try:
-        output = run(args.plan, args.out, args.server)
+        output = run(plan_path, args.out, args.server)
     except Exception as exc:
         print(f"VBOOK_REFERENCE_CAPTURE_FAILED:{exc}", file=sys.stderr)
         return 2

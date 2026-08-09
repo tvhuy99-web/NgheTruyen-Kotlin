@@ -50,6 +50,28 @@ class VBookContractModelTest {
         assertTrue(missing.isEmpty())
     }
 
+    @Test
+    fun configDefaultsAndMultilineFormatAreExplicit() {
+        val manifest = VBookManifestParser.parse(
+            CURRENT.replace(
+                "\"DOMAIN\": { \"title\": \"Domain\", \"default\": \"https://site.example\", \"mode\": \"input\", \"format\": \"text\" }",
+                "\"DOMAIN\": { \"title\": \"Domain\", \"default\": \"https://site.example\", \"mode\": \"input\" }," +
+                    "\"TOKENS\": { \"title\": \"Tokens\", \"default\": \"\", \"mode\": \"input\", \"format\": \"multiline\" }",
+            ),
+        )
+        assertEquals(VBookConfigFormat.TEXT, manifest.config.getValue("DOMAIN").format)
+        assertEquals(VBookConfigFormat.MULTILINE, manifest.config.getValue("TOKENS").format)
+    }
+
+    @Test
+    fun suggestsAliasResolvesToKnownRole() {
+        val manifest = VBookManifestParser.parse(
+            MINIMAL_CURRENT.replace("\"chap\": \"chap.js\"", "\"chap\": \"chap.js\", \"suggests\": \"suggests.js\""),
+        )
+        assertEquals("src/suggests.js", manifest.script(VBookScriptRole.SUGGEST))
+        assertEquals(VBookScriptRole.SUGGEST, VBookScriptRole.from("suggests"))
+    }
+
     companion object {
         private val LEGACY = """
             {

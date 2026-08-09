@@ -89,7 +89,8 @@ object VBookInvocationPlanner {
         val args = when (role) {
             VBookScriptRole.HOME, VBookScriptRole.EXPLORE, VBookScriptRole.GENRE,
             VBookScriptRole.VOICE, VBookScriptRole.LANGUAGE -> emptyList()
-            VBookScriptRole.SEARCH -> listOf(input, continuation.token)
+            VBookScriptRole.SEARCH, VBookScriptRole.COMMENT, VBookScriptRole.SUGGEST ->
+                listOf(input, continuation.token)
             VBookScriptRole.DETAIL, VBookScriptRole.TOC, VBookScriptRole.CHAP,
             VBookScriptRole.PAGE, VBookScriptRole.TRACK -> listOf(input)
             VBookScriptRole.TTS -> listOf(text, voiceId)

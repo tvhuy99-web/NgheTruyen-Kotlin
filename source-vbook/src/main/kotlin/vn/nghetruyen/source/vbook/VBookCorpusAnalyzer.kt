@@ -55,6 +55,9 @@ enum class VBookFeature {
     QUICK_TRANSLATOR_SEGMENTS,
     CRYPTO,
     SCRIPT_EXECUTE,
+    USER_AGENT,
+    SLEEP,
+    LOGGING,
     JS_FORBIDDEN_ASYNC_AWAIT,
     JS_FORBIDDEN_OPTIONAL_CHAINING,
     JS_FORBIDDEN_NULLISH,
@@ -203,6 +206,9 @@ object VBookCorpusAnalyzer {
             hit(VBookFeature.QUICK_TRANSLATOR_SEGMENTS, Regex("\\.segments\\b"))
             hit(VBookFeature.CRYPTO, Regex("\\b(?:CryptoJS|Crypto)\\b"))
             hit(VBookFeature.SCRIPT_EXECUTE, Regex("\\bScript\\.execute\\s*\\("))
+            hit(VBookFeature.USER_AGENT, Regex("\\bUserAgent\\.(?:system|chrome|android|ios)\\s*\\("))
+            hit(VBookFeature.SLEEP, Regex("\\bsleep\\s*\\("))
+            hit(VBookFeature.LOGGING, Regex("\\b(?:Log|Console|console)\\.(?:log|info|warn|error|debug)\\s*\\("))
             hit(VBookFeature.JS_FORBIDDEN_ASYNC_AWAIT, Regex("\\b(?:async\\s+function|await\\s+)"))
             hit(VBookFeature.JS_FORBIDDEN_OPTIONAL_CHAINING, Regex("\\?\\.[A-Za-z_$\\[]"))
             hit(VBookFeature.JS_FORBIDDEN_NULLISH, Regex("\\?\\?"))

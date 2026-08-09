@@ -42,6 +42,29 @@ object VBookStoryNormalizer {
     fun stories(data: JsonValue, fallbackHost: String = ""): List<VBookStoryRecord> =
         sequenceOfItems(data).mapNotNull { story(it, fallbackHost) }
 
+    /**
+     * Current explore.js returns section objects whose `items` contain story cards. Keep this
+     * separate from [stories] so arbitrary nested arrays from detail/chapter payloads are never
+     * mistaken for top-level story results.
+     */
+    fun exploreStories(data: JsonValue, fallbackHost: String = ""): List<VBookStoryRecord> {
+        val candidates = when (data) {
+            is JsonValue.Arr -> data.values.flatMap { value ->
+                val section = value as? JsonValue.Obj
+                val nested = section?.array("items")?.values
+                if (nested != null && (section.string("type") != null || section.string("id") != null || section.string("title") != null)) nested
+                else listOf(value)
+            }
+            is JsonValue.Obj -> data.array("items")?.values.orEmpty()
+            else -> emptyList()
+        }
+        return candidates.asSequence()
+            .take(MAX_EXPLORE_ITEMS)
+            .mapNotNull { story(it, fallbackHost) }
+            .distinctBy(VBookStoryRecord::url)
+            .toList()
+    }
+
     fun story(value: JsonValue, fallbackHost: String = ""): VBookStoryRecord? {
         val obj = value as? JsonValue.Obj ?: return null
         val title = obj.string("name") ?: obj.string("title") ?: return null
@@ -63,12 +86,16 @@ object VBookStoryNormalizer {
         val resolvedUrl = resolveUrl(host, obj.string("url") ?: obj.string("link") ?: inputUrl) ?: inputUrl
         val title = obj.string("name") ?: obj.string("title") ?: return null
         val description = (obj.string("description") ?: obj.string("detail") ?: "").trim()
-        val genres = obj.array("genres")?.values.orEmpty().mapNotNull { value ->
-            when (value) {
-                is JsonValue.Str -> value.value
-                is JsonValue.Obj -> value.string("title") ?: value.string("name")
-                else -> null
-            }?.trim()?.takeIf(String::isNotBlank)
+        val genres = buildList {
+            listOf("genres", "tags").forEach { key ->
+                obj.array(key)?.values.orEmpty().mapNotNullTo(this) { value ->
+                    when (value) {
+                        is JsonValue.Str -> value.value
+                        is JsonValue.Obj -> value.string("title") ?: value.string("name")
+                        else -> null
+                    }?.trim()?.takeIf(String::isNotBlank)
+                }
+            }
         }.distinct()
         val status = obj.string("status")?.trim()?.takeIf(String::isNotBlank)
             ?: when (obj.bool("ongoing")) {
@@ -98,6 +125,7 @@ object VBookStoryNormalizer {
         startIndex: Int = 0,
     ): List<VBookChapterRecord> = sequenceOfItems(data).mapIndexedNotNull { offset, value ->
         val obj = value as? JsonValue.Obj ?: return@mapIndexedNotNull null
+        if (obj.string("type")?.equals("section", ignoreCase = true) == true) return@mapIndexedNotNull null
         val host = obj.string("host") ?: fallbackHost
         val url = resolveUrl(host, obj.string("url") ?: obj.string("link")) ?: return@mapIndexedNotNull null
         val index = startIndex + offset
@@ -167,4 +195,6 @@ object VBookStoryNormalizer {
         .digest(raw.toByteArray(Charsets.UTF_8))
         .take(12)
         .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+
+    private const val MAX_EXPLORE_ITEMS = 20_000
 }

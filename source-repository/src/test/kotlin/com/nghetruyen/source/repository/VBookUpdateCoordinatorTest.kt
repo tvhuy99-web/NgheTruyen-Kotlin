@@ -5,6 +5,7 @@ import com.nghetruyen.source.platform.SourceArtifactIdentity
 import com.nghetruyen.source.platform.SourceArtifactState
 import com.nghetruyen.source.platform.SourceEcosystem
 import com.nghetruyen.source.platform.SourceTrustState
+import com.nghetruyen.source.store.SourceArtifactLifecycle
 import com.nghetruyen.source.store.SourceArtifactRegistry
 import com.nghetruyen.source.store.SourceArtifactTransition
 import org.junit.Assert.assertEquals
@@ -12,6 +13,9 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import vn.nghetruyen.source.vbook.VBookCandidateValidator
+import java.io.ByteArrayOutputStream
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 class VBookUpdateCoordinatorTest {
     private val identity = SourceArtifactIdentity(SourceEcosystem.VBOOK, "official", "artifact-x")
@@ -28,6 +32,7 @@ class VBookUpdateCoordinatorTest {
         assertEquals("v2", second.active!!.artifactId)
         assertEquals("v1", registry.previousKnownGood(identity)!!.artifactId)
         assertTrue(archive.contains("v1") && archive.contains("v2"))
+        assertEquals(second.descriptor.sha256, archive.sha256("v2"))
 
         val restored = coordinator.rollback(identity, 30)
         assertEquals("v1", restored.artifactId)
@@ -48,23 +53,61 @@ class VBookUpdateCoordinatorTest {
         assertEquals(SourceArtifactState.QUARANTINED, registry.quarantined.getValue("bad").state)
     }
 
-    private fun payload(id: String, version: String, plugin: String, scripts: Map<String, String>) = VBookUpdatePayload(
-        artifactId = id,
-        identity = identity,
-        version = version,
-        originalPackageBytes = (id + version).toByteArray(),
-        pluginJson = plugin,
-        scripts = scripts,
-        trust = SourceTrustState.REPOSITORY_TRUSTED,
-        installedAtEpochMs = if (version == "1") 10 else 20,
-    )
+    @Test
+    fun malformedZipIsArchivedAndQuarantinedNotActivated() {
+        val registry = MemoryRegistry()
+        val archive = MemoryArchive()
+        val coordinator = VBookUpdateCoordinator(VBookCandidateValidator(), registry, archive)
+        coordinator.installOrUpdate(payload("good", "1", GOOD_PLUGIN, GOOD_SCRIPTS), 11)
+        val malformed = VBookUpdatePayload(
+            artifactId = "corrupt",
+            identity = identity,
+            version = "2",
+            originalPackageBytes = "not-a-zip".toByteArray(),
+            trust = SourceTrustState.UNVERIFIED,
+            installedAtEpochMs = 20,
+        )
+        val result = coordinator.installOrUpdate(malformed, 21)
+
+        assertEquals(VBookUpdateDisposition.QUARANTINED, result.disposition)
+        assertEquals("good", registry.active(identity)!!.artifactId)
+        assertTrue(result.validation.failures.isNotEmpty())
+        assertEquals(result.descriptor.sha256, archive.sha256("corrupt"))
+    }
+
+    private fun payload(id: String, version: String, plugin: String, scripts: Map<String, String>): VBookUpdatePayload =
+        VBookUpdatePayload(
+            artifactId = id,
+            identity = identity,
+            version = version,
+            originalPackageBytes = packageZip(plugin, scripts),
+            trust = SourceTrustState.REPOSITORY_TRUSTED,
+            installedAtEpochMs = if (version == "1") 10 else 20,
+        )
+
+    private fun packageZip(plugin: String, scripts: Map<String, String>): ByteArray {
+        val output = ByteArrayOutputStream()
+        ZipOutputStream(output).use { zip ->
+            val files = linkedMapOf<String, ByteArray>("plugin.json" to plugin.toByteArray())
+            scripts.forEach { (path, source) -> files[path] = source.toByteArray() }
+            files.forEach { (name, bytes) ->
+                zip.putNextEntry(ZipEntry(name))
+                zip.write(bytes)
+                zip.closeEntry()
+            }
+        }
+        return output.toByteArray()
+    }
 
     private class MemoryArchive : SourceArtifactArchive {
         private val bytes = linkedMapOf<String, ByteArray>()
         override fun stage(descriptor: SourceArtifactDescriptor, originalBytes: ByteArray) {
-            bytes.putIfAbsent(descriptor.artifactId, originalBytes.copyOf())
+            val existing = bytes[descriptor.artifactId]
+            if (existing != null) require(existing.contentEquals(originalBytes)) { "ARCHIVE_IMMUTABLE" }
+            else bytes[descriptor.artifactId] = originalBytes.copyOf()
         }
         override fun contains(artifactId: String): Boolean = artifactId in bytes
+        override fun sha256(artifactId: String): String? = bytes[artifactId]?.let(SourceArtifactLifecycle::sha256)
     }
 
     private class MemoryRegistry : SourceArtifactRegistry {

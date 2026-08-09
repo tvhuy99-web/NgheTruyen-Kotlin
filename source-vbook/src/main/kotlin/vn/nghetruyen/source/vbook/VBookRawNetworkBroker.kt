@@ -1,5 +1,7 @@
 package vn.nghetruyen.source.vbook
 
+import vn.nghetruyen.source.api.JsonCodec
+import vn.nghetruyen.source.api.JsonValue
 import vn.nghetruyen.source.api.SourceManifest
 import vn.nghetruyen.source.api.SourceNetworkBroker
 import vn.nghetruyen.source.api.SourceNetworkRequest
@@ -14,9 +16,9 @@ import java.util.LinkedHashMap
  * vBook-only network decorator used to bridge the mature text-oriented JS host to the raw-byte
  * contract without weakening or modifying the generic network broker.
  *
- * Internal control headers are removed before any upstream request. Charset/base64 operations are
- * served lazily from the already captured response, so POST requests are never replayed merely to
- * decode or encode their response body.
+ * Internal control headers are removed before any upstream request. Charset/base64/request-info
+ * operations are served lazily from the already captured response, so requests are never replayed
+ * merely to inspect a response representation.
  */
 class VBookRawNetworkBroker(
     private val delegate: SourceNetworkBroker,
@@ -58,6 +60,7 @@ class VBookRawNetworkBroker(
                     cached.response.body.toString(charset).toByteArray(Charsets.UTF_8)
                 }
                 OP_BASE64 -> Base64.getEncoder().encode(cached.response.body)
+                OP_REQUEST -> requestMetadataJson(cached.response).toByteArray(Charsets.UTF_8)
                 else -> return failure(request, "VBOOK_RAW_OPERATION_INVALID:$operation")
             }
             return SourcePlatformResult.Success(cached.response.copy(
@@ -96,6 +99,17 @@ class VBookRawNetworkBroker(
         }
     }
 
+    private fun requestMetadataJson(response: SourceNetworkResponse): String {
+        val headers = linkedMapOf<String, JsonValue>()
+        response.requestHeaders.toSortedMap(String.CASE_INSENSITIVE_ORDER).forEach { (name, values) ->
+            headers[name] = JsonValue.Str(values.joinToString(", "))
+        }
+        return JsonCodec.stringify(JsonValue.Obj(linkedMapOf(
+            "url" to JsonValue.Str(response.requestUrl ?: response.finalUrl),
+            "headers" to JsonValue.Obj(headers),
+        )))
+    }
+
     private fun enrichHeaders(
         headers: Map<String, List<String>>,
         response: SourceNetworkResponse,
@@ -124,6 +138,7 @@ class VBookRawNetworkBroker(
         const val INTERNAL_RESPONSE_KEY = "X-Nghe-VBook-Response-Key"
         const val OP_TEXT = "text"
         const val OP_BASE64 = "base64"
+        const val OP_REQUEST = "request"
 
         private val INTERNAL_CONTROL_HEADERS = setOf(
             INTERNAL_REQUEST_KEY,

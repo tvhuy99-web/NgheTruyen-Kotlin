@@ -54,6 +54,7 @@ fun LibraryScreen(
     onSectionSelected: (LibrarySection) -> Unit,
     onImportFile: () -> Unit,
     onStoryClick: (StoryEntity) -> Unit,
+    onUpdateDownloadedStory: (StoryEntity) -> Unit,
     onRemoveFromReading: (String) -> Unit,
     onPauseDownload: (String) -> Unit,
     onResumeDownload: (String) -> Unit,
@@ -223,6 +224,7 @@ fun LibraryScreen(
                     failures = emptyList(),
                     storage = state.offlineStorage,
                     onStoryClick = onStoryClick,
+                    onUpdateDownloadedStory = onUpdateDownloadedStory,
                     onPauseDownload = onPauseDownload,
                     onResumeDownload = onResumeDownload,
                     onRetryDownload = onRetryDownload,
@@ -280,9 +282,7 @@ fun LibraryScreen(
                     modifier = Modifier.fillMaxWidth(),
                 )
             },
-            confirmButton = {
-                TextButton(onClick = { query = draft; showSearch = false }) { Text("TÌM") }
-            },
+            confirmButton = { TextButton(onClick = { query = draft; showSearch = false }) { Text("TÌM") } },
             dismissButton = {
                 Row {
                     TextButton(onClick = { query = ""; showSearch = false }) { Text("HIỆN TẤT CẢ") }
@@ -302,161 +302,73 @@ fun LibraryScreen(
             }
             LibrarySection.DOWNLOADED -> {
                 title = "SẮP XẾP TRUYỆN ĐÃ TẢI"
-                options = listOf(
-                    "recent" to "MỚI TẢI",
-                    "title" to "TÊN A-Z",
-                    "size" to "DUNG LƯỢNG LỚN NHẤT",
-                    "chapters" to "NHIỀU CHƯƠNG NHẤT",
-                )
+                options = listOf("recent" to "MỚI TẢI", "title" to "TÊN A-Z", "size" to "DUNG LƯỢNG LỚN NHẤT", "chapters" to "NHIỀU CHƯƠNG NHẤT")
             }
             LibrarySection.BOOKMARKS, LibrarySection.NOTES -> {
                 title = if (state.librarySection == LibrarySection.NOTES) "SẮP XẾP GHI CHÚ" else "SẮP XẾP ĐÁNH DẤU"
-                options = if (state.librarySection == LibrarySection.NOTES) {
-                    listOf("recent" to "MỚI CẬP NHẬT", "title" to "NỘI DUNG A-Z")
-                } else {
-                    listOf("recent" to "MỚI ĐÁNH DẤU", "title" to "TÊN A-Z")
-                }
+                options = if (state.librarySection == LibrarySection.NOTES) listOf("recent" to "MỚI CẬP NHẬT", "title" to "NỘI DUNG A-Z") else listOf("recent" to "MỚI ĐÁNH DẤU", "title" to "TÊN A-Z")
             }
-            LibrarySection.FOLLOWING -> {
-                title = ""
-                options = emptyList()
-            }
+            LibrarySection.FOLLOWING -> { title = ""; options = emptyList() }
         }
         if (options.isNotEmpty()) {
             AlertDialog(
-                onDismissRequest = { showSort = false },
-                title = { Text(title) },
-                text = {
-                    Column {
-                        options.forEach { (value, label) ->
-                            ReferenceActionButton(
-                                text = label,
-                                onClick = {
-                                    when (state.librarySection) {
-                                        LibrarySection.READING -> readingSort = value
-                                        LibrarySection.DOWNLOADED -> downloadedSort = value
-                                        LibrarySection.BOOKMARKS, LibrarySection.NOTES -> bookmarkSort = value
-                                        LibrarySection.FOLLOWING -> Unit
-                                    }
-                                    showSort = false
-                                },
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
-                            )
-                        }
+                onDismissRequest = { showSort = false }, title = { Text(title) }, text = { Column {
+                    options.forEach { (value, label) ->
+                        ReferenceActionButton(text = label, onClick = {
+                            when (state.librarySection) {
+                                LibrarySection.READING -> readingSort = value
+                                LibrarySection.DOWNLOADED -> downloadedSort = value
+                                LibrarySection.BOOKMARKS, LibrarySection.NOTES -> bookmarkSort = value
+                                LibrarySection.FOLLOWING -> Unit
+                            }
+                            showSort = false
+                        }, modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp))
                     }
-                },
-                confirmButton = { TextButton(onClick = { showSort = false }) { Text("ĐÓNG") } },
+                } }, confirmButton = { TextButton(onClick = { showSort = false }) { Text("ĐÓNG") } },
             )
-        } else {
-            showSort = false
-        }
+        } else showSort = false
     }
 
     if (showDownloadQueue) {
         AlertDialog(
-            onDismissRequest = { showDownloadQueue = false },
-            title = { Text("HÀNG ĐỢI TẢI") },
-            text = {
-                Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState())) {
-                    if (state.downloads.isEmpty()) Text("Hàng đợi tải đang trống.")
-                    state.downloads.forEach { job ->
-                        DownloadJobControls(
-                            job = job,
-                            failures = state.downloadFailures.filter { it.jobId == job.id },
-                            onPauseDownload = onPauseDownload,
-                            onResumeDownload = onResumeDownload,
-                            onRetryDownload = onRetryDownload,
-                            onPrioritizeDownload = onPrioritizeDownload,
-                            onRetryFailedChapter = onRetryFailedChapter,
-                            onCancelDownload = onCancelDownload,
-                        )
-                    }
+            onDismissRequest = { showDownloadQueue = false }, title = { Text("HÀNG ĐỢI TẢI") }, text = { Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState())) {
+                if (state.downloads.isEmpty()) Text("Hàng đợi tải đang trống.")
+                state.downloads.forEach { job ->
+                    DownloadJobControls(job, state.downloadFailures.filter { it.jobId == job.id }, onPauseDownload, onResumeDownload, onRetryDownload, onPrioritizeDownload, onRetryFailedChapter, onCancelDownload)
                 }
-            },
-            confirmButton = { TextButton(onClick = { showDownloadQueue = false }) { Text("ĐÓNG") } },
+            } }, confirmButton = { TextButton(onClick = { showDownloadQueue = false }) { Text("ĐÓNG") } },
         )
     }
 
     if (showReadingHistory) {
         AlertDialog(
-            onDismissRequest = { showReadingHistory = false },
-            title = { Text("LỊCH SỬ ĐỌC") },
-            text = {
-                Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
-                    OutlinedTextField(
-                        value = historyQuery,
-                        onValueChange = { historyQuery = it.take(160) },
-                        placeholder = { Text("Tìm truyện hoặc chương") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    val historyNeedle = historyQuery.trim().lowercase()
-                    val history = state.readingHistory.filter {
-                        historyNeedle.isBlank() || it.storyTitle.lowercase().contains(historyNeedle) ||
-                            it.chapterTitle.lowercase().contains(historyNeedle) ||
-                            it.sourceId.lowercase().contains(historyNeedle)
-                    }
-                    if (history.isEmpty()) Text("Chưa có lịch sử đọc.", modifier = Modifier.padding(top = 10.dp))
-                    val dayFormat = remember { SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()) }
-                    val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
-                    history.groupBy { dayFormat.format(Date(it.visitedAt)) }.forEach { (day, entries) ->
-                        Text(day, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp, bottom = 2.dp))
-                        entries.forEach { item ->
-                            ReferenceActionButton(
-                                text = "${timeFormat.format(Date(item.visitedAt))} • ${item.storyTitle}\n${item.chapterTitle} • đoạn ${item.paragraphIndex + 1}/${item.totalParagraphs.coerceAtLeast(1)} • ${item.sourceId}",
-                                onClick = { showReadingHistory = false; onHistoryClick(item) },
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
-                            )
-                        }
-                    }
+            onDismissRequest = { showReadingHistory = false }, title = { Text("LỊCH SỬ ĐỌC") }, text = { Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
+                OutlinedTextField(value = historyQuery, onValueChange = { historyQuery = it.take(160) }, placeholder = { Text("Tìm truyện hoặc chương") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                val historyNeedle = historyQuery.trim().lowercase()
+                val history = state.readingHistory.filter { historyNeedle.isBlank() || it.storyTitle.lowercase().contains(historyNeedle) || it.chapterTitle.lowercase().contains(historyNeedle) || it.sourceId.lowercase().contains(historyNeedle) }
+                if (history.isEmpty()) Text("Chưa có lịch sử đọc.", modifier = Modifier.padding(top = 10.dp))
+                val dayFormat = remember { SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()) }
+                val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
+                history.groupBy { dayFormat.format(Date(it.visitedAt)) }.forEach { (day, entries) ->
+                    Text(day, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp, bottom = 2.dp))
+                    entries.forEach { item -> ReferenceActionButton(text = "${timeFormat.format(Date(item.visitedAt))} • ${item.storyTitle}\n${item.chapterTitle} • đoạn ${item.paragraphIndex + 1}/${item.totalParagraphs.coerceAtLeast(1)} • ${item.sourceId}", onClick = { showReadingHistory = false; onHistoryClick(item) }, modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp)) }
                 }
-            },
-            confirmButton = { TextButton(onClick = { showReadingHistory = false }) { Text("ĐÓNG") } },
-            dismissButton = {
-                if (state.readingHistory.isNotEmpty()) {
-                    TextButton(onClick = { showReadingHistory = false; showClearReadingHistory = true }) { Text("XÓA LỊCH SỬ") }
-                }
-            },
+            } }, confirmButton = { TextButton(onClick = { showReadingHistory = false }) { Text("ĐÓNG") } }, dismissButton = { if (state.readingHistory.isNotEmpty()) TextButton(onClick = { showReadingHistory = false; showClearReadingHistory = true }) { Text("XÓA LỊCH SỬ") } },
         )
     }
 
     if (showClearReadingHistory) {
-        AlertDialog(
-            onDismissRequest = { showClearReadingHistory = false },
-            title = { Text("XÓA LỊCH SỬ ĐỌC") },
-            text = { Text("Xóa toàn bộ lịch sử đọc? Tiến độ đọc vẫn được giữ.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    onClearReadingHistory()
-                    historyQuery = ""
-                    showClearReadingHistory = false
-                }) { Text("XÓA") }
-            },
-            dismissButton = { TextButton(onClick = { showClearReadingHistory = false }) { Text("HỦY") } },
-        )
+        AlertDialog(onDismissRequest = { showClearReadingHistory = false }, title = { Text("XÓA LỊCH SỬ ĐỌC") }, text = { Text("Xóa toàn bộ lịch sử đọc? Tiến độ đọc vẫn được giữ.") }, confirmButton = { TextButton(onClick = { onClearReadingHistory(); historyQuery = ""; showClearReadingHistory = false }) { Text("XÓA") } }, dismissButton = { TextButton(onClick = { showClearReadingHistory = false }) { Text("HỦY") } })
     }
 }
 
 @Composable
 private fun LibraryControl(text: String, onClick: () -> Unit) {
-    ReferenceActionButton(
-        text = text,
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 1.dp),
-    )
+    ReferenceActionButton(text = text, onClick = onClick, modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 1.dp))
 }
 
 @Composable
-private fun DownloadJobControls(
-    job: DownloadJobEntity,
-    failures: List<ChapterDownloadFailureEntity>,
-    onPauseDownload: (String) -> Unit,
-    onResumeDownload: (String) -> Unit,
-    onRetryDownload: (String) -> Unit,
-    onPrioritizeDownload: (String) -> Unit,
-    onRetryFailedChapter: (String) -> Unit,
-    onCancelDownload: (String) -> Unit,
-) {
+private fun DownloadJobControls(job: DownloadJobEntity, failures: List<ChapterDownloadFailureEntity>, onPauseDownload: (String) -> Unit, onResumeDownload: (String) -> Unit, onRetryDownload: (String) -> Unit, onPrioritizeDownload: (String) -> Unit, onRetryFailedChapter: (String) -> Unit, onCancelDownload: (String) -> Unit) {
     Text(job.currentChapterTitle.ifBlank { "Tải truyện" }, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
     Text("${job.completedChapters}/${job.totalChapters} chương • ${job.state}", style = MaterialTheme.typography.bodySmall)
     Row(Modifier.fillMaxWidth()) {
@@ -465,12 +377,8 @@ private fun DownloadJobControls(
             "PAUSED" -> Button({ onResumeDownload(job.id) }, Modifier.weight(1f).padding(1.dp)) { Text("TIẾP TỤC") }
             "FAILED", "CANCELLED" -> Button({ onRetryDownload(job.id) }, Modifier.weight(1f).padding(1.dp)) { Text("THỬ LẠI") }
         }
-        if (job.state in setOf("QUEUED", "PAUSED", "FAILED")) {
-            Button({ onPrioritizeDownload(job.id) }, Modifier.weight(1f).padding(1.dp)) { Text("ƯU TIÊN") }
-        }
-        if (job.state !in setOf("COMPLETED", "CANCELLED")) {
-            Button({ onCancelDownload(job.storyId) }, Modifier.weight(1f).padding(1.dp)) { Text("HỦY") }
-        }
+        if (job.state in setOf("QUEUED", "PAUSED", "FAILED")) Button({ onPrioritizeDownload(job.id) }, Modifier.weight(1f).padding(1.dp)) { Text("ƯU TIÊN") }
+        if (job.state !in setOf("COMPLETED", "CANCELLED")) Button({ onCancelDownload(job.storyId) }, Modifier.weight(1f).padding(1.dp)) { Text("HỦY") }
     }
     failures.forEach { failure ->
         Text(failure.chapterTitle.ifBlank { "Chương ${failure.chapterIndex + 1}" }, fontWeight = FontWeight.SemiBold)
@@ -483,82 +391,38 @@ private fun DownloadJobControls(
 private fun BookmarkList(bookmarks: List<BookmarkEntity>, onBookmarkOpen: (BookmarkEntity) -> Unit, onBookmarkDelete: (String) -> Unit) {
     var selected by remember { mutableStateOf<BookmarkEntity?>(null) }
     var deleteConfirm by remember { mutableStateOf<BookmarkEntity?>(null) }
-    selected?.let { item -> AlertDialog(
-        onDismissRequest = { selected = null }, title = { Text(item.label.removePrefix("Truyện: ").ifBlank { "ĐÁNH DẤU" }) },
-        text = { Column {
-            ReferenceActionButton("MỞ TRUYỆN", { selected = null; onBookmarkOpen(item) }, modifier = Modifier.fillMaxWidth())
-            ReferenceActionButton("BỎ ĐÁNH DẤU", { selected = null; deleteConfirm = item }, modifier = Modifier.fillMaxWidth().padding(top = 2.dp))
-        } }, confirmButton = { TextButton(onClick = { selected = null }) { Text("ĐÓNG") } },
-    ) }
-    deleteConfirm?.let { item -> AlertDialog(
-        onDismissRequest = { deleteConfirm = null }, title = { Text("BỎ ĐÁNH DẤU") }, text = { Text("Bỏ đánh dấu truyện này?") },
-        confirmButton = { TextButton(onClick = { onBookmarkDelete(item.id); deleteConfirm = null }) { Text("BỎ ĐÁNH DẤU") } },
-        dismissButton = { TextButton(onClick = { deleteConfirm = null }) { Text("HỦY") } },
-    ) }
+    selected?.let { item -> AlertDialog(onDismissRequest = { selected = null }, title = { Text(item.label.removePrefix("Truyện: ").ifBlank { "ĐÁNH DẤU" }) }, text = { Column {
+        ReferenceActionButton("MỞ TRUYỆN", { selected = null; onBookmarkOpen(item) }, modifier = Modifier.fillMaxWidth())
+        ReferenceActionButton("BỎ ĐÁNH DẤU", { selected = null; deleteConfirm = item }, modifier = Modifier.fillMaxWidth().padding(top = 2.dp))
+    } }, confirmButton = { TextButton(onClick = { selected = null }) { Text("ĐÓNG") } }) }
+    deleteConfirm?.let { item -> AlertDialog(onDismissRequest = { deleteConfirm = null }, title = { Text("BỎ ĐÁNH DẤU") }, text = { Text("Bỏ đánh dấu truyện này?") }, confirmButton = { TextButton(onClick = { onBookmarkDelete(item.id); deleteConfirm = null }) { Text("BỎ ĐÁNH DẤU") } }, dismissButton = { TextButton(onClick = { deleteConfirm = null }) { Text("HỦY") } }) }
     if (bookmarks.isEmpty()) { Text("Chưa có truyện đã đánh dấu.", modifier = Modifier.padding(16.dp)); return }
-    LazyColumn(modifier = Modifier.fillMaxSize()) { items(bookmarks, key = { "bookmark:${it.id}" }) { item ->
-        Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).clickable { selected = item }) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                Text(item.label.removePrefix("Truyện: ").ifBlank { "Đánh dấu đoạn ${item.paragraphIndex + 1}" }, fontWeight = FontWeight.SemiBold)
-                if (!item.label.startsWith("Truyện:")) Text("Đoạn ${item.paragraphIndex + 1}")
-            }
-        }
-    } }
+    LazyColumn(modifier = Modifier.fillMaxSize()) { items(bookmarks, key = { "bookmark:${it.id}" }) { item -> Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).clickable { selected = item }) { Column(modifier = Modifier.padding(14.dp)) {
+        Text(item.label.removePrefix("Truyện: ").ifBlank { "Đánh dấu đoạn ${item.paragraphIndex + 1}" }, fontWeight = FontWeight.SemiBold)
+        if (!item.label.startsWith("Truyện:")) Text("Đoạn ${item.paragraphIndex + 1}")
+    } } } }
 }
 
 @Composable
-private fun NoteList(
-    notes: List<ChapterNoteEntity>,
-    onOpen: (ChapterNoteEntity) -> Unit,
-    onDelete: (String) -> Unit,
-) {
-    if (notes.isEmpty()) {
-        Text("Chưa có ghi chú.", modifier = Modifier.padding(16.dp))
-        return
-    }
-    LazyColumn(modifier = Modifier.fillMaxSize()) {
-        items(notes, key = { "note:${it.id}" }) { note ->
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).clickable { onOpen(note) },
-            ) {
-                Column(Modifier.padding(12.dp)) {
-                    Text(note.text, fontWeight = FontWeight.SemiBold, maxLines = 3)
-                    Text("Đoạn ${note.paragraphIndex + 1}", style = MaterialTheme.typography.bodySmall)
-                    ReferenceActionButton(
-                        text = "XÓA GHI CHÚ",
-                        onClick = { onDelete(note.id) },
-                        minHeight = 44.dp,
-                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                    )
-                }
-            }
-        }
-    }
+private fun NoteList(notes: List<ChapterNoteEntity>, onOpen: (ChapterNoteEntity) -> Unit, onDelete: (String) -> Unit) {
+    if (notes.isEmpty()) { Text("Chưa có ghi chú.", modifier = Modifier.padding(16.dp)); return }
+    LazyColumn(modifier = Modifier.fillMaxSize()) { items(notes, key = { "note:${it.id}" }) { note -> Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).clickable { onOpen(note) }) { Column(Modifier.padding(12.dp)) {
+        Text(note.text, fontWeight = FontWeight.SemiBold, maxLines = 3); Text("Đoạn ${note.paragraphIndex + 1}", style = MaterialTheme.typography.bodySmall)
+        ReferenceActionButton(text = "XÓA GHI CHÚ", onClick = { onDelete(note.id) }, minHeight = 44.dp, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+    } } } }
 }
 
 @Composable
 private fun FollowingList(items: List<FollowedStoryEntity>, onOpen: (FollowedStoryEntity) -> Unit, onUnfollow: (String) -> Unit) {
-    var selected by remember { mutableStateOf<FollowedStoryEntity?>(null) }
-    var unfollowConfirm by remember { mutableStateOf<FollowedStoryEntity?>(null) }
-    selected?.let { item -> AlertDialog(
-        onDismissRequest = { selected = null }, title = { Text(item.title) }, text = { Column {
-            ReferenceActionButton("MỞ TRUYỆN", { selected = null; onOpen(item) }, modifier = Modifier.fillMaxWidth())
-            ReferenceActionButton("BỎ THEO DÕI", { selected = null; unfollowConfirm = item }, modifier = Modifier.fillMaxWidth().padding(top = 2.dp))
-        } }, confirmButton = { TextButton(onClick = { selected = null }) { Text("ĐÓNG") } },
-    ) }
-    unfollowConfirm?.let { item -> AlertDialog(
-        onDismissRequest = { unfollowConfirm = null }, title = { Text("BỎ THEO DÕI") }, text = { Text("Bỏ theo dõi “${item.title}”?") },
-        confirmButton = { TextButton(onClick = { onUnfollow(item.storyId); unfollowConfirm = null }) { Text("BỎ THEO DÕI") } },
-        dismissButton = { TextButton(onClick = { unfollowConfirm = null }) { Text("HỦY") } },
-    ) }
+    var selected by remember { mutableStateOf<FollowedStoryEntity?>(null) }; var unfollowConfirm by remember { mutableStateOf<FollowedStoryEntity?>(null) }
+    selected?.let { item -> AlertDialog(onDismissRequest = { selected = null }, title = { Text(item.title) }, text = { Column {
+        ReferenceActionButton("MỞ TRUYỆN", { selected = null; onOpen(item) }, modifier = Modifier.fillMaxWidth()); ReferenceActionButton("BỎ THEO DÕI", { selected = null; unfollowConfirm = item }, modifier = Modifier.fillMaxWidth().padding(top = 2.dp))
+    } }, confirmButton = { TextButton(onClick = { selected = null }) { Text("ĐÓNG") } }) }
+    unfollowConfirm?.let { item -> AlertDialog(onDismissRequest = { unfollowConfirm = null }, title = { Text("BỎ THEO DÕI") }, text = { Text("Bỏ theo dõi “${item.title}”?") }, confirmButton = { TextButton(onClick = { onUnfollow(item.storyId); unfollowConfirm = null }) { Text("BỎ THEO DÕI") } }, dismissButton = { TextButton(onClick = { unfollowConfirm = null }) { Text("HỦY") } }) }
     if (items.isEmpty()) { Text("Chưa theo dõi truyện nào.", modifier = Modifier.padding(16.dp)); return }
-    LazyColumn(modifier = Modifier.fillMaxSize()) { items(items, key = { it.storyId }) { item ->
-        Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).clickable { selected = item }) { Column(modifier = Modifier.padding(14.dp)) {
-            Text(item.title, fontWeight = FontWeight.SemiBold); Text(item.latestKnownChapter.ifBlank { "Chạm để mở tùy chọn" })
-            if (item.newChapterCount > 0) Text("${item.newChapterCount} chương mới chưa xem", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-            Text(item.sourceId, style = MaterialTheme.typography.labelSmall)
-        } }
-    } }
+    LazyColumn(modifier = Modifier.fillMaxSize()) { items(items, key = { it.storyId }) { item -> Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).clickable { selected = item }) { Column(modifier = Modifier.padding(14.dp)) {
+        Text(item.title, fontWeight = FontWeight.SemiBold); Text(item.latestKnownChapter.ifBlank { "Chạm để mở tùy chọn" }); if (item.newChapterCount > 0) Text("${item.newChapterCount} chương mới chưa xem", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold); Text(item.sourceId, style = MaterialTheme.typography.labelSmall)
+    } } } }
 }
 
 @Composable
@@ -568,6 +432,7 @@ private fun DownloadedSection(
     failures: List<ChapterDownloadFailureEntity>,
     storage: Map<String, vn.nghetruyen.app.data.local.OfflineStoryStorage>,
     onStoryClick: (StoryEntity) -> Unit,
+    onUpdateDownloadedStory: (StoryEntity) -> Unit,
     onPauseDownload: (String) -> Unit,
     onResumeDownload: (String) -> Unit,
     onRetryDownload: (String) -> Unit,
@@ -576,86 +441,57 @@ private fun DownloadedSection(
     onCancelDownload: (String) -> Unit,
     onRemoveOffline: (String) -> Unit,
 ) {
+    var selectedOptions by remember { mutableStateOf<StoryEntity?>(null) }
     var pendingRemoval by remember { mutableStateOf<StoryEntity?>(null) }
+    selectedOptions?.let { story ->
+        AlertDialog(
+            onDismissRequest = { selectedOptions = null },
+            title = { Text("TÙY CHỌN") },
+            text = { Column {
+                ReferenceActionButton("CẬP NHẬT / TẢI TIẾP", { selectedOptions = null; onUpdateDownloadedStory(story) }, modifier = Modifier.fillMaxWidth())
+                ReferenceActionButton("XÓA DỮ LIỆU ĐÃ TẢI", { selectedOptions = null; pendingRemoval = story }, modifier = Modifier.fillMaxWidth().padding(top = 2.dp))
+            } },
+            confirmButton = { TextButton(onClick = { selectedOptions = null }) { Text("ĐÓNG") } },
+        )
+    }
     pendingRemoval?.let { story ->
+        val chapterCount = storage[story.id]?.chapterCount ?: 0
         AlertDialog(
             onDismissRequest = { pendingRemoval = null },
-            title = { Text("Xóa bản ngoại tuyến?") },
-            text = {
-                Text(
-                    if (story.sourceId == "offline") {
-                        "Truyện nhập từ tệp sẽ bị xóa khỏi ứng dụng cùng toàn bộ chương và tiến độ."
-                    } else {
-                        "Nội dung chương đã tải của ${story.title} sẽ bị xóa; lịch sử đọc vẫn được giữ."
-                    },
-                )
-            },
+            title = { Text("XÓA DỮ LIỆU ĐÃ TẢI") },
+            text = { Text(if (story.sourceId == "offline") "Truyện nhập từ tệp sẽ bị xóa khỏi ứng dụng cùng toàn bộ chương và tiến độ." else "Xóa $chapterCount chương đã tải của ${story.title}? Tiến độ đọc và dấu trang sẽ được giữ lại.") },
             confirmButton = { TextButton(onClick = { pendingRemoval = null; onRemoveOffline(story.id) }) { Text("XÓA") } },
             dismissButton = { TextButton(onClick = { pendingRemoval = null }) { Text("HỦY") } },
         )
     }
-    if (stories.isEmpty() && jobs.isEmpty() && failures.isEmpty()) {
-        Text("Chưa có truyện ngoại tuyến.", modifier = Modifier.padding(16.dp))
-        return
-    }
+    if (stories.isEmpty() && jobs.isEmpty() && failures.isEmpty()) { Text("Chưa có truyện ngoại tuyến.", modifier = Modifier.padding(16.dp)); return }
     LazyColumn(modifier = Modifier.fillMaxSize()) {
-        items(jobs, key = { "job:${it.id}" }) { job ->
-            Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    DownloadJobControls(
-                        job = job,
-                        failures = failures.filter { it.jobId == job.id },
-                        onPauseDownload = onPauseDownload,
-                        onResumeDownload = onResumeDownload,
-                        onRetryDownload = onRetryDownload,
-                        onPrioritizeDownload = onPrioritizeDownload,
-                        onRetryFailedChapter = onRetryFailedChapter,
-                        onCancelDownload = onCancelDownload,
-                    )
-                }
-            }
-        }
+        items(jobs, key = { "job:${it.id}" }) { job -> Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) { Column(modifier = Modifier.padding(14.dp)) {
+            DownloadJobControls(job, failures.filter { it.jobId == job.id }, onPauseDownload, onResumeDownload, onRetryDownload, onPrioritizeDownload, onRetryFailedChapter, onCancelDownload)
+        } } }
         items(stories, key = { "story:${it.id}" }) { story ->
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).clickable { onStoryClick(story) },
-            ) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    Text(story.title, fontWeight = FontWeight.SemiBold)
-                    if (story.author.isNotBlank()) Text(story.author)
-                    val usage = storage[story.id]
-                    Text(if (usage == null) "Có thể đọc ngoại tuyến" else "${usage.chapterCount} chương • ${formatStorageBytes(usage.bytes)}")
-                    Button(onClick = { pendingRemoval = story }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
-                        Text("XÓA BẢN NGOẠI TUYẾN")
-                    }
-                }
-            }
+            Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).clickable { onStoryClick(story) }) { Column(modifier = Modifier.padding(14.dp)) {
+                Text(story.title, fontWeight = FontWeight.SemiBold); if (story.author.isNotBlank()) Text(story.author)
+                val usage = storage[story.id]
+                Text(if (usage == null) "Có thể đọc ngoại tuyến" else "${usage.chapterCount} chương • ${formatStorageBytes(usage.bytes)}")
+                Text("Chạm để mở danh sách chương đã tải", style = MaterialTheme.typography.bodySmall)
+                ReferenceActionButton("TÙY CHỌN", { selectedOptions = story }, minHeight = 44.dp, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+            } }
         }
     }
 }
 
 @Composable
 private fun StoryEntityList(items: List<StoryEntity>, onStoryClick: (StoryEntity) -> Unit, onRemoveFromReading: (String) -> Unit, emptyText: String) {
-    var selected by remember { mutableStateOf<StoryEntity?>(null) }
-    var removeConfirm by remember { mutableStateOf<StoryEntity?>(null) }
-    selected?.let { story -> AlertDialog(
-        onDismissRequest = { selected = null }, title = { Text(story.title) }, text = { Column {
-            ReferenceActionButton("ĐỌC TIẾP", { selected = null; onStoryClick(story) }, modifier = Modifier.fillMaxWidth())
-            ReferenceActionButton("XÓA KHỎI ĐANG ĐỌC", { selected = null; removeConfirm = story }, modifier = Modifier.fillMaxWidth().padding(top = 2.dp))
-        } }, confirmButton = { TextButton(onClick = { selected = null }) { Text("ĐÓNG") } },
-    ) }
-    removeConfirm?.let { story -> AlertDialog(
-        onDismissRequest = { removeConfirm = null }, title = { Text("XÓA KHỎI ĐANG ĐỌC") },
-        text = { Text("Xóa “${story.title}” khỏi Đang đọc? Truyện đã tải, dấu trang và lịch sử đọc vẫn được giữ.") },
-        confirmButton = { TextButton(onClick = { onRemoveFromReading(story.id); removeConfirm = null }) { Text("XÓA") } },
-        dismissButton = { TextButton(onClick = { removeConfirm = null }) { Text("HỦY") } },
-    ) }
+    var selected by remember { mutableStateOf<StoryEntity?>(null) }; var removeConfirm by remember { mutableStateOf<StoryEntity?>(null) }
+    selected?.let { story -> AlertDialog(onDismissRequest = { selected = null }, title = { Text(story.title) }, text = { Column {
+        ReferenceActionButton("ĐỌC TIẾP", { selected = null; onStoryClick(story) }, modifier = Modifier.fillMaxWidth()); ReferenceActionButton("XÓA KHỎI ĐANG ĐỌC", { selected = null; removeConfirm = story }, modifier = Modifier.fillMaxWidth().padding(top = 2.dp))
+    } }, confirmButton = { TextButton(onClick = { selected = null }) { Text("ĐÓNG") } }) }
+    removeConfirm?.let { story -> AlertDialog(onDismissRequest = { removeConfirm = null }, title = { Text("XÓA KHỎI ĐANG ĐỌC") }, text = { Text("Xóa “${story.title}” khỏi Đang đọc? Truyện đã tải, dấu trang và lịch sử đọc vẫn được giữ.") }, confirmButton = { TextButton(onClick = { onRemoveFromReading(story.id); removeConfirm = null }) { Text("XÓA") } }, dismissButton = { TextButton(onClick = { removeConfirm = null }) { Text("HỦY") } }) }
     if (items.isEmpty()) { Text(emptyText, modifier = Modifier.padding(16.dp)); return }
-    LazyColumn(modifier = Modifier.fillMaxSize()) { items(items, key = { it.id }) { story ->
-        Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).clickable { selected = story }) { Column(modifier = Modifier.padding(14.dp)) {
-            Text(story.title, fontWeight = FontWeight.SemiBold); if (story.author.isNotBlank()) Text(story.author)
-            Text(if (story.isOffline) "Có thể đọc ngoại tuyến" else story.sourceId)
-        } }
-    } }
+    LazyColumn(modifier = Modifier.fillMaxSize()) { items(items, key = { it.id }) { story -> Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).clickable { selected = story }) { Column(modifier = Modifier.padding(14.dp)) {
+        Text(story.title, fontWeight = FontWeight.SemiBold); if (story.author.isNotBlank()) Text(story.author); Text(if (story.isOffline) "Có thể đọc ngoại tuyến" else story.sourceId)
+    } } } }
 }
 
 private fun formatStorageBytes(bytes: Long): String = when {

@@ -50,6 +50,9 @@ data class SourceNetworkResponse(
     val traceId: String,
     /** HTTP reason phrase when the transport exposes one. HTTP/2+ may legitimately return an empty string. */
     val statusText: String = "",
+    /** Actual final request metadata after host defaults, cookies and redirect handling are applied. */
+    val requestUrl: String? = null,
+    val requestHeaders: Map<String, List<String>> = emptyMap(),
     val fromReplay: Boolean = false,
 ) {
     fun bodyText(defaultCharset: Charset = Charsets.UTF_8): String =

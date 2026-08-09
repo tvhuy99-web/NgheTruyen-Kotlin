@@ -13,6 +13,17 @@ import vn.nghetruyen.app.downloads.DownloadRequest
 import vn.nghetruyen.app.downloads.DownloadStorageGuard
 import vn.nghetruyen.app.downloads.StoryDownloadPlanner
 
+/** Keeps the main UI wiring explicit while downloaded-library behavior lives beside its workflow. */
+object DownloadedLibraryCallbacks {
+    fun open(viewModel: AppViewModel, story: StoryEntity) {
+        viewModel.openDownloadedStoryFromLibrary(story)
+    }
+
+    fun update(viewModel: AppViewModel, story: StoryEntity) {
+        viewModel.updateDownloadedStoryFromLibrary(story)
+    }
+}
+
 /** XPK-style entry point for a story on the Downloaded shelf. */
 fun AppViewModel.openDownloadedStoryFromLibrary(entity: StoryEntity) {
     openLibraryStory(entity)

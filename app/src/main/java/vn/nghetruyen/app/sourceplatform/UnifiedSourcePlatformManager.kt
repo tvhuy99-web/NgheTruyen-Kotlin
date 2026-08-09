@@ -6,8 +6,11 @@ import com.nghetruyen.source.repository.VBookUpdateDisposition
 import vn.nghetruyen.app.sources.StorySource
 import vn.nghetruyen.source.api.SourceRuntimeMode
 import vn.nghetruyen.source.vbook.VBookHostManifestFactory
+import vn.nghetruyen.source.vbook.VBookManifestParser
+import vn.nghetruyen.source.vbook.VBookPackageReader
 import vn.nghetruyen.source.vbook.VBookRepositorySnapshot
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.security.MessageDigest
@@ -143,9 +146,23 @@ class UnifiedSourcePlatformManager(
         }
     }
 
+    /**
+     * Generic file import must never convert a newly supplied vBook ZIP back into SourcePack.
+     * Detect the exact raw package at the ecosystem facade and route it to the S4 vBook transaction.
+     */
     fun prepareInstall(input: InputStream): Result<SourceInstallPreview> {
         clearPendingCatalogInstall()
-        return legacy.prepareInstall(input)
+        return runCatching { readBounded(input, MAX_IMPORT_BYTES) }.fold(
+            onSuccess = { bytes ->
+                val isVBook = runCatching {
+                    val pkg = VBookPackageReader.read(bytes)
+                    VBookManifestParser.parse(pkg.pluginJson())
+                }.isSuccess
+                if (isVBook) legacy.prepareVBookImport(ByteArrayInputStream(bytes))
+                else legacy.prepareInstall(ByteArrayInputStream(bytes))
+            },
+            onFailure = { Result.failure(it) },
+        )
     }
 
     fun prepareVBookImport(input: InputStream): Result<SourceInstallPreview> {
@@ -274,5 +291,23 @@ class UnifiedSourcePlatformManager(
         val digest = MessageDigest.getInstance("SHA-256").digest(url.toByteArray(Charsets.UTF_8))
             .take(12).joinToString("") { "%02x".format(it.toInt() and 0xff) }
         return "vbook.index.$digest"
+    }
+
+    private fun readBounded(input: InputStream, maxBytes: Int): ByteArray {
+        val output = ByteArrayOutputStream(minOf(64 * 1024, maxBytes))
+        val buffer = ByteArray(16 * 1024)
+        var total = 0
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            total += read
+            require(total <= maxBytes) { "SOURCE_IMPORT_TOO_LARGE" }
+            output.write(buffer, 0, read)
+        }
+        return output.toByteArray()
+    }
+
+    companion object {
+        private const val MAX_IMPORT_BYTES = 64 * 1024 * 1024
     }
 }

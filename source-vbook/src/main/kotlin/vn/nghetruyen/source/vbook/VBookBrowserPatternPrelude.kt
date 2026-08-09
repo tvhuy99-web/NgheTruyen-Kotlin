@@ -8,11 +8,20 @@ object VBookBrowserPatternPrelude {
           pattern = String(pattern || '');
           if (!pattern) return false;
           if (url.toLowerCase().indexOf(pattern.toLowerCase()) >= 0) return true;
-          var raw = pattern.indexOf('regex:') === 0 ? pattern.substring(6) : pattern;
-          var looksRegex = pattern.indexOf('regex:') === 0 || /[.*+?^${'$'}()|\[\]\\]/.test(raw);
-          if (!looksRegex) return false;
-          try { return new RegExp(raw).test(url); }
+          var explicitRegex = pattern.indexOf('regex:') === 0;
+          var raw = explicitRegex ? pattern.substring(6) : pattern;
+          var looksRegex = explicitRegex || raw.indexOf('.*') >= 0 || /[+?^${'$'}()|\[\]\\]/.test(raw);
+          try {
+            if (looksRegex) return new RegExp(raw).test(url);
+            if (raw.indexOf('*') >= 0) {
+              var escaped = raw.split('*').map(function(part) {
+                return part.replace(/[.*+?^${'$'}{}()|\[\]\\]/g, '\\${'$'}&');
+              }).join('.*');
+              return new RegExp('^' + escaped + '${'$'}', 'i').test(url);
+            }
+          }
           catch (ignored) { return false; }
+          return false;
         };
 
         function __vbookInvokeHost(fn, args) {

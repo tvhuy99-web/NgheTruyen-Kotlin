@@ -51,4 +51,40 @@ class SafeRhinoSandboxTest {
         assertTrue(failure is JsSandboxException)
         assertEquals(JsSandboxFailure.RESULT_TOO_LARGE, (failure as JsSandboxException).failure)
     }
+
+    @Test
+    fun lowLevelExecutorSharesHardeningWithCompatibilityEngines() {
+        val result = SafeRhinoExecutor().execute { context, scope, _ ->
+            ContextResult(context.evaluateString(
+                scope,
+                "[typeof Packages, typeof java, typeof JavaAdapter].join(',')",
+                "compat-engine.js",
+                1,
+                null,
+            ).toString())
+        }
+
+        assertEquals(ContextResult("undefined,undefined,undefined"), result.value)
+    }
+
+    @Test
+    fun observedHeapGrowthBudgetFailsClosed() {
+        var usedHeap = 100L
+        val executor = SafeRhinoExecutor(
+            policy = JsSandboxPolicy(maxHeapGrowthBytes = 10),
+            memoryUsageBytes = { usedHeap },
+        )
+
+        val failure = runCatching {
+            executor.execute { _, _, budget ->
+                usedHeap = 111L
+                budget.charge(1)
+            }
+        }.exceptionOrNull()
+
+        assertTrue(failure is JsSandboxException)
+        assertEquals(JsSandboxFailure.MEMORY_LIMIT, (failure as JsSandboxException).failure)
+    }
+
+    private data class ContextResult(val value: String)
 }

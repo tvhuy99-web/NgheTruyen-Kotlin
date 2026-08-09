@@ -19,10 +19,13 @@ on:
       - 'build.gradle.kts'
       - 'gradle/**'
       - 'gradlew'
+      - 'scripts/check_source_engine_specificity.py'
+      - 'scripts/check_vbook_static.py'
       - '.github/workflows/source-platform-vbook.yml'
   push:
     branches:
       - 'agent/source-platform-s0-s1'
+      - 'agent/vbook-*'
     paths:
       - 'app/src/main/java/vn/nghetruyen/app/sourceplatform/**'
       - 'app/src/main/java/vn/nghetruyen/app/AppContainer.kt'
@@ -40,6 +43,8 @@ on:
       - 'build.gradle.kts'
       - 'gradle/**'
       - 'gradlew'
+      - 'scripts/check_source_engine_specificity.py'
+      - 'scripts/check_vbook_static.py'
       - '.github/workflows/source-platform-vbook.yml'
   workflow_dispatch:
 
@@ -62,6 +67,11 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+
+      - name: Verify vBook architecture and engine specificity
+        run: |
+          python3 scripts/check_vbook_static.py
+          python3 scripts/check_source_engine_specificity.py
 
       - name: Verify source platform and compile app
         run: >-

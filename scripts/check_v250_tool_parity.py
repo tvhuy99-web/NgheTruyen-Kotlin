@@ -85,12 +85,21 @@ interface TranslationEngine { suspend fun translate(request:TranslationRequest):
         st += [write(r,'vn/nghetruyen/source/api/Api.kt','''package vn.nghetruyen.source.api
 data class Privacy(val sendsContentToThirdParty:Boolean=false)
 data class SourceManifest(val id:String,val privacy:Privacy=Privacy())
-data class SourceTranslationRequest(val sourceId:String,val text:String,val storyId:String?=null,val chapterId:String?=null,val sourceLanguage:String?=null,val targetLanguage:String="vi",val instruction:String="",val maxOutputBytes:Int=2097152,val traceId:String="")
+data class SourceTranslationRequest(val sourceId:String,val text:String,val storyId:String?=null,val chapterId:String?=null,val sourceLanguage:String?=null,val targetLanguage:String="vi",val instruction:String="",val maxOutputBytes:Int=2097152,val traceId:String="",val options:Map<String,String> = emptyMap())
 data class SourceTranslationResponse(val translatedText:String,val segments:List<String>,val provider:String?,val traceId:String)
 enum class SourceErrorCode{TRANSLATION_UNAVAILABLE}
 data class SourcePlatformFailure(val code:SourceErrorCode,val message:String,val traceId:String="",val cause:Throwable?=null)
 sealed interface SourcePlatformResult<out T>{ data class Success<T>(val value:T):SourcePlatformResult<T>; data class Failure(val error:SourcePlatformFailure):SourcePlatformResult<Nothing> }
 fun interface SourceTranslationBroker { fun translate(manifest:SourceManifest,request:SourceTranslationRequest):SourcePlatformResult<SourceTranslationResponse> }
+''')]
+        st += [write(r,'vn/nghetruyen/source/vbook/VBook.kt','''package vn.nghetruyen.source.vbook
+object VBookTranslationBrokerRouter { val QUICK_TARGETS=setOf("vp","hv") }
+''')]
+        st += [write(r,'vn/nghetruyen/app/sourceplatform/VBookQuick.kt','''package vn.nghetruyen.app.sourceplatform
+import vn.nghetruyen.source.api.*
+object AndroidVBookQuickTranslationRegistry:SourceTranslationBroker {
+ override fun translate(manifest:SourceManifest,request:SourceTranslationRequest):SourcePlatformResult<SourceTranslationResponse> = throw NotImplementedError()
+}
 ''')]
         run([K,*map(str,st),str(ROOT/'app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidSourceTranslationBroker.kt'),'-d',str(r/'translate.jar')])
     print('V250_TOOL_PARITY_OK')

@@ -1,13 +1,16 @@
 package vn.nghetruyen.source.vbook
 
+import com.nghetruyen.source.sandbox.JsSandboxException
+import com.nghetruyen.source.sandbox.JsSandboxFailure
+import com.nghetruyen.source.sandbox.JsSandboxPolicy
+import com.nghetruyen.source.sandbox.RhinoExecutionBudget
+import com.nghetruyen.source.sandbox.SafeRhinoExecutor
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import org.jsoup.select.Elements
 import org.mozilla.javascript.BaseFunction
-import org.mozilla.javascript.ClassShutter
 import org.mozilla.javascript.Context
-import org.mozilla.javascript.ContextFactory
 import org.mozilla.javascript.Function
 import org.mozilla.javascript.NativeArray
 import org.mozilla.javascript.Scriptable
@@ -68,20 +71,11 @@ class VBookJsRuntime(
         }
         val action = manifest.actions[request.action]
             ?: return failure(SourceErrorCode.ACTION_NOT_FOUND, "SOURCE_ACTION_NOT_FOUND:${request.action}", request)
-        val deadline = started + (action.timeoutMs ?: manifest.runtime.actionTimeoutMs)
-        val budget = SandboxBudget(manifest.runtime.instructionBudget, deadline, clockMs)
+        val timeoutMs = action.timeoutMs ?: manifest.runtime.actionTimeoutMs
         diagnostics.emit(event(manifest, request, "VBOOK_ACTION_STARTED", attributes = mapOf("action" to request.action.name)))
         return runCatching {
-            val factory = SandboxedContextFactory(budget)
-            val cx = factory.enterContext()
-            try {
-                val scope = cx.initSafeStandardObjects()
-                scope.delete("Packages")
-                scope.delete("java")
-                scope.delete("javax")
-                scope.delete("org")
-                scope.delete("com")
-                scope.delete("JavaAdapter")
+            sandboxExecutor(manifest, timeoutMs).execute { cx, scope, budget ->
+                VBookSafeRhinoBoundary.installCurrentContext()
                 installHostApi(cx, scope, manifest, resources, request, budget)
                 cx.evaluateString(scope, BOOTSTRAP, "vbook-bootstrap", 1, null)
                 val loaded = linkedSetOf<String>()
@@ -99,10 +93,8 @@ class VBookJsRuntime(
                 val normalized = normalizeResult(request, parsed)
                 val bytes = JsonCodec.stringify(normalized).toByteArray(Charsets.UTF_8).size
                 require(bytes <= action.maxOutputBytes) { "VBOOK_OUTPUT_TOO_LARGE" }
-                SourceActionResponse(normalized, request.traceId, budget.instructions)
-            } finally {
-                Context.exit()
-            }
+                SourceActionResponse(normalized, request.traceId, budget.instructions.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
+            }.value
         }.fold(
             onSuccess = { response ->
                 diagnostics.emit(event(manifest, request, "VBOOK_ACTION_COMPLETED", durationMs = clockMs() - started, attributes = mapOf("instructions" to response.instructionCount.toString())))
@@ -112,7 +104,12 @@ class VBookJsRuntime(
                 val message = error.message.orEmpty()
                 val code = when {
                     "ACTION_NOT_FOUND" in message -> SourceErrorCode.ACTION_NOT_FOUND
-                    "TIMEOUT" in message || "INSTRUCTION" in message -> SourceErrorCode.RUNTIME_BUDGET_EXCEEDED
+                    error is JsSandboxException && error.failure in setOf(
+                        JsSandboxFailure.TIMEOUT,
+                        JsSandboxFailure.INSTRUCTION_LIMIT,
+                        JsSandboxFailure.MEMORY_LIMIT,
+                    ) -> SourceErrorCode.RUNTIME_BUDGET_EXCEEDED
+                    "TIMEOUT" in message || "INSTRUCTION" in message || "MEMORY" in message || "HEAP" in message.uppercase(Locale.ROOT) -> SourceErrorCode.RUNTIME_BUDGET_EXCEEDED
                     "OUTPUT_TOO_LARGE" in message -> SourceErrorCode.RUNTIME_OUTPUT_TOO_LARGE
                     "NETWORK_" in message -> SourceErrorCode.NETWORK_IO_ERROR
                     "BROWSER_" in message -> SourceErrorCode.BROWSER_UNAVAILABLE
@@ -126,17 +123,14 @@ class VBookJsRuntime(
 
     fun validateScripts(manifest: SourceManifest, resources: SourceResourceProvider): VBookCompatibilityReport {
         val results = manifest.actions.map { (action, spec) ->
-            val budget = SandboxBudget(manifest.runtime.instructionBudget, clockMs() + manifest.runtime.actionTimeoutMs, clockMs)
             runCatching {
-                val factory = SandboxedContextFactory(budget)
-                val cx = factory.enterContext()
-                try {
-                    val scope = cx.initSafeStandardObjects()
+                sandboxExecutor(manifest, manifest.runtime.actionTimeoutMs).execute { cx, scope, budget ->
+                    VBookSafeRhinoBoundary.installCurrentContext()
                     installHostApi(cx, scope, manifest, resources, SourceActionRequest(manifest.id, action), budget)
                     cx.evaluateString(scope, BOOTSTRAP, "vbook-bootstrap", 1, null)
                     ScriptLoader(cx, scope, resources, linkedSetOf(), budget).apply { install(); load(spec.entry) }
                     require(ScriptableObject.getProperty(scope, "execute") is Function) { "VBOOK_EXECUTE_FUNCTION_MISSING" }
-                } finally { Context.exit() }
+                }
             }.fold(
                 { VBookActionCompatibility(action, true, "OK") },
                 { VBookActionCompatibility(action, false, it.message ?: it.javaClass.simpleName) },
@@ -145,13 +139,27 @@ class VBookJsRuntime(
         return VBookCompatibilityReport(results, results.all(VBookActionCompatibility::compatible))
     }
 
+    private fun sandboxExecutor(manifest: SourceManifest, timeoutMs: Long): SafeRhinoExecutor = SafeRhinoExecutor(
+        policy = JsSandboxPolicy(
+            maxInstructions = manifest.runtime.instructionBudget.toLong(),
+            wallClockTimeoutMs = timeoutMs,
+            instructionObserverThreshold = 1_000,
+            maxHeapGrowthBytes = manifest.runtime.memoryBudgetBytes.toLong(),
+            maxResultUnits = manifest.runtime.memoryBudgetBytes.coerceAtLeast(1),
+            maxCollectionItems = 20_000,
+            maxValueDepth = 96,
+            languageVersion = Context.VERSION_ES6,
+        ),
+        clockMs = clockMs,
+    )
+
     private fun installHostApi(
         cx: Context,
         scope: Scriptable,
         manifest: SourceManifest,
         resources: SourceResourceProvider,
         request: SourceActionRequest,
-        budget: SandboxBudget,
+        budget: RhinoExecutionBudget,
     ) {
         fun fetchResponse(url: String, options: Scriptable?): FetchResponseObject {
             budget.charge(50)
@@ -324,7 +332,7 @@ class VBookJsRuntime(
         cx: Context,
         scope: Scriptable,
         resources: SourceResourceProvider,
-        budget: SandboxBudget,
+        budget: RhinoExecutionBudget,
     ): Scriptable = cx.newObject(scope).also { obj ->
         ScriptableObject.putProperty(obj, "execute", hostFunction { args ->
             val rawPath = Context.toString(args.getOrNull(0) ?: "")
@@ -376,7 +384,18 @@ class VBookJsRuntime(
             }
             cx.newObject(scope).also { output ->
                 ScriptableObject.putProperty(output, "translateText", translated.translatedText)
-                ScriptableObject.putProperty(output, "segments", Context.javaToJS(translated.segments.toTypedArray(), scope))
+                val segments = if (translated.segmentMetadata.isNotEmpty()) {
+                    translated.segmentMetadata.map { segment ->
+                        cx.newObject(scope).also { value ->
+                            ScriptableObject.putProperty(value, "srcStart", segment.srcStart)
+                            ScriptableObject.putProperty(value, "srcLen", segment.srcLen)
+                            ScriptableObject.putProperty(value, "transStart", segment.transStart)
+                            ScriptableObject.putProperty(value, "transLen", segment.transLen)
+                            ScriptableObject.putProperty(value, "type", segment.type)
+                        }
+                    }
+                } else translated.segments
+                ScriptableObject.putProperty(output, "segments", VBookRhinoValues.array(cx, scope, segments))
                 ScriptableObject.putProperty(output, "provider", translated.provider.orEmpty())
             }
         })
@@ -387,7 +406,7 @@ class VBookJsRuntime(
         scope: Scriptable,
         manifest: SourceManifest,
         request: SourceActionRequest,
-        budget: SandboxBudget,
+        budget: RhinoExecutionBudget,
     ): BaseFunction = object : BaseFunction() {
         override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<out Any>): Any =
             BufferedWebSocketObject(
@@ -496,7 +515,7 @@ class VBookJsRuntime(
             })
             ScriptableObject.putProperty(obj, "keys", hostFunction { args ->
                 val prefix = Context.toString(args.getOrNull(0) ?: "")
-                Context.javaToJS(keys(prefix).toTypedArray(), scope)
+                VBookRhinoValues.strings(cx, scope, keys(prefix))
             })
             ScriptableObject.putProperty(obj, "key", hostFunction { args ->
                 keys().getOrNull(Context.toNumber(args.getOrNull(0) ?: -1).toInt())
@@ -646,7 +665,7 @@ class VBookJsRuntime(
             })
         }
 
-    private fun browserObject(cx: Context, scope: Scriptable, manifest: SourceManifest, request: SourceActionRequest, budget: SandboxBudget): Scriptable =
+    private fun browserObject(cx: Context, scope: Scriptable, manifest: SourceManifest, request: SourceActionRequest, budget: RhinoExecutionBudget): Scriptable =
         cx.newObject(scope).also { obj ->
             fun execute(action: SourceBrowserAction, args: Array<out Any?>): String {
                 val response = brokers.browser.execute(manifest, SourceBrowserRequest(
@@ -671,7 +690,7 @@ class VBookJsRuntime(
         scope: Scriptable,
         manifest: SourceManifest,
         request: SourceActionRequest,
-        budget: SandboxBudget,
+        budget: RhinoExecutionBudget,
     ): Scriptable = cx.newObject(scope).also { obj ->
         ScriptableObject.putProperty(obj, "newBrowser", hostFunction {
             BrowserCompatObject(cx, scope, brokers, manifest, request, budget, clockMs)
@@ -681,14 +700,14 @@ class VBookJsRuntime(
         })
     }
 
-    private fun websocketObject(cx: Context, scope: Scriptable, manifest: SourceManifest, request: SourceActionRequest, budget: SandboxBudget): Scriptable =
+    private fun websocketObject(cx: Context, scope: Scriptable, manifest: SourceManifest, request: SourceActionRequest, budget: RhinoExecutionBudget): Scriptable =
         cx.newObject(scope).also { obj ->
             ScriptableObject.putProperty(obj, "exchange", hostFunction { args ->
                 val url = Context.toString(args.getOrNull(0) ?: "")
                 val messages = (args.getOrNull(1) as? NativeArray)?.toStringList().orEmpty()
                 val result = brokers.websocket.exchange(manifest, SourceWebSocketRequest(manifest.id, url, messages = messages, timeoutMs = (budget.deadlineMs - clockMs()).coerceAtLeast(100L), traceId = request.traceId))
                 val values = when (result) { is SourcePlatformResult.Success -> result.value.messages; is SourcePlatformResult.Failure -> error(result.error.message) }
-                Context.javaToJS(values.toTypedArray(), scope)
+                VBookRhinoValues.strings(cx, scope, values)
             })
         }
 
@@ -1030,36 +1049,12 @@ class VBookJsRuntime(
 data class VBookActionCompatibility(val action: SourceActionName, val compatible: Boolean, val detail: String)
 data class VBookCompatibilityReport(val actions: List<VBookActionCompatibility>, val allCompatible: Boolean)
 
-private class SandboxBudget(
-    private val instructionBudget: Int,
-    val deadlineMs: Long,
-    private val clockMs: () -> Long,
-) {
-    var instructions: Int = 0
-        private set
-    fun charge(value: Int) {
-        instructions += value.coerceAtLeast(1)
-        require(instructions <= instructionBudget) { "VBOOK_INSTRUCTION_BUDGET_EXCEEDED" }
-        require(clockMs() <= deadlineMs) { "VBOOK_TIMEOUT" }
-    }
-}
-
-private class SandboxedContextFactory(private val budget: SandboxBudget) : ContextFactory() {
-    override fun makeContext(): Context = super.makeContext().apply {
-        optimizationLevel = -1
-        languageVersion = Context.VERSION_ES6
-        instructionObserverThreshold = 1_000
-        setClassShutter(ClassShutter { false })
-    }
-    override fun observeInstructionCount(cx: Context, instructionCount: Int) = budget.charge(instructionCount)
-}
-
 private class ScriptLoader(
     private val cx: Context,
     private val scope: Scriptable,
     private val resources: SourceResourceProvider,
     private val loaded: MutableSet<String>,
-    private val budget: SandboxBudget,
+    private val budget: RhinoExecutionBudget,
 ) {
     fun install() {
         ScriptableObject.putProperty(scope, "load", object : BaseFunction() {
@@ -1102,7 +1097,7 @@ private class FetchResponseObject(
         put("statusCode", this, status)
         put("url", this, url)
         put("body", this, body)
-        put("headers", this, Context.javaToJS(headers.mapValues { it.value.joinToString(", ") }, scope))
+        put("headers", this, VBookRhinoValues.stringMap(cx, scope, headers.mapValues { it.value.joinToString(", ") }))
         put("text", this, function { body })
         put("string", this, function { body })
         put("json", this, function { cx.evaluateString(scope, "JSON.parse(${JsonCodec.stringify(JsonValue.Str(body))})", "fetch-json", 1, null) })
@@ -1149,8 +1144,8 @@ private class JsoupElementsObject(private val elements: Elements, private val ow
         "html" -> fn { elements.joinToString("\n") { it.html() } }
         "outerHtml" -> fn { elements.joinToString("\n") { it.outerHtml() } }
         "attr" -> fn { args -> elements.firstOrNull()?.attr(Context.toString(args.getOrNull(0) ?: "")).orEmpty() }
-        "eachText", "texts" -> fn { Context.javaToJS(elements.map(Element::text).toTypedArray(), ownerScope) }
-        "toArray" -> fn { Context.javaToJS(elements.map { JsoupElementObject(it, ownerScope) }.toTypedArray(), ownerScope) }
+        "eachText", "texts" -> fn { VBookRhinoValues.strings(Context.getCurrentContext(), ownerScope, elements.map(Element::text)) }
+        "toArray" -> fn { VBookRhinoValues.array(Context.getCurrentContext(), ownerScope, elements.map { JsoupElementObject(it, ownerScope) }) }
         else -> super.get(name, start)
     }
     private fun fn(block: (Array<out Any>) -> Any): BaseFunction = object : BaseFunction() {
@@ -1203,11 +1198,11 @@ private class PrefixedStorageObject(
         "length" -> prefixedKeyList(null).size
         else -> super.get(name, start)
     }
-    private fun prefixedKeys(cx: Context): Any = Context.javaToJS(prefixedKeyList(cx).toTypedArray(), ownerScope)
+    private fun prefixedKeys(cx: Context): Any = VBookRhinoValues.strings(cx, ownerScope, prefixedKeyList(cx))
     private fun prefixedKeyList(cx: Context?): List<String> {
         val function = ScriptableObject.getProperty(delegate, "keys") as? Function ?: return emptyList()
-        val context = cx ?: ContextFactory().enterContext()
-        val raw = try { function.call(context, ownerScope, delegate, arrayOf(prefix)) } finally { if (cx == null) Context.exit() }
+        val context = cx ?: Context.getCurrentContext() ?: return emptyList()
+        val raw = function.call(context, ownerScope, delegate, arrayOf(prefix))
         return when (raw) {
             is NativeArray -> raw.toStringList().map { it.removePrefix(prefix) }
             is Scriptable -> (0 until ((ScriptableObject.getProperty(raw, "length") as? Number)?.toInt() ?: 0)).mapNotNull { index ->
@@ -1231,7 +1226,7 @@ private class BufferedWebSocketObject(
     private val brokers: SourceCapabilityBrokers,
     private val manifest: SourceManifest,
     private val request: SourceActionRequest,
-    private val budget: SandboxBudget,
+    private val budget: RhinoExecutionBudget,
     private val clockMs: () -> Long,
     initialUrl: String,
 ) : ScriptableObject() {
@@ -1268,9 +1263,9 @@ private class BufferedWebSocketObject(
         }
         "messages" -> fn { args ->
             if (incoming.isEmpty() && connected && !closed) exchange(Context.toNumber(args.getOrNull(0) ?: 100).toInt().coerceIn(1, 100))
-            val values = incoming.toTypedArray()
+            val values = incoming.toList()
             incoming.clear()
-            Context.javaToJS(values, ownerScope)
+            VBookRhinoValues.strings(cx, ownerScope, values)
         }
         "close" -> fn {
             closed = true
@@ -1369,7 +1364,7 @@ private class BrowserCompatObject(
     private val brokers: SourceCapabilityBrokers,
     private val manifest: SourceManifest,
     private val request: SourceActionRequest,
-    private val budget: SandboxBudget,
+    private val budget: RhinoExecutionBudget,
     private val clockMs: () -> Long,
 ) : ScriptableObject() {
     private var lastUrl: String = ""
@@ -1401,7 +1396,7 @@ private class BrowserCompatObject(
         "waitUrl" -> fn { args -> waitUrl(args.getOrNull(0), timeout(args.getOrNull(1))) }
         "waitRequest" -> fn { args -> waitRequest(args.getOrNull(0), timeout(args.getOrNull(1)), args.getOrNull(2) as? Scriptable) }
         "requests" -> fn { args -> requests(args.getOrNull(0) as? Scriptable) }
-        "urls" -> fn { Context.javaToJS(requestMetadata().map { it.url }.distinct().toTypedArray(), ownerScope) }
+        "urls" -> fn { VBookRhinoValues.strings(cx, ownerScope, requestMetadata().map { it.url }.distinct()) }
         "html" -> fn { args -> snapshot(Context.toNumber(args.getOrNull(0) ?: 0).toLong().coerceIn(0L, 2_000L), timeout(null)) }
         "callJs", "evaluate" -> fn { args -> evaluate(Context.toString(args.getOrNull(0) ?: ""), timeout(args.getOrNull(1))) }
         "callJson" -> fn { args ->
@@ -1548,8 +1543,8 @@ private class BrowserCompatObject(
         val values = requestMetadata().filter { metadata ->
             (patterns.isEmpty() || patterns.any { matches(metadata.url, it) }) &&
                 (method.isBlank() || metadata.method.equals(method, true)) && (!mainFrame || metadata.mainFrame)
-        }.takeLast(limit).map(::metadataObject).toTypedArray()
-        return Context.javaToJS(values, ownerScope)
+        }.takeLast(limit).map(::metadataObject)
+        return VBookRhinoValues.array(cx, ownerScope, values)
     }
 
     private fun requestMetadata(): List<vn.nghetruyen.source.api.SourceBrowserRequestMetadata> {
@@ -1563,7 +1558,7 @@ private class BrowserCompatObject(
         ScriptableObject.putProperty(obj, "method", metadata.method)
         ScriptableObject.putProperty(obj, "mainFrame", metadata.mainFrame)
         ScriptableObject.putProperty(obj, "resourceType", metadata.resourceType.orEmpty())
-        ScriptableObject.putProperty(obj, "headerNames", Context.javaToJS(metadata.headerNames.sorted().toTypedArray(), ownerScope))
+        ScriptableObject.putProperty(obj, "headerNames", VBookRhinoValues.strings(cx, ownerScope, metadata.headerNames.sorted()))
         ScriptableObject.putProperty(obj, "timestamp", metadata.timestampEpochMs)
     }
 
@@ -1571,7 +1566,7 @@ private class BrowserCompatObject(
         val cookie = brokers.cookies.readCookieHeader(manifest.id, url).orEmpty()
         ScriptableObject.putProperty(obj, "url", url)
         ScriptableObject.putProperty(obj, "cookie", cookie)
-        ScriptableObject.putProperty(obj, "names", Context.javaToJS(cookieNames(cookie).toTypedArray(), ownerScope))
+        ScriptableObject.putProperty(obj, "names", VBookRhinoValues.strings(cx, ownerScope, cookieNames(cookie)))
     }
 
     private fun execute(
@@ -1604,7 +1599,7 @@ private class BrowserCompatObject(
     }
 
     private fun dialogArray(dialogs: List<SourceBrowserDialog>): Any =
-        Context.javaToJS(dialogs.map(::dialogObject).toTypedArray(), ownerScope)
+        VBookRhinoValues.array(cx, ownerScope, dialogs.map(::dialogObject))
 
     private fun dialogObject(dialog: SourceBrowserDialog): Scriptable = cx.newObject(ownerScope).also { obj ->
         ScriptableObject.putProperty(obj, "id", dialog.id)

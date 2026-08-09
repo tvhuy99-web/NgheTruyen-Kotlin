@@ -19,12 +19,13 @@ class VBookBrowserPatternPreludeTest {
                 ${VBookBrowserPatternPrelude.build()}
                 JSON.stringify([
                   __vbookBrowserMatch('https://api.example/book/1','api.example/book'),
+                  __vbookBrowserMatch('https://api.example/data?id=7','*api.example/data*'),
                   __vbookBrowserMatch('https://www.alicesw.com/home/chapter/info?id=1','.*?alicesw.com/home/chapter/info.*?'),
                   __vbookBrowserMatch('https://api.example/book/1','regex:[')
                 ]);
             """.trimIndent()
             val result = Context.toString(cx.evaluateString(scope, script, "browser-pattern-test", 1, null))
-            assertEquals("[true,true,false]", result)
+            assertEquals("[true,true,true,false]", result)
         } finally {
             Context.exit()
         }

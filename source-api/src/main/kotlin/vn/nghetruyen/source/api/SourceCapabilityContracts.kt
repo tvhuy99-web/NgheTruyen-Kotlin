@@ -115,10 +115,7 @@ interface SourceStorageBroker {
                 sourceId: String,
                 prefix: String,
                 traceId: String,
-            ): SourcePlatformResult<List<String>> {
-                SourceHostValueBoundary.beforeCollectionExposure()
-                return SourcePlatformResult.Success(emptyList())
-            }
+            ): SourcePlatformResult<List<String>> = SourcePlatformResult.Success(emptyList())
 
             override fun clear(sourceId: String) = SourcePlatformResult.Failure(
                 SourcePlatformFailure(SourceErrorCode.STORAGE_UNAVAILABLE, "SOURCE_STORAGE_BROKER_UNAVAILABLE"),

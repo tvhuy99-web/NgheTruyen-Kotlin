@@ -25,6 +25,8 @@ data class JsSandboxPolicy(
     val maxInstructions: Long = 500_000,
     val wallClockTimeoutMs: Long = 2_000,
     val instructionObserverThreshold: Int = 1_000,
+    /** Maximum positive heap growth observed during one execution. Null disables this guard. */
+    val maxHeapGrowthBytes: Long? = null,
     val maxResultUnits: Int = 1_000_000,
     val maxCollectionItems: Int = 20_000,
     val maxValueDepth: Int = 64,
@@ -34,6 +36,7 @@ data class JsSandboxPolicy(
         require(maxInstructions > 0)
         require(wallClockTimeoutMs > 0)
         require(instructionObserverThreshold > 0)
+        require(maxHeapGrowthBytes == null || maxHeapGrowthBytes > 0)
         require(maxResultUnits > 0)
         require(maxCollectionItems > 0)
         require(maxValueDepth > 0)
@@ -69,6 +72,7 @@ data class JsSandboxResult(
 enum class JsSandboxFailure {
     TIMEOUT,
     INSTRUCTION_LIMIT,
+    MEMORY_LIMIT,
     RESULT_TOO_LARGE,
     RESULT_TOO_DEEP,
     RESULT_TOO_MANY_ITEMS,
@@ -86,53 +90,133 @@ fun interface JsSandboxExtension {
     fun install(context: Context, scope: ScriptableObject)
 }
 
-class SafeRhinoSandbox(
-    private val policy: JsSandboxPolicy = JsSandboxPolicy(),
-) {
-    private val factory = BudgetContextFactory(policy)
+data class RhinoExecutionResult<T>(
+    val value: T,
+    val elapsedMs: Long,
+    val observedInstructions: Long,
+    val peakHeapGrowthBytes: Long,
+)
 
-    fun execute(
-        request: JsSandboxRequest,
-        extensions: List<JsSandboxExtension> = emptyList(),
-    ): JsSandboxResult {
-        val budget = ExecutionBudget(policy)
-        factory.currentBudget.set(budget)
+/**
+ * Shared low-level Rhino executor for compatibility engines.
+ *
+ * Engines install their own ABI inside [block], while context hardening and budgets remain shared.
+ * The heap guard is deliberately conservative: it observes positive process-heap growth at every
+ * instruction/host charge boundary and never exposes JVM objects to the script scope.
+ */
+class SafeRhinoExecutor(
+    private val policy: JsSandboxPolicy = JsSandboxPolicy(),
+    private val clockMs: () -> Long = System::currentTimeMillis,
+    private val memoryUsageBytes: () -> Long = {
+        val runtime = Runtime.getRuntime()
+        runtime.totalMemory() - runtime.freeMemory()
+    },
+) {
+    fun <T> execute(block: (Context, ScriptableObject, RhinoExecutionBudget) -> T): RhinoExecutionResult<T> {
+        val started = clockMs()
+        val budget = RhinoExecutionBudget(
+            policy = policy,
+            deadlineMs = started + policy.wallClockTimeoutMs,
+            clockMs = clockMs,
+            memoryUsageBytes = memoryUsageBytes,
+        )
+        val factory = BudgetContextFactory(policy, budget)
         return try {
-            val started = System.nanoTime()
-            val value = factory.call(ContextAction { context ->
-                configureContext(context)
+            val value = factory.call(ContextAction<T> { context ->
+                configureContext(context, policy)
                 val scope = context.initSafeStandardObjects()
                 removeInteropGlobals(scope)
-                request.bindings.forEach { (name, binding) ->
-                    ScriptableObject.putProperty(scope, name, toNative(context, scope, binding, 0))
-                }
-                extensions.forEach { it.install(context, scope) }
-                val evaluated = context.evaluateString(scope, request.script, request.sourceName, 1, null)
-                fromNative(evaluated, 0)
+                budget.beginMeasuring()
+                block(context, scope, budget)
             })
-            enforceResultBudget(value)
-            JsSandboxResult(
+            budget.checkpoint()
+            RhinoExecutionResult(
                 value = value,
-                elapsedMs = (System.nanoTime() - started) / 1_000_000,
+                elapsedMs = (clockMs() - started).coerceAtLeast(0L),
                 observedInstructions = budget.instructions,
+                peakHeapGrowthBytes = budget.peakHeapGrowthBytes,
             )
         } catch (e: BudgetExceededException) {
             throw JsSandboxException(e.failure, e.message ?: e.failure.name, e)
         } catch (e: RhinoException) {
             throw JsSandboxException(JsSandboxFailure.SCRIPT_ERROR, e.message ?: "JavaScript execution failed", e)
-        } finally {
-            factory.currentBudget.remove()
         }
     }
+}
 
-    private fun configureContext(context: Context) {
-        context.setLanguageVersion(policy.languageVersion)
-        context.setOptimizationLevel(-1)
-        context.setClassShutter(ClassShutter { false })
+class RhinoExecutionBudget internal constructor(
+    private val policy: JsSandboxPolicy,
+    val deadlineMs: Long,
+    private val clockMs: () -> Long,
+    private val memoryUsageBytes: () -> Long,
+) {
+    private var baselineHeapBytes: Long? = null
+
+    var instructions: Long = 0
+        private set
+
+    var peakHeapGrowthBytes: Long = 0
+        private set
+
+    fun charge(value: Int) {
+        instructions += value.coerceAtLeast(1).toLong()
+        checkpoint()
     }
 
-    private fun removeInteropGlobals(scope: ScriptableObject) {
-        INTEROP_GLOBALS.forEach { ScriptableObject.deleteProperty(scope, it) }
+    internal fun beginMeasuring() {
+        baselineHeapBytes = memoryUsageBytes()
+        peakHeapGrowthBytes = 0
+    }
+
+    fun checkpoint() {
+        if (instructions > policy.maxInstructions) {
+            throw BudgetExceededException(
+                JsSandboxFailure.INSTRUCTION_LIMIT,
+                "JavaScript exceeded ${policy.maxInstructions} observed instructions",
+            )
+        }
+        if (clockMs() > deadlineMs) {
+            throw BudgetExceededException(
+                JsSandboxFailure.TIMEOUT,
+                "JavaScript exceeded ${policy.wallClockTimeoutMs} ms",
+            )
+        }
+        val baseline = baselineHeapBytes ?: memoryUsageBytes().also { baselineHeapBytes = it }
+        val growth = (memoryUsageBytes() - baseline).coerceAtLeast(0L)
+        peakHeapGrowthBytes = maxOf(peakHeapGrowthBytes, growth)
+        val limit = policy.maxHeapGrowthBytes
+        if (limit != null && growth > limit) {
+            throw BudgetExceededException(
+                JsSandboxFailure.MEMORY_LIMIT,
+                "JavaScript exceeded $limit bytes of observed heap growth",
+            )
+        }
+    }
+}
+
+class SafeRhinoSandbox(
+    private val policy: JsSandboxPolicy = JsSandboxPolicy(),
+) {
+    private val executor = SafeRhinoExecutor(policy)
+
+    fun execute(
+        request: JsSandboxRequest,
+        extensions: List<JsSandboxExtension> = emptyList(),
+    ): JsSandboxResult {
+        val execution = executor.execute { context, scope, _ ->
+            request.bindings.forEach { (name, binding) ->
+                ScriptableObject.putProperty(scope, name, toNative(context, scope, binding, 0))
+            }
+            extensions.forEach { it.install(context, scope) }
+            val evaluated = context.evaluateString(scope, request.script, request.sourceName, 1, null)
+            fromNative(evaluated, 0)
+        }
+        enforceResultBudget(execution.value)
+        return JsSandboxResult(
+            value = execution.value,
+            elapsedMs = execution.elapsedMs,
+            observedInstructions = execution.observedInstructions,
+        )
     }
 
     private fun toNative(context: Context, scope: Scriptable, value: JsValue, depth: Int): Any? {
@@ -228,47 +312,37 @@ class SafeRhinoSandbox(
         }
     }
 
-    private class BudgetContextFactory(private val policy: JsSandboxPolicy) : ContextFactory() {
-        val currentBudget = ThreadLocal<ExecutionBudget>()
+}
 
-        override fun makeContext(): Context {
-            val context = super.makeContext()
-            context.instructionObserverThreshold = policy.instructionObserverThreshold
-            return context
-        }
+private fun configureContext(context: Context, policy: JsSandboxPolicy) {
+    context.setLanguageVersion(policy.languageVersion)
+    context.setOptimizationLevel(-1)
+    context.setClassShutter(ClassShutter { false })
+}
 
-        override fun observeInstructionCount(context: Context, instructionCount: Int) {
-            val budget = currentBudget.get() ?: return
-            budget.instructions += instructionCount.toLong()
-            if (budget.instructions > policy.maxInstructions) {
-                throw BudgetExceededException(
-                    JsSandboxFailure.INSTRUCTION_LIMIT,
-                    "JavaScript exceeded ${policy.maxInstructions} observed instructions",
-                )
-            }
-            if (System.nanoTime() > budget.deadlineNanos) {
-                throw BudgetExceededException(
-                    JsSandboxFailure.TIMEOUT,
-                    "JavaScript exceeded ${policy.wallClockTimeoutMs} ms",
-                )
-            }
-        }
+private fun removeInteropGlobals(scope: ScriptableObject) {
+    INTEROP_GLOBALS.forEach { ScriptableObject.deleteProperty(scope, it) }
+}
+
+private class BudgetContextFactory(
+    private val policy: JsSandboxPolicy,
+    private val budget: RhinoExecutionBudget,
+) : ContextFactory() {
+    override fun makeContext(): Context = super.makeContext().apply {
+        instructionObserverThreshold = policy.instructionObserverThreshold
     }
 
-    private class ExecutionBudget(policy: JsSandboxPolicy) {
-        val deadlineNanos = System.nanoTime() + policy.wallClockTimeoutMs * 1_000_000
-        var instructions: Long = 0
-    }
-
-    private class BudgetExceededException(
-        val failure: JsSandboxFailure,
-        message: String,
-    ) : RuntimeException(message)
-
-    companion object {
-        private val INTEROP_GLOBALS = listOf(
-            "Packages", "java", "javax", "org", "com", "edu", "net",
-            "JavaAdapter", "JavaImporter", "importClass", "importPackage", "getClass",
-        )
+    override fun observeInstructionCount(context: Context, instructionCount: Int) {
+        budget.charge(instructionCount)
     }
 }
+
+private class BudgetExceededException(
+    val failure: JsSandboxFailure,
+    message: String,
+) : RuntimeException(message)
+
+private val INTEROP_GLOBALS = listOf(
+    "Packages", "java", "javax", "org", "com", "edu", "net",
+    "JavaAdapter", "JavaImporter", "importClass", "importPackage", "getClass",
+)

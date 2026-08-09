@@ -4,7 +4,6 @@ import org.mozilla.javascript.Context
 import org.mozilla.javascript.Scriptable
 import org.mozilla.javascript.ScriptableObject
 import org.mozilla.javascript.WrapFactory
-import vn.nghetruyen.source.api.SourceHostValueBoundary
 import java.lang.reflect.Array as ReflectArray
 
 /**
@@ -12,10 +11,6 @@ import java.lang.reflect.Array as ReflectArray
  * Unknown Java objects are deliberately delegated to Rhino and remain subject to the ClassShutter.
  */
 internal object VBookSafeRhinoBoundary {
-    fun arm() {
-        SourceHostValueBoundary.installBeforeExposureHook(::installCurrentContext)
-    }
-
     fun installCurrentContext() {
         val cx = Context.getCurrentContext() ?: return
         cx.setWrapFactory(SafeHostWrapFactory)

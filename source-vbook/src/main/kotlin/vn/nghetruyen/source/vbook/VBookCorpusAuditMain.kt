@@ -14,7 +14,11 @@ fun main(args: Array<String>) {
     val root = Path.of(args.getOrNull(0) ?: "build/vbook-corpus/packages")
     require(root.exists() && root.isDirectory()) { "VBOOK_CORPUS_DIRECTORY_MISSING:$root" }
     val audits = Files.list(root).use { stream ->
-        stream.filter(Files::isDirectory).sorted().map { dir -> auditDirectory(dir) }.toList()
+        stream.iterator().asSequence()
+            .filter(Files::isDirectory)
+            .sortedBy(Path::toString)
+            .map(::auditDirectory)
+            .toList()
     }
     val report = VBookCorpusAnalyzer.aggregate(audits)
     val json = report.toJson(audits)
@@ -32,7 +36,8 @@ private fun auditDirectory(dir: Path): VBookExtensionAudit {
     val src = dir.resolve("src")
     val scripts = if (Files.isDirectory(src)) {
         Files.walk(src).use { stream ->
-            stream.filter { Files.isRegularFile(it) && it.fileName.toString().endsWith(".js", true) }
+            stream.iterator().asSequence()
+                .filter { Files.isRegularFile(it) && it.fileName.toString().endsWith(".js", true) }
                 .associate { file ->
                     "src/" + src.relativize(file).toString().replace('\\', '/') to file.readText()
                 }

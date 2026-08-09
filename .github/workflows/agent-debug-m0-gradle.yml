@@ -1,0 +1,48 @@
+name: Agent isolate M0 Gradle stage
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    if: github.event.pull_request.head.ref == 'agent/settings-a11y-labels'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      EXPECTED_DEBUG_CERT_SHA256: 534bf882c96a59ccf4310d18d02b14b62aa68e2beff3b6d05bf308e9909eb2f4
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/settings-a11y-labels
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v6
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK packages
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+      - name: clean
+        run: ./gradlew --no-daemon --stacktrace --warning-mode all clean
+      - name: tests
+        run: ./gradlew --no-daemon --stacktrace --warning-mode all test testDebugUnitTest
+      - name: lint
+        run: ./gradlew --no-daemon --stacktrace --warning-mode all lintDebug
+      - name: assemble_and_bundle
+        run: ./gradlew --no-daemon --stacktrace --warning-mode all assembleDebug assembleDebugAndroidTest bundleRelease
+      - name: stable_debug_signature
+        shell: bash
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          APKSIGNER="${ANDROID_HOME}/build-tools/36.0.0/apksigner"
+          test -f "${APK}"
+          ACTUAL_CERT_SHA256="$("${APKSIGNER}" verify --print-certs "${APK}" | awk -F': ' '/certificate SHA-256 digest:/ {print tolower($NF); exit}')"
+          echo "Expected certificate: ${EXPECTED_DEBUG_CERT_SHA256}"
+          echo "Actual certificate:   ${ACTUAL_CERT_SHA256}"
+          test "${ACTUAL_CERT_SHA256}" = "${EXPECTED_DEBUG_CERT_SHA256}"

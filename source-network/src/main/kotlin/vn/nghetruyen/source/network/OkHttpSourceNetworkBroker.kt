@@ -173,6 +173,8 @@ class OkHttpSourceNetworkBroker(
                         timing = SourceNetworkTiming(started, completed),
                         traceId = initial.traceId,
                         statusText = response.message,
+                        requestUrl = response.request.url.toString(),
+                        requestHeaders = response.request.headers.toMultimap().mapKeys { it.key.lowercase(Locale.ROOT) },
                     )
                 }
             }

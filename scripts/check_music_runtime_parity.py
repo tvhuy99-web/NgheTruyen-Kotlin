@@ -15,10 +15,10 @@ for token in ["updateSceneMusicNormalization", "markSceneMusicNormalizationError
 if "tagsCsv.split(',')" in repo: raise SystemExit("MUSIC_RUNTIME repository still splits freeform descriptions")
 for token in ["VERSION = 1", "DEFAULT_TARGET_LUFS = -24f", "PEAK_CEILING_DBFS = -1f", "shelfCoefficients", "highPassCoefficients", "integratedLoudness", "calculateNormalization", "gainDbToLinear"]:
     if token not in estimator: raise SystemExit("MUSIC_RUNTIME missing normalizer behavior: " + token)
-for token in ["KEY_REUSED_MEASUREMENT", "track.normalizationVersion", "track.peakDbfs", "updateSceneMusicNormalization"]:
-    if token not in worker: raise SystemExit("MUSIC_RUNTIME worker cannot reuse measurement: " + token)
+for token in ["KEY_REUSED_MEASUREMENT", "track.normalizationVersion", "track.peakDbfs", "updateSceneMusicNormalization", "KEY_TARGET_LUFS", "targetLufs: Float? = null"]:
+    if token not in worker: raise SystemExit("MUSIC_RUNTIME worker cannot reuse measurement/draft target: " + token)
 for token in ["ACTION_MUSIC_PREVIEW_BEGIN", "ACTION_MUSIC_PREVIEW_END", "beginMusicPreview", "endMusicPreview", "track.normalizationGainDb", "PcmLoudnessEstimator.isReady"]:
     if token not in service: raise SystemExit("MUSIC_RUNTIME service parity missing: " + token)
-for token in ["delay(15_000)", "ACTION_MUSIC_PREVIEW_BEGIN", "ACTION_MUSIC_PREVIEW_END", "calculateNormalization", "SceneMusicAnalysisWorker.enqueue(context, it.id)"]:
+for token in ["delay(15_000)", "ACTION_MUSIC_PREVIEW_BEGIN", "ACTION_MUSIC_PREVIEW_END", "calculateNormalization", "SceneMusicAnalysisWorker.enqueue(context, it.id, musicTargetLufs)"]:
     if token not in reader: raise SystemExit("MUSIC_RUNTIME preview/recalc missing: " + token)
 print("MUSIC_RUNTIME_PARITY=PASS")

@@ -72,6 +72,7 @@ data class VBookMetadata(
     val type: VBookContentType,
     val rawType: String?,
     val nsfw: Boolean,
+    val hasNsfwField: Boolean,
     val encrypt: Boolean,
     val language: String?,
     val legacyTag: String?,
@@ -134,6 +135,7 @@ object VBookManifestParser {
             key to parseConfig(key, value)
         }
         val rawType = metadata.string("type")
+        val hasNsfwField = "nsfw" in metadata.values
         val nsfw = metadata.bool("nsfw") ?: metadata.string("tag")?.equals("nsfw", ignoreCase = true) == true
         return VBookExtensionManifest(
             metadata = VBookMetadata(
@@ -147,6 +149,7 @@ object VBookManifestParser {
                 type = VBookContentType.from(rawType),
                 rawType = rawType,
                 nsfw = nsfw,
+                hasNsfwField = hasNsfwField,
                 encrypt = metadata.bool("encrypt") ?: false,
                 language = metadata.string("language"),
                 legacyTag = metadata.string("tag"),
@@ -227,6 +230,10 @@ object VBookContractDetector {
             legacy += 4
             reasons += "primitive config entries are a legacy signal"
         }
+        if (metadata.hasNsfwField) {
+            current += 2
+            reasons += "metadata.nsfw field is a current schema signal"
+        }
         if (manifest.config.values.any { !it.legacyPrimitive && it.mode != VBookConfigMode.UNKNOWN }) {
             current += 5
             reasons += "descriptor config entries are a current signal"
@@ -245,12 +252,8 @@ object VBookContractDetector {
             current += 5
             reasons += "current-only content type ${metadata.type}"
         }
-        if (metadata.unknown.containsKey("nsfw") || metadata.nsfw && metadata.legacyTag == null) {
-            current += 1
-        }
 
         val joinedScripts = scripts.values.joinToString("\n")
-        if (Regex("\\bResponse\\.success\\s*\\(").containsMatchIn(joinedScripts)) current += 1
         if (Regex("\\bcode\\s*[:=]\\s*(200|403)\\b").containsMatchIn(joinedScripts)) {
             legacy += 2
             reasons += "flat 200/403 response code usage detected"

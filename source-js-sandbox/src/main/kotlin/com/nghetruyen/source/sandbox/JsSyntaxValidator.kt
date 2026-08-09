@@ -24,7 +24,7 @@ object JsSyntaxValidator {
             override fun makeContext(): Context = super.makeContext().also { cx ->
                 cx.languageVersion = languageVersion
                 cx.optimizationLevel = -1
-                cx.classShutter = ClassShutter { false }
+                cx.setClassShutter(ClassShutter { false })
             }
         }
         return runCatching {

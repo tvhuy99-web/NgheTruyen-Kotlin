@@ -11,6 +11,7 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import vn.nghetruyen.app.NgheTruyenApplication
 import java.io.File
+import java.util.UUID
 
 /**
  * Measures a scene track once, then stores the XPK-style fixed normalization gain.
@@ -27,7 +28,9 @@ class SceneMusicAnalysisWorker(
         val trackId = inputData.getString(KEY_TRACK_ID).orEmpty()
         if (trackId.isBlank()) return Result.failure()
         val track = container.libraryRepository.getSceneMusicTrack(trackId) ?: return Result.failure()
-        val target = container.settingsRepository.snapshot().sceneMusicTargetLufs
+        val requestedTarget = inputData.getFloat(KEY_TARGET_LUFS, Float.NaN)
+        val target = (requestedTarget.takeIf(Float::isFinite)
+            ?: container.settingsRepository.snapshot().sceneMusicTargetLufs)
             .coerceIn(PcmLoudnessEstimator.MIN_TARGET_LUFS, PcmLoudnessEstimator.MAX_TARGET_LUFS)
 
         if (track.normalizationVersion >= PcmLoudnessEstimator.VERSION &&
@@ -103,21 +106,29 @@ class SceneMusicAnalysisWorker(
 
     companion object {
         private const val KEY_TRACK_ID = "track_id"
+        private const val KEY_TARGET_LUFS = "target_lufs"
         private const val KEY_LOUDNESS = "loudness_lufs"
         private const val KEY_PEAK = "peak_dbfs"
         private const val KEY_GAIN_DB = "normalization_gain_db"
         private const val KEY_REUSED_MEASUREMENT = "reused_measurement"
         private const val KEY_ERROR = "error"
 
-        fun enqueue(context: Context, trackId: String) {
+        fun enqueue(context: Context, trackId: String, targetLufs: Float? = null): UUID {
+            val data = Data.Builder().putString(KEY_TRACK_ID, trackId)
+            targetLufs?.takeIf(Float::isFinite)?.let { data.putFloat(KEY_TARGET_LUFS, it) }
             val request = OneTimeWorkRequestBuilder<SceneMusicAnalysisWorker>()
-                .setInputData(Data.Builder().putString(KEY_TRACK_ID, trackId).build())
+                .setInputData(data.build())
                 .build()
             WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
                 "scene-music-analysis-$trackId",
                 ExistingWorkPolicy.REPLACE,
                 request,
             )
+            return request.id
+        }
+
+        fun cancel(context: Context, workId: UUID) {
+            WorkManager.getInstance(context.applicationContext).cancelWorkById(workId)
         }
     }
 }

@@ -1,6 +1,6 @@
 package vn.nghetruyen.source.vbook
 
-/** JavaScript compatibility shim for the current vBook WebSocket ABI and request-url matching edge. */
+/** JavaScript compatibility shim for the current vBook WebSocket ABI and current host bridges. */
 object VBookWebSocketPrelude {
     fun build(): String = """
         var __vbookNativeWebSocket = WebSocket;
@@ -59,6 +59,8 @@ object VBookWebSocketPrelude {
           Object.defineProperty(out, 'closeReason', {get:function(){return nativeSocket.closeReason;}});
           return out;
         };
+
+        ${VBookFetchSafePrelude.build()}
 
         ${VBookBrowserPatternPrelude.build()}
     """.trimIndent()

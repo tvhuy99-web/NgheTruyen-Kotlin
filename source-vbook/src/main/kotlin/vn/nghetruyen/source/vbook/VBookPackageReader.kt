@@ -32,14 +32,11 @@ fun interface VBookScriptPayloadDecoder {
     fun decode(manifest: VBookExtensionManifest, path: String, payload: ByteArray): String
 
     companion object {
-        val PLAIN_UTF8 = VBookScriptPayloadDecoder { manifest, path, payload ->
-            runCatching { strictUtf8(payload, path) }.getOrElse { cause ->
-                if (manifest.metadata.encrypt) {
-                    error("VBOOK_ENCRYPTED_SCRIPT_DECODER_REQUIRED:$path:${cause.message}")
-                }
-                throw cause
-            }
-        }
+        /**
+         * Current official build tooling strips metadata.encrypt before packaging/testing, so the flag
+         * is not used to guess a binary decoder. Runtime acceptance is decided from the actual bytes.
+         */
+        val PLAIN_UTF8 = VBookScriptPayloadDecoder { _, path, payload -> strictUtf8(payload, path) }
     }
 }
 
@@ -86,7 +83,7 @@ object VBookPackageReader {
         val icon = files.remove("icon.png")
         val scripts = files.filterKeys { it.startsWith("src/") && it.endsWith(".js", true) }
         require(scripts.isNotEmpty()) { "VBOOK_PACKAGE_SCRIPTS_MISSING" }
-        strictUtf8(plugin, "plugin.json") // fail early on malformed metadata
+        strictUtf8(plugin, "plugin.json")
         return VBookPackage(plugin, icon, scripts, other)
     }
 

@@ -104,6 +104,12 @@ object VBookEngineFeatureMatrix {
                 else "Implementation exists; certification remains a separate differential-test state.",
             )
 
+            VBookFeature.FETCH_STATUS_TEXT -> VBookFeatureSupport(
+                feature,
+                VBookFeatureImplementationLevel.PARTIAL,
+                "The generic transport contract now carries statusText, but all concrete network brokers must populate the transport reason phrase before this can be certified.",
+            )
+
             VBookFeature.METADATA_ENCRYPT -> VBookFeatureSupport(
                 feature,
                 VBookFeatureImplementationLevel.PACKAGE_LAYER_PENDING,

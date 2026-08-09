@@ -30,7 +30,7 @@ object DownloadedLibraryCallbacks {
 
     /** Returns only chapter bodies that still exist locally, in canonical chapter order. */
     suspend fun chapters(app: NgheTruyenApplication, story: StoryEntity): List<ChapterEntity> =
-        app.container.libraryRepository.listOfflineChapters(story.id)
+        app.container.libraryRepository.listExportableChapters(story.id)
             .filter { chapter ->
                 !chapter.content.isNullOrBlank() && (story.sourceId == "offline" || chapter.downloadedAt != null)
             }
@@ -103,7 +103,7 @@ fun AppViewModel.updateDownloadedStoryFromLibrary(entity: StoryEntity) {
                 return@launch
             }
         }
-        val downloaded = container.libraryRepository.listOfflineChapters(entity.id)
+        val downloaded = container.libraryRepository.listExportableChapters(entity.id)
             .filter { it.downloadedAt != null && !it.content.isNullOrBlank() }
         val nextIndex = (downloaded.maxOfOrNull { it.chapterIndex } ?: -1) + 1
         if (nextIndex >= chapters.size) {

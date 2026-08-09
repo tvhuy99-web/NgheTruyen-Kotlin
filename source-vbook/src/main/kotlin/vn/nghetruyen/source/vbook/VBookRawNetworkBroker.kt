@@ -16,9 +16,9 @@ import java.util.LinkedHashMap
  * vBook-only network decorator used to bridge the mature text-oriented JS host to the raw-byte
  * contract without weakening or modifying the generic network broker.
  *
- * Internal control headers are removed before any upstream request. Charset/base64/request-info
- * operations are served lazily from the already captured response, so requests are never replayed
- * merely to inspect a response representation.
+ * Internal control headers are removed before any upstream request. The initial response body is
+ * a small JSON metadata envelope consumed by [VBookFetchSafePrelude]; response representations are
+ * then served lazily from the captured raw bytes without replaying the upstream request.
  */
 class VBookRawNetworkBroker(
     private val delegate: SourceNetworkBroker,
@@ -64,11 +64,12 @@ class VBookRawNetworkBroker(
                 ?: return failure(request, "VBOOK_RAW_RESPONSE_CACHE_MISS")
             val bytes = when (operation) {
                 OP_TEXT -> {
-                    val charsetName = decodeCharset?.takeIf(String::isNotBlank)
-                        ?: return failure(request, "VBOOK_FETCH_CHARSET_REQUIRED")
-                    val charset = runCatching { Charset.forName(charsetName) }.getOrElse {
-                        return failure(request, "VBOOK_FETCH_CHARSET_INVALID:$charsetName")
-                    }
+                    val charset = decodeCharset?.takeIf(String::isNotBlank)?.let { charsetName ->
+                        runCatching { Charset.forName(charsetName) }.getOrElse {
+                            return failure(request, "VBOOK_FETCH_CHARSET_INVALID:$charsetName")
+                        }
+                    } ?: cached.response.charsetName?.let { runCatching { Charset.forName(it) }.getOrNull() }
+                        ?: Charsets.UTF_8
                     cached.response.body.toString(charset).toByteArray(Charsets.UTF_8)
                 }
                 OP_BASE64 -> Base64.getEncoder().encode(cached.response.body)
@@ -80,7 +81,8 @@ class VBookRawNetworkBroker(
                 charsetName = Charsets.UTF_8.name(),
                 traceId = request.traceId,
                 fromReplay = true,
-                headers = enrichHeaders(cached.response.headers, cached.response, key),
+                // The safe current-vBook shim never inspects Java response collections for cache reads.
+                headers = emptyMap(),
             ))
         }
 
@@ -98,8 +100,13 @@ class VBookRawNetworkBroker(
         val response = result.value
         val key = requestKey?.takeIf(String::isNotBlank)
         if (key != null) put(CacheKey(request.sourceId, key), response)
+        val envelope = responseEnvelopeJson(response, key ?: "")
         return SourcePlatformResult.Success(response.copy(
-            headers = enrichHeaders(response.headers, response, key),
+            body = envelope.toByteArray(Charsets.UTF_8),
+            charsetName = Charsets.UTF_8.name(),
+            // Avoid exposing Java Maps to the deny-all Rhino ClassShutter. The envelope contains a
+            // JSON copy that the current-vBook prelude materializes as a native JS object.
+            headers = emptyMap(),
         ))
     }
 
@@ -137,6 +144,30 @@ class VBookRawNetworkBroker(
         }
     }
 
+    private fun responseEnvelopeJson(response: SourceNetworkResponse, key: String): String {
+        val headers = linkedMapOf<String, JsonValue>()
+        response.headers.toSortedMap(String.CASE_INSENSITIVE_ORDER).forEach { (name, values) ->
+            headers[name] = JsonValue.Str(values.joinToString(", "))
+        }
+        val requestHeaders = linkedMapOf<String, JsonValue>()
+        response.requestHeaders.toSortedMap(String.CASE_INSENSITIVE_ORDER).forEach { (name, values) ->
+            requestHeaders[name] = JsonValue.Str(values.joinToString(", "))
+        }
+        val defaultCharset = response.charsetName?.let { runCatching { Charset.forName(it) }.getOrNull() } ?: Charsets.UTF_8
+        return JsonCodec.stringify(JsonValue.Obj(linkedMapOf(
+            "__ngheVBookFetch" to JsonValue.Num(1.0, "1"),
+            "responseKey" to JsonValue.Str(key),
+            "body" to JsonValue.Str(response.body.toString(defaultCharset)),
+            "rawSize" to JsonValue.Num(response.body.size.toDouble(), response.body.size.toString()),
+            "statusText" to JsonValue.Str(response.statusText),
+            "headers" to JsonValue.Obj(headers),
+            "request" to JsonValue.Obj(linkedMapOf(
+                "url" to JsonValue.Str(response.requestUrl ?: response.finalUrl),
+                "headers" to JsonValue.Obj(requestHeaders),
+            )),
+        )))
+    }
+
     private fun requestMetadataJson(response: SourceNetworkResponse): String {
         val headers = linkedMapOf<String, JsonValue>()
         response.requestHeaders.toSortedMap(String.CASE_INSENSITIVE_ORDER).forEach { (name, values) ->
@@ -146,16 +177,6 @@ class VBookRawNetworkBroker(
             "url" to JsonValue.Str(response.requestUrl ?: response.finalUrl),
             "headers" to JsonValue.Obj(headers),
         )))
-    }
-
-    private fun enrichHeaders(
-        headers: Map<String, List<String>>,
-        response: SourceNetworkResponse,
-        key: String?,
-    ): Map<String, List<String>> = LinkedHashMap(headers).apply {
-        put(INTERNAL_RAW_SIZE.lowercase(), listOf(response.body.size.toString()))
-        put(INTERNAL_STATUS_TEXT.lowercase(), listOf(response.statusText))
-        if (key != null) put(INTERNAL_RESPONSE_KEY.lowercase(), listOf(key))
     }
 
     private fun Map<String, String>.controlHeader(name: String): String? =

@@ -1,5 +1,6 @@
 package vn.nghetruyen.source.network
 
+import okio.ByteString
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -12,6 +13,7 @@ import vn.nghetruyen.source.api.SourceManifest
 import vn.nghetruyen.source.api.SourcePlatformFailure
 import vn.nghetruyen.source.api.SourcePlatformResult
 import vn.nghetruyen.source.api.SourceWebSocketBroker
+import vn.nghetruyen.source.api.SourceWebSocketFrame
 import vn.nghetruyen.source.api.SourceWebSocketRequest
 import vn.nghetruyen.source.api.SourceWebSocketResponse
 import vn.nghetruyen.source.diagnostics.DiagnosticCategory
@@ -20,7 +22,7 @@ import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 import vn.nghetruyen.source.diagnostics.DiagnosticSink
 import java.net.InetAddress
 import java.net.URI
-import java.util.Locale
+import java.util.Base64
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
@@ -50,10 +52,34 @@ class OkHttpSourceWebSocketBroker(
             request.headers.forEach(builder::header)
             readCookies(manifest, httpUrl)?.let { builder.header("Cookie", it) }
             val messages = mutableListOf<String>()
+            val frames = mutableListOf<SourceWebSocketFrame>()
             val closeCode = AtomicReference<Int?>(null)
             val closeReason = AtomicReference<String?>(null)
             val failure = AtomicReference<Throwable?>(null)
             val latch = CountDownLatch(1)
+
+            fun appendFrame(webSocket: WebSocket, frame: SourceWebSocketFrame) {
+                val byteSize = if (frame.type == "binary") {
+                    runCatching { Base64.getDecoder().decode(frame.data).size }.getOrDefault(capability.maxMessageBytes + 1)
+                } else frame.data.toByteArray(Charsets.UTF_8).size
+                if (byteSize > capability.maxMessageBytes) {
+                    failure.compareAndSet(null, IllegalStateException("SOURCE_WEBSOCKET_MESSAGE_TOO_LARGE"))
+                    webSocket.close(1009, "message too large")
+                    latch.countDown()
+                    return
+                }
+                synchronized(frames) {
+                    if (frames.size < request.maxResponses) {
+                        frames += frame
+                        if (frame.type == "text") messages += frame.data
+                    }
+                    if (frames.size >= request.maxResponses) {
+                        webSocket.close(1000, "complete")
+                        latch.countDown()
+                    }
+                }
+            }
+
             val listener = object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
                     writeCookies(manifest, httpUrl, response.headers("Set-Cookie"))
@@ -65,22 +91,13 @@ class OkHttpSourceWebSocketBroker(
                             return
                         }
                     }
-                    if (request.messages.isEmpty() && request.maxResponses == 0) webSocket.close(1000, "complete")
                 }
 
-                override fun onMessage(webSocket: WebSocket, text: String) {
-                    if (text.toByteArray(Charsets.UTF_8).size > capability.maxMessageBytes) {
-                        failure.compareAndSet(null, IllegalStateException("SOURCE_WEBSOCKET_MESSAGE_TOO_LARGE"))
-                        webSocket.close(1009, "message too large")
-                        latch.countDown()
-                        return
-                    }
-                    synchronized(messages) { if (messages.size < request.maxResponses) messages += text }
-                    if (messages.size >= request.maxResponses) {
-                        webSocket.close(1000, "complete")
-                        latch.countDown()
-                    }
-                }
+                override fun onMessage(webSocket: WebSocket, text: String) =
+                    appendFrame(webSocket, SourceWebSocketFrame("text", text))
+
+                override fun onMessage(webSocket: WebSocket, bytes: ByteString) =
+                    appendFrame(webSocket, SourceWebSocketFrame("binary", Base64.getEncoder().encodeToString(bytes.toByteArray())))
 
                 override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                     closeCode.set(code)
@@ -108,10 +125,16 @@ class OkHttpSourceWebSocketBroker(
                 error("SOURCE_WEBSOCKET_TIMEOUT")
             }
             failure.get()?.let { throw it }
-            SourceWebSocketResponse(messages.toList(), closeCode.get(), closeReason.get(), request.traceId)
+            SourceWebSocketResponse(
+                messages = messages.toList(),
+                closeCode = closeCode.get(),
+                closeReason = closeReason.get(),
+                traceId = request.traceId,
+                frames = frames.toList(),
+            )
         }.fold(
             onSuccess = {
-                diagnostics.emit(event(manifest, request, "WEBSOCKET_COMPLETED", durationMs = clockMs() - started, attributes = mapOf("messages" to it.messages.size.toString())))
+                diagnostics.emit(event(manifest, request, "WEBSOCKET_COMPLETED", durationMs = clockMs() - started, attributes = mapOf("frames" to it.frames.size.toString())))
                 SourcePlatformResult.Success(it)
             },
             onFailure = { error ->

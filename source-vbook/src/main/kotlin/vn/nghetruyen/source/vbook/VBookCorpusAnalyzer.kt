@@ -18,7 +18,9 @@ enum class VBookFeature {
     LEGACY_HTTP_SOURCE,
     CONFIG_LEGACY_PRIMITIVE,
     CONFIG_DESCRIPTOR,
+    CONFIG_CONNECTION_SETTINGS,
     DYNAMIC_SCRIPT_REFERENCE,
+    DYNAMIC_DATA_ARGUMENT,
     DYNAMIC_LOAD,
     LOAD_CRYPTO_BUILTIN,
     RESPONSE_HELPER,
@@ -33,15 +35,24 @@ enum class VBookFeature {
     FETCH_BLOB,
     FETCH_REQUEST_INFO,
     HTML_DOM,
+    HTML_COLLECTION_CALLBACKS,
+    HTML_MUTATION,
+    HTML_ATTRIBUTES,
     LOCAL_CONFIG,
     LOCAL_STORAGE,
     CACHE_STORAGE,
     LOCAL_COOKIE,
     BROWSER,
+    BROWSER_LOAD_HTML,
+    BROWSER_WAIT_URL,
     BROWSER_REQUEST_METADATA,
     GRAPHICS,
     WEBSOCKET,
+    WEBSOCKET_HEADERS,
+    WEBSOCKET_FRAMES,
     QUICK_TRANSLATOR,
+    QUICK_TRANSLATOR_OPTIONS,
+    QUICK_TRANSLATOR_SEGMENTS,
     CRYPTO,
     SCRIPT_EXECUTE,
     JS_FORBIDDEN_ASYNC_AWAIT,
@@ -116,6 +127,8 @@ object VBookCorpusAnalyzer {
         setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
     )
     private val loadLiteral = Regex("\\bload\\s*\\(\\s*['\"]([^'\"]+)['\"]\\s*\\)")
+    private val quickTranslatorWithExtras = Regex("\\bQt\\.translate\\s*\\([^)]*,[^)]*,", RegexOption.DOT_MATCHES_ALL)
+    private val websocketWithHeaders = Regex("\\b(?:new\\s+)?WebSocket\\s*\\([^,\\n]+,\\s*\\{", RegexOption.IGNORE_CASE)
 
     fun audit(
         id: String,
@@ -149,11 +162,14 @@ object VBookCorpusAnalyzer {
         if (manifest.metadata.source.startsWith("http://", ignoreCase = true)) add(VBookFeature.LEGACY_HTTP_SOURCE, value = manifest.metadata.source)
         if (manifest.config.values.any(VBookConfigField::legacyPrimitive)) add(VBookFeature.CONFIG_LEGACY_PRIMITIVE, value = "primitive config")
         if (manifest.config.values.any { !it.legacyPrimitive }) add(VBookFeature.CONFIG_DESCRIPTOR, value = "descriptor config")
+        if (manifest.config.keys.any { it in VBookConfigValues.BUILT_IN_KEYS }) {
+            add(VBookFeature.CONFIG_CONNECTION_SETTINGS, value = manifest.config.keys.filter { it in VBookConfigValues.BUILT_IN_KEYS }.sorted().joinToString())
+        }
 
         val dynamicScripts = linkedSetOf<String>()
         scripts.forEach { (path, code) ->
             fun hit(feature: VBookFeature, regex: Regex, label: String = regex.pattern) {
-                regex.find(code)?.let { add(feature, path, label) }
+                regex.find(code)?.let { match -> add(feature, path, match.value.take(160).ifBlank { label }) }
             }
             hit(VBookFeature.RESPONSE_HELPER, Regex("\\bResponse\\.(?:success|error)\\s*\\("))
             hit(VBookFeature.RESPONSE_LEGACY_CODE, Regex("\\bcode\\s*[:=]\\s*(?:200|403)\\b"))
@@ -167,15 +183,24 @@ object VBookCorpusAnalyzer {
             hit(VBookFeature.FETCH_BLOB, Regex("\\.blob\\s*\\("))
             hit(VBookFeature.FETCH_REQUEST_INFO, Regex("\\.request\\.(?:url|headers)\\b"))
             hit(VBookFeature.HTML_DOM, Regex("\\b(?:Html|HTML)\\.parse\\s*\\(|\\.select\\s*\\("))
+            hit(VBookFeature.HTML_COLLECTION_CALLBACKS, Regex("\\.(?:forEach|map)\\s*\\("))
+            hit(VBookFeature.HTML_MUTATION, Regex("\\.remove\\s*\\("))
+            hit(VBookFeature.HTML_ATTRIBUTES, Regex("\\.attributes\\s*\\("))
             hit(VBookFeature.LOCAL_CONFIG, Regex("\\blocalConfig\\b"))
             hit(VBookFeature.LOCAL_STORAGE, Regex("\\blocalStorage\\b"))
             hit(VBookFeature.CACHE_STORAGE, Regex("\\bcacheStorage\\b"))
             hit(VBookFeature.LOCAL_COOKIE, Regex("\\blocalCookie\\b"))
-            hit(VBookFeature.BROWSER, Regex("\\b(?:Engine\\.newBrowser|Browser\\.)"))
+            hit(VBookFeature.BROWSER, Regex("\\b(?:Engine\\.(?:newBrowser|browser)|Browser\\.)"))
+            hit(VBookFeature.BROWSER_LOAD_HTML, Regex("\\.loadHtml\\s*\\("))
+            hit(VBookFeature.BROWSER_WAIT_URL, Regex("\\.waitUrl\\s*\\("))
             hit(VBookFeature.BROWSER_REQUEST_METADATA, Regex("\\.(?:waitRequest|requests|urls)\\s*\\("))
             hit(VBookFeature.GRAPHICS, Regex("\\bGraphics\\."))
             hit(VBookFeature.WEBSOCKET, Regex("\\bWebSocket\\s*\\("))
+            hit(VBookFeature.WEBSOCKET_HEADERS, websocketWithHeaders)
+            hit(VBookFeature.WEBSOCKET_FRAMES, Regex("\\.message\\s*\\("))
             hit(VBookFeature.QUICK_TRANSLATOR, Regex("\\bQt\\.translate\\s*\\("))
+            hit(VBookFeature.QUICK_TRANSLATOR_OPTIONS, quickTranslatorWithExtras)
+            hit(VBookFeature.QUICK_TRANSLATOR_SEGMENTS, Regex("\\.segments\\b"))
             hit(VBookFeature.CRYPTO, Regex("\\b(?:CryptoJS|Crypto)\\b"))
             hit(VBookFeature.SCRIPT_EXECUTE, Regex("\\bScript\\.execute\\s*\\("))
             hit(VBookFeature.JS_FORBIDDEN_ASYNC_AWAIT, Regex("\\b(?:async\\s+function|await\\s+)"))
@@ -198,6 +223,9 @@ object VBookCorpusAnalyzer {
                 runCatching { VBookPaths.normalizeScriptPath(raw) }.getOrNull()?.let { target ->
                     dynamicScripts += target
                     add(VBookFeature.DYNAMIC_SCRIPT_REFERENCE, path, target)
+                    if (Regex("\\bdata\\s*:").containsMatchIn(match.value)) {
+                        add(VBookFeature.DYNAMIC_DATA_ARGUMENT, path, match.value)
+                    }
                 }
             }
         }

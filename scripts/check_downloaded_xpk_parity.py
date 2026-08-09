@@ -22,6 +22,9 @@ for marker in [
 assert "XÓA BẢN NGOẠI TUYẾN" not in downloaded, "Legacy direct-delete button returned"
 
 for marker in [
+    "object DownloadedLibraryCallbacks",
+    "viewModel.openDownloadedStoryFromLibrary(story)",
+    "viewModel.updateDownloadedStoryFromLibrary(story)",
     "fun AppViewModel.openDownloadedStoryFromLibrary(entity: StoryEntity)",
     'setStoryDetailTab("chapters")',
     "fun AppViewModel.updateDownloadedStoryFromLibrary(entity: StoryEntity)",
@@ -34,8 +37,9 @@ for marker in [
 ]:
     assert marker in actions, f"Downloaded action parity missing: {marker}"
 
-for source_name, source in [("app", app), ("reference", reference)]:
-    assert "onStoryClick = viewModel::openDownloadedStoryFromLibrary" in source, f"{source_name} missing downloaded open wiring"
-    assert "onUpdateDownloadedStory = viewModel::updateDownloadedStoryFromLibrary" in source, f"{source_name} missing downloaded update wiring"
+assert "onStoryClick = { story -> DownloadedLibraryCallbacks.open(viewModel, story) }" in app, "app missing downloaded open adapter wiring"
+assert "onUpdateDownloadedStory = { story -> DownloadedLibraryCallbacks.update(viewModel, story) }" in app, "app missing downloaded update adapter wiring"
+assert "onStoryClick = viewModel::openDownloadedStoryFromLibrary" in reference, "reference missing direct downloaded open wiring"
+assert "onUpdateDownloadedStory = viewModel::updateDownloadedStoryFromLibrary" in reference, "reference missing direct downloaded update wiring"
 
 print("DOWNLOADED_XPK_PARITY=PASS")

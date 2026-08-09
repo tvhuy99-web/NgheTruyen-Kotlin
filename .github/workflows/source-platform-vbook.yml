@@ -1,0 +1,79 @@
+name: Source Platform vBook
+
+on:
+  pull_request:
+    paths:
+      - 'app/src/main/java/vn/nghetruyen/app/sourceplatform/**'
+      - 'app/src/main/java/vn/nghetruyen/app/AppContainer.kt'
+      - 'source-api/**'
+      - 'source-package/**'
+      - 'source-store/**'
+      - 'source-runtime/**'
+      - 'source-diagnostics/**'
+      - 'source-network/**'
+      - 'source-repository/**'
+      - 'source-vbook/**'
+      - 'source-js-sandbox/**'
+      - 'source-compat-testkit/**'
+      - 'settings.gradle.kts'
+      - 'build.gradle.kts'
+      - 'gradle/**'
+      - 'gradlew'
+      - '.github/workflows/source-platform-vbook.yml'
+  push:
+    branches:
+      - 'agent/source-platform-s0-s1'
+    paths:
+      - 'app/src/main/java/vn/nghetruyen/app/sourceplatform/**'
+      - 'app/src/main/java/vn/nghetruyen/app/AppContainer.kt'
+      - 'source-api/**'
+      - 'source-package/**'
+      - 'source-store/**'
+      - 'source-runtime/**'
+      - 'source-diagnostics/**'
+      - 'source-network/**'
+      - 'source-repository/**'
+      - 'source-vbook/**'
+      - 'source-js-sandbox/**'
+      - 'source-compat-testkit/**'
+      - 'settings.gradle.kts'
+      - 'build.gradle.kts'
+      - 'gradle/**'
+      - 'gradlew'
+      - '.github/workflows/source-platform-vbook.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Verify source platform and compile app
+        run: >-
+          ./gradlew
+          :source-api:test
+          :source-js-sandbox:test
+          :source-compat-testkit:test
+          :source-store:test
+          :source-runtime:test
+          :source-diagnostics:test
+          :source-network:test
+          :source-repository:test
+          :source-vbook:test
+          :app:compileDebugKotlin
+          --stacktrace

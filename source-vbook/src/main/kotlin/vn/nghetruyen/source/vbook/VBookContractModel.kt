@@ -281,21 +281,15 @@ object VBookRequiredScripts {
         }
         val required = when (manifest.metadata.type) {
             VBookContentType.NOVEL, VBookContentType.CHINESE_NOVEL -> setOf("search", "detail", "toc", "chap")
+            // Both page and chap are optional in the documented current comic contract. If neither
+            // exists, the host renders the raw chapter URL as a single page.
             VBookContentType.COMIC -> setOf("search", "detail", "toc")
             VBookContentType.VIDEO, VBookContentType.AUDIO -> setOf("search", "detail", "toc", "track")
             VBookContentType.TTS -> setOf("voice", "tts")
             VBookContentType.TRANSLATE -> setOf("language", "translate")
             VBookContentType.UNKNOWN -> emptySet()
-        }.toMutableSet()
-        if (manifest.metadata.type == VBookContentType.COMIC &&
-            "page" !in manifest.scripts && "chap" !in manifest.scripts
-        ) {
-            required += "page|chap"
         }
-        return required.filterTo(linkedSetOf()) { requirement ->
-            if ('|' in requirement) requirement.split('|').none(manifest.scripts::containsKey)
-            else requirement !in manifest.scripts
-        }
+        return required - manifest.scripts.keys
     }
 }
 

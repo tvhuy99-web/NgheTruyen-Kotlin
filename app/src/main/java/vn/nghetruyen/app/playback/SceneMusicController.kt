@@ -13,6 +13,8 @@ import kotlin.math.roundToInt
 
 /**
  * Owns two MediaPlayer instances so scene changes can crossfade without a gap.
+ * It also models the reference tool's attack/release duck envelope and can hand
+ * non-looping playlist completion back to the playback service.
  * All public calls are expected on the main thread.
  */
 class SceneMusicController(
@@ -25,16 +27,26 @@ class SceneMusicController(
         val uri: String,
         val player: MediaPlayer,
         var baseVolume: Float,
+        var fadeMultiplier: Float = 1f,
     )
 
     private var active: Slot? = null
     private var outgoing: Slot? = null
     private var transitionJob: Job? = null
+    private var duckJob: Job? = null
     private var speaking = false
-    private var duckFactor = 0.25f
+    private var duckFactor = 0.63095734f
+    private var duckMultiplier = 1f
+    private var duckAttackMillis = 1850
+    private var duckReleaseMillis = 2050
 
     val activeTrackId: String?
         get() = active?.trackId
+
+    fun setDuckTiming(attackMillis: Int, releaseMillis: Int) {
+        duckAttackMillis = attackMillis.coerceIn(0, 2_000)
+        duckReleaseMillis = releaseMillis.coerceIn(0, 5_000)
+    }
 
     fun transition(
         trackId: String,
@@ -42,35 +54,41 @@ class SceneMusicController(
         volume: Float,
         duckFactor: Float,
         crossfadeMillis: Int,
+        looping: Boolean = true,
+        onCompletion: (() -> Unit)? = null,
     ) {
-        val normalizedVolume = volume.coerceIn(0f, 0.6f)
+        val normalizedVolume = volume.coerceIn(0f, 1f)
         this.duckFactor = duckFactor.coerceIn(0.05f, 1f)
+        if (speaking && duckJob?.isActive != true) duckMultiplier = this.duckFactor
         val current = active
         if (current?.trackId == trackId && current.uri == uri) {
             current.baseVolume = normalizedVolume
             applyLevel(current)
             return
         }
-        val nextPlayer = createPlayer(trackId, uri, normalizedVolume) ?: return
+        val nextPlayer = createPlayer(trackId, uri, looping, onCompletion) ?: return
         nextPlayer.setOnPreparedListener { prepared ->
             val next = Slot(trackId, uri, prepared, normalizedVolume)
             startTransition(next, crossfadeMillis.coerceIn(0, 8_000))
         }
         runCatching { nextPlayer.prepareAsync() }.onFailure {
             nextPlayer.release()
-            onError("Không chuẩn bị được nhạc cảnh đã chọn.")
+            onError("Không chuẩn bị được nhạc nền đã chọn.")
+            onCompletion?.invoke()
         }
     }
 
     fun keepCurrent(duckFactor: Float) {
         this.duckFactor = duckFactor.coerceIn(0.05f, 1f)
-        active?.let(::applyLevel)
+        animateDuck(if (speaking) this.duckFactor else 1f, if (speaking) duckAttackMillis else duckReleaseMillis)
     }
 
     fun setSpeaking(value: Boolean) {
         speaking = value
-        active?.let(::applyLevel)
-        outgoing?.let(::applyLevel)
+        animateDuck(
+            target = if (value) duckFactor else 1f,
+            durationMillis = if (value) duckAttackMillis else duckReleaseMillis,
+        )
     }
 
     fun pause() {
@@ -84,18 +102,21 @@ class SceneMusicController(
             applyLevel(slot)
             if (!slot.player.isPlaying) slot.player.start()
         }.onFailure {
-            onError("Không tiếp tục được nhạc cảnh hiện tại.")
+            onError("Không tiếp tục được nhạc nền hiện tại.")
         }
     }
 
     fun stop(clearTrack: Boolean = true) {
         transitionJob?.cancel()
         transitionJob = null
+        duckJob?.cancel()
+        duckJob = null
         release(outgoing)
         outgoing = null
         if (clearTrack) {
             release(active)
             active = null
+            duckMultiplier = if (speaking) duckFactor else 1f
         } else {
             pause()
         }
@@ -103,7 +124,12 @@ class SceneMusicController(
 
     fun release() = stop(clearTrack = true)
 
-    private fun createPlayer(trackId: String, uri: String, volume: Float): MediaPlayer? = runCatching {
+    private fun createPlayer(
+        trackId: String,
+        uri: String,
+        looping: Boolean,
+        onCompletion: (() -> Unit)?,
+    ): MediaPlayer? = runCatching {
         MediaPlayer().apply {
             setAudioAttributes(
                 AudioAttributes.Builder()
@@ -112,16 +138,27 @@ class SceneMusicController(
                     .build(),
             )
             setDataSource(context, Uri.parse(uri))
-            isLooping = true
+            isLooping = looping
             setVolume(0f, 0f)
+            setOnCompletionListener { completed ->
+                val current = active
+                if (current?.player === completed) {
+                    active = null
+                    runCatching { completed.release() }
+                    onCompletion?.invoke()
+                }
+            }
             setOnErrorListener { failed, _, _ ->
-                runCatching { failed.reset() }
-                onError("Không phát được nhạc cảnh '$trackId'.")
+                val wasActive = active?.player === failed
+                if (wasActive) active = null
+                runCatching { failed.release() }
+                onError("Không phát được nhạc nền '$trackId'.")
+                if (wasActive) onCompletion?.invoke()
                 true
             }
         }
     }.getOrElse {
-        onError("Không mở được tệp nhạc cảnh đã chọn.")
+        onError("Không mở được tệp nhạc nền đã chọn.")
         null
     }
 
@@ -130,38 +167,68 @@ class SceneMusicController(
         outgoing?.let(::release)
         outgoing = active
         active = next
+        val old = outgoing
+        next.fadeMultiplier = if (durationMillis > 0 && old != null) 0f else 1f
         runCatching { next.player.start() }.onFailure {
             release(next)
-            active = outgoing
+            active = old
             outgoing = null
-            onError("Không khởi động được nhạc cảnh đã chọn.")
+            onError("Không khởi động được nhạc nền đã chọn.")
             return
         }
-        if (durationMillis <= 0 || outgoing == null) {
-            outgoing?.let(::release)
+        if (durationMillis <= 0 || old == null) {
+            old?.let(::release)
             outgoing = null
+            next.fadeMultiplier = 1f
             applyLevel(next)
             return
         }
         transitionJob = scope.launch(Dispatchers.Main.immediate) {
             val steps = (durationMillis / 40f).roundToInt().coerceIn(4, 120)
-            val old = outgoing
             repeat(steps + 1) { index ->
                 val fraction = index.toFloat() / steps.toFloat()
-                setSlotLevel(next, desiredLevel(next) * fraction)
-                old?.let { setSlotLevel(it, desiredLevel(it) * (1f - fraction)) }
+                next.fadeMultiplier = fraction
+                old.fadeMultiplier = 1f - fraction
+                applyLevel(next)
+                applyLevel(old)
                 if (index < steps) delay(durationMillis.toLong() / steps)
             }
             release(old)
             if (outgoing === old) outgoing = null
+            next.fadeMultiplier = 1f
             applyLevel(next)
+        }
+    }
+
+    private fun animateDuck(target: Float, durationMillis: Int) {
+        duckJob?.cancel()
+        val safeTarget = target.coerceIn(0.05f, 1f)
+        if (durationMillis <= 0 || kotlin.math.abs(duckMultiplier - safeTarget) < 0.001f) {
+            duckMultiplier = safeTarget
+            active?.let(::applyLevel)
+            outgoing?.let(::applyLevel)
+            return
+        }
+        val start = duckMultiplier
+        duckJob = scope.launch(Dispatchers.Main.immediate) {
+            val steps = (durationMillis / 40f).roundToInt().coerceIn(4, 125)
+            repeat(steps + 1) { index ->
+                val fraction = index.toFloat() / steps.toFloat()
+                duckMultiplier = start + (safeTarget - start) * fraction
+                active?.let(::applyLevel)
+                outgoing?.let(::applyLevel)
+                if (index < steps) delay(durationMillis.toLong() / steps)
+            }
+            duckMultiplier = safeTarget
+            active?.let(::applyLevel)
+            outgoing?.let(::applyLevel)
         }
     }
 
     private fun applyLevel(slot: Slot) = setSlotLevel(slot, desiredLevel(slot))
 
     private fun desiredLevel(slot: Slot): Float =
-        (slot.baseVolume * if (speaking) duckFactor else 1f).coerceIn(0f, 1f)
+        (slot.baseVolume * duckMultiplier * slot.fadeMultiplier).coerceIn(0f, 1f)
 
     private fun setSlotLevel(slot: Slot, level: Float) {
         runCatching { slot.player.setVolume(level, level) }

@@ -567,10 +567,10 @@ fun ReaderScreen(
                     ReaderButton("CUỘN", { onLayoutModeChange(ReaderLayoutMode.SCROLL) }, Modifier.weight(1f), selected = display.layoutMode == ReaderLayoutMode.SCROLL)
                     ReaderButton("TỪNG ĐOẠN", { onLayoutModeChange(ReaderLayoutMode.PAGED) }, Modifier.weight(1f), selected = display.layoutMode == ReaderLayoutMode.PAGED)
                 }
-                ValueStepper("Cỡ chữ", "${display.fontSizeSp} sp", { onFontSizeChange(display.fontSizeSp - 1) }, { onFontSizeChange(display.fontSizeSp + 1) })
-                ValueStepper("Khoảng cách dòng", "${display.lineHeightPercent}%", { onLineHeightChange(display.lineHeightPercent - 10) }, { onLineHeightChange(display.lineHeightPercent + 10) })
-                ValueStepper("Lề ngang", "${display.horizontalPaddingDp} dp", { onHorizontalPaddingChange(display.horizontalPaddingDp - 2) }, { onHorizontalPaddingChange(display.horizontalPaddingDp + 2) })
-                ValueStepper("Khoảng đoạn", "${display.paragraphSpacingDp} dp", { onParagraphSpacingChange(display.paragraphSpacingDp - 2) }, { onParagraphSpacingChange(display.paragraphSpacingDp + 2) })
+                ReaderIntSlider("Cỡ chữ", display.fontSizeSp, 12, 40, suffix = " sp", onChange = onFontSizeChange)
+                ReaderIntSlider("Khoảng cách dòng", display.lineHeightPercent, 100, 200, suffix = "%", onChange = onLineHeightChange)
+                ReaderIntSlider("Lề ngang", display.horizontalPaddingDp, 0, 64, step = 2, suffix = " dp", onChange = onHorizontalPaddingChange)
+                ReaderIntSlider("Khoảng đoạn", display.paragraphSpacingDp, 0, 48, step = 2, suffix = " dp", onChange = onParagraphSpacingChange)
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Chế độ nền tối khi đọc", Modifier.weight(1f)); Switch(display.theme == ReaderThemeMode.DARK, { onThemeChange(if (it) ReaderThemeMode.DARK else ReaderThemeMode.LIGHT) }) }
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Giữ màn hình sáng khi đọc", Modifier.weight(1f)); Switch(display.keepScreenOn, onKeepScreenOnChange) }
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Phím âm lượng chuyển đoạn khi TTS", Modifier.weight(1f)); Switch(display.volumeKeysNavigate, onVolumeKeysNavigateChange) }
@@ -694,12 +694,7 @@ fun ReaderScreen(
                             TextButton({ musicMode = SceneMusicPlaybackMode.SMART_AVOID_REPEAT }, Modifier.weight(1f)) { Text((if (musicMode == SceneMusicPlaybackMode.SMART_AVOID_REPEAT) "✓ " else "") + "TRÁNH LẶP") }
                         }
                         if (musicMode == SceneMusicPlaybackMode.SMART_AVOID_REPEAT) {
-                            ValueStepper(
-                                "Tránh lặp",
-                                "$musicAvoidRepeatWindow bài",
-                                { musicAvoidRepeatWindow = (musicAvoidRepeatWindow - 1).coerceAtLeast(0) },
-                                { musicAvoidRepeatWindow = (musicAvoidRepeatWindow + 1).coerceAtMost(20) },
-                            )
+                            ReaderIntSlider("Tránh lặp", musicAvoidRepeatWindow, 0, 20, suffix = " bài") { musicAvoidRepeatWindow = it }
                         }
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Text("Giữ qua chương", Modifier.weight(1f))
@@ -714,20 +709,11 @@ fun ReaderScreen(
                         }
                         ReaderMenuButton("NÂNG CAO") { musicAdvanced = true }
                     } else {
-                        ValueStepper(
-                            "Crossfade",
-                            "$musicCrossfadeMs ms",
-                            { musicCrossfadeMs = (musicCrossfadeMs - 400).coerceAtLeast(0) },
-                            { musicCrossfadeMs = (musicCrossfadeMs + 400).coerceAtMost(8_000) },
-                        )
-                        Text("Chuẩn hóa ${"%.1f".format(musicTargetLufs)} LUFS", fontWeight = FontWeight.SemiBold)
-                        Slider(musicTargetLufs, { musicTargetLufs = it }, valueRange = -36f..-18f, steps = 35)
-                        Text("Giảm giọng ${"%.1f".format(musicDuckDb)} dB", fontWeight = FontWeight.SemiBold)
-                        Slider(musicDuckDb, { musicDuckDb = it }, valueRange = 0f..24f, steps = 47)
-                        Text("Attack $musicAttackMs ms", fontWeight = FontWeight.SemiBold)
-                        Slider(musicAttackMs.toFloat(), { musicAttackMs = it.toInt() }, valueRange = 0f..2000f, steps = 39)
-                        Text("Release $musicReleaseMs ms", fontWeight = FontWeight.SemiBold)
-                        Slider(musicReleaseMs.toFloat(), { musicReleaseMs = it.toInt() }, valueRange = 0f..5000f, steps = 99)
+                        ReaderIntSlider("Crossfade", musicCrossfadeMs, 0, 8_000, step = 400, suffix = " ms") { musicCrossfadeMs = it }
+                        ReaderFloatSlider("Mức chuẩn hóa", musicTargetLufs, -36f, -18f, steps = 17, shown = { "%.0f LUFS".format(it) }) { musicTargetLufs = it }
+                        ReaderFloatSlider("Giảm khi giọng đọc phát", musicDuckDb, 0f, 24f, steps = 23, shown = { "%.0f dB".format(it) }) { musicDuckDb = it }
+                        ReaderIntSlider("Attack", musicAttackMs, 0, 2_000, step = 10, suffix = " ms") { musicAttackMs = it }
+                        ReaderIntSlider("Release", musicReleaseMs, 0, 5_000, step = 10, suffix = " ms") { musicReleaseMs = it }
                         ReaderMenuButton("CHUẨN HÓA KHO NHẠC") {
                             state.sceneMusicTracks.forEach { SceneMusicAnalysisWorker.enqueue(context, it.id) }
                             onMessage("Đã đưa kho nhạc vào hàng đợi chuẩn hóa.")
@@ -1216,17 +1202,70 @@ private fun ReaderButton(
 }
 
 @Composable
-private fun ValueStepper(label: String, value: String, less: () -> Unit, more: () -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text("$label: $value", Modifier.weight(1f))
-        TextButton(less) { Text("−") }
-        TextButton(more) { Text("+") }
-    }
+private fun ReaderIntSlider(
+    label: String,
+    value: Int,
+    minimum: Int,
+    maximum: Int,
+    step: Int = 1,
+    suffix: String = "",
+    onChange: (Int) -> Unit,
+) {
+    val safeStep = step.coerceAtLeast(1)
+    val safe = value.coerceIn(minimum, maximum)
+    val intervals = ((maximum - minimum) / safeStep).coerceAtLeast(1)
+    val description = "$label: $safe$suffix"
+    Text(description, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 6.dp))
+    Slider(
+        value = safe.toFloat(),
+        onValueChange = { raw ->
+            val snapped = minimum + (((raw - minimum.toFloat()) / safeStep.toFloat()).toInt() * safeStep)
+            onChange(snapped.coerceIn(minimum, maximum))
+        },
+        valueRange = minimum.toFloat()..maximum.toFloat(),
+        steps = (intervals - 1).coerceAtLeast(0),
+        modifier = Modifier.fillMaxWidth().semantics { contentDescription = description },
+    )
+}
+
+@Composable
+private fun ReaderFloatSlider(
+    label: String,
+    value: Float,
+    minimum: Float,
+    maximum: Float,
+    steps: Int = 0,
+    shown: (Float) -> String,
+    onChange: (Float) -> Unit,
+) {
+    val safe = value.coerceIn(minimum, maximum)
+    val description = "$label: ${shown(safe)}"
+    Text(description, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 6.dp))
+    Slider(
+        value = safe,
+        onValueChange = { onChange(it.coerceIn(minimum, maximum)) },
+        valueRange = minimum..maximum,
+        steps = steps,
+        modifier = Modifier.fillMaxWidth().semantics { contentDescription = description },
+    )
 }
 
 @Composable
 private fun TtsSlider(label: String, value: Float, min: Float, max: Float, percent: Boolean = false, onChange: (Float) -> Unit) {
     val shown = value.coerceIn(min, max)
-    Text(if (percent) "$label: ${"%.0f".format(shown * 100)}%" else "$label: ${"%.2f".format(shown)}x", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 6.dp))
-    Slider(shown, onChange, valueRange = min..max)
+    val description = if (percent) "$label: ${"%.0f".format(shown * 100)}%" else "$label: ${"%.2f".format(shown)}x"
+    Text(description, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 6.dp))
+    val intervals = when {
+        percent && max <= 1f -> 100
+        percent -> 200
+        label.contains("Tốc độ", ignoreCase = true) -> 275
+        else -> 150
+    }
+    Slider(
+        value = shown,
+        onValueChange = { onChange(it.coerceIn(min, max)) },
+        valueRange = min..max,
+        steps = (intervals - 1).coerceAtLeast(0),
+        modifier = Modifier.fillMaxWidth().semantics { contentDescription = description },
+    )
 }

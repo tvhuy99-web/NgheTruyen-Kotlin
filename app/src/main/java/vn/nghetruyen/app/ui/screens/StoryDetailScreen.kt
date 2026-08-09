@@ -613,25 +613,25 @@ fun StoryDetailScreen(
                         ).forEach { (value, label) -> DropdownMenuItem(text = { Text(label) }, onClick = { voiceMode = value; modeExpanded = false }) }
                     }
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Tự động phân vai", Modifier.weight(1f))
+                        Text("Tự động phân vai rồi đọc khi mở chương ở chế độ TTS", Modifier.weight(1f))
                         Switch(voiceAutoRun, { voiceAutoRun = it }, enabled = voiceMode != StoryVoiceCastMode.OFF)
                     }
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("AI điều chỉnh giọng", Modifier.weight(1f))
+                        Text("AI tự điều chỉnh tốc độ, cao độ và âm lượng", Modifier.weight(1f))
                         Switch(expressive, { expressive = it }, enabled = voiceMode != StoryVoiceCastMode.OFF)
                     }
                     if (expressive && voiceMode != StoryVoiceCastMode.OFF) {
                         ReferencePercentSlider("Giới hạn tốc độ", speedLimit) { speedLimit = it }
                         ReferencePercentSlider("Giới hạn cao độ", pitchLimit) { pitchLimit = it }
                         ReferencePercentSlider("Giới hạn âm lượng", volumeLimit) { volumeLimit = it }
-                        ReferenceActionButton("HƯỚNG DẪN AI", { showExpressionPromptDialog = true }, normalColor = ReferenceGray, modifier = Modifier.fillMaxWidth())
+                        ReferenceActionButton("XEM / SỬA HƯỚNG DẪN THÔNG SỐ", { showExpressionPromptDialog = true }, normalColor = ReferenceGray, modifier = Modifier.fillMaxWidth())
                     }
                     if (voiceMode == StoryVoiceCastMode.PRIVATE) {
                         val privateRoles = state.voiceRoles.filter { it.storyId == detail.story.id }
                         Text("Bộ hồ sơ riêng: ${privateRoles.size} vai", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
-                        ReferenceActionButton("BỘ GIỌNG RIÊNG", { showVoiceProfiles = true }, normalColor = ReferenceGray, modifier = Modifier.fillMaxWidth())
+                        ReferenceActionButton("THIẾT LẬP BỘ GIỌNG RIÊNG", { showVoiceProfiles = true }, normalColor = ReferenceGray, modifier = Modifier.fillMaxWidth())
                     }
-                    Text("Ghi chú AI", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                    Text("Ghi chú chung bổ sung cho AI", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
                     OutlinedTextField(
                         voiceNote,
                         { voiceNote = it.take(4_000) },
@@ -926,7 +926,7 @@ private fun VoiceRoleEntity.toDraft(context: android.content.Context): VoiceRole
 @Composable
 private fun ReferencePercentSlider(label: String, value: Int, onChange: (Int) -> Unit) {
     Text("$label: ±${value.coerceIn(0, 100)}%", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 6.dp))
-    Slider(value = value.coerceIn(0, 100).toFloat(), onValueChange = { onChange(it.toInt().coerceIn(0, 100)) }, valueRange = 0f..100f, steps = 19)
+    Slider(value = value.coerceIn(0, 100).toFloat(), onValueChange = { onChange(it.toInt().coerceIn(0, 100)) }, valueRange = 0f..100f, steps = 99, modifier = Modifier.fillMaxWidth().semantics { contentDescription = "$label: ±${value.coerceIn(0, 100)}%" })
 }
 
 @Composable

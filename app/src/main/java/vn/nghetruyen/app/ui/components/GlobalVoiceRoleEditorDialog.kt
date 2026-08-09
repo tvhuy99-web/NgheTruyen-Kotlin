@@ -145,7 +145,7 @@ fun GlobalVoiceRoleEditorDialog(
                     onValueChange = { value ->
                         if (!draft.isNarrator) onDraftChange(draft.copy(roleName = value.take(80)))
                     },
-                    label = { Text("Tên vai") },
+                    label = { Text("Tên vai hoặc tên nhân vật") },
                     enabled = !draft.isNarrator,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -153,7 +153,7 @@ fun GlobalVoiceRoleEditorDialog(
                 OutlinedTextField(
                     value = draft.description,
                     onValueChange = { onDraftChange(draft.copy(description = it.take(1_000))) },
-                    label = { Text("Mô tả") },
+                    label = { Text("Mô tả để AI nhận biết") },
                     minLines = 2,
                     modifier = Modifier.fillMaxWidth().padding(top = 5.dp),
                 )
@@ -174,7 +174,7 @@ fun GlobalVoiceRoleEditorDialog(
                     }
                 }
 
-                Text("TTS", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                Text("Bộ đọc TTS", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
                 Box(Modifier.fillMaxWidth()) {
                     Button(onClick = { engineExpanded = true }, modifier = Modifier.fillMaxWidth()) {
                         Text(engineLabel)
@@ -221,7 +221,7 @@ fun GlobalVoiceRoleEditorDialog(
                     }
                 }
 
-                Text("Giọng", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 7.dp))
+                Text("Giọng nói", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 7.dp))
                 Box(Modifier.fillMaxWidth()) {
                     Button(
                         onClick = { voiceExpanded = true },
@@ -255,7 +255,7 @@ fun GlobalVoiceRoleEditorDialog(
                     }
                 }
 
-                Text("Xử lý", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                Text("Phương pháp xử lý", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
                 Row(Modifier.fillMaxWidth()) {
                     Button(
                         onClick = {
@@ -295,7 +295,7 @@ fun GlobalVoiceRoleEditorDialog(
                     }
                 }
 
-                CompactVoiceValueRow("Tốc độ TTS", draft.rate, 0.25f, 3f) {
+                CompactVoiceValueRow("Tốc độ đọc", draft.rate, 0.25f, 3f) {
                     onDraftChange(draft.copy(rate = it))
                 }
                 CompactVoiceValueRow("Cao độ TTS", draft.pitch, 0.5f, 2f) {

@@ -84,10 +84,14 @@ class VBookRawNetworkBroker(
             ))
         }
 
-        enforceInterRequestDelay(request.sourceId, requestedDelay)
+        val timeoutBudgetMs = minOf(requestedTimeout ?: request.timeoutMs, request.timeoutMs).coerceAtLeast(100L)
+        val delayElapsedMs = when (val delay = enforceInterRequestDelay(request.sourceId, requestedDelay, timeoutBudgetMs)) {
+            is DelayResult.Allowed -> delay.elapsedMs
+            DelayResult.ExceedsBudget -> return failure(request, "VBOOK_FETCH_DELAY_EXCEEDS_TIMEOUT")
+        }
         val delegatedRequest = request.copy(
             headers = sanitizedHeaders,
-            timeoutMs = requestedTimeout ?: request.timeoutMs,
+            timeoutMs = (timeoutBudgetMs - delayElapsedMs).coerceAtLeast(100L),
         )
         val result = delegate.execute(manifest, delegatedRequest)
         if (result !is SourcePlatformResult.Success) return result
@@ -99,17 +103,25 @@ class VBookRawNetworkBroker(
         ))
     }
 
-    private fun enforceInterRequestDelay(sourceId: String, delayMs: Long) {
-        if (delayMs <= 0L) return
+    private sealed interface DelayResult {
+        data class Allowed(val elapsedMs: Long) : DelayResult
+        data object ExceedsBudget : DelayResult
+    }
+
+    private fun enforceInterRequestDelay(sourceId: String, delayMs: Long, timeoutBudgetMs: Long): DelayResult {
+        if (delayMs <= 0L) return DelayResult.Allowed(0L)
+        val started = clockMs()
         synchronized(delayLock) {
             val now = clockMs()
             val last = lastUpstreamStartMs[sourceId]
             if (last != null) {
                 val waitMs = (last + delayMs - now).coerceAtLeast(0L)
+                if (waitMs >= timeoutBudgetMs - 100L) return DelayResult.ExceedsBudget
                 if (waitMs > 0L) sleeper(waitMs)
             }
             lastUpstreamStartMs[sourceId] = clockMs()
         }
+        return DelayResult.Allowed((clockMs() - started).coerceAtLeast(0L))
     }
 
     @Synchronized

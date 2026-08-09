@@ -27,6 +27,7 @@ enum class VBookFeature {
     FETCH_QUERIES,
     FETCH_TIMEOUT,
     FETCH_HEADER,
+    FETCH_STATUS_TEXT,
     FETCH_CHARSET,
     FETCH_BASE64,
     FETCH_BLOB,
@@ -160,6 +161,7 @@ object VBookCorpusAnalyzer {
             hit(VBookFeature.FETCH_QUERIES, Regex("\\bqueries\\s*:"))
             hit(VBookFeature.FETCH_TIMEOUT, Regex("\\btimeout\\s*:"))
             hit(VBookFeature.FETCH_HEADER, Regex("\\.header\\s*\\("))
+            hit(VBookFeature.FETCH_STATUS_TEXT, Regex("\\.statusText\\b"))
             hit(VBookFeature.FETCH_CHARSET, Regex("\\.(?:text|html)\\s*\\(\\s*['\"][^'\"]+['\"]\\s*\\)"))
             hit(VBookFeature.FETCH_BASE64, Regex("\\.base64\\s*\\("))
             hit(VBookFeature.FETCH_BLOB, Regex("\\.blob\\s*\\("))
@@ -200,7 +202,6 @@ object VBookCorpusAnalyzer {
             }
         }
 
-        val declared = manifest.allDeclaredScriptPaths()
         val packagePaths = scripts.keys.mapTo(linkedSetOf()) { VBookPaths.normalizeScriptPath(it) }
         val missingDynamic = dynamicScripts - packagePaths
         val unknownRoles = manifest.scripts.keys.filterTo(linkedSetOf()) { VBookScriptRole.from(it) == null }

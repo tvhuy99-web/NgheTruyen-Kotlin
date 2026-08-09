@@ -28,15 +28,23 @@ jobs:
         run: |
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
-      - name: Verify parity policy
-        run: python3 scripts/check_ui_control_parity.py
-      - name: Compile UI changes
-        run: ./gradlew --no-daemon --stacktrace :app:compileDebugKotlin
-      - name: Record successful verification
+      - name: Verify and record result
+        shell: bash
         run: |
-          printf 'UI_CONTROL_PARITY=PASS\nKOTLIN_COMPILE=PASS\n' > UI_CONTROL_PARITY_VERIFIED.txt
+          set +e
+          python3 scripts/check_ui_control_parity.py
+          PARITY_CODE=$?
+          ./gradlew --no-daemon --stacktrace :app:compileDebugKotlin
+          COMPILE_CODE=$?
+          set -e
+          {
+            if [ "$PARITY_CODE" -eq 0 ]; then echo 'UI_CONTROL_PARITY=PASS'; else echo 'UI_CONTROL_PARITY=FAIL'; fi
+            if [ "$COMPILE_CODE" -eq 0 ]; then echo 'KOTLIN_COMPILE=PASS'; else echo 'KOTLIN_COMPILE=FAIL'; fi
+          } > UI_CONTROL_PARITY_VERIFIED.txt
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add UI_CONTROL_PARITY_VERIFIED.txt
-          git commit -m 'test: record UI parity compile pass'
+          git commit -m 'test: record UI parity verification'
           git push origin HEAD:agent/settings-a11y-labels
+          test "$PARITY_CODE" -eq 0
+          test "$COMPILE_CODE" -eq 0

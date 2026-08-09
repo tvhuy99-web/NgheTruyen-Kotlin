@@ -46,6 +46,7 @@ STATIC_GATES=(
   scripts/check_music_playback_parity.py
   scripts/check_music_normalization_flow_parity.py
   scripts/check_xpk_final_ui_parity.py
+  scripts/check_downloaded_xpk_parity.py
 )
 for gate in "${STATIC_GATES[@]}"; do
   printf 'RUN_STATIC_GATE=%s\n' "$gate"

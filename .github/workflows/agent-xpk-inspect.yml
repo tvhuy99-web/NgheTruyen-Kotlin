@@ -3,13 +3,13 @@ name: Agent XPK parity inspect
 on:
   push:
     branches: [agent/settings-a11y-labels]
+  pull_request:
 
 permissions:
   contents: read
 
 jobs:
   inspect:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

@@ -65,7 +65,6 @@ object VBookEngineFeatureMatrix {
         VBookFeature.CONTENT_AUDIO,
         VBookFeature.CONTENT_TTS,
         VBookFeature.CONTENT_TRANSLATE,
-        VBookFeature.CONTENT_UNKNOWN,
         VBookFeature.CONFIG_LEGACY_PRIMITIVE,
         VBookFeature.CONFIG_DESCRIPTOR,
         VBookFeature.CONFIG_CONNECTION_SETTINGS,
@@ -109,6 +108,7 @@ object VBookEngineFeatureMatrix {
     )
 
     private val partial = setOf(
+        VBookFeature.CONTENT_UNKNOWN,
         VBookFeature.LOCAL_COOKIE_CLEARTEXT,
         VBookFeature.WEBSOCKET,
         VBookFeature.QUICK_TRANSLATOR_OPTIONS,
@@ -191,6 +191,8 @@ object VBookEngineFeatureMatrix {
     }
 
     private fun partialNote(feature: VBookFeature): String = when (feature) {
+        VBookFeature.CONTENT_UNKNOWN ->
+            "Unknown metadata.type is archived and audited but not activated. A new type or legacy dialect must be proven before the host assigns provider semantics."
         VBookFeature.LOCAL_COOKIE_CLEARTEXT ->
             "Cleartext network access is sandboxed per extension, but localCookie.setCookie still enforces HTTPS. The corpus scanner exposes this exact combination so it blocks parity only when an extension actually requires it."
         VBookFeature.WEBSOCKET ->

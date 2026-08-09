@@ -254,6 +254,7 @@ class UnifiedSourcePlatformManager(
 
     private fun clearPendingCatalogInstall() {
         pendingVBookCatalog = null
+        legacy.cancelPendingInstall()
     }
 
     private fun repositoryState(local: String?, remote: String): String {

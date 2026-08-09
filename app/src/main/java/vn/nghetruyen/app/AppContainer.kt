@@ -29,7 +29,14 @@ class AppContainer(context: Context) {
     val settingsRepository: SettingsRepository by lazy { SettingsRepository(appContext) }
     val libraryRepository: LibraryRepository by lazy { LibraryRepository(database) }
     val sourceSessionStore: EncryptedSourceSessionStore by lazy { EncryptedSourceSessionStore(appContext) }
-    val sourcePlatformManager: SourcePlatformManager by lazy { SourcePlatformManager(appContext, sourceSessionStore, aiServices) }
+    val sourcePlatformManager: SourcePlatformManager by lazy {
+        SourcePlatformManager(
+            context = appContext,
+            sourceSessionStore = sourceSessionStore,
+            translationEngine = aiServices,
+            libraryRepository = libraryRepository,
+        )
+    }
     val sourceRegistry: SourceRegistry by lazy {
         SourceRegistry(
             sessionStore = sourceSessionStore,

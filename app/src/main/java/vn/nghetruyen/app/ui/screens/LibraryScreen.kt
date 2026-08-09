@@ -1,5 +1,6 @@
 package vn.nghetruyen.app.ui.screens
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -24,19 +25,25 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import vn.nghetruyen.app.NgheTruyenApplication
 import vn.nghetruyen.app.data.local.BookmarkEntity
 import vn.nghetruyen.app.data.local.ChapterDownloadFailureEntity
+import vn.nghetruyen.app.data.local.ChapterEntity
 import vn.nghetruyen.app.data.local.ChapterNoteEntity
 import vn.nghetruyen.app.data.local.DownloadJobEntity
 import vn.nghetruyen.app.data.local.FollowedStoryEntity
 import vn.nghetruyen.app.data.local.ReadingHistoryEntity
 import vn.nghetruyen.app.data.local.StoryEntity
+import vn.nghetruyen.app.ui.DownloadedLibraryCallbacks
 import vn.nghetruyen.app.ui.LibrarySection
 import vn.nghetruyen.app.ui.MainUiState
 import vn.nghetruyen.app.ui.components.ReferenceActionButton
@@ -441,12 +448,20 @@ private fun DownloadedSection(
     onCancelDownload: (String) -> Unit,
     onRemoveOffline: (String) -> Unit,
 ) {
+    val context = LocalContext.current
+    val app = context.applicationContext as NgheTruyenApplication
+    val scope = rememberCoroutineScope()
     var selectedOptions by remember { mutableStateOf<StoryEntity?>(null) }
     var pendingRemoval by remember { mutableStateOf<StoryEntity?>(null) }
+    var selectedChapterStory by remember { mutableStateOf<StoryEntity?>(null) }
+    var downloadedChapters by remember { mutableStateOf<List<ChapterEntity>>(emptyList()) }
+    var chapterQuery by remember { mutableStateOf("") }
+    var showChapterSearch by remember { mutableStateOf(false) }
+
     selectedOptions?.let { story ->
         AlertDialog(
             onDismissRequest = { selectedOptions = null },
-            title = { Text("TÙY CHỌN") },
+            title = { Text(story.title.ifBlank { "Truyện" }) },
             text = { Column {
                 ReferenceActionButton("CẬP NHẬT / TẢI TIẾP", { selectedOptions = null; onUpdateDownloadedStory(story) }, modifier = Modifier.fillMaxWidth())
                 ReferenceActionButton("XÓA DỮ LIỆU ĐÃ TẢI", { selectedOptions = null; pendingRemoval = story }, modifier = Modifier.fillMaxWidth().padding(top = 2.dp))
@@ -464,13 +479,95 @@ private fun DownloadedSection(
             dismissButton = { TextButton(onClick = { pendingRemoval = null }) { Text("HỦY") } },
         )
     }
+
+    selectedChapterStory?.let { story ->
+        val visible = rankDownloadedChapters(downloadedChapters, chapterQuery)
+        AlertDialog(
+            onDismissRequest = { selectedChapterStory = null },
+            title = { Text("CHƯƠNG: ${story.title.ifBlank { "Truyện" }}${if (chapterQuery.isNotBlank()) " - TÌM: ${chapterQuery.trim()}" else ""}") },
+            text = {
+                Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState())) {
+                    if (visible.isEmpty()) {
+                        Text("Không tìm thấy chương phù hợp với “${chapterQuery.trim()}”.")
+                    } else {
+                        visible.forEach { chapter ->
+                            ReferenceActionButton(
+                                text = chapter.title.ifBlank { "Chương ${chapter.chapterIndex + 1}" },
+                                onClick = {
+                                    DownloadedLibraryCallbacks.selectChapter(chapter)
+                                    selectedChapterStory = null
+                                    onStoryClick(story)
+                                },
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { selectedChapterStory = null }) { Text("ĐÓNG") } },
+            dismissButton = {
+                TextButton(onClick = { showChapterSearch = true }) {
+                    Text(if (chapterQuery.isBlank()) "TÌM KIẾM" else "TÌM: ${chapterQuery.trim()}")
+                }
+            },
+        )
+    }
+
+    if (showChapterSearch) {
+        var draft by remember(showChapterSearch, selectedChapterStory?.id) { mutableStateOf(chapterQuery) }
+        AlertDialog(
+            onDismissRequest = { showChapterSearch = false },
+            title = { Text("TÌM CHƯƠNG ĐÃ TẢI") },
+            text = {
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = { draft = it.take(180) },
+                    placeholder = { Text("Nhập tên, số chương hoặc vài ký tự liên quan") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    chapterQuery = draft.trim()
+                    showChapterSearch = false
+                }) { Text("TÌM") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = {
+                        chapterQuery = ""
+                        showChapterSearch = false
+                    }) { Text("HIỆN TẤT CẢ") }
+                    TextButton(onClick = { showChapterSearch = false }) { Text("HỦY") }
+                }
+            },
+        )
+    }
+
     if (stories.isEmpty() && jobs.isEmpty() && failures.isEmpty()) { Text("Chưa có truyện ngoại tuyến.", modifier = Modifier.padding(16.dp)); return }
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         items(jobs, key = { "job:${it.id}" }) { job -> Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) { Column(modifier = Modifier.padding(14.dp)) {
             DownloadJobControls(job, failures.filter { it.jobId == job.id }, onPauseDownload, onResumeDownload, onRetryDownload, onPrioritizeDownload, onRetryFailedChapter, onCancelDownload)
         } } }
         items(stories, key = { "story:${it.id}" }) { story ->
-            Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).clickable { onStoryClick(story) }) { Column(modifier = Modifier.padding(14.dp)) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .clickable {
+                        scope.launch {
+                            val chapters = DownloadedLibraryCallbacks.chapters(app, story)
+                            if (chapters.isEmpty()) {
+                                Toast.makeText(context, "Truyện này chưa có chương nào còn tồn tại trên thiết bị.", Toast.LENGTH_LONG).show()
+                            } else {
+                                downloadedChapters = chapters
+                                chapterQuery = ""
+                                selectedChapterStory = story
+                            }
+                        }
+                    },
+            ) { Column(modifier = Modifier.padding(14.dp)) {
                 Text(story.title, fontWeight = FontWeight.SemiBold); if (story.author.isNotBlank()) Text(story.author)
                 val usage = storage[story.id]
                 Text(if (usage == null) "Có thể đọc ngoại tuyến" else "${usage.chapterCount} chương • ${formatStorageBytes(usage.bytes)}")
@@ -479,6 +576,25 @@ private fun DownloadedSection(
             } }
         }
     }
+}
+
+private fun rankDownloadedChapters(chapters: List<ChapterEntity>, query: String): List<ChapterEntity> {
+    val needle = query.trim().lowercase()
+    if (needle.isBlank()) return chapters
+    return chapters.mapNotNull { chapter ->
+        val title = chapter.title.lowercase()
+        val indexText = (chapter.chapterIndex + 1).toString()
+        val haystack = "$title ${chapter.remoteUrl.lowercase()} $indexText"
+        val score = when {
+            title == needle || indexText == needle -> 0
+            title.startsWith(needle) -> 1
+            title.contains(needle) -> 2
+            haystack.contains(needle) -> 3
+            else -> return@mapNotNull null
+        }
+        score to chapter
+    }.sortedWith(compareBy<Pair<Int, ChapterEntity>> { it.first }.thenBy { it.second.chapterIndex })
+        .map { it.second }
 }
 
 @Composable

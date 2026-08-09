@@ -24,6 +24,8 @@ class VBookRawNetworkBroker(
     private val delegate: SourceNetworkBroker,
     private val maxCachedResponses: Int = 32,
     private val maxCachedBytes: Long = 32L * 1024L * 1024L,
+    private val clockMs: () -> Long = System::currentTimeMillis,
+    private val sleeper: (Long) -> Unit = Thread::sleep,
 ) : SourceNetworkBroker {
     private data class CacheKey(val sourceId: String, val key: String)
     private data class Cached(val response: SourceNetworkResponse, val bytes: Int)
@@ -32,6 +34,8 @@ class VBookRawNetworkBroker(
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<CacheKey, Cached>?): Boolean = size > maxCachedResponses
     }
     private var cachedBytes: Long = 0
+    private val delayLock = Any()
+    private val lastUpstreamStartMs = mutableMapOf<String, Long>()
 
     init {
         require(maxCachedResponses in 1..256)
@@ -45,6 +49,10 @@ class VBookRawNetworkBroker(
         val requestedTimeout = request.headers.controlHeader(INTERNAL_TIMEOUT_MS)
             ?.toLongOrNull()
             ?.coerceIn(100L, 120_000L)
+        val requestedDelay = request.headers.controlHeader(INTERNAL_DELAY_MS)
+            ?.toLongOrNull()
+            ?.coerceIn(0L, 120_000L)
+            ?: 0L
         val sanitizedHeaders = request.headers.filterKeys { key ->
             !key.startsWith(INTERNAL_PREFIX, ignoreCase = true)
         }
@@ -76,6 +84,7 @@ class VBookRawNetworkBroker(
             ))
         }
 
+        enforceInterRequestDelay(request.sourceId, requestedDelay)
         val delegatedRequest = request.copy(
             headers = sanitizedHeaders,
             timeoutMs = requestedTimeout ?: request.timeoutMs,
@@ -88,6 +97,19 @@ class VBookRawNetworkBroker(
         return SourcePlatformResult.Success(response.copy(
             headers = enrichHeaders(response.headers, response, key),
         ))
+    }
+
+    private fun enforceInterRequestDelay(sourceId: String, delayMs: Long) {
+        if (delayMs <= 0L) return
+        synchronized(delayLock) {
+            val now = clockMs()
+            val last = lastUpstreamStartMs[sourceId]
+            if (last != null) {
+                val waitMs = (last + delayMs - now).coerceAtLeast(0L)
+                if (waitMs > 0L) sleeper(waitMs)
+            }
+            lastUpstreamStartMs[sourceId] = clockMs()
+        }
     }
 
     @Synchronized
@@ -141,6 +163,7 @@ class VBookRawNetworkBroker(
         const val INTERNAL_OPERATION = "X-Nghe-VBook-Operation"
         const val INTERNAL_DECODE_CHARSET = "X-Nghe-VBook-Decode-Charset"
         const val INTERNAL_TIMEOUT_MS = "X-Nghe-VBook-Timeout-Ms"
+        const val INTERNAL_DELAY_MS = "X-Nghe-VBook-Delay-Ms"
         const val INTERNAL_RAW_SIZE = "X-Nghe-VBook-Raw-Size"
         const val INTERNAL_STATUS_TEXT = "X-Nghe-VBook-Status-Text"
         const val INTERNAL_RESPONSE_KEY = "X-Nghe-VBook-Response-Key"

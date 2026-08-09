@@ -54,12 +54,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.log10
 import kotlin.math.pow
+import java.util.UUID
 import vn.nghetruyen.app.NgheTruyenApplication
 import vn.nghetruyen.app.ai.vietphrase.VietPhraseDiagnosticExport
 import vn.nghetruyen.app.ai.vietphrase.VietPhraseDiagnosticExporter
@@ -199,6 +202,13 @@ fun ReaderScreen(
     var showMusicBulkResult by remember { mutableStateOf(false) }
     var musicBulkUpdates by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var musicBulkErrors by remember { mutableStateOf<List<String>>(emptyList()) }
+    var showMusicNormalizationProgress by remember { mutableStateOf(false) }
+    var musicNormalizationWorkIds by remember { mutableStateOf<List<UUID>>(emptyList()) }
+    var musicNormalizationDone by remember { mutableIntStateOf(0) }
+    var musicNormalizationFailed by remember { mutableIntStateOf(0) }
+    var musicNormalizationCancelled by remember { mutableIntStateOf(0) }
+    var musicNormalizationTarget by remember { mutableStateOf(-24f) }
+    var musicNormalizationRunToken by remember { mutableIntStateOf(0) }
     var showMusicClearAllConfirm by remember { mutableStateOf(false) }
     var musicPreviewPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
     var showExportDialog by remember { mutableStateOf(false) }
@@ -693,8 +703,35 @@ fun ReaderScreen(
                 ReaderIntSlider("Attack", musicAttackMs, 0, 2_000, step = 10, suffix = " ms") { musicAttackMs = it }
                 ReaderIntSlider("Release", musicReleaseMs, 0, 5_000, step = 10, suffix = " ms") { musicReleaseMs = it }
                 ReaderMenuButton("CHUẨN HÓA TOÀN BỘ KHO NHẠC") {
-                    state.sceneMusicTracks.forEach { SceneMusicAnalysisWorker.enqueue(context, it.id) }
-                    onMessage("Đã đưa toàn bộ kho nhạc vào hàng đợi chuẩn hóa.")
+                    val tracks = state.sceneMusicTracks
+                    if (tracks.isEmpty()) {
+                        onMessage("Kho nhạc đang trống.")
+                    } else {
+                        musicNormalizationTarget = musicTargetLufs
+                        musicNormalizationDone = 0
+                        musicNormalizationFailed = 0
+                        musicNormalizationCancelled = 0
+                        musicNormalizationRunToken += 1
+                        val runToken = musicNormalizationRunToken
+                        val workIds = tracks.map { track ->
+                            SceneMusicAnalysisWorker.enqueue(context, track.id, musicTargetLufs)
+                        }
+                        musicNormalizationWorkIds = workIds
+                        showMusicNormalizationProgress = true
+                        scope.launch {
+                            val workManager = WorkManager.getInstance(context.applicationContext)
+                            while (showMusicNormalizationProgress && runToken == musicNormalizationRunToken) {
+                                val infos = withContext(Dispatchers.IO) {
+                                    workIds.mapNotNull { id -> runCatching { workManager.getWorkInfoById(id).get() }.getOrNull() }
+                                }
+                                musicNormalizationDone = infos.count { it.state == WorkInfo.State.SUCCEEDED }
+                                musicNormalizationFailed = infos.count { it.state == WorkInfo.State.FAILED }
+                                musicNormalizationCancelled = infos.count { it.state == WorkInfo.State.CANCELLED }
+                                if (infos.size == workIds.size && infos.all { it.state.isFinished }) break
+                                delay(300)
+                            }
+                        }
+                    }
                 }
                 Text("${state.sceneMusicTracks.size} bài • ${state.sceneMusicTracks.count { it.enabled }} đang bật", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
                 ReaderMenuButton("QUẢN LÝ DANH SÁCH NHẠC") {
@@ -717,12 +754,56 @@ fun ReaderScreen(
                     settings.setBackgroundMusicDuckFactor(10.0.pow(-musicDuckDb / 20.0).toFloat())
                     settings.setBackgroundMusicAttackMillis(musicAttackMs)
                     settings.setBackgroundMusicReleaseMillis(musicReleaseMs)
-                    state.sceneMusicTracks.forEach { SceneMusicAnalysisWorker.enqueue(context, it.id) }
+                    state.sceneMusicTracks.forEach { SceneMusicAnalysisWorker.enqueue(context, it.id, musicTargetLufs) }
                     ReaderPlaybackService.command(context, ReaderPlaybackService.ACTION_REFRESH)
                     onMessage("Đã lưu cài đặt nhạc nền."); showMusicDialog = false
                 }
             }) { Text("LƯU CÀI ĐẶT") } },
             dismissButton = { TextButton(onClick = { showMusicDialog = false }) { Text("ĐÓNG") } },
+        )
+    }
+
+    if (showMusicNormalizationProgress) {
+        val total = musicNormalizationWorkIds.size
+        val finished = musicNormalizationDone + musicNormalizationFailed + musicNormalizationCancelled
+        val running = (total - finished).coerceAtLeast(0)
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("CHUẨN HÓA KHO NHẠC") },
+            text = {
+                Column {
+                    Text("Mục tiêu: %.0f LUFS".format(musicNormalizationTarget), fontWeight = FontWeight.SemiBold)
+                    Text("Hoàn tất: $finished / $total")
+                    Text("Thành công: $musicNormalizationDone")
+                    if (musicNormalizationFailed > 0) Text("Lỗi: $musicNormalizationFailed")
+                    if (musicNormalizationCancelled > 0) Text("Đã hủy: $musicNormalizationCancelled")
+                    if (running > 0) Text("Đang xử lý: $running")
+                    Text(
+                        "Các bài đã có loudness và peak chỉ được tính lại gain, không giải mã lại.",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+            },
+            confirmButton = {
+                if (finished >= total && total > 0) {
+                    TextButton(onClick = {
+                        showMusicNormalizationProgress = false
+                        musicNormalizationWorkIds = emptyList()
+                        onMessage("Chuẩn hóa xong: $musicNormalizationDone thành công, $musicNormalizationFailed lỗi.")
+                    }) { Text("ĐÓNG") }
+                }
+            },
+            dismissButton = {
+                if (finished < total) {
+                    TextButton(onClick = {
+                        musicNormalizationRunToken += 1
+                        musicNormalizationWorkIds.forEach { SceneMusicAnalysisWorker.cancel(context, it) }
+                        showMusicNormalizationProgress = false
+                        onMessage("Đã hủy hàng đợi chuẩn hóa nhạc.")
+                    }) { Text("HỦY") }
+                }
+            },
         )
     }
 

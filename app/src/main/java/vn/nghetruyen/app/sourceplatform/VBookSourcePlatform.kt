@@ -29,6 +29,7 @@ import vn.nghetruyen.source.vbook.VBookFeature
 import vn.nghetruyen.source.vbook.VBookHostManifestFactory
 import vn.nghetruyen.source.vbook.VBookManifestParser
 import vn.nghetruyen.source.vbook.VBookPackageReader
+import vn.nghetruyen.source.vbook.VBookProviderSession
 import vn.nghetruyen.source.vbook.VBookValidationFactory
 import java.io.File
 
@@ -212,6 +213,27 @@ class VBookSourcePlatform(
             }
             VBookStorySource(artifact, bytes, brokers, configStore)
         }.getOrNull()
+    }
+
+    /** All active vBook provider sessions, including non-StorySource content types. */
+    fun activeProviderSessions(contentType: VBookContentType? = null): List<VBookProviderSession> =
+        activeArtifacts().mapNotNull { artifact ->
+            val bytes = store.originalBytes(artifact.artifactId) ?: return@mapNotNull null
+            runCatching {
+                VBookProviderSession(
+                    artifactIdentity = artifact.identity.canonicalKey(),
+                    packageBytes = bytes,
+                    brokers = brokers,
+                    configReader = configStore,
+                )
+            }.getOrNull()?.takeIf { contentType == null || it.contentType == contentType }
+        }
+
+    fun activeComicProviders(): List<VBookProviderSession> = activeProviderSessions(VBookContentType.COMIC)
+    fun activeTtsProviders(): List<VBookProviderSession> = activeProviderSessions(VBookContentType.TTS)
+    fun activeTranslationProviders(): List<VBookProviderSession> = activeProviderSessions(VBookContentType.TRANSLATE)
+    fun activeMediaProviders(): List<VBookProviderSession> = activeProviderSessions().filter {
+        it.contentType in setOf(VBookContentType.VIDEO, VBookContentType.AUDIO)
     }
 
     fun config(repositoryId: String, remoteIdentity: String): VBookConfigSnapshot {

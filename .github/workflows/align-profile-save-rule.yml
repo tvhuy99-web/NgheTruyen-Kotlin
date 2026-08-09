@@ -1,0 +1,51 @@
+name: Align profile save rule
+
+on:
+  push:
+    branches:
+      - agent/settings-a11y-labels
+    paths:
+      - .github/workflows/align-profile-save-rule.yml
+
+permissions:
+  contents: write
+
+jobs:
+  align:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Match reference save validation
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('app/src/main/java/vn/nghetruyen/app/ui/components/GlobalVoiceRoleEditorDialog.kt')
+          s = p.read_text(encoding='utf-8')
+          old = 'enabled = draft.roleName.isNotBlank(),'
+          new = 'enabled = draft.roleName.isNotBlank() && draft.description.isNotBlank(),'
+          if s.count(old) != 1:
+              raise SystemExit(f'Expected one save condition, found {s.count(old)}')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+
+          gate = Path('scripts/check_ui_control_parity.py')
+          g = gate.read_text(encoding='utf-8')
+          anchor = '        \'Text("LƯU HỒ SƠ")\',\n'
+          marker = '        "enabled = draft.roleName.isNotBlank() && draft.description.isNotBlank()",\n'
+          if marker not in g:
+              if anchor not in g:
+                  raise SystemExit('Gate anchor not found')
+              g = g.replace(anchor, anchor + marker, 1)
+              gate.write_text(g, encoding='utf-8')
+          PY
+          git diff --check
+      - name: Commit source and gate
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/vn/nghetruyen/app/ui/components/GlobalVoiceRoleEditorDialog.kt scripts/check_ui_control_parity.py
+          git commit -m 'ui: match reference voice profile save validation'
+          git push origin HEAD:agent/settings-a11y-labels

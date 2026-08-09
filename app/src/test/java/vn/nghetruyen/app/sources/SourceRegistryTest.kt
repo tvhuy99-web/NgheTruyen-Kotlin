@@ -35,7 +35,7 @@ class SourceRegistryTest {
     @Test
     fun readyDegradedAndPendingSourcesAreReportedExplicitly() = runBlocking {
         val registry = SourceRegistry()
-        val demo = requireNotNull(registry.get("demo"))
+        val demo = requireNotNull(registry.get("vn.nghetruyen.sources.demo"))
         val demoResult = demo.search("gió")
         assertTrue(demoResult is AppResult.Success)
 

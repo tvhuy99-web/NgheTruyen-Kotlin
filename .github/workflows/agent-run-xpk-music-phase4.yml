@@ -26,6 +26,8 @@ jobs:
           java-version: '17'
       - name: Apply normalization flow patch
         run: python3 scripts/agent_apply_xpk_music_phase4.py
+      - name: Inspect patched Compose line
+        run: nl -ba app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt | sed -n '298,314p'
       - name: Run parity gates
         run: |
           python3 scripts/check_ui_control_parity.py

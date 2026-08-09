@@ -1,0 +1,22 @@
+name: Agent inspect phase4 compile line
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    if: github.event.pull_request.head.ref == 'agent/settings-a11y-labels'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/settings-a11y-labels
+      - name: Apply patch and print compile area
+        shell: bash
+        run: |
+          python3 scripts/agent_apply_xpk_music_phase4.py
+          nl -ba app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt | sed -n '296,314p'

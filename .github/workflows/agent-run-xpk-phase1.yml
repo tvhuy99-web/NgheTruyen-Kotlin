@@ -32,16 +32,8 @@ jobs:
           p = Path('scripts/agent_apply_xpk_phase1.py')
           s = p.read_text()
           replacements = [
-              (
-                  'display_start = s.index("    if (showDisplayDialog) {")',
-                  'display_start = s.index("    if (showDisplayDialog) {", mode_start)',
-                  'display patch anchor',
-              ),
-              (
-                  'music_start = s.index("    if (showMusicDialog) {")',
-                  'music_start = s.index("    if (showMusicDialog) {", sleep_start)',
-                  'music patch anchor',
-              ),
+              ('display_start = s.index("    if (showDisplayDialog) {")', 'display_start = s.index("    if (showDisplayDialog) {", mode_start)', 'display patch anchor'),
+              ('music_start = s.index("    if (showMusicDialog) {")', 'music_start = s.index("    if (showMusicDialog) {", sleep_start)', 'music patch anchor'),
           ]
           for old, new, label in replacements:
               if old not in s:
@@ -104,8 +96,13 @@ jobs:
           if missing: raise SystemExit("REFERENCE_WORKFLOW missing Reader markers: " + repr(missing))
           for obsolete in ['title = { Text("AI & CHUYỂN NGỮ") }', 'title = { Text("KHÁC") }', "musicAdvanced"]:
               if obsolete in reader: raise SystemExit("REFERENCE_WORKFLOW obsolete Reader navigation: " + obsolete)
-          legacy = vm[vm.find("private fun openStoryAdvancedOptions"):][:1200]
-          if "destination = Destination.Story" in legacy: raise SystemExit("REFERENCE_WORKFLOW story settings still force destination change")
+          start = vm.find("private fun openStoryAdvancedOptions")
+          if start < 0: raise SystemExit("REFERENCE_WORKFLOW openStoryAdvancedOptions missing")
+          end = vm.find("\n    fun ", start + 1)
+          if end < 0: end = vm.find("\n    private fun ", start + 1)
+          if end < 0: end = len(vm)
+          target_function = vm[start:end]
+          if "destination = Destination.Story" in target_function: raise SystemExit("REFERENCE_WORKFLOW story settings still force destination change")
           for marker in ["ĐỌC TIẾP", "XÓA KHỎI ĐANG ĐỌC", "MỞ TRUYỆN", "BỎ ĐÁNH DẤU", "BỎ THEO DÕI"]:
               if marker not in library: raise SystemExit("REFERENCE_WORKFLOW missing Library action: " + marker)
           for marker in ["backgroundMusicAttackMillis: Int = 1850", "backgroundMusicReleaseMillis: Int = 2050", "sceneMusicTargetLufs: Float = -24.0f", "SceneMusicPlaybackMode.SEQUENTIAL"]:

@@ -98,6 +98,7 @@ object VBookEngineFeatureMatrix {
         VBookFeature.BROWSER_WAIT_URL,
         VBookFeature.BROWSER_REQUEST_METADATA,
         VBookFeature.GRAPHICS,
+        VBookFeature.QUICK_TRANSLATOR,
         VBookFeature.CRYPTO,
         VBookFeature.SCRIPT_EXECUTE,
     )
@@ -106,7 +107,6 @@ object VBookEngineFeatureMatrix {
         VBookFeature.WEBSOCKET,
         VBookFeature.WEBSOCKET_HEADERS,
         VBookFeature.WEBSOCKET_FRAMES,
-        VBookFeature.QUICK_TRANSLATOR,
         VBookFeature.QUICK_TRANSLATOR_OPTIONS,
         VBookFeature.QUICK_TRANSLATOR_SEGMENTS,
     )
@@ -169,20 +169,20 @@ object VBookEngineFeatureMatrix {
             "Compatibility wrapper translates vBook loadHtml(html, baseUrl) into the legacy internal host argument order."
         VBookFeature.BROWSER_WAIT_URL ->
             "Compatibility wrapper waits against captured network-request URLs rather than the current page URL."
+        VBookFeature.QUICK_TRANSLATOR ->
+            "Base Qt.translate(text,'vp'|'hv') is routed to a dedicated offline Quick Translator broker rather than the generic AI/translate-extension path."
         else -> "Implementation exists; certification remains a separate differential-test state."
     }
 
     private fun partialNote(feature: VBookFeature): String = when (feature) {
         VBookFeature.WEBSOCKET ->
-            "Network broker now preserves text/binary frames, but the JavaScript host object still needs exact constructor-header and frame-object wiring."
+            "Network broker preserves text/binary frames, but the JavaScript host still needs exact stateful-session/frame-object semantics."
         VBookFeature.WEBSOCKET_HEADERS ->
             "SourceWebSocketBroker accepts headers, but the current JavaScript WebSocket constructor does not yet forward its second argument."
         VBookFeature.WEBSOCKET_FRAMES ->
             "Transport frames are preserved, but JS message() still exposes the older string-only shape instead of {type,data}."
-        VBookFeature.QUICK_TRANSLATOR ->
-            "Qt.translate currently routes through the generic translation broker; a dedicated vp/hv compatibility adapter is still required for reference semantics."
         VBookFeature.QUICK_TRANSLATOR_OPTIONS ->
-            "Quick Translator extras are not yet carried end-to-end with their vBook meanings."
+            "Base vp/hv translation is offline, but vBook extras such as NER, person_name and traditional-to-simplified are not yet fully reference-compatible."
         VBookFeature.QUICK_TRANSLATOR_SEGMENTS ->
             "The source API can represent offset segments, but the JS Qt bridge does not yet expose the reference object-array shape."
         else -> "Compatibility behavior is incomplete."

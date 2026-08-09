@@ -288,8 +288,9 @@ def main() -> int:
         "app/src/main/java/vn/nghetruyen/app/data/local/AppDatabase.kt",
         'tableName = "reading_history"',
         "interface ReadingHistoryDao",
-        "version = 22",
+        "version = 23",
         "MIGRATION_21_22",
+        "MIGRATION_22_23",
         "abstract fun readingHistoryDao()",
         "suspend fun update(item: VietPhraseEntity): Int",
     )

@@ -42,6 +42,7 @@ enum class VBookFeature {
     LOCAL_STORAGE,
     CACHE_STORAGE,
     LOCAL_COOKIE,
+    LOCAL_COOKIE_CLEARTEXT,
     BROWSER,
     BROWSER_LOAD_HTML,
     BROWSER_WAIT_URL,
@@ -162,7 +163,12 @@ object VBookCorpusAnalyzer {
         }
         add(contentFeature, value = manifest.metadata.rawType.orEmpty())
         if (manifest.metadata.encrypt) add(VBookFeature.METADATA_ENCRYPT, value = "metadata.encrypt=true")
-        if (manifest.metadata.source.startsWith("http://", ignoreCase = true)) add(VBookFeature.LEGACY_HTTP_SOURCE, value = manifest.metadata.source)
+        if (manifest.metadata.source.startsWith("http://", ignoreCase = true)) {
+            add(VBookFeature.LEGACY_HTTP_SOURCE, value = manifest.metadata.source)
+        }
+        manifest.config.values.firstOrNull { it.defaultValue.startsWith("http://", ignoreCase = true) }?.let {
+            add(VBookFeature.LEGACY_HTTP_SOURCE, value = "config:${it.key}=${it.defaultValue}")
+        }
         if (manifest.config.values.any(VBookConfigField::legacyPrimitive)) add(VBookFeature.CONFIG_LEGACY_PRIMITIVE, value = "primitive config")
         if (manifest.config.values.any { !it.legacyPrimitive }) add(VBookFeature.CONFIG_DESCRIPTOR, value = "descriptor config")
         if (manifest.config.keys.any { it in VBookConfigValues.BUILT_IN_KEYS }) {
@@ -174,6 +180,7 @@ object VBookCorpusAnalyzer {
             fun hit(feature: VBookFeature, regex: Regex, label: String = regex.pattern) {
                 regex.find(code)?.let { match -> add(feature, path, match.value.take(160).ifBlank { label }) }
             }
+            if (code.contains("http://", ignoreCase = true)) add(VBookFeature.LEGACY_HTTP_SOURCE, path, "http:// literal")
             hit(VBookFeature.RESPONSE_HELPER, Regex("\\bResponse\\.(?:success|error)\\s*\\("))
             hit(VBookFeature.RESPONSE_LEGACY_CODE, Regex("\\bcode\\s*[:=]\\s*(?:200|403)\\b"))
             hit(VBookFeature.FETCH, Regex("\\bfetch\\s*\\("))
@@ -234,6 +241,11 @@ object VBookCorpusAnalyzer {
                     }
                 }
             }
+        }
+
+        val featuresBeforeComposite = evidence.mapTo(linkedSetOf(), VBookFeatureEvidence::feature)
+        if (VBookFeature.LEGACY_HTTP_SOURCE in featuresBeforeComposite && VBookFeature.LOCAL_COOKIE in featuresBeforeComposite) {
+            add(VBookFeature.LOCAL_COOKIE_CLEARTEXT, value = "legacy cleartext source uses localCookie")
         }
 
         val packagePaths = scripts.keys.mapTo(linkedSetOf()) { VBookPaths.normalizeScriptPath(it) }

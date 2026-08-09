@@ -109,6 +109,7 @@ object VBookEngineFeatureMatrix {
     )
 
     private val partial = setOf(
+        VBookFeature.LOCAL_COOKIE_CLEARTEXT,
         VBookFeature.WEBSOCKET,
         VBookFeature.QUICK_TRANSLATOR_OPTIONS,
         VBookFeature.QUICK_TRANSLATOR_SEGMENTS,
@@ -190,6 +191,8 @@ object VBookEngineFeatureMatrix {
     }
 
     private fun partialNote(feature: VBookFeature): String = when (feature) {
+        VBookFeature.LOCAL_COOKIE_CLEARTEXT ->
+            "Cleartext network access is sandboxed per extension, but localCookie.setCookie still enforces HTTPS. The corpus scanner exposes this exact combination so it blocks parity only when an extension actually requires it."
         VBookFeature.WEBSOCKET ->
             "Headers and frame objects are wired, but the broker still performs bounded exchange calls rather than one persistent socket session across arbitrary repeated receives; full stateful parity remains unclaimed."
         VBookFeature.QUICK_TRANSLATOR_OPTIONS ->

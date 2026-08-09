@@ -12,17 +12,20 @@ object VBookNetworkPolicy {
         base: SourceManifest,
         plugin: VBookExtensionManifest,
         resources: SourceResourceProvider,
+        configValues: VBookConfigValues = VBookConfigValues.resolve(plugin),
         additionalScriptPaths: Set<String> = emptySet(),
     ): SourceManifest {
         val existing = base.capabilities.network
         val detectedCleartext = requiresLegacyCleartext(plugin, resources, additionalScriptPaths)
+        val connection = configValues.connectionSettings()
         val network = (existing ?: SourceNetworkCapability(
             methods = allMethods,
             maxResponseBytes = 16 * 1024 * 1024,
             maxRequestBytes = 4 * 1024 * 1024,
             requestsPerMinute = 600,
-            maxConcurrent = 8,
+            maxConcurrent = connection.threadNum,
         )).copy(
+            maxConcurrent = connection.threadNum,
             publicInternet = true,
             allowCleartext = existing?.allowCleartext == true || detectedCleartext,
         )

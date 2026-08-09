@@ -34,7 +34,22 @@ class FileSourceArtifactStoreTest {
 
         val reopened = FileSourceArtifactStore(root)
         assertEquals("v1", reopened.active(identity)?.artifactId)
+        assertEquals(listOf("v1"), reopened.activeArtifacts(SourceEcosystem.VBOOK).map { it.artifactId })
         assertArrayEquals(v1Bytes, reopened.originalBytes("v1"))
+
+        val secondIdentity = SourceArtifactIdentity(SourceEcosystem.VBOOK, "community", "other/path")
+        val otherBytes = "package-other".toByteArray()
+        val other = SourceArtifactLifecycle.candidate(
+            artifactId = "other-v1",
+            identity = secondIdentity,
+            version = "1",
+            bytes = otherBytes,
+            profile = profile,
+            trust = SourceTrustState.REPOSITORY_TRUSTED,
+            installedAtEpochMs = 15,
+        )
+        reopened.stage(other, otherBytes)
+        SourceArtifactActivator(reopened).activate(other, 16)
 
         val v2Bytes = "package-v2".toByteArray()
         val v2 = SourceArtifactLifecycle.candidate(
@@ -52,6 +67,8 @@ class FileSourceArtifactStoreTest {
         val reopenedAgain = FileSourceArtifactStore(root)
         assertEquals("v2", reopenedAgain.active(identity)?.artifactId)
         assertEquals("v1", reopenedAgain.previousKnownGood(identity)?.artifactId)
+        assertEquals(setOf("v2", "other-v1"), reopenedAgain.activeArtifacts(SourceEcosystem.VBOOK).map { it.artifactId }.toSet())
+        assertTrue(reopenedAgain.activeArtifacts(SourceEcosystem.NATIVE).isEmpty())
 
         val restored = SourceArtifactActivator(reopenedAgain).rollback(identity, 30)
         assertEquals("v1", restored.artifactId)
@@ -59,6 +76,7 @@ class FileSourceArtifactStoreTest {
         val afterRollback = FileSourceArtifactStore(root)
         assertEquals("v1", afterRollback.active(identity)?.artifactId)
         assertNull(afterRollback.previousKnownGood(identity))
+        assertEquals(setOf("v1", "other-v1"), afterRollback.activeArtifacts(SourceEcosystem.VBOOK).map { it.artifactId }.toSet())
         assertArrayEquals(v2Bytes, afterRollback.originalBytes("v2"))
     }
 

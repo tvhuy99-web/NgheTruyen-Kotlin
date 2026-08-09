@@ -386,7 +386,7 @@ def main() -> None:
         "BÌNH LUẬN",
         "TẢI LẠI",
         "state.storyComments",
-        "THIẾT LẬP AI CHO TRUYỆN NÀY",
+        "AI RIÊNG CHO TRUYỆN",
         "PHÂN VAI TTS CHO TRUYỆN NÀY",
         "BỘ GIỌNG RIÊNG CỦA TRUYỆN",
     )

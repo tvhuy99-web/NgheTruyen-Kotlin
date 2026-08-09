@@ -21,11 +21,9 @@ data class VBookCandidateValidation(
     val profile: SourceCompatibilityProfile?,
     val failures: List<SourceFailure>,
     val warnings: List<String>,
-    /** Engine features used by this package that are known incomplete in the current host. */
     val blockingFeatures: Set<VBookFeature> = emptySet(),
 ) {
-    val activatable: Boolean get() =
-        failures.isEmpty() && blockingFeatures.isEmpty() && state == SourceCompatibilityState.SUPPORTED
+    val activatable: Boolean get() = failures.isEmpty() && blockingFeatures.isEmpty() && state == SourceCompatibilityState.SUPPORTED
 }
 
 fun interface VBookCompileProbe {
@@ -112,6 +110,20 @@ class VBookCandidateValidator(
                 )
             }
         }
+
+        VBookLoadGraphValidator.validate(normalizedScripts, parsed.detection.profile).forEach { issue ->
+            val code = when (issue.code) {
+                VBookLoadIssueCode.MISSING_TARGET -> SourceFailureCode.VBOOK_SCRIPT_MISSING
+                VBookLoadIssueCode.NON_LITERAL, VBookLoadIssueCode.RECURSIVE -> SourceFailureCode.VBOOK_HOST_API_UNSUPPORTED
+            }
+            failures += SourceFailure(
+                code = code,
+                message = "VBOOK_LOAD_${issue.code.name}:${issue.scriptPath}${issue.target?.let { ":$it" }.orEmpty()}",
+                sourceId = candidate.artifactId,
+                action = issue.scriptPath,
+            )
+        }
+
         val forbidden = parsed.features.filter { feature -> feature.name.startsWith("JS_FORBIDDEN_") }
         if (forbidden.isNotEmpty()) {
             failures += SourceFailure(
@@ -120,27 +132,27 @@ class VBookCandidateValidator(
                 sourceId = candidate.artifactId,
             )
         }
-
-        val blockingFeatures = parsed.features.filterTo(linkedSetOf()) { feature ->
-            if (feature == VBookFeature.METADATA_ENCRYPT) return@filterTo false
-            VBookEngineFeatureMatrix.support(feature).implementation in setOf(
-                VBookFeatureImplementationLevel.PARTIAL,
-                VBookFeatureImplementationLevel.PACKAGE_LAYER_PENDING,
-            )
-        }
-        if (blockingFeatures.isNotEmpty()) {
-            warnings += "VBOOK_ENGINE_FEATURE_PARTIAL:${blockingFeatures.sortedBy(Enum<*>::name).joinToString { it.name }}"
-        }
         if (parsed.manifest.metadata.encrypt) {
-            // The flag is common on readable official packages and is not itself proof that the ZIP bytes
-            // are encrypted. Package decoding must be decided from the actual archive format, not this flag.
-            warnings += "VBOOK_ENCRYPT_METADATA_PRESENT_PACKAGE_DECODER_UNCERTIFIED"
+            // The flag alone does not prove this ZIP is encrypted. If scripts are readable/compilable,
+            // activation is allowed; only proprietary encrypted-distribution decoding remains unclaimed.
+            warnings += "VBOOK_ENCRYPTED_DISTRIBUTION_REQUIRES_PACKAGE_DECODER_PROOF"
         }
         if (VBookFeature.LEGACY_HTTP_SOURCE in parsed.features) {
-            warnings += "VBOOK_LEGACY_HTTP_SCOPED_TO_VBOOK_SANDBOX"
+            warnings += "VBOOK_LEGACY_HTTP_REQUIRES_EXPLICIT_CLEARTEXT_POLICY"
         }
         if (parsed.unknownScriptRoles.isNotEmpty()) {
             warnings += "VBOOK_UNKNOWN_SCRIPT_ROLES:${parsed.unknownScriptRoles.sorted().joinToString()}"
+        }
+
+        val blockingFeatures = parsed.features.filterTo(linkedSetOf()) { feature ->
+            feature != VBookFeature.METADATA_ENCRYPT &&
+                VBookEngineFeatureMatrix.support(feature).implementation in setOf(
+                    VBookFeatureImplementationLevel.PARTIAL,
+                    VBookFeatureImplementationLevel.PACKAGE_LAYER_PENDING,
+                )
+        }
+        if (blockingFeatures.isNotEmpty()) {
+            warnings += "VBOOK_PARTIAL_FEATURES:${blockingFeatures.sortedBy(Enum<*>::name).joinToString { it.name }}"
         }
 
         val profile = parsed.detection.profile.takeUnless { it == VBookContractProfile.UNKNOWN }?.let {

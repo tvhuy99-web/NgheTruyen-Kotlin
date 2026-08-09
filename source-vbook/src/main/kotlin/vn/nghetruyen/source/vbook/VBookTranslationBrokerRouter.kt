@@ -17,6 +17,7 @@ class VBookTranslationBrokerRouter(
         manifest: SourceManifest,
         request: SourceTranslationRequest,
     ): SourcePlatformResult<SourceTranslationResponse> {
+        VBookSafeRhinoBoundary.installCurrentContext()
         val target = request.targetLanguage.trim().lowercase()
         val markedQuickRequest = request.instruction.startsWith(QUICK_TRANSLATOR_PREFIX)
         if (!markedQuickRequest && target !in QUICK_TARGETS) {

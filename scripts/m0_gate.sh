@@ -40,6 +40,7 @@ STATIC_GATES=(
   scripts/check_milestone3_ui_static.py
   scripts/check_milestone3_download_static.py
   scripts/check_milestone3_kindle.py
+  scripts/check_ui_control_parity.py
 )
 for gate in "${STATIC_GATES[@]}"; do
   printf 'RUN_STATIC_GATE=%s\n' "$gate"

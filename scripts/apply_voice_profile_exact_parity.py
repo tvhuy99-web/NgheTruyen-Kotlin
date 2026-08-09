@@ -16,8 +16,5 @@ old = '''
 '''
 if old not in text:
     raise SystemExit("Expected extra Sonic slider block not found")
-text = text.replace(old, "\n", 1)
-path.write_text(text, encoding="utf-8")
-
-check = Path("scripts/check_ui_control_parity.py")
-gate = check.read_text(encoding="utf-8")n
+path.write_text(text.replace(old, "\n", 1), encoding="utf-8")
+print("VOICE_PROFILE_EXACT_PARITY_APPLIED")

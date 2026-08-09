@@ -29,10 +29,18 @@ data class VBookDynamicAction(
     val input: String,
     val scriptPath: String,
     val data: String = "",
+    /** Explore actions may explicitly declare `data`, including an empty string, as args[1]. */
+    val hasDataArgument: Boolean = false,
     val type: String? = null,
 ) {
-    fun invocation(continuation: VBookContinuation = VBookContinuation()): VBookScriptInvocation =
-        VBookScriptInvocation(scriptPath, listOf(input, continuation.token))
+    fun invocation(continuation: VBookContinuation = VBookContinuation()): VBookScriptInvocation {
+        val args = when {
+            continuation.hasNext() -> listOf(input, continuation.token)
+            hasDataArgument -> listOf(input, data)
+            else -> listOf(input)
+        }
+        return VBookScriptInvocation(scriptPath, args)
+    }
 }
 
 object VBookDynamicActionParser {
@@ -44,6 +52,7 @@ object VBookDynamicActionParser {
             input = obj.string("input").orEmpty(),
             scriptPath = VBookPaths.normalizeScriptPath(rawScript),
             data = obj.string("data").orEmpty(),
+            hasDataArgument = "data" in obj.values,
             type = obj.string("type"),
         )
     }
@@ -93,21 +102,54 @@ object VBookInvocationPlanner {
     fun legacy(scriptPath: String, args: List<String>): VBookScriptInvocation = VBookScriptInvocation(scriptPath, args)
 }
 
+data class VBookConnectionSettings(
+    val threadNum: Int = DEFAULT_THREAD_NUM,
+    val timeoutMs: Long = DEFAULT_TIMEOUT_MS,
+    val delayMs: Long = DEFAULT_DELAY_MS,
+) {
+    companion object {
+        const val DEFAULT_THREAD_NUM = 3
+        const val DEFAULT_TIMEOUT_MS = 30_000L
+        const val DEFAULT_DELAY_MS = 0L
+    }
+}
+
 data class VBookConfigValues(
     val values: Map<String, String>,
 ) {
     operator fun get(key: String): String? = values[key]
 
+    fun connectionSettings(): VBookConnectionSettings = VBookConnectionSettings(
+        threadNum = values[THREAD_NUM]?.toIntOrNull()?.coerceIn(1, 8)
+            ?: VBookConnectionSettings.DEFAULT_THREAD_NUM,
+        timeoutMs = values[TIMEOUT]?.toLongOrNull()?.coerceIn(100L, 120_000L)
+            ?: VBookConnectionSettings.DEFAULT_TIMEOUT_MS,
+        delayMs = values[DELAY]?.toLongOrNull()?.coerceIn(0L, 120_000L)
+            ?: VBookConnectionSettings.DEFAULT_DELAY_MS,
+    )
+
     companion object {
+        const val THREAD_NUM = "thread_num"
+        const val TIMEOUT = "timeout"
+        const val DELAY = "delay"
+        const val IGNORE = "ignore"
+        val BUILT_IN_KEYS = setOf(THREAD_NUM, TIMEOUT, DELAY, IGNORE)
+
         fun resolve(
             manifest: VBookExtensionManifest,
             persisted: Map<String, String> = emptyMap(),
             runtimeOverrides: Map<String, String> = emptyMap(),
         ): VBookConfigValues {
-            val output = linkedMapOf<String, String>()
+            val output = linkedMapOf(
+                THREAD_NUM to VBookConnectionSettings.DEFAULT_THREAD_NUM.toString(),
+                TIMEOUT to VBookConnectionSettings.DEFAULT_TIMEOUT_MS.toString(),
+                DELAY to VBookConnectionSettings.DEFAULT_DELAY_MS.toString(),
+                IGNORE to "false",
+            )
             manifest.config.forEach { (key, spec) -> output[key] = spec.defaultValue }
-            persisted.forEach { (key, value) -> if (key in manifest.config) output[key] = value }
-            runtimeOverrides.forEach { (key, value) -> if (key in manifest.config) output[key] = value }
+            val allowedKeys = manifest.config.keys + BUILT_IN_KEYS
+            persisted.forEach { (key, value) -> if (key in allowedKeys) output[key] = value }
+            runtimeOverrides.forEach { (key, value) -> if (key in allowedKeys) output[key] = value }
             return VBookConfigValues(output)
         }
     }
@@ -115,7 +157,7 @@ data class VBookConfigValues(
 
 object VBookConfigPrelude {
     private val identifier = Regex("^[A-Za-z_$][A-Za-z0-9_$]{0,127}$")
-    private val reserved = setOf("thread_num", "timeout", "delay", "ignore")
+    private val reserved = VBookConfigValues.BUILT_IN_KEYS
 
     fun build(profile: VBookContractProfile, config: VBookConfigValues): String {
         if (profile != VBookContractProfile.CURRENT_JS) return ""

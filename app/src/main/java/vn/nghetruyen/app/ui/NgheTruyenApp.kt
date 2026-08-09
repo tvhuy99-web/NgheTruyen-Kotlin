@@ -49,10 +49,7 @@ fun NgheTruyenApp(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    BackHandler(enabled = state.destination != Destination.Root) {
-        viewModel.back()
-    }
-
+    BackHandler(enabled = state.destination != Destination.Root) { viewModel.back() }
     LaunchedEffect(state.message) {
         val message = state.message ?: return@LaunchedEffect
         snackbarHostState.showSnackbar(message)
@@ -61,18 +58,10 @@ fun NgheTruyenApp(
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
-        bottomBar = {
-            if (state.destination == Destination.Root) {
-                PrimaryBottomBar(selected = state.rootTab, onSelect = viewModel::setRootTab)
-            }
-        },
+        bottomBar = { if (state.destination == Destination.Root) PrimaryBottomBar(selected = state.rootTab, onSelect = viewModel::setRootTab) },
         containerColor = ReferenceScreenBackground,
     ) { padding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
-        ) {
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             when (state.destination) {
                 Destination.Root -> when (state.rootTab) {
                     RootTab.EXPLORE -> ExploreScreen(
@@ -96,7 +85,8 @@ fun NgheTruyenApp(
                         state = state,
                         onSectionSelected = viewModel::setLibrarySection,
                         onImportFile = onImportFile,
-                        onStoryClick = viewModel::openLibraryStory,
+                        onStoryClick = viewModel::openDownloadedStoryFromLibrary,
+                        onUpdateDownloadedStory = viewModel::updateDownloadedStoryFromLibrary,
                         onRemoveFromReading = viewModel::removeFromReading,
                         onPauseDownload = viewModel::pauseDownload,
                         onResumeDownload = viewModel::resumeDownload,
@@ -333,30 +323,10 @@ fun NgheTruyenApp(
 }
 
 @Composable
-private fun PrimaryBottomBar(
-    selected: RootTab,
-    onSelect: (RootTab) -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(ReferenceDivider)
-            .padding(2.dp),
-    ) {
-        listOf(
-            RootTab.EXPLORE to "KHÁM PHÁ",
-            RootTab.LIBRARY to "TỦ TRUYỆN",
-            RootTab.PERSONAL to "CÁ NHÂN",
-        ).forEach { (tab, label) ->
-            ReferenceTabButton(
-                text = label,
-                selected = selected == tab,
-                onClick = { onSelect(tab) },
-                accessibilityLabel = "Tab ${label.lowercase()}",
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(1.dp),
-            )
+private fun PrimaryBottomBar(selected: RootTab, onSelect: (RootTab) -> Unit) {
+    Row(modifier = Modifier.fillMaxWidth().background(ReferenceDivider).padding(2.dp)) {
+        listOf(RootTab.EXPLORE to "KHÁM PHÁ", RootTab.LIBRARY to "TỦ TRUYỆN", RootTab.PERSONAL to "CÁ NHÂN").forEach { (tab, label) ->
+            ReferenceTabButton(text = label, selected = selected == tab, onClick = { onSelect(tab) }, accessibilityLabel = "Tab ${label.lowercase()}", modifier = Modifier.weight(1f).padding(1.dp))
         }
     }
 }

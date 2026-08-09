@@ -5,6 +5,7 @@ import com.nghetruyen.source.platform.SourceCompatibilityState
 import com.nghetruyen.source.platform.SourceEcosystem
 import com.nghetruyen.source.platform.SourceFailure
 import com.nghetruyen.source.platform.SourceFailureCode
+import com.nghetruyen.source.sandbox.JsSyntaxValidator
 
 data class VBookCandidate(
     val artifactId: String,
@@ -28,12 +29,21 @@ fun interface VBookCompileProbe {
     fun validate(scriptPath: String, source: String): String?
 
     companion object {
+        val RHINO = VBookCompileProbe { path, source ->
+            JsSyntaxValidator.validate(source, path).takeUnless { it.valid }?.let { result ->
+                buildString {
+                    append(result.message ?: "syntax error")
+                    result.line?.let { append(" at ").append(it) }
+                    result.column?.let { append(':').append(it) }
+                }
+            }
+        }
         val NONE = VBookCompileProbe { _, _ -> null }
     }
 }
 
 class VBookCandidateValidator(
-    private val compileProbe: VBookCompileProbe = VBookCompileProbe.NONE,
+    private val compileProbe: VBookCompileProbe = VBookCompileProbe.RHINO,
 ) {
     fun validate(candidate: VBookCandidate): VBookCandidateValidation {
         val parsed = runCatching {

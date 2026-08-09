@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Fetch the vBook repository corpus without executing extension code.
+"""Fetch the full vBook repository corpus without executing extension code.
 
-This is a developer/CI acquisition tool. Runtime compatibility decisions remain in
-source-vbook's Kotlin analyzers. The downloader only preserves provenance and safely
-extracts plugin.json + JavaScript files for corpus tests.
+The downloader preserves repository/catalog provenance and the original plugin.zip bytes, then
+extracts only plugin.json + src/*.js into a separate analysis tree. Completeness is strict by
+default so a missing catalog/package cannot silently turn into a green compatibility report.
+Use --allow-errors only when intentionally classifying upstream availability separately.
 """
 
 from __future__ import annotations
@@ -12,7 +13,6 @@ import argparse
 import hashlib
 import io
 import json
-import os
 import pathlib
 import sys
 import time
@@ -21,7 +21,7 @@ import urllib.request
 import zipfile
 
 DEFAULT_INDEX = "https://raw.githubusercontent.com/Darkrai9x/vbook-extensions/master/repository.json"
-USER_AGENT = "NgheTruyen-VBook-Corpus/1"
+USER_AGENT = "NgheTruyen-VBook-Corpus/2"
 MAX_INDEX_BYTES = 2 * 1024 * 1024
 MAX_CATALOG_BYTES = 16 * 1024 * 1024
 MAX_ZIP_BYTES = 16 * 1024 * 1024
@@ -55,7 +55,7 @@ def fetch(url: str, limit: int, attempts: int = 2) -> bytes:
                 if len(data) > limit:
                     raise RuntimeError(f"RESPONSE_TOO_LARGE:{len(data)}>{limit}")
                 return data
-        except Exception as exc:  # acquisition diagnostics are intentionally preserved
+        except Exception as exc:
             last = exc
             if attempt + 1 < attempts:
                 time.sleep(0.4 * (attempt + 1))
@@ -122,6 +122,13 @@ def write_bytes(path: pathlib.Path, data: bytes) -> None:
     path.write_bytes(data)
 
 
+def package_identity(catalog_url: str, package_url: str) -> str:
+    """Stable within one repository/catalog path; never depends on source website host/name."""
+    parsed = urllib.parse.urlparse(package_url)
+    remote = parsed.path or package_url
+    return hashlib.sha256((catalog_url.strip() + "\n" + remote.strip()).encode("utf-8")).hexdigest()
+
+
 def run(index_url: str, output_dir: pathlib.Path, limit_packages: int | None) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     index_bytes = fetch(index_url, MAX_INDEX_BYTES)
@@ -129,13 +136,17 @@ def run(index_url: str, output_dir: pathlib.Path, limit_packages: int | None) ->
     if not isinstance(index, list):
         raise RuntimeError("REPOSITORY_INDEX_ARRAY_REQUIRED")
 
+    valid_descriptors = [row for row in index if isinstance(row, dict) and row.get("link")]
     report = {
-        "schema": 1,
+        "schema": 2,
         "indexUrl": index_url,
         "indexSha256": sha256(index_bytes),
+        "indexDescriptorCount": len(valid_descriptors),
         "catalogs": [],
         "packages": [],
     }
+    write_bytes(output_dir / "repository.json", index_bytes)
+
     package_count = 0
     for repo_pos, descriptor in enumerate(index):
         if not isinstance(descriptor, dict) or not descriptor.get("link"):
@@ -167,7 +178,7 @@ def run(index_url: str, output_dir: pathlib.Path, limit_packages: int | None) ->
             if not isinstance(item, dict) or not item.get("path"):
                 continue
             package_url = str(item["path"])
-            identity = hashlib.sha256((catalog_url.strip() + "\n" + package_url.strip()).encode("utf-8")).hexdigest()
+            identity = package_identity(catalog_url, package_url)
             row = {
                 "catalogUrl": catalog_url,
                 "catalogIndex": repo_pos,
@@ -183,13 +194,17 @@ def run(index_url: str, output_dir: pathlib.Path, limit_packages: int | None) ->
             package_count += 1
             try:
                 zip_bytes = fetch(package_url, MAX_ZIP_BYTES)
+                zip_hash = sha256(zip_bytes)
                 files = extract_source_zip(zip_bytes)
                 package_dir = output_dir / "packages" / identity
+                write_bytes(output_dir / "archives" / identity / "plugin.zip", zip_bytes)
                 for name, data_bytes in files.items():
                     write_bytes(package_dir / name, data_bytes)
                 row.update({
                     "status": "OK",
-                    "zipSha256": sha256(zip_bytes),
+                    "zipSha256": zip_hash,
+                    "archivePath": f"archives/{identity}/plugin.zip",
+                    "sourcePath": f"packages/{identity}",
                     "fileCount": len(files),
                     "pluginSha256": sha256(files["plugin.json"]),
                 })
@@ -199,12 +214,18 @@ def run(index_url: str, output_dir: pathlib.Path, limit_packages: int | None) ->
         if limit_packages is not None and package_count >= limit_packages:
             break
 
+    catalog_error = sum(1 for row in report["catalogs"] if row["status"] != "OK")
+    package_error = sum(1 for row in report["packages"] if row["status"] != "OK")
+    truncated = limit_packages is not None and package_count >= limit_packages
     report["summary"] = {
         "repositoryCount": len(report["catalogs"]),
         "catalogOk": sum(1 for row in report["catalogs"] if row["status"] == "OK"),
+        "catalogError": catalog_error,
         "packageAttempted": len(report["packages"]),
         "packageOk": sum(1 for row in report["packages"] if row["status"] == "OK"),
-        "packageError": sum(1 for row in report["packages"] if row["status"] != "OK"),
+        "packageError": package_error,
+        "truncated": truncated,
+        "complete": catalog_error == 0 and package_error == 0 and not truncated and len(report["catalogs"]) == len(valid_descriptors),
     }
     (output_dir / "corpus-index.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     return report
@@ -215,6 +236,7 @@ def main() -> int:
     parser.add_argument("--index", default=DEFAULT_INDEX)
     parser.add_argument("--out", default="build/vbook-corpus")
     parser.add_argument("--limit-packages", type=int, default=None)
+    parser.add_argument("--allow-errors", action="store_true", help="Record incomplete/upstream failures but do not fail acquisition")
     args = parser.parse_args()
     if args.limit_packages is not None and args.limit_packages < 1:
         parser.error("--limit-packages must be >= 1")
@@ -224,7 +246,9 @@ def main() -> int:
         print(f"VBOOK_CORPUS_FATAL:{exc}", file=sys.stderr)
         return 2
     print(json.dumps(report["summary"], ensure_ascii=False, sort_keys=True))
-    return 0 if report["summary"]["catalogOk"] else 1
+    if args.allow_errors:
+        return 0 if report["summary"]["catalogOk"] else 1
+    return 0 if report["summary"]["complete"] else 3
 
 
 if __name__ == "__main__":

@@ -38,70 +38,64 @@ jobs:
           reader_path = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt')
           reader = reader_path.read_text()
 
-          old_diag = '''                ReaderMenuButton("SAO CHÉP CHẨN ĐOÁN BỘ ĐỌC") {
-                      clipboard.setText(AnnotatedString("Bộ đọc: ${ttsDraft.enginePackage ?: "Mặc định hệ thống"}\\nNgôn ngữ: ${ttsDraft.languageTag}\\nGiọng: ${ttsDraft.voiceName ?: "Mặc định"}\\nSố bộ đọc/giọng: ${state.ttsEngines.size}/${ttsVoices.size}"))
-                      onMessage("Đã sao chép chẩn đoán bộ đọc.")
-                  }
-          '''.replace('\n          ', '\n')
-          new_diag = '''                if (!ttsLoading && state.ttsEngines.isEmpty()) {
-                      ReaderMenuButton("SAO CHÉP CHẨN ĐOÁN BỘ ĐỌC") {
-                          clipboard.setText(AnnotatedString("Bộ đọc: ${ttsDraft.enginePackage ?: "Mặc định hệ thống"}\\nNgôn ngữ: ${ttsDraft.languageTag}\\nGiọng: ${ttsDraft.voiceName ?: "Mặc định"}\\nSố bộ đọc/giọng: ${state.ttsEngines.size}/${ttsVoices.size}"))
-                          onMessage("Đã sao chép chẩn đoán bộ đọc.")
-                      }
-                  }
-          '''.replace('\n          ', '\n')
+          # XPK only exposes diagnostic-copy when engine discovery found nothing.
           if 'if (!ttsLoading && state.ttsEngines.isEmpty()) {' not in reader:
-              reader = replace_once(reader, old_diag, new_diag, 'conditional TTS diagnostics')
+              start_marker = '                ReaderMenuButton("SAO CHÉP CHẨN ĐOÁN BỘ ĐỌC") {'
+              end_marker = '                    onMessage("Đã sao chép chẩn đoán bộ đọc.")\n                }\n'
+              start = reader.find(start_marker)
+              end = reader.find(end_marker, start)
+              if start < 0 or end < 0:
+                  raise SystemExit('missing marker: TTS diagnostic block')
+              end += len(end_marker)
+              block = reader[start:end]
+              indented = ''.join(('    ' + line if line.strip() else line) for line in block.splitlines(keepends=True))
+              wrapped = '                if (!ttsLoading && state.ttsEngines.isEmpty()) {\n' + indented + '                }\n'
+              reader = reader[:start] + wrapped + reader[end:]
 
+          # Match XPK music-library statistics, including approximate AI catalog token cost.
           stats_anchor = '        val describedCount = musicLibraryDraft.count { it.tagsCsv.isNotBlank() }\n'
           if 'val estimatedCatalogTokens' not in reader:
-              stats_extra = '''        val catalogChars = musicLibraryDraft.sumOf { track ->
-              if (track.enabled) track.id.length + track.title.length + track.tagsCsv.trim().length + 8 else 0
-          }
-          val estimatedCatalogTokens = ((catalogChars + 3) / 4).coerceAtLeast(0)
-          '''.replace('\n          ', '\n')
+              stats_extra = (
+                  '        val catalogChars = musicLibraryDraft.sumOf { track ->\n'
+                  '            if (track.enabled) track.id.length + track.title.length + track.tagsCsv.trim().length + 8 else 0\n'
+                  '        }\n'
+                  '        val estimatedCatalogTokens = ((catalogChars + 3) / 4).coerceAtLeast(0)\n'
+              )
               reader = replace_once(reader, stats_anchor, stats_anchor + stats_extra, 'music token estimate')
 
           old_summary = '                    "${musicLibraryDraft.size} bài • $enabledCount bật • $normalizedCount chuẩn hóa • $describedCount mô tả",\n'
-          new_summary = '''                    "Kho nhạc: ${musicLibraryDraft.size} bài\\n" +
-                          "Bài đang bật: $enabledCount bài\\n" +
-                          "Đã chuẩn hóa: $normalizedCount bài\\n" +
-                          "Đã có mô tả: $describedCount bài\\n" +
-                          "Ước tính khi gửi danh mục AI: khoảng $estimatedCatalogTokens token",
-          '''.replace('\n          ', '\n')
+          new_summary = (
+              '                    "Kho nhạc: ${musicLibraryDraft.size} bài\\n" +\n'
+              '                        "Bài đang bật: $enabledCount bài\\n" +\n'
+              '                        "Đã chuẩn hóa: $normalizedCount bài\\n" +\n'
+              '                        "Đã có mô tả: $describedCount bài\\n" +\n'
+              '                        "Ước tính khi gửi danh mục AI: khoảng $estimatedCatalogTokens token",\n'
+          )
           if 'Ước tính khi gửi danh mục AI: khoảng $estimatedCatalogTokens token' not in reader:
               reader = replace_once(reader, old_summary, new_summary, 'music stats summary')
 
-          old_editor = '''                text = { Column {
-                      OutlinedTextField(title, { title = it.take(120) }, placeholder = { Text("Tên bài") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                      Text("Mô tả cho AI", modifier = Modifier.padding(top = 8.dp))
-                      OutlinedTextField(
-                          description,
-                          { description = it.take(301) },
-                          placeholder = { Text("Mô tả ngắn") },
-                          minLines = 4,
-                          maxLines = 7,
-                          modifier = Modifier.fillMaxWidth(),
-                      )
-                  } },
-          '''.replace('\n          ', '\n')
-          new_editor = '''                text = { Column {
-                      Text("Tên bài gửi cho AI")
-                      OutlinedTextField(title, { title = it.take(120) }, placeholder = { Text("Tên bài") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                      Text("Mô tả tham khảo cho AI, không bắt buộc AI làm theo", modifier = Modifier.padding(top = 8.dp))
-                      OutlinedTextField(
-                          description,
-                          { description = it.take(301) },
-                          placeholder = { Text("Tông/diễn biến: ...; Dùng: ...; Tránh: ...") },
-                          minLines = 4,
-                          maxLines = 7,
-                          modifier = Modifier.fillMaxWidth(),
-                      )
-                      Text("Tối đa 300 ký tự. Chỉ ghi thông tin thực sự giúp AI phân biệt và chọn bài.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
-                  } },
-          '''.replace('\n          ', '\n')
+          # Match XPK per-track AI metadata wording without relying on whole-block whitespace.
           if 'Tên bài gửi cho AI' not in reader:
-              reader = replace_once(reader, old_editor, new_editor, 'music AI metadata editor')
+              editor_anchor = '            var description by remember(track.id, track.tagsCsv) { mutableStateOf(track.tagsCsv) }\n'
+              editor_pos = reader.find(editor_anchor)
+              text_start = reader.find('                text = { Column {\n', editor_pos)
+              text_end = reader.find('                } },\n                confirmButton', text_start)
+              if editor_pos < 0 or text_start < 0 or text_end < 0:
+                  raise SystemExit('missing marker: music AI metadata editor')
+              segment = reader[text_start:text_end]
+              title_field = '                    OutlinedTextField(title, { title = it.take(120) }, placeholder = { Text("Tên bài") }, singleLine = true, modifier = Modifier.fillMaxWidth())\n'
+              if title_field not in segment:
+                  raise SystemExit('missing marker: music title field')
+              segment = segment.replace(title_field, '                    Text("Tên bài gửi cho AI")\n' + title_field, 1)
+              segment = segment.replace('Text("Mô tả cho AI", modifier = Modifier.padding(top = 8.dp))', 'Text("Mô tả tham khảo cho AI, không bắt buộc AI làm theo", modifier = Modifier.padding(top = 8.dp))', 1)
+              segment = segment.replace('placeholder = { Text("Mô tả ngắn") }', 'placeholder = { Text("Tông/diễn biến: ...; Dùng: ...; Tránh: ...") }', 1)
+              field_end = '                        modifier = Modifier.fillMaxWidth(),\n                    )\n'
+              if field_end not in segment:
+                  raise SystemExit('missing marker: music description field end')
+              helper = '                    Text("Tối đa 300 ký tự. Chỉ ghi thông tin thực sự giúp AI phân biệt và chọn bài.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))\n'
+              segment = segment.replace(field_end, field_end + helper, 1)
+              reader = reader[:text_start] + segment + reader[text_end:]
+
           reader_path.write_text(reader)
 
           story_path = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/StoryReferenceAdvancedDialogs.kt')
@@ -155,8 +149,7 @@ jobs:
               anchor = '  scripts/check_music_normalization_flow_parity.py\n'
               if anchor not in m0:
                   raise SystemExit('missing marker: m0 final parity anchor')
-              m0 = m0.replace(anchor, anchor + '  scripts/check_xpk_final_ui_parity.py\n', 1)
-              m0_path.write_text(m0)
+              m0_path.write_text(m0.replace(anchor, anchor + '  scripts/check_xpk_final_ui_parity.py\n', 1))
           PY
       - name: Run parity gates
         run: |

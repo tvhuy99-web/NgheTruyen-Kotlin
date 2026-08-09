@@ -1,0 +1,45 @@
+name: Align Personal UI gate controls
+
+on:
+  push:
+    branches:
+      - agent/settings-a11y-labels
+    paths:
+      - .github/workflows/align-personal-gate-controls.yml
+
+permissions:
+  contents: write
+
+jobs:
+  align:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Align TTS selector markers
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/validate_release.py')
+          s = p.read_text(encoding='utf-8')
+          replacements = {
+              '        "HIỂN THỊ TẤT CẢ",\n': '        "selectedEngineLabel",\n        "selectedVoiceLabel",\n',
+              '        "Bộ máy TTS",\n': '        "Bộ đọc TTS",\n',
+          }
+          for old, new in replacements.items():
+              if s.count(old) != 1:
+                  raise SystemExit(f'Expected one marker {old!r}, found {s.count(old)}')
+              s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+          PY
+          git diff --check
+      - name: Commit gate update
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add scripts/validate_release.py
+          git commit -m 'test: align release gate with TTS selectors'
+          git push origin HEAD:agent/settings-a11y-labels

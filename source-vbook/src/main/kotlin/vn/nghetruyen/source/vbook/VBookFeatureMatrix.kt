@@ -98,15 +98,18 @@ object VBookEngineFeatureMatrix {
         VBookFeature.BROWSER_WAIT_URL,
         VBookFeature.BROWSER_REQUEST_METADATA,
         VBookFeature.GRAPHICS,
+        VBookFeature.WEBSOCKET_HEADERS,
+        VBookFeature.WEBSOCKET_FRAMES,
         VBookFeature.QUICK_TRANSLATOR,
         VBookFeature.CRYPTO,
         VBookFeature.SCRIPT_EXECUTE,
+        VBookFeature.USER_AGENT,
+        VBookFeature.SLEEP,
+        VBookFeature.LOGGING,
     )
 
     private val partial = setOf(
         VBookFeature.WEBSOCKET,
-        VBookFeature.WEBSOCKET_HEADERS,
-        VBookFeature.WEBSOCKET_FRAMES,
         VBookFeature.QUICK_TRANSLATOR_OPTIONS,
         VBookFeature.QUICK_TRANSLATOR_SEGMENTS,
     )
@@ -135,7 +138,7 @@ object VBookEngineFeatureMatrix {
             feature == VBookFeature.METADATA_ENCRYPT -> VBookFeatureSupport(
                 feature,
                 VBookFeatureImplementationLevel.PACKAGE_LAYER_PENDING,
-                "Plain source-tree/package execution is supported; encrypted distribution decoding is intentionally not guessed without a proven reference format.",
+                "Readable packages with metadata.encrypt=true are accepted; proprietary encrypted-distribution decoding remains unclaimed until its package format is proven against the reference.",
             )
             feature in referenceRejects -> VBookFeatureSupport(
                 feature,
@@ -149,6 +152,8 @@ object VBookEngineFeatureMatrix {
     private fun implementationNote(feature: VBookFeature): String = when (feature) {
         VBookFeature.FETCH_CHARSET, VBookFeature.FETCH_BASE64, VBookFeature.FETCH_BLOB ->
             "VBookRawNetworkBroker keeps exact response bytes; representation APIs reuse the captured response and never replay the upstream request."
+        VBookFeature.FETCH_TIMEOUT ->
+            "Requested timeout is capped by the remaining action budget, and configured inter-request delay cannot sleep past that budget."
         VBookFeature.FETCH_STATUS_TEXT ->
             "Transport reason metadata is preserved. Empty statusText remains valid for protocols/transports without a reason phrase."
         VBookFeature.FETCH_REQUEST_INFO ->
@@ -169,22 +174,28 @@ object VBookEngineFeatureMatrix {
             "Compatibility wrapper translates vBook loadHtml(html, baseUrl) into the legacy internal host argument order."
         VBookFeature.BROWSER_WAIT_URL ->
             "Compatibility wrapper waits against captured network-request URLs rather than the current page URL."
+        VBookFeature.WEBSOCKET_HEADERS ->
+            "The current compatibility prelude carries constructor headers through an internal vBook-only marker; the network broker validates them before opening the public WSS connection."
+        VBookFeature.WEBSOCKET_FRAMES ->
+            "Text and binary transport frames are converted to the current {type,data} JavaScript shape; binary data remains canonical base64."
         VBookFeature.QUICK_TRANSLATOR ->
             "Base Qt.translate(text,'vp'|'hv') is routed to a dedicated offline Quick Translator broker rather than the generic AI/translate-extension path."
+        VBookFeature.USER_AGENT ->
+            "UserAgent.system/chrome/android/ios are exposed inside the safe Rhino host without Java interop."
+        VBookFeature.SLEEP ->
+            "sleep(ms) is sandbox-budgeted and cannot bypass the action deadline."
+        VBookFeature.LOGGING ->
+            "Log, Console and console diagnostic methods are available without exposing JVM logging classes."
         else -> "Implementation exists; certification remains a separate differential-test state."
     }
 
     private fun partialNote(feature: VBookFeature): String = when (feature) {
         VBookFeature.WEBSOCKET ->
-            "Network broker preserves text/binary frames, but the JavaScript host still needs exact stateful-session/frame-object semantics."
-        VBookFeature.WEBSOCKET_HEADERS ->
-            "SourceWebSocketBroker accepts headers, but the current JavaScript WebSocket constructor does not yet forward its second argument."
-        VBookFeature.WEBSOCKET_FRAMES ->
-            "Transport frames are preserved, but JS message() still exposes the older string-only shape instead of {type,data}."
+            "Headers and frame objects are wired, but the broker still performs bounded exchange calls rather than one persistent socket session across arbitrary repeated receives; full stateful parity remains unclaimed."
         VBookFeature.QUICK_TRANSLATOR_OPTIONS ->
-            "Base vp/hv translation is offline, but vBook extras such as NER, person_name and traditional-to-simplified are not yet fully reference-compatible."
+            "All extras now reach the dedicated broker, but specialized semantics such as NER, person_name and traditional-to-simplified remain reference-dependent."
         VBookFeature.QUICK_TRANSLATOR_SEGMENTS ->
-            "The source API can represent offset segments, but the JS Qt bridge does not yet expose the reference object-array shape."
+            "The source API can represent offset segments and the JS shim can expose object arrays, but the offline broker does not yet prove reference-compatible offsets/types."
         else -> "Compatibility behavior is incomplete."
     }
 

@@ -27,6 +27,16 @@ jobs:
       - name: Apply reference workflow patch
         shell: bash
         run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/agent_apply_xpk_phase1.py')
+          s = p.read_text()
+          old = 'display_start = s.index("    if (showDisplayDialog) {")'
+          new = 'display_start = s.index("    if (showDisplayDialog) {", mode_start)'
+          if old not in s:
+              raise SystemExit('display patch anchor not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
           set +e
           output="$(python3 scripts/agent_apply_xpk_phase1.py 2>&1)"
           rc=$?
@@ -39,8 +49,6 @@ jobs:
           import ast
           from pathlib import Path
 
-          # The first patch performs all large-file changes. Re-anchor the flat Reader
-          # menu last so no later string slice can accidentally remove it.
           patch_source = Path('scripts/agent_apply_xpk_phase1.py').read_text()
           tree = ast.parse(patch_source)
           flat_menu = None

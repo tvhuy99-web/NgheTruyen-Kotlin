@@ -16,7 +16,11 @@ class VBookCleartextCookieFeatureTest {
         assertTrue(VBookFeature.LOCAL_COOKIE_CLEARTEXT in audit.features)
 
         val validation = VBookCandidateValidator().validate(VBookCandidate("legacy-cookie", plugin("http://legacy.example"), scripts))
-        assertEquals(SourceCompatibilityState.PARTIAL, validation.state)
+        assertEquals(SourceCompatibilityState.UNSUPPORTED, validation.state)
+        assertEquals(
+            VBookFeatureImplementationLevel.EXPLICITLY_UNSUPPORTED,
+            VBookEngineFeatureMatrix.support(VBookFeature.LOCAL_COOKIE_CLEARTEXT).implementation,
+        )
         assertTrue(VBookFeature.LOCAL_COOKIE_CLEARTEXT in validation.blockingFeatures)
         assertFalse(validation.activatable)
     }

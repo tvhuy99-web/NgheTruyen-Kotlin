@@ -142,11 +142,21 @@ class VBookCandidateValidator(
         val blockingFeatures = parsed.features.filterTo(linkedSetOf()) { feature ->
             VBookEngineFeatureMatrix.support(feature).implementation in setOf(
                 VBookFeatureImplementationLevel.PARTIAL,
+                VBookFeatureImplementationLevel.EXPLICITLY_UNSUPPORTED,
                 VBookFeatureImplementationLevel.PACKAGE_LAYER_PENDING,
             )
         }
         if (blockingFeatures.isNotEmpty()) {
-            warnings += "VBOOK_PARTIAL_FEATURES:${blockingFeatures.sortedBy(Enum<*>::name).joinToString { it.name }}"
+            val unsupported = blockingFeatures.filter {
+                VBookEngineFeatureMatrix.support(it).implementation == VBookFeatureImplementationLevel.EXPLICITLY_UNSUPPORTED
+            }
+            if (unsupported.isNotEmpty()) {
+                warnings += "VBOOK_EXPLICITLY_UNSUPPORTED_FEATURES:${unsupported.sortedBy(Enum<*>::name).joinToString { it.name }}"
+            }
+            val partial = blockingFeatures - unsupported.toSet()
+            if (partial.isNotEmpty()) {
+                warnings += "VBOOK_PARTIAL_FEATURES:${partial.sortedBy(Enum<*>::name).joinToString { it.name }}"
+            }
         }
 
         val profile = parsed.detection.profile.takeUnless { it == VBookContractProfile.UNKNOWN }?.let {
@@ -154,6 +164,9 @@ class VBookCandidateValidator(
         }
         val state = when {
             failures.isNotEmpty() -> SourceCompatibilityState.UNSUPPORTED
+            blockingFeatures.any {
+                VBookEngineFeatureMatrix.support(it).implementation == VBookFeatureImplementationLevel.EXPLICITLY_UNSUPPORTED
+            } -> SourceCompatibilityState.UNSUPPORTED
             blockingFeatures.isNotEmpty() -> SourceCompatibilityState.PARTIAL
             else -> SourceCompatibilityState.SUPPORTED
         }

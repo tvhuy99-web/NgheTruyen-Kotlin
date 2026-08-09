@@ -60,29 +60,28 @@ class VBookUpdateCoordinatorTest {
     }
 
     @Test
-    fun partialEngineFeatureIsQuarantinedWithoutReplacingKnownGood() {
+    fun explicitlyUnsupportedEngineFeatureIsQuarantinedWithoutReplacingKnownGood() {
         val registry = MemoryRegistry()
         val archive = MemoryArchive()
         val coordinator = VBookUpdateCoordinator(VBookCandidateValidator(), registry, archive)
         coordinator.installOrUpdate(payload("good", "1", goodPlugin(1), GOOD_SCRIPTS), 11)
 
-        val websocketScripts = GOOD_SCRIPTS + mapOf(
+        val unsupportedScripts = GOOD_SCRIPTS + mapOf(
             "src/search.js" to """
                 function execute(q,p){
-                  var ws = new WebSocket('wss://ws.example');
-                  var frame = ws.message();
-                  return Response.success([{type:frame.type,data:frame.data}],p);
+                  var translated = Qt.translate(q, 'vp', {person_name:true});
+                  return Response.success([{name:translated}],p);
                 }
             """.trimIndent(),
         )
-        val result = coordinator.installOrUpdate(payload("ws-v2", "2", goodPlugin(2), websocketScripts), 21)
+        val result = coordinator.installOrUpdate(payload("qt-v2", "2", goodPlugin(2), unsupportedScripts), 21)
 
         assertEquals(VBookUpdateDisposition.QUARANTINED, result.disposition)
-        assertEquals(SourceCompatibilityState.PARTIAL, result.validation.state)
-        assertTrue(VBookFeature.WEBSOCKET in result.validation.blockingFeatures)
-        assertFalse(VBookFeature.WEBSOCKET_FRAMES in result.validation.blockingFeatures)
+        assertEquals(SourceCompatibilityState.UNSUPPORTED, result.validation.state)
+        assertTrue(VBookFeature.QUICK_TRANSLATOR_OPTIONS in result.validation.blockingFeatures)
+        assertFalse(VBookFeature.QUICK_TRANSLATOR in result.validation.blockingFeatures)
         assertEquals("good", registry.active(identity)!!.artifactId)
-        assertEquals(SourceArtifactState.QUARANTINED, registry.quarantined.getValue("ws-v2").state)
+        assertEquals(SourceArtifactState.QUARANTINED, registry.quarantined.getValue("qt-v2").state)
     }
 
     @Test

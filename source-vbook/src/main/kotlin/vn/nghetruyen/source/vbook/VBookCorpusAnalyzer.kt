@@ -182,6 +182,14 @@ object VBookCorpusAnalyzer {
             fun hit(feature: VBookFeature, regex: Regex, label: String = regex.pattern) {
                 regex.find(executableCode)?.let { match -> add(feature, path, match.value.take(160).ifBlank { label }) }
             }
+            fun hitLiteralArgument(feature: VBookFeature, regex: Regex) {
+                regex.findAll(code).firstOrNull { match ->
+                    // The match starts in executable code only when the method dot survived masking.
+                    // This preserves literal arguments for evidence without treating generated JS/HTML
+                    // strings or comments as host-API requirements.
+                    executableCode.getOrNull(match.range.first) == '.'
+                }?.let { match -> add(feature, path, match.value.take(160)) }
+            }
             if (structuralCode.contains("http://", ignoreCase = true)) add(VBookFeature.LEGACY_HTTP_SOURCE, path, "http:// literal")
             hit(VBookFeature.RESPONSE_HELPER, Regex("\\bResponse\\.(?:success|error)\\s*\\("))
             hit(VBookFeature.RESPONSE_LEGACY_CODE, Regex("\\bcode\\s*[:=]\\s*(?:200|403)\\b"))
@@ -190,7 +198,7 @@ object VBookCorpusAnalyzer {
             hit(VBookFeature.FETCH_TIMEOUT, Regex("\\btimeout\\s*:"))
             hit(VBookFeature.FETCH_HEADER, Regex("\\.header\\s*\\("))
             hit(VBookFeature.FETCH_STATUS_TEXT, Regex("\\.statusText\\b"))
-            hit(VBookFeature.FETCH_CHARSET, Regex("\\.(?:text|html)\\s*\\(\\s*['\"][^'\"]+['\"]\\s*\\)"))
+            hitLiteralArgument(VBookFeature.FETCH_CHARSET, Regex("\\.(?:text|html)\\s*\\(\\s*['\"][^'\"]+['\"]\\s*\\)"))
             hit(VBookFeature.FETCH_BASE64, Regex("\\.base64\\s*\\("))
             hit(VBookFeature.FETCH_BLOB, Regex("\\.blob\\s*\\("))
             hit(VBookFeature.FETCH_REQUEST_INFO, Regex("\\.request\\.(?:url|headers)\\b"))

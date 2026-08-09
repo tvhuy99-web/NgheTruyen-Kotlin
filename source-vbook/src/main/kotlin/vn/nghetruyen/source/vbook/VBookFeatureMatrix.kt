@@ -3,6 +3,7 @@ package vn.nghetruyen.source.vbook
 enum class VBookFeatureImplementationLevel {
     IMPLEMENTED,
     PARTIAL,
+    EXPLICITLY_UNSUPPORTED,
     PACKAGE_LAYER_PENDING,
     METADATA_ONLY,
     REFERENCE_REJECTS,
@@ -38,6 +39,7 @@ data class VBookCorpusCompatibilityMatrix(
             (requiredByCorpus[row.feature] ?: 0) > 0 &&
                 row.implementation in setOf(
                     VBookFeatureImplementationLevel.PARTIAL,
+                    VBookFeatureImplementationLevel.EXPLICITLY_UNSUPPORTED,
                     VBookFeatureImplementationLevel.PACKAGE_LAYER_PENDING,
                 )
         }
@@ -98,6 +100,7 @@ object VBookEngineFeatureMatrix {
         VBookFeature.BROWSER_WAIT_URL,
         VBookFeature.BROWSER_REQUEST_METADATA,
         VBookFeature.GRAPHICS,
+        VBookFeature.WEBSOCKET,
         VBookFeature.WEBSOCKET_HEADERS,
         VBookFeature.WEBSOCKET_FRAMES,
         VBookFeature.QUICK_TRANSLATOR,
@@ -108,10 +111,9 @@ object VBookEngineFeatureMatrix {
         VBookFeature.LOGGING,
     )
 
-    private val partial = setOf(
+    private val explicitlyUnsupported = setOf(
         VBookFeature.CONTENT_UNKNOWN,
         VBookFeature.LOCAL_COOKIE_CLEARTEXT,
-        VBookFeature.WEBSOCKET,
         VBookFeature.QUICK_TRANSLATOR_OPTIONS,
         VBookFeature.QUICK_TRANSLATOR_SEGMENTS,
     )
@@ -132,10 +134,10 @@ object VBookEngineFeatureMatrix {
                 VBookFeatureImplementationLevel.IMPLEMENTED,
                 implementationNote(feature),
             )
-            feature in partial -> VBookFeatureSupport(
+            feature in explicitlyUnsupported -> VBookFeatureSupport(
                 feature,
-                VBookFeatureImplementationLevel.PARTIAL,
-                partialNote(feature),
+                VBookFeatureImplementationLevel.EXPLICITLY_UNSUPPORTED,
+                unsupportedNote(feature),
             )
             feature == VBookFeature.METADATA_ENCRYPT -> VBookFeatureSupport(
                 feature,
@@ -180,6 +182,8 @@ object VBookEngineFeatureMatrix {
             "The current compatibility prelude carries constructor headers through an internal vBook-only marker; the network broker validates them before opening the public WSS connection."
         VBookFeature.WEBSOCKET_FRAMES ->
             "Text and binary transport frames are converted to the current {type,data} JavaScript shape; binary data remains canonical base64."
+        VBookFeature.WEBSOCKET ->
+            "The synchronous vBook socket ABI is implemented as one bounded WSS exchange per receive call, with headers, text/binary frames, close metadata, lifetime and message-size limits covered by tests."
         VBookFeature.QUICK_TRANSLATOR ->
             "Base Qt.translate(text,'vp'|'hv') is routed to a dedicated offline Quick Translator broker rather than the generic AI/translate-extension path."
         VBookFeature.USER_AGENT ->
@@ -191,18 +195,16 @@ object VBookEngineFeatureMatrix {
         else -> "Implementation exists; certification remains a separate differential-test state."
     }
 
-    private fun partialNote(feature: VBookFeature): String = when (feature) {
+    private fun unsupportedNote(feature: VBookFeature): String = when (feature) {
         VBookFeature.CONTENT_UNKNOWN ->
             "Unknown metadata.type is archived and audited but not activated. A new type or legacy dialect must be proven before the host assigns provider semantics."
         VBookFeature.LOCAL_COOKIE_CLEARTEXT ->
             "Cleartext network access is sandboxed per extension, but localCookie.setCookie still enforces HTTPS. The corpus scanner exposes this exact combination so it blocks parity only when an extension actually requires it."
-        VBookFeature.WEBSOCKET ->
-            "Headers and frame objects are wired, but the broker still performs bounded exchange calls rather than one persistent socket session across arbitrary repeated receives; full stateful parity remains unclaimed."
         VBookFeature.QUICK_TRANSLATOR_OPTIONS ->
-            "All extras now reach the dedicated broker, but specialized semantics such as NER, person_name and traditional-to-simplified remain reference-dependent."
+            "All extras reach the dedicated broker, but unsupported specialized semantics such as NER, person_name and traditional-to-simplified are rejected at compatibility validation rather than silently approximated."
         VBookFeature.QUICK_TRANSLATOR_SEGMENTS ->
-            "The source API can represent offset segments and the JS shim can expose object arrays, but the offline broker does not yet prove reference-compatible offsets/types."
-        else -> "Compatibility behavior is incomplete."
+            "The generic/provider source API can represent offset segments, but Quick Translator does not claim reference-compatible offsets/types and packages that require them are quarantined."
+        else -> "This feature is intentionally unsupported and blocks activation; it is never silently approximated."
     }
 
     fun support(feature: VBookFeature): VBookFeatureSupport = support.getValue(feature)

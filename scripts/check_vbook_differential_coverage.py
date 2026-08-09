@@ -3,6 +3,7 @@
 
 This gate intentionally distinguishes three states:
 - PARTIAL/PACKAGE_LAYER_PENDING: implementation blocker, captures cannot make it green.
+- EXPLICITLY_UNSUPPORTED: known, quarantined behavior; never a silent unknown.
 - IMPLEMENTED but uncovered: proof blocker, more reference cases are required.
 - IMPLEMENTED and covered: eligible for semantic comparison/certification.
 """
@@ -17,6 +18,7 @@ import sys
 REFERENCE_REJECTS = "REFERENCE_REJECTS"
 IMPLEMENTED = "IMPLEMENTED"
 PARTIAL = "PARTIAL"
+EXPLICITLY_UNSUPPORTED = "EXPLICITLY_UNSUPPORTED"
 PACKAGE_PENDING = "PACKAGE_LAYER_PENDING"
 
 
@@ -48,7 +50,7 @@ def main() -> int:
             implementation = str(raw.get("implementation") or "").strip()
             if feature and count > 0:
                 feature_rows[feature] = raw
-                if implementation not in {IMPLEMENTED, PARTIAL, PACKAGE_PENDING, REFERENCE_REJECTS}:
+                if implementation not in {IMPLEMENTED, PARTIAL, EXPLICITLY_UNSUPPORTED, PACKAGE_PENDING, REFERENCE_REJECTS}:
                     raise RuntimeError(f"CORPUS_IMPLEMENTATION_STATE_INVALID:{feature}:{implementation}")
 
         covered: dict[str, set[str]] = {}
@@ -77,7 +79,7 @@ def main() -> int:
         waived = {str(value).strip() for value in args.allow_uncovered if str(value).strip()}
         partial_required = sorted(
             feature for feature, row in feature_rows.items()
-            if row["implementation"] in {PARTIAL, PACKAGE_PENDING}
+            if row["implementation"] in {PARTIAL, EXPLICITLY_UNSUPPORTED, PACKAGE_PENDING}
         )
         uncovered = sorted(
             feature for feature, row in feature_rows.items()

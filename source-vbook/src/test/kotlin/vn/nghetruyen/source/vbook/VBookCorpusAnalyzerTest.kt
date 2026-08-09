@@ -54,6 +54,31 @@ class VBookCorpusAnalyzerTest {
     }
 
     @Test
+    fun charsetLiteralIsDetectedOnlyInExecutableCode() {
+        val audit = VBookCorpusAnalyzer.audit(
+            "charset-mask",
+            PLUGIN,
+            mapOf(
+                "src/search.js" to """
+                    function execute(query, page) {
+                      var generated = "<script>response.text('shift_jis');<" + "/script>";
+                      var plain = fetch('https://example.org/plain').text();
+                      var decoded = fetch('https://example.org/gbk').text('gbk');
+                      return Response.success([], '');
+                    }
+                """.trimIndent(),
+                "src/detail.js" to response("{}"),
+                "src/toc.js" to response("[]"),
+                "src/chap.js" to response("'text'"),
+            ),
+        )
+
+        assertTrue(VBookFeature.FETCH_CHARSET in audit.features)
+        assertTrue(audit.evidence.any { it.feature == VBookFeature.FETCH_CHARSET && "gbk" in it.value })
+        assertFalse(audit.evidence.any { it.feature == VBookFeature.FETCH_CHARSET && "shift_jis" in it.value })
+    }
+
+    @Test
     fun scansHostApisDynamicScriptsAndSubFeatures() {
         val audit = VBookCorpusAnalyzer.audit(
             id = "sample",

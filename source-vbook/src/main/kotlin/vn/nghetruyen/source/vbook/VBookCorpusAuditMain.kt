@@ -69,6 +69,7 @@ private fun VBookCorpusReport.toJson(audits: List<VBookExtensionAudit>): JsonVal
             if (feature == VBookFeature.METADATA_ENCRYPT) return@filter false
             VBookEngineFeatureMatrix.support(feature).implementation in setOf(
                 VBookFeatureImplementationLevel.PARTIAL,
+                VBookFeatureImplementationLevel.EXPLICITLY_UNSUPPORTED,
                 VBookFeatureImplementationLevel.PACKAGE_LAYER_PENDING,
             )
         }

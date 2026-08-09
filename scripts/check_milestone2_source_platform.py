@@ -17,6 +17,22 @@ from cryptography.hazmat.primitives.asymmetric import ec
 ROOT = Path(__file__).resolve().parents[1]
 KOTLINC = shutil.which("kotlinc")
 
+# This lightweight M2 compiler intentionally covers the generic repository contract only. The
+# vBook coordinator/planner are compiled with their real source-vbook/Rhino graph by Gradle and the
+# dedicated vBook workflow; duplicating that graph with handwritten stubs here creates stale gates.
+MANUAL_COMPILE_EXCLUSIONS = {
+    "source-repository": {
+        "VBookRepositoryUpdatePlanner.kt",
+        "VBookUpdateCoordinator.kt",
+    },
+}
+MANUAL_TEST_EXCLUSIONS = {
+    "source-repository": {
+        "VBookRepositoryUpdatePlannerTest.kt",
+        "VBookUpdateCoordinatorTest.kt",
+    },
+}
+
 
 def run(command: list[str]) -> None:
     result = subprocess.run(command, cwd=ROOT)
@@ -25,12 +41,18 @@ def run(command: list[str]) -> None:
 
 
 def sources(module: str) -> list[str]:
-    return [str(path) for path in sorted((ROOT / module / "src/main/kotlin").rglob("*.kt"))]
+    excluded = MANUAL_COMPILE_EXCLUSIONS.get(module, set())
+    return [
+        str(path)
+        for path in sorted((ROOT / module / "src/main/kotlin").rglob("*.kt"))
+        if path.name not in excluded
+    ]
 
 
 def test_sources(module: str) -> list[str]:
     root = ROOT / module / "src/test/kotlin"
-    return [str(path) for path in sorted(root.rglob("*.kt"))] if root.is_dir() else []
+    excluded = MANUAL_TEST_EXCLUSIONS.get(module, set())
+    return [str(path) for path in sorted(root.rglob("*.kt")) if path.name not in excluded] if root.is_dir() else []
 
 
 def write(root: Path, relative: str, content: str) -> Path:
@@ -264,7 +286,7 @@ class Elements():ArrayList<Element>() {
             "source-store": ["source-api", "source-package", "source-diagnostics"],
             "source-runtime": ["source-api", "source-diagnostics"],
             "source-network": ["source-api", "source-diagnostics"],
-            "source-repository": ["source-api", "source-package", "source-diagnostics"],
+            "source-repository": ["source-api", "source-package", "source-diagnostics", "source-store"],
         }
         if precompiled_dir:
             stub_jars = [precompiled_dir / "m2-stubs.jar", precompiled_dir / "jsoup-stubs.jar"]

@@ -78,7 +78,7 @@ class VBookUpdateCoordinator(
             val failure = validation.failures.firstOrNull() ?: SourceFailure(
                 SourceFailureCode.ARTIFACT_UPDATE_REJECTED,
                 if (validation.blockingFeatures.isNotEmpty()) {
-                    "VBOOK_ENGINE_FEATURE_PARTIAL:${validation.blockingFeatures.sortedBy(Enum<*>::name).joinToString { it.name }}"
+                    "VBOOK_ENGINE_FEATURE_BLOCKED:${validation.blockingFeatures.sortedBy(Enum<*>::name).joinToString { it.name }}"
                 } else {
                     "VBOOK_CANDIDATE_NOT_ACTIVATABLE:${validation.state}"
                 },

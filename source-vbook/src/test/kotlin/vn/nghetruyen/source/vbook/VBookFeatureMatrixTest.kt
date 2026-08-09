@@ -7,6 +7,12 @@ import org.junit.Test
 
 class VBookFeatureMatrixTest {
     @Test
+    fun unknownContentTypeIsExplicitlyUnsupported() {
+        val support = VBookEngineFeatureMatrix.support(VBookFeature.CONTENT_UNKNOWN)
+        assertEquals(VBookFeatureImplementationLevel.EXPLICITLY_UNSUPPORTED, support.implementation)
+    }
+
+    @Test
     fun implementedFeaturesStillBlockFullParityUntilReferenceCertified() {
         val report = VBookCorpusReport(
             extensionCount = 1,
@@ -35,7 +41,7 @@ class VBookFeatureMatrixTest {
     }
 
     @Test
-    fun persistentWebsocketOrAdvancedQuickTranslatorStillBlocksWhenCorpusUsesIt() {
+    fun websocketIsImplementedButAdvancedQuickTranslatorIsExplicitlyUnsupported() {
         val report = VBookCorpusReport(
             extensionCount = 2,
             profiles = mapOf(VBookContractProfile.CURRENT_JS to 2),
@@ -48,8 +54,12 @@ class VBookFeatureMatrixTest {
             extensionsWithMissingDynamicScripts = emptyList(),
         )
         val matrix = VBookEngineFeatureMatrix.matrix(report)
-        assertTrue(matrix.blockingFeatures.any { it.feature == VBookFeature.WEBSOCKET })
+        assertFalse(matrix.blockingFeatures.any { it.feature == VBookFeature.WEBSOCKET })
         assertTrue(matrix.blockingFeatures.any { it.feature == VBookFeature.QUICK_TRANSLATOR_OPTIONS })
+        assertEquals(
+            VBookFeatureImplementationLevel.EXPLICITLY_UNSUPPORTED,
+            VBookEngineFeatureMatrix.support(VBookFeature.QUICK_TRANSLATOR_OPTIONS).implementation,
+        )
         assertFalse(matrix.canClaimFullCorpusParity)
     }
 

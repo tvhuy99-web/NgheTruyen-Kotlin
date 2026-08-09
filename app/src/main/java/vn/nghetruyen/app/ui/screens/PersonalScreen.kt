@@ -1251,7 +1251,9 @@ private fun SourceAddLinkSection(
                 enabled = trustKeyId.isNotBlank() && trustPublicKey.isNotBlank() && trustFingerprint.isNotBlank(),
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
             ) { Text("THÊM KHÓA") }
-            Button(onClick = onImportRotation, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) { Text("NHẬP XOAY KHÓA") }
+            Button(onClick = onImportRotation, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                Text("NHẬP TỆP XOAY KHÓA ĐÃ KÝ")
+            }
         }
     }
 }
@@ -2804,7 +2806,7 @@ private fun SourceManagementCard(
             Button(
                 onClick = onImportSourceTrustRotation,
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-            ) { Text("NHẬP XOAY KHÓA") }
+            ) { Text("NHẬP TỆP XOAY KHÓA ĐÃ KÝ") }
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             Button(onInstallSourcePack, Modifier.fillMaxWidth()) { Text("CÀI .NTSOURCE / VBOOK / LUA API 2") }
             state.pendingSourceInstall?.let { preview ->

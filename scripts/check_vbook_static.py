@@ -23,6 +23,7 @@ def require(text: str, label: str, *tokens: str) -> None:
 def main() -> None:
     runtime = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt")
     compatibility_runtime = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookCompatibilityRuntime.kt")
+    feature_matrix = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookFeatureMatrix.kt")
     sandbox = read("source-js-sandbox/src/main/kotlin/com/nghetruyen/source/sandbox/JsSandbox.kt")
     boundary = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookRhinoValues.kt")
     importer = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookPluginImporter.kt")
@@ -64,6 +65,7 @@ def main() -> None:
         'putProperty(scope, "WebSocket"',
     )
     require(compatibility_runtime, "vBook diagnostic wiring", "diagnostics: DiagnosticSink", "diagnostics,")
+    require(feature_matrix, "vBook feature truth", "EXPLICITLY_UNSUPPORTED", "VBookFeature.WEBSOCKET,")
     require(
         boundary,
         "vBook host boundary",

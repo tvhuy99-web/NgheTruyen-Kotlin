@@ -1,0 +1,44 @@
+name: Validate compact UI merge
+
+on:
+  pull_request:
+    types: [edited]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: >-
+      github.event.pull_request.number == 11 &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'agent/compact-ui-parity'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout main with full history
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Merge compact UI onto main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main agent/compact-ui-parity
+          git checkout -B agent/compact-ui-integrated origin/main
+          git merge --no-ff -X theirs origin/agent/compact-ui-parity -m "Merge compact UI parity into main"
+          if git ls-files -u | grep -q .; then
+            echo "Unresolved merge conflicts remain:" >&2
+            git status --short >&2
+            exit 1
+          fi
+
+      - name: Install validation dependencies
+        run: python3 -m pip install --disable-pip-version-check beautifulsoup4 cryptography
+
+      - name: Run project validation gate
+        run: bash scripts/m0_gate.sh

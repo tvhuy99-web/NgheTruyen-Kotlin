@@ -36,7 +36,34 @@ jobs:
             exit "$rc"
           fi
           python3 - <<'PY'
+          import ast
           from pathlib import Path
+
+          # The first patch performs all large-file changes. Re-anchor the flat Reader
+          # menu last so no later string slice can accidentally remove it.
+          patch_source = Path('scripts/agent_apply_xpk_phase1.py').read_text()
+          tree = ast.parse(patch_source)
+          flat_menu = None
+          for node in ast.walk(tree):
+              if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == 'flat_menu' for t in node.targets):
+                  flat_menu = ast.literal_eval(node.value)
+                  break
+          if flat_menu is None:
+              raise SystemExit('flat_menu assignment not found')
+          reader_path = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt')
+          reader = reader_path.read_text()
+          mode_marker = '    if (showReaderModeDialog) {'
+          mode_pos = reader.find(mode_marker)
+          if mode_pos < 0:
+              raise SystemExit('reader mode dialog marker missing')
+          menu_marker = '    if (showReaderOptions) {'
+          menu_pos = reader.find(menu_marker)
+          if menu_pos >= 0 and menu_pos < mode_pos:
+              reader = reader[:menu_pos] + flat_menu + reader[mode_pos:]
+          else:
+              reader = reader[:mode_pos] + flat_menu + reader[mode_pos:]
+          reader_path.write_text(reader)
+
           p = Path('scripts/m0_gate.sh')
           s = p.read_text()
           marker = '  scripts/check_ui_control_parity.py\n'
@@ -67,10 +94,6 @@ jobs:
           print("REFERENCE_WORKFLOW_PARITY=PASS")
           '''.replace('\n          ', '\n').lstrip())
           PY
-      - name: Inspect patched reader menu
-        shell: bash
-        run: |
-          grep -n -A95 -B3 'if (showReaderOptions)' app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt || true
       - name: Run parity gates
         run: |
           python3 scripts/check_ui_control_parity.py

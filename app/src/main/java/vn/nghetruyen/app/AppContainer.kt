@@ -21,6 +21,7 @@ import vn.nghetruyen.app.sources.EncryptedSourceSessionStore
 import vn.nghetruyen.app.sourceplatform.AndroidVBookQuickTranslationRegistry
 import vn.nghetruyen.app.sourceplatform.SourcePlatformManager
 import vn.nghetruyen.app.sourceplatform.UnifiedSourcePlatformManager
+import vn.nghetruyen.app.sourceplatform.VBookRepositoryClient
 import vn.nghetruyen.app.sourceplatform.VBookSourcePlatform
 import vn.nghetruyen.app.sources.SourceHealthChecker
 import vn.nghetruyen.app.sources.SourceRegistry
@@ -45,6 +46,8 @@ class AppContainer(context: Context) {
         VBookSourcePlatform(appContext, sourceSessionStore, aiServices)
     }
 
+    val vBookRepositoryClient: VBookRepositoryClient by lazy { VBookRepositoryClient() }
+
     private val legacySourcePlatformManager: SourcePlatformManager by lazy {
         vBookQuickTranslationInstalled
         SourcePlatformManager(
@@ -60,6 +63,7 @@ class AppContainer(context: Context) {
         UnifiedSourcePlatformManager(
             legacy = legacySourcePlatformManager,
             vBook = vBookSourcePlatform,
+            vBookRepositories = vBookRepositoryClient,
             onExternalSourcesChanged = { refreshSourceRegistry() },
         )
     }

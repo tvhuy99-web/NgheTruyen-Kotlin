@@ -132,11 +132,6 @@ class VBookCandidateValidator(
                 sourceId = candidate.artifactId,
             )
         }
-        if (parsed.manifest.metadata.encrypt) {
-            // The flag alone does not prove this ZIP is encrypted. If scripts are readable/compilable,
-            // activation is allowed; only proprietary encrypted-distribution decoding remains unclaimed.
-            warnings += "VBOOK_ENCRYPTED_DISTRIBUTION_REQUIRES_PACKAGE_DECODER_PROOF"
-        }
         if (VBookFeature.LEGACY_HTTP_SOURCE in parsed.features) {
             warnings += "VBOOK_LEGACY_HTTP_REQUIRES_EXPLICIT_CLEARTEXT_POLICY"
         }
@@ -145,11 +140,10 @@ class VBookCandidateValidator(
         }
 
         val blockingFeatures = parsed.features.filterTo(linkedSetOf()) { feature ->
-            feature != VBookFeature.METADATA_ENCRYPT &&
-                VBookEngineFeatureMatrix.support(feature).implementation in setOf(
-                    VBookFeatureImplementationLevel.PARTIAL,
-                    VBookFeatureImplementationLevel.PACKAGE_LAYER_PENDING,
-                )
+            VBookEngineFeatureMatrix.support(feature).implementation in setOf(
+                VBookFeatureImplementationLevel.PARTIAL,
+                VBookFeatureImplementationLevel.PACKAGE_LAYER_PENDING,
+            )
         }
         if (blockingFeatures.isNotEmpty()) {
             warnings += "VBOOK_PARTIAL_FEATURES:${blockingFeatures.sortedBy(Enum<*>::name).joinToString { it.name }}"

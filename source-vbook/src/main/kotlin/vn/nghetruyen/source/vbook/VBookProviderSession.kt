@@ -5,6 +5,7 @@ import vn.nghetruyen.source.api.SourceCapabilityBrokers
 import vn.nghetruyen.source.api.SourceErrorCode
 import vn.nghetruyen.source.api.SourcePlatformFailure
 import vn.nghetruyen.source.api.SourcePlatformResult
+import vn.nghetruyen.source.diagnostics.DiagnosticSink
 import java.util.Base64
 
 data class VBookTtsVoice(
@@ -65,6 +66,7 @@ class VBookProviderSession(
     packageBytes: ByteArray,
     brokers: SourceCapabilityBrokers,
     private val configReader: VBookConfigReader = VBookConfigReader { emptyMap() },
+    diagnostics: DiagnosticSink = DiagnosticSink.NONE,
 ) {
     private val pkg = VBookPackageReader.read(packageBytes)
     private val resources = VBookPackageResourceProvider(pkg)
@@ -73,7 +75,7 @@ class VBookProviderSession(
     val sourceId: String = VBookHostManifestFactory.stableSourceId(artifactIdentity)
     private val configKey = artifactIdentity
     private val hostManifest = VBookHostManifestFactory.create(artifactIdentity, manifest, resources)
-    private val runtime = VBookCompatibilityRuntime(brokers)
+    private val runtime = VBookCompatibilityRuntime(brokers, diagnostics)
 
     fun comicPages(chapterUrl: String, traceId: String = ""): SourcePlatformResult<List<String>> {
         if (contentType != VBookContentType.COMIC) return wrongType(VBookContentType.COMIC, traceId)

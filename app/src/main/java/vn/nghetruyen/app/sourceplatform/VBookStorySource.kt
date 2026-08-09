@@ -14,6 +14,7 @@ import vn.nghetruyen.app.sources.SourceImplementationKind
 import vn.nghetruyen.app.sources.StorySource
 import vn.nghetruyen.source.api.SourceCapabilityBrokers
 import vn.nghetruyen.source.api.SourcePlatformResult
+import vn.nghetruyen.source.diagnostics.DiagnosticSink
 import vn.nghetruyen.source.runtime.SourceResourceProvider
 import vn.nghetruyen.source.vbook.VBookCompatibilityRuntime
 import vn.nghetruyen.source.vbook.VBookConfigReader
@@ -40,12 +41,13 @@ class VBookStorySource(
     packageBytes: ByteArray,
     brokers: SourceCapabilityBrokers,
     private val configReader: VBookConfigReader = VBookConfigReader { emptyMap() },
+    diagnostics: DiagnosticSink = DiagnosticSink.NONE,
 ) : StorySource {
     private val pkg: VBookPackage = VBookPackageReader.read(packageBytes)
     private val resources = PackageResources(pkg)
     private val plugin: VBookExtensionManifest = vn.nghetruyen.source.vbook.VBookManifestParser.parse(pkg.pluginJson())
     private val hostManifest = VBookHostManifestFactory.create(artifact.identity.canonicalKey(), plugin, resources)
-    private val runtime = VBookCompatibilityRuntime(brokers)
+    private val runtime = VBookCompatibilityRuntime(brokers, diagnostics)
     private val configKey = artifact.identity.canonicalKey()
     private val pageCache = ConcurrentHashMap<PageKey, VBookCompatibilityRuntime.ExecutionResult>()
     private val chapterByUrl = ConcurrentHashMap<String, ChapterSummary>()

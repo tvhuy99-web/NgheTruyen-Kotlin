@@ -229,10 +229,11 @@ object VBookManifestParser {
 
     private val SENSITIVE_CONFIG_WORDS = setOf(
         "password", "passwd", "passphrase", "token", "secret", "cookie", "authorization",
-        "credential", "credentials", "apikey", "sessionid", "session", "bearer",
+        "credential", "credentials", "apikey", "sessionid", "session", "bearer", "username",
+        "login", "email", "account",
     )
     private val SENSITIVE_CONFIG_COMPACT_WORDS = setOf(
-        "apikey", "accesstoken", "authtoken", "clientsecret", "sessionid",
+        "apikey", "accesstoken", "authtoken", "clientsecret", "sessionid", "username",
     )
 
     private fun scalar(value: JsonValue): String = when (value) {
@@ -285,7 +286,7 @@ object VBookContractDetector {
             reasons += "current-only content type ${metadata.type}"
         }
 
-        val joinedScripts = scripts.values.joinToString("\n")
+        val joinedScripts = scripts.values.joinToString("\n", transform = VBookJavaScriptLexicalMask::executable)
         if (Regex("\\bcode\\s*[:=]\\s*(200|403)\\b").containsMatchIn(joinedScripts)) {
             legacy += 2
             reasons += "flat 200/403 response code usage detected"

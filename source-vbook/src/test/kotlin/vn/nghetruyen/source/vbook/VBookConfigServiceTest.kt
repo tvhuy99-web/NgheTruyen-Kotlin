@@ -63,15 +63,16 @@ class VBookConfigServiceTest {
                 "DOMAIN":{"title":"Domain","default":"default.example","mode":"input","format":"text"},
                 "API_TOKEN":{"title":"Access token","default":"","mode":"input","format":"text"},
                 "API_KEY":{"title":"API key","default":"","mode":"input","format":"text"},
+                "USERNAME":{"title":"Username","default":"","mode":"input","format":"text"},
                 "PIN":{"title":"PIN","default":"","mode":"input","format":"text","secret":true}
               }
             }
         """.trimIndent())
 
-        service.save("x", manifest, mapOf("DOMAIN" to "site.example", "API_TOKEN" to "abc", "API_KEY" to "xyz", "PIN" to "1234"))
+        service.save("x", manifest, mapOf("DOMAIN" to "site.example", "API_TOKEN" to "abc", "API_KEY" to "xyz", "USERNAME" to "reader", "PIN" to "1234"))
 
         assertEquals(mapOf("DOMAIN" to "site.example"), config.read("x"))
-        assertEquals(mapOf("API_TOKEN" to "abc", "API_KEY" to "xyz", "PIN" to "1234"), secrets.read("x"))
+        assertEquals(mapOf("API_TOKEN" to "abc", "API_KEY" to "xyz", "USERNAME" to "reader", "PIN" to "1234"), secrets.read("x"))
         assertEquals("abc", service.load("x", manifest).values["API_TOKEN"])
     }
 

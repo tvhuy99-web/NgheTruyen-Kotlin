@@ -38,7 +38,7 @@ import vn.nghetruyen.source.packagekit.VerifiedSourcePack
 import vn.nghetruyen.source.repository.SourceRepositoryCatalog
 import vn.nghetruyen.source.repository.SourceRepositoryPackageStatus
 import vn.nghetruyen.source.repository.SourceRepositoryVerifier
-import vn.nghetruyen.source.repository.VBookUpdateDisposition
+import com.nghetruyen.source.repository.VBookUpdateDisposition
 import vn.nghetruyen.source.repository.VerifiedSourceRepository
 import vn.nghetruyen.source.runtime.DeclarativeSourceRuntime
 import vn.nghetruyen.source.runtime.MapSourceResourceProvider
@@ -164,6 +164,8 @@ class SourcePlatformManager(
             },
             commentFixtureCount = active?.manifest?.fixtures?.count { it.action == vn.nghetruyen.source.api.SourceActionName.COMMENTS } ?: 0,
             removable = installed.sourceId !in builtinSourceIds,
+            ecosystem = if (active?.manifest?.runtime?.mode == SourceRuntimeMode.VBOOK_JS_COMPAT) "VBOOK" else "NATIVE",
+            contentType = active?.manifest?.contentType?.name.orEmpty(),
         )
     }
 
@@ -340,6 +342,7 @@ class SourcePlatformManager(
                 commentCapability = "VBOOK_DYNAMIC",
                 commentFixtureCount = 0,
                 removable = true,
+                ecosystem = "VBOOK",
             )
         }
 

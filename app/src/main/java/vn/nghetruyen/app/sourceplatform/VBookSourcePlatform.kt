@@ -13,14 +13,18 @@ import com.nghetruyen.source.repository.VBookUpdateResult
 import com.nghetruyen.source.store.FileSourceArtifactStore
 import com.nghetruyen.source.store.SourceArtifactLifecycle
 import vn.nghetruyen.app.ai.TranslationEngine
-import vn.nghetruyen.app.sources.EncryptedSourceSessionStore
+import vn.nghetruyen.app.sources.SourceSessionStore
 import vn.nghetruyen.app.sources.StorySource
 import vn.nghetruyen.source.api.SourceCapabilityBrokers
 import vn.nghetruyen.source.api.SourcePlatformResult
-import vn.nghetruyen.source.diagnostics.PersistentDiagnosticStore
+import vn.nghetruyen.source.diagnostics.BoundedDiagnosticRecorder
+import vn.nghetruyen.source.diagnostics.DiagnosticLevel
+import vn.nghetruyen.source.diagnostics.DiagnosticEvent
 import vn.nghetruyen.source.network.OkHttpSourceNetworkBroker
 import vn.nghetruyen.source.network.OkHttpSourceWebSocketBroker
-import vn.nghetruyen.source.network.PersistentSourceCookiePartition
+import vn.nghetruyen.source.network.PartitionedSourceCookieJar
+import vn.nghetruyen.source.runtime.JcaSourceCryptoBroker
+import vn.nghetruyen.source.lua.LuaNativeHookBroker
 import vn.nghetruyen.source.vbook.VBookCandidate
 import vn.nghetruyen.source.vbook.VBookCandidateValidation
 import vn.nghetruyen.source.vbook.VBookConfigService
@@ -34,6 +38,7 @@ import vn.nghetruyen.source.vbook.VBookPackageReader
 import vn.nghetruyen.source.vbook.VBookProviderSession
 import vn.nghetruyen.source.vbook.VBookValidationFactory
 import java.io.File
+import java.net.URI
 
 data class VBookInstallPreview(
     val repositoryId: String,
@@ -61,7 +66,10 @@ data class VBookInstalledSourceInfo(
     val profileId: String,
     val canRollback: Boolean,
     val installedVersions: List<String>,
+    val loginAvailable: Boolean,
 )
+
+data class VBookLoginInfo(val sourceId: String, val loginUrl: String, val allowedHosts: Set<String>)
 
 /**
  * Persistent vBook subsystem. It deliberately does not install vBook packages into SourcePackStore.
@@ -69,14 +77,17 @@ data class VBookInstalledSourceInfo(
  */
 class VBookSourcePlatform(
     context: Context,
-    sourceSessionStore: EncryptedSourceSessionStore,
+    sourceSessionStore: SourceSessionStore,
     translationEngine: TranslationEngine,
     root: File = File(context.filesDir, "source-platform/vbook"),
     private val clockMs: () -> Long = System::currentTimeMillis,
 ) {
     private val appContext = context.applicationContext
-    private val diagnostics = PersistentDiagnosticStore(appContext)
-    private val cookiePartition = PersistentSourceCookiePartition(appContext)
+    private val diagnostics = BoundedDiagnosticRecorder(maxEvents = 8_000, level = DiagnosticLevel.BASIC)
+    private val cookiePartition = VBookSessionCookiePartition(
+        PartitionedSourceCookieJar(EncryptedSourceCookiePersistence(appContext)),
+        sourceSessionStore,
+    )
     private val translationBroker = AndroidSourceTranslationBroker(translationEngine)
     private val configStore = AndroidVBookConfigStore(appContext)
     private val secretStore = AndroidVBookSecretStore(appContext)
@@ -85,10 +96,10 @@ class VBookSourcePlatform(
     private val brokers = SourceCapabilityBrokers(
         network = OkHttpSourceNetworkBroker(cookiePartition, diagnostics),
         browser = AndroidSourceBrowserBroker(appContext, cookiePartition, diagnostics),
-        storage = EncryptedSourceStorageBroker(sourceSessionStore),
-        crypto = AndroidSourceCryptoBroker(appContext),
+        storage = EncryptedSourceStorageBroker(File(root, "storage")),
+        crypto = JcaSourceCryptoBroker(AndroidSourceSecretKeyProvider()),
         websocket = OkHttpSourceWebSocketBroker(cookiePartition, diagnostics),
-        nativeHooks = AndroidSourceNativeHookBroker(),
+        nativeHooks = LuaNativeHookBroker(),
         graphics = AndroidSourceGraphicsBroker(),
         translation = translationBroker,
         cookies = cookiePartition,
@@ -180,7 +191,15 @@ class VBookSourcePlatform(
             profileId = current.compatibilityProfile?.id.orEmpty(),
             canRollback = current.state == SourceArtifactState.ACTIVE && previous != null,
             installedVersions = listOfNotNull(current.version, previous?.version).distinct(),
+            loginAvailable = loginInfo(manifest, sourceId = VBookHostManifestFactory.stableSourceId(current.identity.canonicalKey())) != null,
         )
+    }
+
+    fun loginInfoBySourceId(sourceId: String): VBookLoginInfo? {
+        val current = installedBySourceId(sourceId)
+        val bytes = store.originalBytes(current.artifactId) ?: return null
+        val manifest = runCatching { VBookManifestParser.parse(VBookPackageReader.read(bytes).pluginJson()) }.getOrNull() ?: return null
+        return loginInfo(manifest, sourceId)
     }
 
     fun setEnabled(sourceId: String, enabled: Boolean): VBookInstalledSourceInfo {
@@ -221,7 +240,7 @@ class VBookSourcePlatform(
             if (plugin.metadata.type !in setOf(VBookContentType.NOVEL, VBookContentType.CHINESE_NOVEL)) {
                 return@runCatching null
             }
-            VBookStorySource(artifact, bytes, brokers, configReader)
+            VBookStorySource(artifact, bytes, brokers, configReader, diagnostics)
         }.getOrNull()
     }
 
@@ -235,6 +254,7 @@ class VBookSourcePlatform(
                     packageBytes = bytes,
                     brokers = brokers,
                     configReader = configReader,
+                    diagnostics = diagnostics,
                 )
             }.getOrNull()?.takeIf { contentType == null || it.contentType == contentType }
         }
@@ -270,12 +290,70 @@ class VBookSourcePlatform(
         return configService.reset(identity.canonicalKey(), manifest)
     }
 
+    fun configFieldsBySourceId(sourceId: String): List<SourceConfigFieldUi> {
+        val current = installedBySourceId(sourceId)
+        val bytes = store.originalBytes(current.artifactId) ?: error("VBOOK_INSTALLED_ARTIFACT_BYTES_MISSING")
+        val manifest = VBookManifestParser.parse(VBookPackageReader.read(bytes).pluginJson())
+        val extensionKey = current.identity.canonicalKey()
+        val snapshot = configService.load(extensionKey, manifest)
+        val persistedSecrets = secretStore.read(extensionKey)
+        return manifest.config.values.map { field ->
+            SourceConfigFieldUi(
+                key = field.key,
+                title = field.title.ifBlank { field.key },
+                subtitle = field.subtitle,
+                value = if (field.sensitive) "" else snapshot.values[field.key].orEmpty(),
+                defaultValue = field.defaultValue,
+                options = field.values,
+                mode = field.mode.name,
+                format = field.format.name,
+                sensitive = field.sensitive,
+                configured = if (field.sensitive) !persistedSecrets[field.key].isNullOrEmpty() else true,
+            )
+        }
+    }
+
+    fun saveConfigBySourceId(sourceId: String, changes: Map<String, String>): VBookConfigSnapshot {
+        val current = installedBySourceId(sourceId)
+        val bytes = store.originalBytes(current.artifactId) ?: error("VBOOK_INSTALLED_ARTIFACT_BYTES_MISSING")
+        val manifest = VBookManifestParser.parse(VBookPackageReader.read(bytes).pluginJson())
+        return configService.save(current.identity.canonicalKey(), manifest, changes)
+    }
+
+    fun resetConfigBySourceId(sourceId: String): VBookConfigSnapshot {
+        val current = installedBySourceId(sourceId)
+        val bytes = store.originalBytes(current.artifactId) ?: error("VBOOK_INSTALLED_ARTIFACT_BYTES_MISSING")
+        val manifest = VBookManifestParser.parse(VBookPackageReader.read(bytes).pluginJson())
+        return configService.reset(current.identity.canonicalKey(), manifest)
+    }
+
+    /** Revalidates the exact archived ZIP without touching the active pointer or contacting a site. */
+    fun validateBySourceId(sourceId: String): VBookCandidateValidation {
+        val current = installedBySourceId(sourceId)
+        val bytes = store.originalBytes(current.artifactId) ?: error("VBOOK_INSTALLED_ARTIFACT_BYTES_MISSING")
+        val pkg = VBookPackageReader.read(bytes)
+        return validator.validate(VBookCandidate(current.artifactId, pkg.pluginJson(), pkg.decodeScripts()))
+    }
+
+    fun diagnosticsSnapshot(sourceId: String? = null): List<DiagnosticEvent> = diagnostics.snapshot(sourceId)
+
+    fun clearDiagnostics() {
+        diagnostics.clear()
+    }
+
     fun originalPackageBytes(artifactId: String): ByteArray? = store.originalBytes(artifactId)
 
     private fun installedBySourceId(sourceId: String): SourceArtifactDescriptor =
         store.installedArtifacts(SourceEcosystem.VBOOK).firstOrNull {
             VBookHostManifestFactory.stableSourceId(it.identity.canonicalKey()) == sourceId
         } ?: error("VBOOK_INSTALLED_SOURCE_NOT_FOUND:$sourceId")
+
+    private fun loginInfo(manifest: vn.nghetruyen.source.vbook.VBookExtensionManifest, sourceId: String): VBookLoginInfo? {
+        val uri = runCatching { URI(manifest.metadata.source) }.getOrNull() ?: return null
+        val host = uri.host?.lowercase()?.takeIf(String::isNotBlank) ?: return null
+        if (!uri.scheme.equals("https", ignoreCase = true) || uri.userInfo != null || uri.fragment != null) return null
+        return VBookLoginInfo(sourceId, uri.toASCIIString(), setOf(host))
+    }
 
     private fun artifactId(identity: SourceArtifactIdentity, packageSha: String): String =
         "vbook-" + SourceArtifactLifecycle.sha256(

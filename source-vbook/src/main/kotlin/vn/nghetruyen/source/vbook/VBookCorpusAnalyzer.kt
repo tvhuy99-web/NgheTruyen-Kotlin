@@ -177,10 +177,12 @@ object VBookCorpusAnalyzer {
 
         val dynamicScripts = linkedSetOf<String>()
         scripts.forEach { (path, code) ->
+            val executableCode = VBookJavaScriptLexicalMask.executable(code)
+            val structuralCode = VBookJavaScriptLexicalMask.withoutComments(code)
             fun hit(feature: VBookFeature, regex: Regex, label: String = regex.pattern) {
-                regex.find(code)?.let { match -> add(feature, path, match.value.take(160).ifBlank { label }) }
+                regex.find(executableCode)?.let { match -> add(feature, path, match.value.take(160).ifBlank { label }) }
             }
-            if (code.contains("http://", ignoreCase = true)) add(VBookFeature.LEGACY_HTTP_SOURCE, path, "http:// literal")
+            if (structuralCode.contains("http://", ignoreCase = true)) add(VBookFeature.LEGACY_HTTP_SOURCE, path, "http:// literal")
             hit(VBookFeature.RESPONSE_HELPER, Regex("\\bResponse\\.(?:success|error)\\s*\\("))
             hit(VBookFeature.RESPONSE_LEGACY_CODE, Regex("\\bcode\\s*[:=]\\s*(?:200|403)\\b"))
             hit(VBookFeature.FETCH, Regex("\\bfetch\\s*\\("))
@@ -223,7 +225,7 @@ object VBookCorpusAnalyzer {
             hit(VBookFeature.JS_FORBIDDEN_NAMED_CAPTURE, Regex("\\(\\?<([A-Za-z][A-Za-z0-9_]*)>"))
             hit(VBookFeature.JS_FORBIDDEN_LOOKBEHIND, Regex("\\(\\?<([=!])"))
 
-            loadLiteral.findAll(code).forEach { match ->
+            loadLiteral.findAll(structuralCode).forEach { match ->
                 val target = match.groupValues[1]
                 if (target.equals("crypto.js", ignoreCase = true)) {
                     add(VBookFeature.LOAD_CRYPTO_BUILTIN, path, target)
@@ -231,7 +233,7 @@ object VBookCorpusAnalyzer {
                     add(VBookFeature.DYNAMIC_LOAD, path, target)
                 }
             }
-            dynamicObject.findAll(code).forEach { match ->
+            dynamicObject.findAll(structuralCode).forEach { match ->
                 val raw = match.groupValues[1]
                 runCatching { VBookPaths.normalizeScriptPath(raw) }.getOrNull()?.let { target ->
                     dynamicScripts += target

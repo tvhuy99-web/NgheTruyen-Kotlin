@@ -63,13 +63,17 @@ class RequestBody { companion object { fun ByteArray.toRequestBody(contentType:M
 class Headers(private val values: Map<String,List<String>> = emptyMap()){ fun toMultimap()=values }
 class TlsVersion(val javaName:String); class CipherSuite(val javaName:String); class Handshake(val tlsVersion:TlsVersion,val cipherSuite:CipherSuite)
 class ResponseBody { fun contentLength():Long=0; fun byteStream():InputStream=ByteArrayInputStream(ByteArray(0)); fun contentType():MediaType?=null }
-class Request(val url:HttpUrl){ class Builder { private var url:HttpUrl=HttpUrl.run{"https://example.org".toHttpUrl()}; fun url(value:HttpUrl)=apply{url=value}; fun url(value:String)=apply{url=HttpUrl.run{value.toHttpUrl()}}; fun header(name:String,value:String)=apply{}; fun get()=apply{}; fun head()=apply{}; fun method(method:String,body:RequestBody?)=apply{}; fun build()=Request(url) } }
-class Response(val code:Int=200,val request:Request=Request.Builder().build(),val body:ResponseBody=ResponseBody(),val headers:Headers=Headers(),val handshake:Handshake?=null):Closeable { val isSuccessful:Boolean get()=code in 200..299; fun header(name:String):String?=null; fun headers(name:String):List<String> = emptyList(); override fun close(){} }
+class Request(val url:HttpUrl,val headers:Headers=Headers()){ class Builder { private var url:HttpUrl=HttpUrl.run{"https://example.org".toHttpUrl()}; fun url(value:HttpUrl)=apply{url=value}; fun url(value:String)=apply{url=HttpUrl.run{value.toHttpUrl()}}; fun header(name:String,value:String)=apply{}; fun get()=apply{}; fun head()=apply{}; fun method(method:String,body:RequestBody?)=apply{}; fun build()=Request(url) } }
+class Response(val code:Int=200,val request:Request=Request.Builder().build(),val body:ResponseBody=ResponseBody(),val headers:Headers=Headers(),val handshake:Handshake?=null,val message:String="OK"):Closeable { val isSuccessful:Boolean get()=code in 200..299; fun header(name:String):String?=null; fun headers(name:String):List<String> = emptyList(); override fun close(){} }
 class Timeout { fun timeout(timeout:Long,unit:TimeUnit):Timeout=this }
 class Call { fun execute()=Response(); fun timeout()=Timeout() }
 open class WebSocket { open fun send(text:String):Boolean=true; open fun close(code:Int,reason:String?):Boolean=true; open fun cancel(){} }
-open class WebSocketListener { open fun onOpen(webSocket:WebSocket,response:Response){}; open fun onMessage(webSocket:WebSocket,text:String){}; open fun onClosing(webSocket:WebSocket,code:Int,reason:String){}; open fun onClosed(webSocket:WebSocket,code:Int,reason:String){}; open fun onFailure(webSocket:WebSocket,t:Throwable,response:Response?){} }
+open class WebSocketListener { open fun onOpen(webSocket:WebSocket,response:Response){}; open fun onMessage(webSocket:WebSocket,text:String){}; open fun onMessage(webSocket:WebSocket,bytes:okio.ByteString){}; open fun onClosing(webSocket:WebSocket,code:Int,reason:String){}; open fun onClosed(webSocket:WebSocket,code:Int,reason:String){}; open fun onFailure(webSocket:WebSocket,t:Throwable,response:Response?){} }
 class OkHttpClient { fun newCall(request:Request)=Call(); fun newWebSocket(request:Request,listener:WebSocketListener):WebSocket=WebSocket(); class Builder { fun dns(dns:Dns)=apply{}; fun connectTimeout(duration:Duration)=apply{}; fun readTimeout(duration:Duration)=apply{}; fun callTimeout(duration:Duration)=apply{}; fun followRedirects(value:Boolean)=apply{}; fun followSslRedirects(value:Boolean)=apply{}; fun retryOnConnectionFailure(value:Boolean)=apply{}; fun build()=OkHttpClient() } }
+'''
+
+OKIO_STUB = r'''package okio
+class ByteString(private val value:ByteArray=ByteArray(0)) { fun toByteArray():ByteArray=value.copyOf() }
 '''
 
 
@@ -226,6 +230,7 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="nghe-m2-source-") as temp_name:
         temp = Path(temp_name)
         stub = write(temp, "stubs/okhttp3/OkHttp.kt", OKHTTP_STUB)
+        okio_stub = write(temp, "stubs/okio/ByteString.kt", OKIO_STUB)
         junit_stub = write(temp, "stubs/org/junit/JUnit.kt", JUNIT_STUB)
         jsoup_main = write(temp, "stubs/org/jsoup/Jsoup.kt", """package org.jsoup
 import org.jsoup.nodes.Document
@@ -271,7 +276,7 @@ class Elements():ArrayList<Element>() {
             print(f"MILESTONE2_SOURCE_PLATFORM_PRECOMPILED={precompiled_dir}", flush=True)
         else:
             combined_stubs = temp / "source-platform-m2-stubs.jar"
-            run([KOTLINC, str(stub), str(junit_stub), str(jsoup_main), str(jsoup_nodes), str(jsoup_elements), "-d", str(combined_stubs)])
+            run([KOTLINC, str(stub), str(okio_stub), str(junit_stub), str(jsoup_main), str(jsoup_nodes), str(jsoup_elements), "-d", str(combined_stubs)])
             stub_jars = [combined_stubs]
             module_jars: dict[str, Path] = {}
             for module in required_modules:

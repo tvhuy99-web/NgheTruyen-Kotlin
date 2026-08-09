@@ -11,19 +11,24 @@ import vn.nghetruyen.source.api.SourceErrorCode
 import vn.nghetruyen.source.api.SourceManifest
 import vn.nghetruyen.source.api.SourcePlatformFailure
 import vn.nghetruyen.source.api.SourcePlatformResult
+import vn.nghetruyen.source.diagnostics.DiagnosticSink
 import vn.nghetruyen.source.runtime.SourceResourceProvider
 
 /** Contract-aware facade over the mature vBook host API implementation. */
 class VBookCompatibilityRuntime(
     private val runtime: VBookJsRuntime = VBookJsRuntime(),
 ) {
-    constructor(brokers: SourceCapabilityBrokers) : this(
+    constructor(
+        brokers: SourceCapabilityBrokers,
+        diagnostics: DiagnosticSink = DiagnosticSink.NONE,
+    ) : this(
         VBookJsRuntime(
             brokers.copy(
                 network = VBookRawNetworkBroker(brokers.network),
                 translation = VBookTranslationBrokerRouter(brokers.translation, brokers.quickTranslation),
                 websocket = VBookWebSocketBroker(brokers.websocket),
             ),
+            diagnostics,
         ),
     )
 

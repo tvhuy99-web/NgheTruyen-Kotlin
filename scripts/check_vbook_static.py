@@ -22,6 +22,7 @@ def require(text: str, label: str, *tokens: str) -> None:
 
 def main() -> None:
     runtime = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt")
+    compatibility_runtime = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookCompatibilityRuntime.kt")
     sandbox = read("source-js-sandbox/src/main/kotlin/com/nghetruyen/source/sandbox/JsSandbox.kt")
     boundary = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookRhinoValues.kt")
     importer = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookPluginImporter.kt")
@@ -29,8 +30,14 @@ def main() -> None:
     config_service = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookConfigService.kt")
     config_store = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidVBookConfigStore.kt")
     secret_store = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidVBookSecretStore.kt")
+    encrypted_storage = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/EncryptedSourceStorageBroker.kt")
+    session_cookies = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/VBookSessionCookiePartition.kt")
     backup_rules = read("app/src/main/res/xml/backup_rules.xml")
     extraction_rules = read("app/src/main/res/xml/data_extraction_rules.xml")
+    source_models = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/SourcePlatformModels.kt")
+    unified_manager = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/UnifiedSourcePlatformManager.kt")
+    source_ui = read("app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt")
+    config_ui = read("app/src/main/java/vn/nghetruyen/app/ui/screens/SourcePackConfigDialog.kt")
 
     require(
         sandbox,
@@ -56,6 +63,7 @@ def main() -> None:
         'putProperty(scope, "Qt"',
         'putProperty(scope, "WebSocket"',
     )
+    require(compatibility_runtime, "vBook diagnostic wiring", "diagnostics: DiagnosticSink", "diagnostics,")
     require(
         boundary,
         "vBook host boundary",
@@ -90,8 +98,27 @@ def main() -> None:
         "AES/GCM/NoPadding",
         "cipher.updateAAD(extensionKey.toByteArray(Charsets.UTF_8))",
     )
+    require(
+        encrypted_storage,
+        "encrypted vBook local storage",
+        "class EncryptedSourceStorageBroker",
+        "AES/GCM/NoPadding",
+        "cipher.updateAAD(associatedData(sourceId, key))",
+        "Quotas are enforced against plaintext",
+    )
+    require(session_cookies, "vBook manual login bridge", "class VBookSessionCookiePartition", "syncFromManualLogin", "mirrorDelegate")
     for rules, label in ((backup_rules, "backup rules"), (extraction_rules, "data extraction rules")):
         require(rules, label, 'path="encrypted_vbook_secrets_v1.xml"', 'path="encrypted_vbook_config_v1.xml"')
+    require(source_models, "unified source UI model", "val ecosystem: String", "val configFields: List<SourceConfigFieldUi>")
+    require(unified_manager, "unified vBook diagnostics", "vBook.diagnosticsSnapshot(sourceId)", "vBook.clearDiagnostics()")
+    require(source_ui, "unified source UI", '"VBOOK" to "VBOOK"', 'text = "KIỂM TRA"', 'text = "CẤU HÌNH"', 'text = "ĐĂNG NHẬP"')
+    require(
+        config_ui,
+        "native vBook config editor",
+        "PasswordVisualTransformation()",
+        "field.sensitive && value.isBlank()",
+        "Giá trị này sẽ được mã hóa",
+    )
     for forbidden in ("addJavascriptInterface", "ProcessBuilder(", "Class.forName("):
         assert forbidden not in runtime, f"Forbidden vBook bridge token: {forbidden}"
 

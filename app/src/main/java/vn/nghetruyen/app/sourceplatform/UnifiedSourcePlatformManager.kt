@@ -5,6 +5,8 @@ import com.nghetruyen.source.platform.SourceEcosystem
 import com.nghetruyen.source.repository.VBookUpdateDisposition
 import vn.nghetruyen.app.sources.StorySource
 import vn.nghetruyen.source.api.SourceRuntimeMode
+import vn.nghetruyen.source.diagnostics.DiagnosticJsonExporter
+import vn.nghetruyen.source.diagnostics.SourceTraceExplorer
 import vn.nghetruyen.source.vbook.VBookHostManifestFactory
 import vn.nghetruyen.source.vbook.VBookManifestParser
 import vn.nghetruyen.source.vbook.VBookPackageReader
@@ -236,6 +238,34 @@ class UnifiedSourcePlatformManager(
         }
     }
 
+    fun saveConfiguration(sourceId: String, changes: Map<String, String>): Result<Unit> = runCatching {
+        require(vBook.installedSources().any { it.sourceId == sourceId }) { "Cấu hình này chỉ áp dụng cho tiện ích vBook." }
+        vBook.saveConfigBySourceId(sourceId, changes)
+        onExternalSourcesChanged()
+    }
+
+    fun resetConfiguration(sourceId: String): Result<Unit> = runCatching {
+        require(vBook.installedSources().any { it.sourceId == sourceId }) { "Cấu hình này chỉ áp dụng cho tiện ích vBook." }
+        vBook.resetConfigBySourceId(sourceId)
+        onExternalSourcesChanged()
+    }
+
+    fun checkInstalledPack(sourceId: String): Result<String> = runCatching {
+        val installed = vBook.installedSources().firstOrNull { it.sourceId == sourceId }
+            ?: error("Kiểm tra gói ngoại tuyến hiện chỉ áp dụng cho tiện ích vBook.")
+        val validation = vBook.validateBySourceId(sourceId)
+        require(validation.activatable) {
+            val blockers = validation.blockingFeatures.sortedBy(Enum<*>::name).joinToString { it.name }
+            val failures = validation.failures.joinToString("; ") { it.message }
+            listOf(blockers, failures).filter(String::isNotBlank).joinToString(" | ").ifBlank { "Gói không thể kích hoạt." }
+        }
+        "${installed.name}: gói vBook gốc, cấu trúc, tập lệnh và khả năng tương thích đều hợp lệ."
+    }
+
+    fun vBookLoginInfo(sourceId: String): VBookLoginInfo? = runCatching {
+        vBook.loginInfoBySourceId(sourceId)
+    }.getOrNull()
+
     /** vBook export is the exact immutable ZIP originally staged, not a reconstructed archive. */
     fun exportInstalledPack(sourceId: String, output: OutputStream): Result<Unit> {
         val installed = vBook.installedSources().firstOrNull { it.sourceId == sourceId }
@@ -249,11 +279,44 @@ class UnifiedSourcePlatformManager(
     }
 
     fun inspectSelector(html: String, selector: String, baseUrl: String) = legacy.inspectSelector(html, selector, baseUrl)
-    fun diagnosticsSnapshot(sourceId: String? = null) = legacy.diagnosticsSnapshot(sourceId)
-    fun diagnosticTraces(limit: Int = 20) = legacy.diagnosticTraces(limit)
-    fun diagnosticSummaries(limit: Int = 20) = legacy.diagnosticSummaries(limit)
-    fun exportDiagnostics() = legacy.exportDiagnostics()
-    fun clearDiagnostics() = legacy.clearDiagnostics()
+    fun diagnosticsSnapshot(sourceId: String? = null) =
+        (legacy.diagnosticsSnapshot(sourceId) + vBook.diagnosticsSnapshot(sourceId)).sortedBy { it.timestampEpochMs }
+
+    fun diagnosticTraces(limit: Int = 20): List<SourceTraceUi> = SourceTraceExplorer.summarize(diagnosticsSnapshot())
+        .take(limit.coerceIn(1, 200))
+        .map { trace ->
+            SourceTraceUi(
+                traceId = trace.traceId,
+                sourceId = trace.sourceId,
+                eventCount = trace.eventCount,
+                startedAtEpochMs = trace.startedAtEpochMs,
+                endedAtEpochMs = trace.completedAtEpochMs,
+                failed = trace.errorCount > 0,
+            )
+        }
+
+    fun diagnosticSummaries(limit: Int = 20): List<SourceDiagnosticUi> = diagnosticsSnapshot()
+        .takeLast(limit.coerceIn(1, 200))
+        .asReversed()
+        .map { event ->
+            SourceDiagnosticUi(
+                timestampEpochMs = event.timestampEpochMs,
+                traceId = event.traceId,
+                sourceId = event.sourceId,
+                category = event.category.name,
+                name = event.name,
+                severity = event.severity.name,
+                durationMs = event.durationMs,
+                detail = event.attributes.entries.joinToString(" • ") { (key, value) -> "$key=$value" },
+            )
+        }
+
+    fun exportDiagnostics(): ByteArray = DiagnosticJsonExporter.export(diagnosticsSnapshot())
+
+    fun clearDiagnostics() {
+        legacy.clearDiagnostics()
+        vBook.clearDiagnostics()
+    }
 
     private fun installedUi(installed: VBookInstalledSourceInfo): SourcePackUiInfo = SourcePackUiInfo(
         id = installed.sourceId,
@@ -267,6 +330,11 @@ class UnifiedSourcePlatformManager(
         commentCapability = "VBOOK_DYNAMIC",
         commentFixtureCount = 0,
         removable = true,
+        ecosystem = "VBOOK",
+        contentType = installed.contentType.name,
+        compatibilityProfile = installed.profileId,
+        configFields = runCatching { vBook.configFieldsBySourceId(installed.sourceId) }.getOrDefault(emptyList()),
+        loginAvailable = installed.loginAvailable,
     )
 
     private fun clearPendingCatalogInstall() {

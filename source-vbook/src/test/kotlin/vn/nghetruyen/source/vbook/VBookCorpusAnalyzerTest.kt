@@ -7,6 +7,53 @@ import org.junit.Test
 
 class VBookCorpusAnalyzerTest {
     @Test
+    fun hostApisInsideCommentsAndGeneratedPageScriptsAreNotCorpusRequirements() {
+        val audit = VBookCorpusAnalyzer.audit(
+            "generated-page-script",
+            PLUGIN,
+            mapOf("src/search.js" to """
+                function execute(query, page) {
+                  // new WebSocket('wss://comment.invalid'); Qt.translate('x', 'vp', {});
+                  var html = "<script>var ws = new WebSocket('wss://page.example'); ws.onmessage=function(e){};<" + "/script>";
+                  var browser = Engine.newBrowser();
+                  browser.loadHtml(html, 'https://page.example/');
+                  return Response.success([], '');
+                }
+            """.trimIndent(),
+            "src/detail.js" to response("{}"),
+            "src/toc.js" to response("[]"),
+            "src/chap.js" to response("'text'")),
+        )
+
+        assertFalse(VBookFeature.WEBSOCKET in audit.features)
+        assertFalse(VBookFeature.QUICK_TRANSLATOR_OPTIONS in audit.features)
+        assertTrue(VBookFeature.BROWSER in audit.features)
+        assertTrue(VBookFeature.BROWSER_LOAD_HTML in audit.features)
+    }
+
+    @Test
+    fun executableHostApisRemainVisibleAfterLexicalMasking() {
+        val audit = VBookCorpusAnalyzer.audit(
+            "real-host-api",
+            PLUGIN,
+            mapOf("src/search.js" to """
+                function execute(query, page) {
+                  var ws = new WebSocket('wss://socket.example', {'X-Test':'yes'});
+                  var translated = Qt.translate('x', 'vp', {person_name:true});
+                  return Response.success([], '');
+                }
+            """.trimIndent(),
+            "src/detail.js" to response("{}"),
+            "src/toc.js" to response("[]"),
+            "src/chap.js" to response("'text'")),
+        )
+
+        assertTrue(VBookFeature.WEBSOCKET in audit.features)
+        assertTrue(VBookFeature.WEBSOCKET_HEADERS in audit.features)
+        assertTrue(VBookFeature.QUICK_TRANSLATOR_OPTIONS in audit.features)
+    }
+
+    @Test
     fun scansHostApisDynamicScriptsAndSubFeatures() {
         val audit = VBookCorpusAnalyzer.audit(
             id = "sample",
@@ -92,6 +139,8 @@ class VBookCorpusAnalyzerTest {
         assertEquals(2, rows.size)
         assertEquals("B", rows[1].author)
     }
+
+    private fun response(data: String): String = "function execute(){return Response.success($data, '');}"
 
     companion object {
         private val PLUGIN = """

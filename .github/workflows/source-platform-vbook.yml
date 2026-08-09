@@ -5,6 +5,11 @@ on:
     paths:
       - 'app/src/main/java/vn/nghetruyen/app/sourceplatform/**'
       - 'app/src/main/java/vn/nghetruyen/app/AppContainer.kt'
+      - 'app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt'
+      - 'app/src/main/java/vn/nghetruyen/app/ui/NgheTruyenApp.kt'
+      - 'app/src/main/java/vn/nghetruyen/app/ui/ReferenceNgheTruyenApp.kt'
+      - 'app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt'
+      - 'app/src/main/java/vn/nghetruyen/app/ui/screens/SourcePackConfigDialog.kt'
       - 'app/src/main/res/xml/backup_rules.xml'
       - 'app/src/main/res/xml/data_extraction_rules.xml'
       - 'source-api/**'
@@ -31,6 +36,11 @@ on:
     paths:
       - 'app/src/main/java/vn/nghetruyen/app/sourceplatform/**'
       - 'app/src/main/java/vn/nghetruyen/app/AppContainer.kt'
+      - 'app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt'
+      - 'app/src/main/java/vn/nghetruyen/app/ui/NgheTruyenApp.kt'
+      - 'app/src/main/java/vn/nghetruyen/app/ui/ReferenceNgheTruyenApp.kt'
+      - 'app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt'
+      - 'app/src/main/java/vn/nghetruyen/app/ui/screens/SourcePackConfigDialog.kt'
       - 'app/src/main/res/xml/backup_rules.xml'
       - 'app/src/main/res/xml/data_extraction_rules.xml'
       - 'source-api/**'

@@ -129,9 +129,18 @@ def package_identity(catalog_url: str, package_url: str) -> str:
     return hashlib.sha256((catalog_url.strip() + "\n" + remote.strip()).encode("utf-8")).hexdigest()
 
 
-def run(index_url: str, output_dir: pathlib.Path, limit_packages: int | None) -> dict:
+def cached_or_fetch(path: pathlib.Path, url: str, limit: int, resume: bool) -> bytes:
+    if resume and path.is_file():
+        data = path.read_bytes()
+        if 0 < len(data) <= limit:
+            return data
+    return fetch(url, limit)
+
+
+def run(index_url: str, output_dir: pathlib.Path, limit_packages: int | None, resume: bool = False) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
-    index_bytes = fetch(index_url, MAX_INDEX_BYTES)
+    index_path = output_dir / "repository.json"
+    index_bytes = cached_or_fetch(index_path, index_url, MAX_INDEX_BYTES, resume)
     index = parse_json(index_bytes, "repository.json")
     if not isinstance(index, list):
         raise RuntimeError("REPOSITORY_INDEX_ARRAY_REQUIRED")
@@ -145,7 +154,7 @@ def run(index_url: str, output_dir: pathlib.Path, limit_packages: int | None) ->
         "catalogs": [],
         "packages": [],
     }
-    write_bytes(output_dir / "repository.json", index_bytes)
+    write_bytes(index_path, index_bytes)
 
     package_count = 0
     for repo_pos, descriptor in enumerate(index):
@@ -159,13 +168,14 @@ def run(index_url: str, output_dir: pathlib.Path, limit_packages: int | None) ->
             "description": str(descriptor.get("description", "")),
         }
         try:
-            catalog_bytes = fetch(catalog_url, MAX_CATALOG_BYTES)
+            catalog_path = output_dir / "catalogs" / f"{repo_pos:02d}-{slug(catalog_url)}.json"
+            catalog_bytes = cached_or_fetch(catalog_path, catalog_url, MAX_CATALOG_BYTES, resume)
             catalog = parse_json(catalog_bytes, catalog_url)
             data = catalog.get("data", []) if isinstance(catalog, dict) else []
             if not isinstance(data, list):
                 raise RuntimeError("CATALOG_DATA_ARRAY_REQUIRED")
             catalog_row.update({"sha256": sha256(catalog_bytes), "itemCount": len(data), "status": "OK"})
-            write_bytes(output_dir / "catalogs" / f"{repo_pos:02d}-{slug(catalog_url)}.json", catalog_bytes)
+            write_bytes(catalog_path, catalog_bytes)
         except Exception as exc:
             catalog_row.update({"status": "ERROR", "error": str(exc)})
             report["catalogs"].append(catalog_row)
@@ -193,11 +203,12 @@ def run(index_url: str, output_dir: pathlib.Path, limit_packages: int | None) ->
             }
             package_count += 1
             try:
-                zip_bytes = fetch(package_url, MAX_ZIP_BYTES)
+                archive_path = output_dir / "archives" / identity / "plugin.zip"
+                zip_bytes = cached_or_fetch(archive_path, package_url, MAX_ZIP_BYTES, resume)
                 zip_hash = sha256(zip_bytes)
                 files = extract_source_zip(zip_bytes)
                 package_dir = output_dir / "packages" / identity
-                write_bytes(output_dir / "archives" / identity / "plugin.zip", zip_bytes)
+                write_bytes(archive_path, zip_bytes)
                 for name, data_bytes in files.items():
                     write_bytes(package_dir / name, data_bytes)
                 row.update({
@@ -236,12 +247,13 @@ def main() -> int:
     parser.add_argument("--index", default=DEFAULT_INDEX)
     parser.add_argument("--out", default="build/vbook-corpus")
     parser.add_argument("--limit-packages", type=int, default=None)
+    parser.add_argument("--resume", action="store_true", help="Reuse already validated downloads after an interrupted acquisition")
     parser.add_argument("--allow-errors", action="store_true", help="Record incomplete/upstream failures but do not fail acquisition")
     args = parser.parse_args()
     if args.limit_packages is not None and args.limit_packages < 1:
         parser.error("--limit-packages must be >= 1")
     try:
-        report = run(args.index, pathlib.Path(args.out), args.limit_packages)
+        report = run(args.index, pathlib.Path(args.out), args.limit_packages, resume=args.resume)
     except Exception as exc:
         print(f"VBOOK_CORPUS_FATAL:{exc}", file=sys.stderr)
         return 2

@@ -597,6 +597,8 @@ fun ReaderScreen(
         var engineExpanded by remember { mutableStateOf(false) }
         var languageExpanded by remember { mutableStateOf(false) }
         var voiceExpanded by remember { mutableStateOf(false) }
+        var processingExpanded by remember { mutableStateOf(false) }
+        var sonicQualityExpanded by remember { mutableStateOf(false) }
         val languages = ttsVoices.map { it.languageTag }.filter(String::isNotBlank).distinct().sorted()
         val visibleVoices = ttsVoices.filter { ttsDraft.languageTag.isBlank() || it.languageTag == ttsDraft.languageTag }
         AlertDialog(
@@ -639,15 +641,23 @@ fun ReaderScreen(
                     visibleVoices.forEach { voice -> DropdownMenuItem(text = { Text(voice.displayName) }, onClick = { ttsDraft = ttsDraft.copy(voiceName = voice.name, languageTag = voice.languageTag); voiceExpanded = false }) }
                 }
                 Text("Phương pháp xử lý", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
-                Row(Modifier.fillMaxWidth()) {
-                    TextButton({ ttsDraft = ttsDraft.copy(processingMethod = "system", volume = ttsDraft.volume.coerceAtMost(1f)) }, Modifier.weight(1f)) { Text((if (ttsDraft.processingMethod == "system") "✓ " else "") + "Android, tối đa 100%") }
-                    TextButton({ ttsDraft = ttsDraft.copy(processingMethod = "sonic") }, Modifier.weight(1f)) { Text((if (ttsDraft.processingMethod == "sonic") "✓ " else "") + "Sonic, tối đa 200%") }
+                Box(Modifier.fillMaxWidth()) {
+                    Button(onClick = { processingExpanded = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (ttsDraft.processingMethod == "sonic") "Sonic, tối đa 200%" else "Android, tối đa 100%")
+                    }
+                    DropdownMenu(expanded = processingExpanded, onDismissRequest = { processingExpanded = false }) {
+                        DropdownMenuItem(text = { Text("Android, tối đa 100%") }, onClick = { processingExpanded = false; ttsDraft = ttsDraft.copy(processingMethod = "system", volume = ttsDraft.volume.coerceAtMost(1f)) })
+                        DropdownMenuItem(text = { Text("Sonic, tối đa 200%") }, onClick = { processingExpanded = false; ttsDraft = ttsDraft.copy(processingMethod = "sonic") })
+                    }
                 }
                 if (ttsDraft.processingMethod == "sonic") {
                     Text("Chế độ Sonic", fontWeight = FontWeight.SemiBold)
-                    Row(Modifier.fillMaxWidth()) {
-                        TextButton({ ttsDraft = ttsDraft.copy(sonicAccurate = false) }, Modifier.weight(1f)) { Text((if (!ttsDraft.sonicAccurate) "✓ " else "") + "Nhanh") }
-                        TextButton({ ttsDraft = ttsDraft.copy(sonicAccurate = true) }, Modifier.weight(1f)) { Text((if (ttsDraft.sonicAccurate) "✓ " else "") + "Chính xác") }
+                    Box(Modifier.fillMaxWidth()) {
+                        Button(onClick = { sonicQualityExpanded = true }, modifier = Modifier.fillMaxWidth()) { Text(if (ttsDraft.sonicAccurate) "Chính xác" else "Nhanh") }
+                        DropdownMenu(expanded = sonicQualityExpanded, onDismissRequest = { sonicQualityExpanded = false }) {
+                            DropdownMenuItem(text = { Text("Nhanh") }, onClick = { sonicQualityExpanded = false; ttsDraft = ttsDraft.copy(sonicAccurate = false) })
+                            DropdownMenuItem(text = { Text("Chính xác") }, onClick = { sonicQualityExpanded = false; ttsDraft = ttsDraft.copy(sonicAccurate = true) })
+                        }
                     }
                 }
                 TtsSlider("Tốc độ đọc", ttsDraft.speed, 0.25f, 3f) { ttsDraft = ttsDraft.copy(speed = it) }
@@ -673,6 +683,7 @@ fun ReaderScreen(
     }
 
     if (showMusicDialog) {
+        var musicModeExpanded by remember { mutableStateOf(false) }
         AlertDialog(
             onDismissRequest = { showMusicDialog = false; musicAdvanced = false },
             title = { Text(if (musicAdvanced) "NHẠC NỀN • NÂNG CAO" else "NHẠC NỀN") },
@@ -687,11 +698,24 @@ fun ReaderScreen(
                             Text("AI đổi nhạc", Modifier.weight(1f))
                             Switch(musicAi, { musicAi = it })
                         }
-                        Text("Chế độ phát", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
-                        Row(Modifier.fillMaxWidth()) {
-                            TextButton({ musicMode = SceneMusicPlaybackMode.SEQUENTIAL }, Modifier.weight(1f)) { Text((if (musicMode == SceneMusicPlaybackMode.SEQUENTIAL) "✓ " else "") + "LẦN LƯỢT") }
-                            TextButton({ musicMode = SceneMusicPlaybackMode.SHUFFLE }, Modifier.weight(1f)) { Text((if (musicMode == SceneMusicPlaybackMode.SHUFFLE) "✓ " else "") + "NGẪU NHIÊN") }
-                            TextButton({ musicMode = SceneMusicPlaybackMode.SMART_AVOID_REPEAT }, Modifier.weight(1f)) { Text((if (musicMode == SceneMusicPlaybackMode.SMART_AVOID_REPEAT) "✓ " else "") + "TRÁNH LẶP") }
+                        Text("Chế độ phát khi không dùng nhạc theo cảnh", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                        Box(Modifier.fillMaxWidth()) {
+                            val currentModeLabel = when (musicMode) {
+                                SceneMusicPlaybackMode.SEQUENTIAL -> "Lần lượt"
+                                SceneMusicPlaybackMode.SHUFFLE -> "Ngẫu nhiên"
+                                SceneMusicPlaybackMode.SMART_AVOID_REPEAT -> "Tránh lặp"
+                            }
+                            Button(onClick = { musicModeExpanded = true }, modifier = Modifier.fillMaxWidth()) { Text(currentModeLabel) }
+                            DropdownMenu(expanded = musicModeExpanded, onDismissRequest = { musicModeExpanded = false }) {
+                                SceneMusicPlaybackMode.entries.forEach { mode ->
+                                    val label = when (mode) {
+                                        SceneMusicPlaybackMode.SEQUENTIAL -> "Lần lượt"
+                                        SceneMusicPlaybackMode.SHUFFLE -> "Ngẫu nhiên"
+                                        SceneMusicPlaybackMode.SMART_AVOID_REPEAT -> "Tránh lặp"
+                                    }
+                                    DropdownMenuItem(text = { Text(label) }, onClick = { musicMode = mode; musicModeExpanded = false })
+                                }
+                            }
                         }
                         if (musicMode == SceneMusicPlaybackMode.SMART_AVOID_REPEAT) {
                             ReaderIntSlider("Tránh lặp", musicAvoidRepeatWindow, 0, 20, suffix = " bài") { musicAvoidRepeatWindow = it }

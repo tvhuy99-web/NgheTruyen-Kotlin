@@ -1440,6 +1440,7 @@ private fun PlaybackAutomationCard(
     onNormalizeTtsVolumeChange: (Boolean) -> Unit,
     onTtsTargetLufsChange: (Float) -> Unit,
 ) {
+    var sceneModeExpanded by remember { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 5.dp)) {
         Column(Modifier.padding(16.dp)) {
             Text("Tai nghe & tự động", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -1468,6 +1469,7 @@ private fun PlaybackAutomationCard(
                 value = state.sonicDefaultSpeed,
                 minimum = 0.25f,
                 maximum = 3f,
+                steps = 274,
                 shown = { "%.2f×".format(it) },
                 onChange = onSonicDefaultSpeedChange,
             )
@@ -1476,6 +1478,7 @@ private fun PlaybackAutomationCard(
                 value = state.sonicDefaultPitch,
                 minimum = 0.5f,
                 maximum = 2f,
+                steps = 149,
                 shown = { "%.2f×".format(it) },
                 onChange = onSonicDefaultPitchChange,
             )
@@ -1497,15 +1500,23 @@ private fun PlaybackAutomationCard(
                 onChange = onTtsTargetLufsChange,
             )
             SettingSwitch("Giữ nhạc qua chương", state.sceneMusicContinueAcrossChapters, onSceneMusicContinueChange)
-            Text("Chế độ nhạc cảnh", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
-            SceneMusicPlaybackMode.entries.forEach { mode ->
-                Button({ onSceneMusicPlaybackModeChange(mode) }, Modifier.fillMaxWidth().padding(top = 2.dp)) {
-                    val label = when (mode) {
-                        SceneMusicPlaybackMode.SEQUENTIAL -> "TUẦN TỰ"
-                        SceneMusicPlaybackMode.SHUFFLE -> "NGẪU NHIÊN"
-                        SceneMusicPlaybackMode.SMART_AVOID_REPEAT -> "TRÁNH LẶP"
+            Text("Chế độ phát", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+            Box(Modifier.fillMaxWidth()) {
+                val currentModeLabel = when (state.sceneMusicPlaybackMode) {
+                    SceneMusicPlaybackMode.SEQUENTIAL -> "Lần lượt"
+                    SceneMusicPlaybackMode.SHUFFLE -> "Ngẫu nhiên"
+                    SceneMusicPlaybackMode.SMART_AVOID_REPEAT -> "Tránh lặp"
+                }
+                Button(onClick = { sceneModeExpanded = true }, modifier = Modifier.fillMaxWidth()) { Text(currentModeLabel) }
+                DropdownMenu(expanded = sceneModeExpanded, onDismissRequest = { sceneModeExpanded = false }) {
+                    SceneMusicPlaybackMode.entries.forEach { mode ->
+                        val label = when (mode) {
+                            SceneMusicPlaybackMode.SEQUENTIAL -> "Lần lượt"
+                            SceneMusicPlaybackMode.SHUFFLE -> "Ngẫu nhiên"
+                            SceneMusicPlaybackMode.SMART_AVOID_REPEAT -> "Tránh lặp"
+                        }
+                        DropdownMenuItem(text = { Text(label) }, onClick = { sceneModeExpanded = false; onSceneMusicPlaybackModeChange(mode) })
                     }
-                    Text((if (state.sceneMusicPlaybackMode == mode) "✓ " else "") + label)
                 }
             }
             ReferenceFloatSettingsSlider(
@@ -1607,10 +1618,10 @@ private fun VoiceSettingsCard(
     onPreviewVoice: () -> Unit, onOpenTtsSettings: () -> Unit,
     onInterruptionModeChange: (AudioInterruptionMode) -> Unit,
 ) {
-    var showAllVoices by remember { mutableStateOf(false) }
-    var showAllEngines by remember { mutableStateOf(false) }
-    val visibleVoices = if (showAllVoices) voices else voices.take(MAX_VISIBLE_VOICES)
-    val visibleEngines = if (showAllEngines) engines else engines.take(6)
+    var engineExpanded by remember { mutableStateOf(false) }
+    var voiceExpanded by remember { mutableStateOf(false) }
+    val selectedEngineLabel = engines.firstOrNull { it.packageName == selectedEnginePackage }?.label ?: "Mặc định hệ thống"
+    val selectedVoiceLabel = voices.firstOrNull { it.name == selectedVoiceName }?.displayName ?: "Giọng mặc định"
     Card(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 5.dp)) {
         Column(Modifier.padding(16.dp)) {
             Text("TTS & giọng đọc", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -1619,6 +1630,7 @@ private fun VoiceSettingsCard(
                 value = rate,
                 minimum = 0.25f,
                 maximum = 3f,
+                steps = 274,
                 shown = { "%.2f×".format(it) },
                 onChange = onRateChange,
             )
@@ -1627,6 +1639,7 @@ private fun VoiceSettingsCard(
                 value = pitch,
                 minimum = 0.5f,
                 maximum = 2f,
+                steps = 149,
                 shown = { "%.2f×".format(it) },
                 onChange = onPitchChange,
             )
@@ -1654,30 +1667,26 @@ private fun VoiceSettingsCard(
                     Modifier.weight(1f).padding(2.dp),
                 ) { Text((if (interruptionMode == AudioInterruptionMode.CONTINUE_DUCKED) "✓ " else "") + "TIẾP TỤC") }
             }
-            Text("Bộ máy TTS", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp))
-            Button({ onEngineSelected(null) }, Modifier.fillMaxWidth().padding(top = 4.dp)) {
-                Text(if (selectedEnginePackage == null) "✓ MẶC ĐỊNH HỆ THỐNG" else "MẶC ĐỊNH HỆ THỐNG")
-            }
-            visibleEngines.forEach { engine ->
-                Button({ onEngineSelected(engine) }, Modifier.fillMaxWidth().padding(top = 3.dp)) {
-                    Text((if (engine.packageName == selectedEnginePackage) "✓ " else "") + engine.label)
+            Text("Bộ đọc TTS", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp))
+            Box(Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                Button(onClick = { engineExpanded = true }, modifier = Modifier.fillMaxWidth()) { Text(selectedEngineLabel) }
+                DropdownMenu(expanded = engineExpanded, onDismissRequest = { engineExpanded = false }) {
+                    DropdownMenuItem(text = { Text("Mặc định hệ thống") }, onClick = { engineExpanded = false; onEngineSelected(null) })
+                    engines.forEach { engine ->
+                        DropdownMenuItem(text = { Text(engine.label) }, onClick = { engineExpanded = false; onEngineSelected(engine) })
+                    }
                 }
             }
-            if (engines.size > 6) Button({ showAllEngines = !showAllEngines }, Modifier.fillMaxWidth().padding(top = 3.dp)) {
-                Text(if (showAllEngines) "THU GỌN BỘ MÁY" else "HIỂN THỊ TẤT CẢ ${engines.size} BỘ MÁY")
-            }
-            Text("Giọng TTS", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp))
-            Button({ onVoiceSelected(null) }, Modifier.fillMaxWidth().padding(top = 4.dp)) {
-                Text(if (selectedVoiceName == null) "✓ GIỌNG MẶC ĐỊNH" else "GIỌNG MẶC ĐỊNH")
-            }
-            visibleVoices.forEach { voice ->
-                Button({ onVoiceSelected(voice) }, Modifier.fillMaxWidth().padding(top = 3.dp)) {
-                    Text((if (voice.name == selectedVoiceName) "✓ " else "") + voice.displayName)
+            Text("Giọng đọc", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp))
+            Box(Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                Button(onClick = { voiceExpanded = true }, enabled = !loadingVoices, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (loadingVoices) "ĐANG QUÉT…" else selectedVoiceLabel)
                 }
-            }
-            if (voices.size > MAX_VISIBLE_VOICES) {
-                Button({ showAllVoices = !showAllVoices }, Modifier.fillMaxWidth().padding(top = 4.dp)) {
-                    Text(if (showAllVoices) "THU GỌN GIỌNG" else "HIỂN THỊ TẤT CẢ ${voices.size} GIỌNG")
+                DropdownMenu(expanded = voiceExpanded, onDismissRequest = { voiceExpanded = false }) {
+                    DropdownMenuItem(text = { Text("Giọng mặc định") }, onClick = { voiceExpanded = false; onVoiceSelected(null) })
+                    voices.forEach { voice ->
+                        DropdownMenuItem(text = { Text(voice.displayName) }, onClick = { voiceExpanded = false; onVoiceSelected(voice) })
+                    }
                 }
             }
             Button(onPreviewVoice, Modifier.fillMaxWidth().padding(top = 6.dp)) { Text("NGHE THỬ GIỌNG ĐANG CHỌN") }

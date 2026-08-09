@@ -30,6 +30,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import vn.nghetruyen.app.core.model.TtsEngineOption
@@ -52,6 +54,8 @@ fun GlobalVoiceRoleEditorDialog(
     var engineExpanded by remember { mutableStateOf(false) }
     var languageExpanded by remember { mutableStateOf(false) }
     var voiceExpanded by remember { mutableStateOf(false) }
+    var processingExpanded by remember { mutableStateOf(false) }
+    var sonicQualityExpanded by remember { mutableStateOf(false) }
     var voices by remember(draft.enginePackage) { mutableStateOf<List<TtsVoiceOption>>(emptyList()) }
     var loadingVoices by remember(draft.enginePackage) { mutableStateOf(true) }
 
@@ -256,41 +260,29 @@ fun GlobalVoiceRoleEditorDialog(
                 }
 
                 Text("Phương pháp xử lý", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
-                Row(Modifier.fillMaxWidth()) {
-                    Button(
-                        onClick = {
-                            onDraftChange(
-                                draft.copy(
-                                    processingMethod = "system",
-                                    volume = draft.volume.coerceAtMost(1f),
-                                ),
-                            )
-                        },
-                        modifier = Modifier.weight(1f).padding(end = 2.dp),
-                    ) {
-                        Text((if (draft.processingMethod != "sonic") "✓ " else "") + "HỆ THỐNG")
+                Box(Modifier.fillMaxWidth()) {
+                    Button(onClick = { processingExpanded = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (draft.processingMethod == "sonic") "Sonic, tối đa 200%" else "Android, tối đa 100%")
                     }
-                    Button(
-                        onClick = { onDraftChange(draft.copy(processingMethod = "sonic")) },
-                        modifier = Modifier.weight(1f).padding(start = 2.dp),
-                    ) {
-                        Text((if (draft.processingMethod == "sonic") "✓ " else "") + "SONIC")
+                    DropdownMenu(expanded = processingExpanded, onDismissRequest = { processingExpanded = false }) {
+                        DropdownMenuItem(text = { Text("Android, tối đa 100%") }, onClick = {
+                            processingExpanded = false
+                            onDraftChange(draft.copy(processingMethod = "system", volume = draft.volume.coerceAtMost(1f)))
+                        })
+                        DropdownMenuItem(text = { Text("Sonic, tối đa 200%") }, onClick = {
+                            processingExpanded = false
+                            onDraftChange(draft.copy(processingMethod = "sonic"))
+                        })
                     }
                 }
 
                 if (draft.processingMethod == "sonic") {
-                    Row(Modifier.fillMaxWidth()) {
-                        Button(
-                            onClick = { onDraftChange(draft.copy(sonicAccurate = false)) },
-                            modifier = Modifier.weight(1f).padding(end = 2.dp),
-                        ) {
-                            Text((if (!draft.sonicAccurate) "✓ " else "") + "NHANH")
-                        }
-                        Button(
-                            onClick = { onDraftChange(draft.copy(sonicAccurate = true)) },
-                            modifier = Modifier.weight(1f).padding(start = 2.dp),
-                        ) {
-                            Text((if (draft.sonicAccurate) "✓ " else "") + "CHÍNH XÁC")
+                    Text("Chế độ Sonic", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 7.dp))
+                    Box(Modifier.fillMaxWidth()) {
+                        Button(onClick = { sonicQualityExpanded = true }, modifier = Modifier.fillMaxWidth()) { Text(if (draft.sonicAccurate) "Chính xác" else "Nhanh") }
+                        DropdownMenu(expanded = sonicQualityExpanded, onDismissRequest = { sonicQualityExpanded = false }) {
+                            DropdownMenuItem(text = { Text("Nhanh") }, onClick = { sonicQualityExpanded = false; onDraftChange(draft.copy(sonicAccurate = false)) })
+                            DropdownMenuItem(text = { Text("Chính xác") }, onClick = { sonicQualityExpanded = false; onDraftChange(draft.copy(sonicAccurate = true)) })
                         }
                     }
                 }
@@ -362,10 +354,19 @@ private fun CompactVoiceValueRow(
         fontWeight = FontWeight.SemiBold,
         modifier = Modifier.padding(top = 5.dp),
     )
+    val intervals = when {
+        percent && maximum <= 1f -> 100
+        percent -> 200
+        minimum == 0.25f && maximum == 3f -> 275
+        minimum == 0.5f && maximum == 2f -> 150
+        else -> 100
+    }
+    val spoken = if (percent) "$label ${"%.0f".format(safeValue * 100)}%" else "$label ${"%.2f".format(safeValue)}×"
     Slider(
         value = safeValue,
         onValueChange = { onChange(it.coerceIn(minimum, maximum)) },
         valueRange = minimum..maximum,
-        modifier = Modifier.fillMaxWidth(),
+        steps = (intervals - 1).coerceAtLeast(0),
+        modifier = Modifier.fillMaxWidth().semantics { contentDescription = spoken },
     )
 }

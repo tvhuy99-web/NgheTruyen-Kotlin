@@ -1,0 +1,34 @@
+{
+  "metadata": {
+    "name": "NgheTruyen Current ABI Fixture",
+    "author": "NgheTruyen",
+    "version": 1,
+    "source": "https://example.invalid",
+    "description": "Deterministic differential fixture",
+    "locale": "vi",
+    "regexp": "example\\.invalid",
+    "type": "novel",
+    "nsfw": false
+  },
+  "script": {
+    "explore": "explore.js",
+    "search": "search.js",
+    "detail": "detail.js",
+    "toc": "toc.js",
+    "chap": "chap.js"
+  },
+  "config": {
+    "DOMAIN": {
+      "title": "Domain",
+      "default": "fixture.example",
+      "mode": "input",
+      "format": "text"
+    },
+    "thread_num": {
+      "title": "Threads",
+      "default": "3",
+      "mode": "input",
+      "format": "number"
+    }
+  }
+}

@@ -271,15 +271,24 @@ class VBookCompatibilityRuntime(
               var response = __vbookNativeFetch(url, nativeOptions);
               var responseKey = __vbookHeaderValue(response, '${VBookRawNetworkBroker.INTERNAL_RESPONSE_KEY}') || requestKey;
               var rawSizeText = __vbookHeaderValue(response, '${VBookRawNetworkBroker.INTERNAL_RAW_SIZE}');
+              var statusTextValue = __vbookHeaderValue(response, '${VBookRawNetworkBroker.INTERNAL_STATUS_TEXT}');
               var nativeText = response.text;
               var nativeHtml = response.html;
+              var requestInfoResponse = __vbookCachedResponse(url, nativeOptions, nativeHeaders, responseKey, '${VBookRawNetworkBroker.OP_REQUEST}', null);
+              var requestInfo = null;
+              try { requestInfo = JSON.parse(String(requestInfoResponse.body || '{}')); }
+              catch (ignored) { requestInfo = null; }
               response.header = function(name) {
                 name = String(name || '').toLowerCase();
                 if (name.indexOf('x-nghe-vbook-') === 0) return undefined;
                 return __vbookHeaderValue(response, name);
               };
-              response.statusText = response.statusText === undefined ? '' : response.statusText;
-              response.request = {url:url, headers:publicHeaders};
+              response.statusText = statusTextValue === undefined
+                ? (response.statusText === undefined ? '' : response.statusText)
+                : String(statusTextValue);
+              response.request = requestInfo && typeof requestInfo === 'object'
+                ? requestInfo
+                : {url:url, headers:publicHeaders};
               response.base64 = function(){
                 return __vbookCachedResponse(url, nativeOptions, nativeHeaders, responseKey, '${VBookRawNetworkBroker.OP_BASE64}', null).body;
               };

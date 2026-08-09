@@ -7,7 +7,7 @@ import org.junit.Test
 
 class VBookCorpusAnalyzerTest {
     @Test
-    fun scansHostApisAndDynamicScripts() {
+    fun scansHostApisDynamicScriptsAndSubFeatures() {
         val audit = VBookCorpusAnalyzer.audit(
             id = "sample",
             pluginJson = PLUGIN,
@@ -19,11 +19,21 @@ class VBookCorpusAnalyzerTest {
                       var token = response.request.url;
                       var body = response.text('gbk');
                       var blob = response.blob();
+                      var doc = response.html();
+                      doc.select('script').forEach(function(el){el.remove();});
+                      var attrs = doc.select('a').first().attributes();
+                      var browser = Engine.newBrowser();
+                      browser.loadHtml('<html></html>', DOMAIN);
+                      browser.waitUrl(['*api*'], 1000);
                       localStorage.setItem('token', token);
+                      var translated = Qt.translate('你好', 'vp', {person_name:true});
+                      var segments = translated.segments;
+                      var ws = new WebSocket('wss://ws.example', {'X-Test':'one'});
+                      var frame = ws.message();
                       return Response.success([], 'cursor-2');
                     }
                 """.trimIndent(),
-                "src/home.js" to "function execute(){ return Response.success([{title:'All',input:'',script:'listing.js'}]); }",
+                "src/home.js" to "function execute(){ return Response.success([{title:'All',input:'',data:'server-a',script:'listing.js'}]); }",
                 "src/listing.js" to "function execute(input,page){ return Response.success([], ''); }",
                 "src/detail.js" to "function execute(url){ return Response.success({name:'X',url:url}); }",
                 "src/toc.js" to "function execute(url){ return Response.success([]); }",
@@ -38,6 +48,16 @@ class VBookCorpusAnalyzerTest {
         assertTrue(VBookFeature.FETCH_BLOB in audit.features)
         assertTrue(VBookFeature.FETCH_REQUEST_INFO in audit.features)
         assertTrue(VBookFeature.LOAD_CRYPTO_BUILTIN in audit.features)
+        assertTrue(VBookFeature.DYNAMIC_DATA_ARGUMENT in audit.features)
+        assertTrue(VBookFeature.HTML_COLLECTION_CALLBACKS in audit.features)
+        assertTrue(VBookFeature.HTML_MUTATION in audit.features)
+        assertTrue(VBookFeature.HTML_ATTRIBUTES in audit.features)
+        assertTrue(VBookFeature.BROWSER_LOAD_HTML in audit.features)
+        assertTrue(VBookFeature.BROWSER_WAIT_URL in audit.features)
+        assertTrue(VBookFeature.WEBSOCKET_HEADERS in audit.features)
+        assertTrue(VBookFeature.WEBSOCKET_FRAMES in audit.features)
+        assertTrue(VBookFeature.QUICK_TRANSLATOR_OPTIONS in audit.features)
+        assertTrue(VBookFeature.QUICK_TRANSLATOR_SEGMENTS in audit.features)
         assertTrue("src/listing.js" in audit.referencedDynamicScripts)
         assertTrue(audit.missingReferencedScripts.isEmpty())
         assertTrue(audit.missingRequiredScripts.isEmpty())
@@ -85,6 +105,9 @@ class VBookCorpusAnalyzerTest {
                 "detail":"detail.js", "toc":"toc.js", "chap":"chap.js"
               },
               "config": {
+                "thread_num":4,
+                "timeout":15000,
+                "delay":250,
                 "DOMAIN":{"title":"Domain","default":"https://x.example","mode":"input","format":"text"}
               }
             }

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Guard the final XPK-aligned Reader, TTS, music-library, and voice-cast UI details."""
+
 from pathlib import Path
 
 reader = Path("app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt").read_text()

@@ -28,7 +28,7 @@ jobs:
         run: |
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
-      - name: Verify and record result
+      - name: Verify and record final result
         shell: bash
         run: |
           set +e
@@ -46,7 +46,7 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add UI_CONTROL_PARITY_VERIFIED.txt UI_CONTROL_PARITY_COMPILE.log UI_PARITY_CHECK.log
           if ! git diff --cached --quiet; then
-            git commit -m 'test: record UI parity verification details'
+            git commit -m 'test: record final UI parity verification'
             git push origin HEAD:agent/settings-a11y-labels
           fi
           test "$PARITY_CODE" -eq 0

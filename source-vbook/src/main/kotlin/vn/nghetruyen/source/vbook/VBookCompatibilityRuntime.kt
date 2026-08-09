@@ -13,13 +13,7 @@ import vn.nghetruyen.source.api.SourcePlatformFailure
 import vn.nghetruyen.source.api.SourcePlatformResult
 import vn.nghetruyen.source.runtime.SourceResourceProvider
 
-/**
- * Contract-aware facade over the mature vBook host API implementation.
- *
- * The existing VBookJsRuntime owns browser/network/storage/crypto bridges. This facade owns
- * vBook contract semantics: profile detection, exact positional string args, config constants,
- * dynamic package scripts, Response shape and load('crypto.js') behavior.
- */
+/** Contract-aware facade over the mature vBook host API implementation. */
 class VBookCompatibilityRuntime(
     private val runtime: VBookJsRuntime = VBookJsRuntime(),
 ) {
@@ -53,11 +47,8 @@ class VBookCompatibilityRuntime(
     ): SourcePlatformResult<ExecutionResult> {
         val plugin = loadPlugin(resources) ?: return failure(SourceErrorCode.VBOOK_SCRIPT_ERROR, "VBOOK_PLUGIN_JSON_MISSING", traceId)
         val profile = detectProfile(plugin, resources)
-        if (profile == VBookContractProfile.UNKNOWN) {
-            return failure(SourceErrorCode.VBOOK_RUNTIME_UNAVAILABLE, "VBOOK_CONTRACT_PROFILE_AMBIGUOUS", traceId)
-        }
-        val script = plugin.script(role)
-            ?: return failure(SourceErrorCode.ACTION_NOT_FOUND, "VBOOK_SCRIPT_ROLE_MISSING:${role.manifestKey}", traceId)
+        if (profile == VBookContractProfile.UNKNOWN) return failure(SourceErrorCode.VBOOK_RUNTIME_UNAVAILABLE, "VBOOK_CONTRACT_PROFILE_AMBIGUOUS", traceId)
+        val script = plugin.script(role) ?: return failure(SourceErrorCode.ACTION_NOT_FOUND, "VBOOK_SCRIPT_ROLE_MISSING:${role.manifestKey}", traceId)
         val invocation = if (profile == VBookContractProfile.CURRENT_JS) {
             VBookInvocationPlanner.current(role, script, input, continuation, text, voiceId, from, to, source)
         } else {
@@ -86,18 +77,11 @@ class VBookCompatibilityRuntime(
     ): SourcePlatformResult<ExecutionResult> {
         val plugin = loadPlugin(resources) ?: return failure(SourceErrorCode.VBOOK_SCRIPT_ERROR, "VBOOK_PLUGIN_JSON_MISSING", traceId)
         val profile = detectProfile(plugin, resources)
-        if (profile == VBookContractProfile.UNKNOWN) {
-            return failure(SourceErrorCode.VBOOK_RUNTIME_UNAVAILABLE, "VBOOK_CONTRACT_PROFILE_AMBIGUOUS", traceId)
-        }
+        if (profile == VBookContractProfile.UNKNOWN) return failure(SourceErrorCode.VBOOK_RUNTIME_UNAVAILABLE, "VBOOK_CONTRACT_PROFILE_AMBIGUOUS", traceId)
         return execute(
-            sourceManifest = sourceManifest,
-            resources = resources,
-            plugin = plugin,
-            profile = profile,
-            invocation = VBookScriptInvocation(VBookPaths.normalizeScriptPath(scriptPath), args),
-            persistedConfig = persistedConfig,
-            runtimeConfig = runtimeConfig,
-            traceId = traceId,
+            sourceManifest, resources, plugin, profile,
+            VBookScriptInvocation(VBookPaths.normalizeScriptPath(scriptPath), args),
+            persistedConfig, runtimeConfig, traceId,
         )
     }
 
@@ -112,9 +96,7 @@ class VBookCompatibilityRuntime(
         traceId: String,
     ): SourcePlatformResult<ExecutionResult> {
         val normalizedScript = VBookPaths.normalizeScriptPath(invocation.scriptPath)
-        if (resources.read(normalizedScript, 2 * 1024 * 1024) == null) {
-            return failure(SourceErrorCode.ACTION_NOT_FOUND, "VBOOK_SCRIPT_RESOURCE_MISSING:$normalizedScript", traceId)
-        }
+        if (resources.read(normalizedScript, 2 * 1024 * 1024) == null) return failure(SourceErrorCode.ACTION_NOT_FOUND, "VBOOK_SCRIPT_RESOURCE_MISSING:$normalizedScript", traceId)
         val config = VBookConfigValues.resolve(plugin, persistedConfig, runtimeConfig)
         val dispatcher = buildDispatcher(profile, config)
         val overlay = OverlayResources(resources, DISPATCH_PATH, dispatcher.toByteArray(Charsets.UTF_8))
@@ -137,12 +119,7 @@ class VBookCompatibilityRuntime(
             "script" to JsonValue.Str(normalizedScript.removePrefix("src/")),
             "args" to JsonValue.Arr(invocation.args.map(JsonValue::Str)),
         ))
-        val request = SourceActionRequest(
-            sourceId = sourceManifest.id,
-            action = SourceActionName.UI_ACTION,
-            input = input,
-            traceId = traceId,
-        )
+        val request = SourceActionRequest(sourceManifest.id, SourceActionName.UI_ACTION, input, traceId)
         return when (val result = runtime.execute(manifest, overlay, request)) {
             is SourcePlatformResult.Failure -> result
             is SourcePlatformResult.Success -> decodeDispatchResult(result.value, profile, traceId)
@@ -157,24 +134,10 @@ class VBookCompatibilityRuntime(
         val obj = response.value as? JsonValue.Obj ?: error("VBOOK_DISPATCH_RESULT_OBJECT_REQUIRED")
         val encoded = obj.string(RAW_RESULT_KEY) ?: error("VBOOK_DISPATCH_RAW_RESULT_MISSING")
         val envelope = VBookResponseEnvelopeParser.parse(JsonValue.Str(encoded), profile)
-        ExecutionResult(
-            data = envelope.data,
-            continuation = envelope.continuation,
-            profile = profile,
-            rawEnvelope = envelope.raw,
-            instructionCount = response.instructionCount,
-            traceId = response.traceId,
-        )
+        ExecutionResult(envelope.data, envelope.continuation, profile, envelope.raw, response.instructionCount, response.traceId)
     }.fold(
         onSuccess = { SourcePlatformResult.Success(it) },
-        onFailure = { error ->
-            SourcePlatformResult.Failure(SourcePlatformFailure(
-                SourceErrorCode.VBOOK_SCRIPT_ERROR,
-                error.message ?: "VBOOK_RESPONSE_DECODE_FAILED",
-                requestedTraceId,
-                error,
-            ))
-        },
+        onFailure = { error -> SourcePlatformResult.Failure(SourcePlatformFailure(SourceErrorCode.VBOOK_SCRIPT_ERROR, error.message ?: "VBOOK_RESPONSE_DECODE_FAILED", requestedTraceId, error)) },
     )
 
     private fun loadPlugin(resources: SourceResourceProvider): VBookExtensionManifest? {
@@ -183,9 +146,7 @@ class VBookCompatibilityRuntime(
     }
 
     private fun detectProfile(plugin: VBookExtensionManifest, resources: SourceResourceProvider): VBookContractProfile {
-        val sources = plugin.allDeclaredScriptPaths().associateWith { path ->
-            resources.read(path, 2 * 1024 * 1024)?.toString(Charsets.UTF_8).orEmpty()
-        }
+        val sources = plugin.allDeclaredScriptPaths().associateWith { path -> resources.read(path, 2 * 1024 * 1024)?.toString(Charsets.UTF_8).orEmpty() }
         return VBookContractDetector.detect(plugin, sources).profile
     }
 
@@ -216,6 +177,7 @@ class VBookCompatibilityRuntime(
               key:function(index){ var keys=Object.keys(__vbookConfigValues).sort(); return keys[Number(index)||0]; },
               length:Object.keys(__vbookConfigValues).length
             });
+
             var __vbookPackageLoad = load;
             var __vbookInsideLoad = false;
             load = function(name) {
@@ -226,6 +188,156 @@ class VBookCompatibilityRuntime(
               try { return __vbookPackageLoad(name); }
               finally { __vbookInsideLoad = false; }
             };
+
+            var __vbookNativeHtmlParse = Html.parse;
+            function __vbookDomState(){ return {removed:[]}; }
+            function __vbookCleanHtml(raw,state){
+              var out=String(raw==null?'':raw), removed=(state&&state.removed?state.removed:[]).slice();
+              removed.sort(function(a,b){return String(b).length-String(a).length;});
+              for(var i=0;i<removed.length;i++){
+                var token=String(removed[i]||'');
+                if(token) out=out.split(token).join('');
+              }
+              return out;
+            }
+            function __vbookRemoved(nativeEl,state){
+              if(!nativeEl||!state) return false;
+              var raw=String(nativeEl.outerHtml()), removed=state.removed||[];
+              for(var i=0;i<removed.length;i++) if(String(removed[i]).indexOf(raw)>=0) return true;
+              return false;
+            }
+            function __vbookWrapElement(nativeEl,state){
+              if(!nativeEl||__vbookRemoved(nativeEl,state)) return undefined;
+              var out={};
+              out.select=function(selector){return __vbookWrapElements(nativeEl.select(String(selector||'')),state);};
+              out.selectFirst=function(selector){var found=out.select(selector);return found.length?found[0]:undefined;};
+              out.text=function(){var raw=__vbookCleanHtml(nativeEl.outerHtml(),state);return __vbookNativeHtmlParse(raw).text();};
+              out.ownText=function(){return String(nativeEl.ownText());};
+              out.wholeText=function(){var raw=__vbookCleanHtml(nativeEl.outerHtml(),state);return __vbookNativeHtmlParse(raw).text();};
+              out.html=function(){return __vbookCleanHtml(nativeEl.html(),state);};
+              out.outerHtml=function(){return __vbookCleanHtml(nativeEl.outerHtml(),state);};
+              out.attr=function(name){return String(nativeEl.attr(String(name||'')));};
+              out.absUrl=function(name){return String(nativeEl.absUrl(String(name||'')));};
+              out.id=function(){return String(nativeEl.id());};
+              out.tagName=function(){return String(nativeEl.tagName());};
+              out.hasClass=function(name){return !!nativeEl.hasClass(String(name||''));};
+              out.parent=function(){return __vbookWrapElement(nativeEl.parent(),state);};
+              out.children=function(){return __vbookWrapElements(nativeEl.children(),state);};
+              out.attributes=function(){
+                var attrs={}, open=String(nativeEl.outerHtml()).match(/^<[^>]+>/), text=open?open[0]:'';
+                var re=/\s([^\s=\/>]+)(?:\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s>]+))?/g, m;
+                while((m=re.exec(text))!==null){var name=String(m[1]||'');if(name) attrs[name]=String(nativeEl.attr(name));}
+                return attrs;
+              };
+              out.remove=function(){
+                var raw=String(nativeEl.outerHtml());
+                if(raw&&state.removed.indexOf(raw)<0) state.removed.push(raw);
+                return out;
+              };
+              return out;
+            }
+            function __vbookWrapElements(nativeElements,state){
+              var arr=[], length=Number(nativeElements&&nativeElements.length||0);
+              for(var i=0;i<length;i++){
+                var nativeEl=nativeElements.get(i), wrapped=__vbookWrapElement(nativeEl,state);
+                if(wrapped) arr.push(wrapped);
+              }
+              arr.size=function(){return arr.length;};
+              arr.isEmpty=function(){return arr.length===0;};
+              arr.get=function(index){return arr[Number(index)||0];};
+              arr.eq=arr.get;
+              arr.first=function(){return arr.length?arr[0]:undefined;};
+              arr.last=function(){return arr.length?arr[arr.length-1]:undefined;};
+              arr.select=function(selector){
+                var merged=[];
+                for(var si=0;si<arr.length;si++){
+                  var nested=arr[si].select(selector);
+                  for(var ni=0;ni<nested.length;ni++) merged.push(nested[ni]);
+                }
+                return __vbookDecorateWrappedArray(merged,state);
+              };
+              arr.text=function(){var values=[];for(var ti=0;ti<arr.length;ti++){var value=arr[ti].text();if(value)values.push(value);}return values.join(' ');};
+              arr.html=function(){var values=[];for(var hi=0;hi<arr.length;hi++)values.push(arr[hi].html());return values.join('\n');};
+              arr.outerHtml=function(){var values=[];for(var oi=0;oi<arr.length;oi++)values.push(arr[oi].outerHtml());return values.join('\n');};
+              arr.attr=function(name){return arr.length?arr[0].attr(name):'';};
+              arr.eachText=function(){return arr.map(function(el){return el.text();});};
+              arr.texts=arr.eachText;
+              arr.toArray=function(){return arr.slice();};
+              arr.remove=function(){arr.slice().forEach(function(el){el.remove();});return arr;};
+              return arr;
+            }
+            function __vbookDecorateWrappedArray(items,state){
+              var nativeLike={length:items.length,get:function(i){return items[i]&&items[i].__native;}};
+              var arr=items;
+              arr.size=function(){return arr.length;};
+              arr.isEmpty=function(){return arr.length===0;};
+              arr.get=function(index){return arr[Number(index)||0];};
+              arr.eq=arr.get;
+              arr.first=function(){return arr.length?arr[0]:undefined;};
+              arr.last=function(){return arr.length?arr[arr.length-1]:undefined;};
+              arr.select=function(selector){var merged=[];for(var i=0;i<arr.length;i++){var nested=arr[i].select(selector);for(var j=0;j<nested.length;j++)merged.push(nested[j]);}return __vbookDecorateWrappedArray(merged,state);};
+              arr.text=function(){return arr.map(function(el){return el.text();}).filter(function(v){return !!v;}).join(' ');};
+              arr.html=function(){return arr.map(function(el){return el.html();}).join('\n');};
+              arr.outerHtml=function(){return arr.map(function(el){return el.outerHtml();}).join('\n');};
+              arr.attr=function(name){return arr.length?arr[0].attr(name):'';};
+              arr.eachText=function(){return arr.map(function(el){return el.text();});};
+              arr.texts=arr.eachText;
+              arr.toArray=function(){return arr.slice();};
+              arr.remove=function(){arr.slice().forEach(function(el){el.remove();});return arr;};
+              return arr;
+            }
+            function __vbookWrapDocument(nativeDoc){
+              var state=__vbookDomState(), out={};
+              out.select=function(selector){return __vbookWrapElements(nativeDoc.select(String(selector||'')),state);};
+              out.selectFirst=function(selector){var found=out.select(selector);return found.length?found[0]:undefined;};
+              out.first=out.selectFirst;
+              out.text=function(){return __vbookNativeHtmlParse(__vbookCleanHtml(nativeDoc.outerHtml(),state)).text();};
+              out.html=function(){return __vbookCleanHtml(nativeDoc.html(),state);};
+              out.outerHtml=function(){return __vbookCleanHtml(nativeDoc.outerHtml(),state);};
+              out.title=function(){return String(nativeDoc.title());};
+              out.location=function(){return String(nativeDoc.location());};
+              out.baseUri=out.location;
+              out.body=function(){return __vbookWrapElement(nativeDoc.body(),state);};
+              return out;
+            }
+            Html.parse=function(content,baseUrl){return __vbookWrapDocument(__vbookNativeHtmlParse(String(content==null?'':content),String(baseUrl||'')));};
+
+            var __vbookNativeNewBrowser = Engine.newBrowser;
+            var __vbookNativeBrowser = Engine.browser;
+            function __vbookBrowserMatch(url,pattern){
+              url=String(url||''); pattern=String(pattern||'');
+              if(pattern.indexOf('regex:')===0){try{return new RegExp(pattern.substring(6)).test(url);}catch(e){return false;}}
+              if(pattern.indexOf('*')<0) return url.toLowerCase().indexOf(pattern.toLowerCase())>=0;
+              var parts=pattern.toLowerCase().split('*'), value=url.toLowerCase(), pos=0;
+              if(parts[0]&&value.indexOf(parts[0])!==0) return false;
+              for(var i=0;i<parts.length;i++){
+                if(!parts[i]) continue;
+                var found=value.indexOf(parts[i],pos); if(found<0) return false; pos=found+parts[i].length;
+              }
+              var last=parts[parts.length-1];
+              return !last||value.lastIndexOf(last)===value.length-last.length;
+            }
+            function __vbookWrapBrowser(nativeBrowser){
+              var out={}, names=['launch','launchAsync','waitSelector','waitRequest','requests','urls','html','callJs','evaluate','callJson','callJsAsync','evaluate_async','tapSelector','tap_selector','getVariable','cookie','cookieSnapshot','syncSession','setCookies','clearCookies','block','setUserAgent','setReplayPolicy','setDialogPolicy','dialogs','lastDialog','waitDialog','close','currentUrl'];
+              for(var i=0;i<names.length;i++)(function(name){if(typeof nativeBrowser[name]==='function')out[name]=function(){return nativeBrowser[name].apply(nativeBrowser,arguments);};})(names[i]);
+              out.loadHtml=function(html,baseUrl){return nativeBrowser.loadHtml(String(baseUrl||''),String(html==null?'':html));};
+              out.waitUrl=function(patterns,timeoutMs){
+                var list=Array.isArray(patterns)?patterns:[patterns], timeout=Number(timeoutMs||15000), deadline=new Date().getTime()+timeout;
+                do{
+                  var urls=nativeBrowser.urls();
+                  for(var ui=0;ui<Number(urls&&urls.length||0);ui++){
+                    var candidate=String(urls[ui]);
+                    for(var pi=0;pi<list.length;pi++) if(__vbookBrowserMatch(candidate,list[pi])) return candidate;
+                  }
+                  sleep(100);
+                }while(new Date().getTime()<deadline);
+                return false;
+              };
+              return out;
+            }
+            Engine.newBrowser=function(){return __vbookWrapBrowser(__vbookNativeNewBrowser.apply(Engine,arguments));};
+            Engine.browser=function(){return __vbookWrapBrowser(__vbookNativeBrowser.apply(Engine,arguments));};
+
             var __vbookNativeFetch = fetch;
             var __vbookFetchSeq = 0;
             function __vbookCopyObject(source) {
@@ -268,9 +380,7 @@ class VBookCompatibilityRuntime(
               var nativeHeaders = __vbookCopyObject(publicHeaders);
               var requestKey = 'vbr-' + String(Date.now()) + '-' + String(++__vbookFetchSeq);
               nativeHeaders['${VBookRawNetworkBroker.INTERNAL_REQUEST_KEY}'] = requestKey;
-              nativeHeaders['${VBookRawNetworkBroker.INTERNAL_TIMEOUT_MS}'] = String(
-                options.timeout === undefined || options.timeout === null ? __vbookDefaultTimeoutMs : options.timeout
-              );
+              nativeHeaders['${VBookRawNetworkBroker.INTERNAL_TIMEOUT_MS}'] = String(options.timeout === undefined || options.timeout === null ? __vbookDefaultTimeoutMs : options.timeout);
               if (__vbookDelayMs > 0) nativeHeaders['${VBookRawNetworkBroker.INTERNAL_DELAY_MS}'] = String(__vbookDelayMs);
               nativeOptions.headers = nativeHeaders;
               if (nativeOptions.body && typeof nativeOptions.body === 'object') nativeOptions.body = JSON.stringify(nativeOptions.body);
@@ -283,40 +393,31 @@ class VBookCompatibilityRuntime(
               var nativeHtml = response.html;
               var requestInfoResponse = __vbookCachedResponse(url, nativeOptions, nativeHeaders, responseKey, '${VBookRawNetworkBroker.OP_REQUEST}', null);
               var requestInfo = null;
-              try { requestInfo = JSON.parse(String(requestInfoResponse.body || '{}')); }
-              catch (ignored) { requestInfo = null; }
+              try { requestInfo = JSON.parse(String(requestInfoResponse.body || '{}')); } catch (ignored) { requestInfo = null; }
               response.header = function(name) {
                 name = String(name || '').toLowerCase();
                 if (name.indexOf('x-nghe-vbook-') === 0) return undefined;
                 return __vbookHeaderValue(response, name);
               };
-              response.statusText = statusTextValue === undefined
-                ? (response.statusText === undefined ? '' : response.statusText)
-                : String(statusTextValue);
-              response.request = requestInfo && typeof requestInfo === 'object'
-                ? requestInfo
-                : {url:url, headers:publicHeaders};
-              response.base64 = function(){
-                return __vbookCachedResponse(url, nativeOptions, nativeHeaders, responseKey, '${VBookRawNetworkBroker.OP_BASE64}', null).body;
-              };
-              response.blob = function(){
-                var type=response.header('content-type') || '', rawSize=Number(rawSizeText || 0);
-                return {size:rawSize, type:String(type).split(';')[0], base64:function(){return response.base64();}};
-              };
+              response.statusText = statusTextValue === undefined ? (response.statusText === undefined ? '' : response.statusText) : String(statusTextValue);
+              response.request = requestInfo && typeof requestInfo === 'object' ? requestInfo : {url:url, headers:publicHeaders};
+              response.base64 = function(){return __vbookCachedResponse(url,nativeOptions,nativeHeaders,responseKey,'${VBookRawNetworkBroker.OP_BASE64}',null).body;};
+              response.blob = function(){var type=response.header('content-type')||'',rawSize=Number(rawSizeText||0);return {size:rawSize,type:String(type).split(';')[0],base64:function(){return response.base64();}};};
               response.text = function(charset) {
                 if (charset === undefined || charset === null || String(charset).length === 0) return nativeText();
-                return __vbookCachedResponse(url, nativeOptions, nativeHeaders, responseKey, '${VBookRawNetworkBroker.OP_TEXT}', String(charset)).body;
+                return __vbookCachedResponse(url,nativeOptions,nativeHeaders,responseKey,'${VBookRawNetworkBroker.OP_TEXT}',String(charset)).body;
               };
               response.string = response.text;
               response.json = function(){ return JSON.parse(response.text()); };
               response.html = function(charset){
-                if (charset === undefined || charset === null || String(charset).length === 0) return nativeHtml();
+                if (charset === undefined || charset === null || String(charset).length === 0) return __vbookWrapDocument(nativeHtml());
                 return Html.parse(response.text(charset), response.url || url);
               };
               response.document = response.html;
               __vbookStripInternalHeaders(response);
               return response;
             };
+
             $prelude
             function execute(payload) {
               payload = payload || {};
@@ -337,8 +438,7 @@ class VBookCompatibilityRuntime(
         """.trimIndent()
     }
 
-    private fun failure(code: SourceErrorCode, message: String, traceId: String) =
-        SourcePlatformResult.Failure(SourcePlatformFailure(code, message, traceId))
+    private fun failure(code: SourceErrorCode, message: String, traceId: String) = SourcePlatformResult.Failure(SourcePlatformFailure(code, message, traceId))
 
     private class OverlayResources(
         private val delegate: SourceResourceProvider,

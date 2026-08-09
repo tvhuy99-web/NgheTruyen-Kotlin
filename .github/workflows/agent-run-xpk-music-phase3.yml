@@ -25,7 +25,19 @@ jobs:
           distribution: temurin
           java-version: '17'
       - name: Apply XPK playlist playback patch
-        run: python3 scripts/agent_apply_xpk_music_playback_phase3.py
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/agent_apply_xpk_music_playback_phase3.py')
+          s = p.read_text()
+          old = 'val nextId = backgroundMusicShuffleBag.removeFirstOrNull()'
+          new = 'val nextId = if (backgroundMusicShuffleBag.isEmpty()) null else backgroundMusicShuffleBag.removeFirst()'
+          if old not in s:
+              raise SystemExit('shuffle compatibility marker missing')
+          p.write_text(s.replace(old, new, 1))
+          PY
+          python3 scripts/agent_apply_xpk_music_playback_phase3.py
       - name: Run parity gates
         run: |
           python3 scripts/check_ui_control_parity.py

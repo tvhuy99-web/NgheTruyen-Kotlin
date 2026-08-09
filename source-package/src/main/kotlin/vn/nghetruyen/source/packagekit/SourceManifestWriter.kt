@@ -37,6 +37,8 @@ object SourceManifestWriter {
                 "maxRequestBytes" to num(network.maxRequestBytes),
                 "requestsPerMinute" to num(network.requestsPerMinute),
                 "maxConcurrent" to num(network.maxConcurrent),
+                "publicInternet" to JsonValue.Bool(network.publicInternet),
+                "allowCleartext" to JsonValue.Bool(network.allowCleartext),
             )) }.orNull(),
             "cookies" to JsonValue.Str(manifest.capabilities.cookies.name),
             "browser" to JsonValue.Obj(linkedMapOf(

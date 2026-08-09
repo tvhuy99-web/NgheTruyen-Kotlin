@@ -2,6 +2,7 @@ package vn.nghetruyen.source.vbook
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 import vn.nghetruyen.source.api.JsonValue
 import vn.nghetruyen.source.api.SemanticVersion
@@ -38,7 +39,7 @@ class VBookCurrentHostWiringTest {
             ))
         }
         val runtime = VBookCompatibilityRuntime(SourceCapabilityBrokers(quickTranslation = quick))
-        val result = runtime.executeDeclared(
+        val result = success(runtime.executeDeclared(
             sourceManifest = manifest(),
             resources = resources("""
                 function execute(query, page) {
@@ -49,7 +50,7 @@ class VBookCurrentHostWiringTest {
             role = VBookScriptRole.SEARCH,
             input = "q",
             traceId = "qt-wiring",
-        ) as SourcePlatformResult.Success
+        ))
 
         assertEquals("vp", capturedTarget)
         assertEquals("true", capturedOptions["person_name"])
@@ -75,7 +76,7 @@ class VBookCurrentHostWiringTest {
             ))
         }
         val runtime = VBookCompatibilityRuntime(SourceCapabilityBrokers(websocket = websocket))
-        val result = runtime.executeDeclared(
+        val result = success(runtime.executeDeclared(
             sourceManifest = manifest(),
             resources = resources("""
                 function execute(query, page) {
@@ -90,7 +91,7 @@ class VBookCurrentHostWiringTest {
             role = VBookScriptRole.SEARCH,
             input = "q",
             traceId = "ws-wiring",
-        ) as SourcePlatformResult.Success
+        ))
 
         assertEquals("yes", capturedHeaders["X-Test"])
         assertEquals(listOf("ping"), capturedMessages)
@@ -116,7 +117,7 @@ class VBookCurrentHostWiringTest {
             ))
         }
         val runtime = VBookCompatibilityRuntime(SourceCapabilityBrokers(network = network))
-        runtime.executeDeclared(
+        success(runtime.executeDeclared(
             sourceManifest = manifest(network = true),
             resources = resources("""
                 function execute(query, page) {
@@ -127,7 +128,7 @@ class VBookCurrentHostWiringTest {
             role = VBookScriptRole.SEARCH,
             input = "q",
             traceId = "query-fragment",
-        ) as SourcePlatformResult.Success
+        ))
 
         assertEquals("https://x.example/path?q=a%20b#chapter", capturedUrl)
     }
@@ -148,6 +149,13 @@ class VBookCurrentHostWiringTest {
         assertTrue(VBookFeature.USER_AGENT in audit.features)
         assertTrue(VBookFeature.SLEEP in audit.features)
         assertTrue(VBookFeature.LOGGING in audit.features)
+    }
+
+    private fun success(result: SourcePlatformResult<VBookCompatibilityRuntime.ExecutionResult>): SourcePlatformResult.Success<VBookCompatibilityRuntime.ExecutionResult> {
+        if (result is SourcePlatformResult.Success) return result
+        val failure = result as SourcePlatformResult.Failure
+        fail("VBOOK_HOST_WIRING_FAILURE code=${failure.error.code} message=${failure.error.message} cause=${failure.error.cause?.javaClass?.name}:${failure.error.cause?.message}")
+        error("unreachable")
     }
 
     private fun manifest(network: Boolean = false): SourceManifest = SourceManifest(

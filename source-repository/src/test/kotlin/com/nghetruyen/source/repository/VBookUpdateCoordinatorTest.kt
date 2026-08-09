@@ -3,6 +3,7 @@ package com.nghetruyen.source.repository
 import com.nghetruyen.source.platform.SourceArtifactDescriptor
 import com.nghetruyen.source.platform.SourceArtifactIdentity
 import com.nghetruyen.source.platform.SourceArtifactState
+import com.nghetruyen.source.platform.SourceCompatibilityState
 import com.nghetruyen.source.platform.SourceEcosystem
 import com.nghetruyen.source.platform.SourceTrustState
 import com.nghetruyen.source.store.SourceArtifactLifecycle
@@ -13,6 +14,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import vn.nghetruyen.source.vbook.VBookCandidateValidator
+import vn.nghetruyen.source.vbook.VBookFeature
 import java.io.ByteArrayOutputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
@@ -51,6 +53,32 @@ class VBookUpdateCoordinatorTest {
         assertEquals("good", registry.active(identity)!!.artifactId)
         assertNotNull(registry.quarantined["bad"])
         assertEquals(SourceArtifactState.QUARANTINED, registry.quarantined.getValue("bad").state)
+    }
+
+    @Test
+    fun partialEngineFeatureIsQuarantinedWithoutReplacingKnownGood() {
+        val registry = MemoryRegistry()
+        val archive = MemoryArchive()
+        val coordinator = VBookUpdateCoordinator(VBookCandidateValidator(), registry, archive)
+        coordinator.installOrUpdate(payload("good", "1", GOOD_PLUGIN, GOOD_SCRIPTS), 11)
+
+        val websocketScripts = GOOD_SCRIPTS + mapOf(
+            "src/search.js" to """
+                function execute(q,p){
+                  var ws = new WebSocket('wss://ws.example');
+                  var frame = ws.message();
+                  return Response.success([{type:frame.type,data:frame.data}],p);
+                }
+            """.trimIndent(),
+        )
+        val result = coordinator.installOrUpdate(payload("ws-v2", "2", GOOD_PLUGIN, websocketScripts), 21)
+
+        assertEquals(VBookUpdateDisposition.QUARANTINED, result.disposition)
+        assertEquals(SourceCompatibilityState.PARTIAL, result.validation.state)
+        assertTrue(VBookFeature.WEBSOCKET in result.validation.blockingFeatures)
+        assertTrue(VBookFeature.WEBSOCKET_FRAMES in result.validation.blockingFeatures)
+        assertEquals("good", registry.active(identity)!!.artifactId)
+        assertEquals(SourceArtifactState.QUARANTINED, registry.quarantined.getValue("ws-v2").state)
     }
 
     @Test

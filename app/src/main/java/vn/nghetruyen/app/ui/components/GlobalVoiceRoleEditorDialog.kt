@@ -295,15 +295,6 @@ fun GlobalVoiceRoleEditorDialog(
                     onDraftChange(draft.copy(volume = it))
                 }
 
-                if (draft.processingMethod == "sonic") {
-                    CompactVoiceValueRow("Tốc độ Sonic", draft.sonicSpeed, 0.25f, 3f) {
-                        onDraftChange(draft.copy(sonicSpeed = it))
-                    }
-                    CompactVoiceValueRow("Cao độ Sonic", draft.sonicPitch, 0.5f, 2f) {
-                        onDraftChange(draft.copy(sonicPitch = it))
-                    }
-                }
-
                 Button(
                     onClick = { onPreview(draft) },
                     modifier = Modifier.fillMaxWidth().padding(top = 7.dp),

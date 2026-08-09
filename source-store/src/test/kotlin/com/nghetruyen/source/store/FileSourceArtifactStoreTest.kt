@@ -1,6 +1,7 @@
 package com.nghetruyen.source.store
 
 import com.nghetruyen.source.platform.SourceArtifactIdentity
+import com.nghetruyen.source.platform.SourceArtifactState
 import com.nghetruyen.source.platform.SourceCompatibilityProfile
 import com.nghetruyen.source.platform.SourceEcosystem
 import com.nghetruyen.source.platform.SourceTrustState
@@ -78,6 +79,55 @@ class FileSourceArtifactStoreTest {
         assertNull(afterRollback.previousKnownGood(identity))
         assertEquals(setOf("v1", "other-v1"), afterRollback.activeArtifacts(SourceEcosystem.VBOOK).map { it.artifactId }.toSet())
         assertArrayEquals(v2Bytes, afterRollback.originalBytes("v2"))
+    }
+
+    @Test
+    fun disabledArtifactSurvivesRestartAndCanBeEnabledAgain() {
+        val root = Files.createTempDirectory("source-artifact-disable")
+        val identity = SourceArtifactIdentity(SourceEcosystem.VBOOK, "official", "disabled/path")
+        val profile = SourceCompatibilityProfile(SourceEcosystem.VBOOK, "current-js")
+        val bytes = "package-disabled".toByteArray()
+        val first = FileSourceArtifactStore(root)
+        val candidate = SourceArtifactLifecycle.candidate(
+            "disabled-v1", identity, "1", bytes, profile, SourceTrustState.HASH_VERIFIED, 10,
+        )
+        first.stage(candidate, bytes)
+        SourceArtifactActivator(first).activate(candidate, 11)
+        SourceArtifactActivator(first).disable(identity)
+
+        val reopened = FileSourceArtifactStore(root)
+        assertNull(reopened.active(identity))
+        assertEquals(SourceArtifactState.DISABLED, reopened.disabled(identity)?.state)
+        assertEquals(listOf("disabled-v1"), reopened.installedArtifacts(SourceEcosystem.VBOOK).map { it.artifactId })
+        assertTrue(reopened.activeArtifacts(SourceEcosystem.VBOOK).isEmpty())
+
+        val disabled = requireNotNull(reopened.disabled(identity))
+        reopened.commit(SourceArtifactLifecycle.enable(disabled, 20))
+        val enabledAgain = FileSourceArtifactStore(root)
+        assertEquals(SourceArtifactState.ACTIVE, enabledAgain.active(identity)?.state)
+        assertNull(enabledAgain.disabled(identity))
+        assertArrayEquals(bytes, enabledAgain.originalBytes("disabled-v1"))
+    }
+
+    @Test
+    fun uninstallRemovesIdentityPointerButRetainsImmutableArchive() {
+        val root = Files.createTempDirectory("source-artifact-uninstall")
+        val identity = SourceArtifactIdentity(SourceEcosystem.VBOOK, "official", "remove/path")
+        val profile = SourceCompatibilityProfile(SourceEcosystem.VBOOK, "current-js")
+        val bytes = "package-remove".toByteArray()
+        val store = FileSourceArtifactStore(root)
+        val candidate = SourceArtifactLifecycle.candidate(
+            "remove-v1", identity, "1", bytes, profile, SourceTrustState.HASH_VERIFIED, 10,
+        )
+        store.stage(candidate, bytes)
+        SourceArtifactActivator(store).activate(candidate, 11)
+
+        assertTrue(store.uninstall(identity))
+        val reopened = FileSourceArtifactStore(root)
+        assertNull(reopened.active(identity))
+        assertTrue(reopened.installedArtifacts(SourceEcosystem.VBOOK).isEmpty())
+        assertTrue(reopened.contains("remove-v1"))
+        assertArrayEquals(bytes, reopened.originalBytes("remove-v1"))
     }
 
     @Test

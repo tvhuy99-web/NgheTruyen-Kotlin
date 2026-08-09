@@ -299,6 +299,9 @@ data class SourceCapabilityBrokers(
     val websocket: SourceWebSocketBroker = SourceWebSocketBroker.DENY_ALL,
     val nativeHooks: SourceNativeHookBroker = SourceNativeHookBroker.DENY_ALL,
     val graphics: SourceGraphicsBroker = SourceGraphicsBroker.DENY_ALL,
+    /** Generic translation extension/provider path. */
     val translation: SourceTranslationBroker = SourceTranslationBroker.DENY_ALL,
     val cookies: SourceCookiePartition = SourceCookiePartition.NONE,
+    /** vBook Qt.translate vp/hv path. Kept separate from generic AI/translate extensions. */
+    val quickTranslation: SourceTranslationBroker = SourceTranslationBroker.DENY_ALL,
 )

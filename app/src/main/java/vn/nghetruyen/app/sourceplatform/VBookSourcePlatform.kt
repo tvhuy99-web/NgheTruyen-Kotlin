@@ -48,6 +48,7 @@ data class VBookInstallPreview(
 
 data class VBookInstalledSourceInfo(
     val sourceId: String,
+    val artifactId: String,
     val repositoryId: String,
     val remoteIdentity: String,
     val name: String,
@@ -164,6 +165,7 @@ class VBookSourcePlatform(
         val previous = store.previousKnownGood(current.identity)
         VBookInstalledSourceInfo(
             sourceId = VBookHostManifestFactory.stableSourceId(current.identity.canonicalKey()),
+            artifactId = current.artifactId,
             repositoryId = current.identity.repositoryId,
             remoteIdentity = current.identity.remoteIdentity,
             name = manifest.metadata.name.ifBlank { current.identity.remoteIdentity },

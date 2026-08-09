@@ -1,6 +1,9 @@
 package vn.nghetruyen.app
 
 import android.content.Context
+import com.nghetruyen.source.platform.SourceArtifactDescriptor
+import com.nghetruyen.source.platform.SourceTrustState
+import com.nghetruyen.source.repository.VBookUpdateResult
 import vn.nghetruyen.app.ai.EncryptedAiCredentialStore
 import vn.nghetruyen.app.ai.AiRequestGovernor
 import vn.nghetruyen.app.ai.OnlineAiServices
@@ -56,6 +59,30 @@ class AppContainer(context: Context) {
     /** One refresh point after native or vBook install/update/rollback. */
     fun refreshSourceRegistry() {
         sourceRegistry.refreshSourcePacks(currentExternalStorySources())
+    }
+
+    fun installOrUpdateVBook(
+        repositoryId: String,
+        remoteIdentity: String,
+        version: String?,
+        packageBytes: ByteArray,
+        trust: SourceTrustState = SourceTrustState.REPOSITORY_TRUSTED,
+    ): VBookUpdateResult {
+        val result = vBookSourcePlatform.installOrUpdate(
+            repositoryId = repositoryId,
+            remoteIdentity = remoteIdentity,
+            version = version,
+            packageBytes = packageBytes,
+            trust = trust,
+        )
+        refreshSourceRegistry()
+        return result
+    }
+
+    fun rollbackVBook(repositoryId: String, remoteIdentity: String): SourceArtifactDescriptor {
+        val restored = vBookSourcePlatform.rollback(repositoryId, remoteIdentity)
+        refreshSourceRegistry()
+        return restored
     }
 
     private fun currentExternalStorySources() =

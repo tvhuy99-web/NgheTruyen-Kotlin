@@ -1,0 +1,329 @@
+name: Agent fix downloaded XPK parity
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-clean:
+    if: github.event.pull_request.head.ref == 'agent/settings-a11y-labels'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/settings-a11y-labels
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v6
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK packages
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+      - name: Apply downloaded-library parity patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one anchor, found {count}: {old[:100]!r}')
+              p.write_text(text.replace(old, new, 1))
+
+          library = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/LibraryScreen.kt')
+          text = library.read_text()
+          replace_once(
+              library,
+              '    onStoryClick: (StoryEntity) -> Unit,\n    onRemoveFromReading: (String) -> Unit,',
+              '    onStoryClick: (StoryEntity) -> Unit,\n    onUpdateDownloadedStory: (StoryEntity) -> Unit,\n    onRemoveFromReading: (String) -> Unit,',
+          )
+          replace_once(
+              library,
+              '                    onStoryClick = onStoryClick,\n                    onPauseDownload = onPauseDownload,',
+              '                    onStoryClick = onStoryClick,\n                    onUpdateDownloadedStory = onUpdateDownloadedStory,\n                    onPauseDownload = onPauseDownload,',
+          )
+          text = library.read_text()
+          start = text.index('@Composable\nprivate fun DownloadedSection(')
+          end = text.index('@Composable\nprivate fun StoryEntityList', start)
+          downloaded = '''@Composable
+private fun DownloadedSection(
+    stories: List<StoryEntity>,
+    jobs: List<DownloadJobEntity>,
+    failures: List<ChapterDownloadFailureEntity>,
+    storage: Map<String, vn.nghetruyen.app.data.local.OfflineStoryStorage>,
+    onStoryClick: (StoryEntity) -> Unit,
+    onUpdateDownloadedStory: (StoryEntity) -> Unit,
+    onPauseDownload: (String) -> Unit,
+    onResumeDownload: (String) -> Unit,
+    onRetryDownload: (String) -> Unit,
+    onPrioritizeDownload: (String) -> Unit,
+    onRetryFailedChapter: (String) -> Unit,
+    onCancelDownload: (String) -> Unit,
+    onRemoveOffline: (String) -> Unit,
+) {
+    var selectedOptions by remember { mutableStateOf<StoryEntity?>(null) }
+    var pendingRemoval by remember { mutableStateOf<StoryEntity?>(null) }
+
+    selectedOptions?.let { story ->
+        AlertDialog(
+            onDismissRequest = { selectedOptions = null },
+            title = { Text("TÙY CHỌN") },
+            text = {
+                Column {
+                    ReferenceActionButton(
+                        text = "CẬP NHẬT / TẢI TIẾP",
+                        onClick = {
+                            selectedOptions = null
+                            onUpdateDownloadedStory(story)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    ReferenceActionButton(
+                        text = "XÓA DỮ LIỆU ĐÃ TẢI",
+                        onClick = {
+                            selectedOptions = null
+                            pendingRemoval = story
+                        },
+                        modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                    )
+                }
+            },
+            confirmButton = { TextButton(onClick = { selectedOptions = null }) { Text("ĐÓNG") } },
+        )
+    }
+
+    pendingRemoval?.let { story ->
+        val chapterCount = storage[story.id]?.chapterCount ?: 0
+        AlertDialog(
+            onDismissRequest = { pendingRemoval = null },
+            title = { Text("XÓA DỮ LIỆU ĐÃ TẢI") },
+            text = {
+                Text(
+                    if (story.sourceId == "offline") {
+                        "Truyện nhập từ tệp sẽ bị xóa khỏi ứng dụng cùng toàn bộ chương và tiến độ."
+                    } else {
+                        "Xóa $chapterCount chương đã tải của ${story.title}? Tiến độ đọc và dấu trang sẽ được giữ lại."
+                    },
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingRemoval = null
+                    onRemoveOffline(story.id)
+                }) { Text("XÓA") }
+            },
+            dismissButton = { TextButton(onClick = { pendingRemoval = null }) { Text("HỦY") } },
+        )
+    }
+
+    if (stories.isEmpty() && jobs.isEmpty() && failures.isEmpty()) {
+        Text("Chưa có truyện ngoại tuyến.", modifier = Modifier.padding(16.dp))
+        return
+    }
+    LazyColumn(modifier = Modifier.fillMaxSize()) {
+        items(jobs, key = { "job:${it.id}" }) { job ->
+            Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    DownloadJobControls(
+                        job = job,
+                        failures = failures.filter { it.jobId == job.id },
+                        onPauseDownload = onPauseDownload,
+                        onResumeDownload = onResumeDownload,
+                        onRetryDownload = onRetryDownload,
+                        onPrioritizeDownload = onPrioritizeDownload,
+                        onRetryFailedChapter = onRetryFailedChapter,
+                        onCancelDownload = onCancelDownload,
+                    )
+                }
+            }
+        }
+        items(stories, key = { "story:${it.id}" }) { story ->
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .clickable { onStoryClick(story) },
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(story.title, fontWeight = FontWeight.SemiBold)
+                    if (story.author.isNotBlank()) Text(story.author)
+                    val usage = storage[story.id]
+                    Text(if (usage == null) "Có thể đọc ngoại tuyến" else "${usage.chapterCount} chương • ${formatStorageBytes(usage.bytes)}")
+                    Text("Chạm để mở danh sách chương đã tải", style = MaterialTheme.typography.bodySmall)
+                    ReferenceActionButton(
+                        text = "TÙY CHỌN",
+                        onClick = { selectedOptions = story },
+                        minHeight = 44.dp,
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+'''
+          library.write_text(text[:start] + downloaded + text[end:])
+
+          vm = Path('app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt')
+          text = vm.read_text()
+          start = text.index('    fun openOfflineStory(entity: StoryEntity) {')
+          end = text.index('    fun loadStoryComments(force: Boolean = false)', start)
+          block = text[start:end]
+          if 'sourceId = "offline"' not in block or 'storyDetailTab = "intro"' not in block:
+              raise SystemExit('AppViewModel openOfflineStory anchors changed')
+          block = block.replace(
+              'val chapters = container.libraryRepository.listOfflineChapters(entity.id).map { chapter ->',
+              'val chapters = container.libraryRepository.listOfflineChapters(entity.id)\n                .filter { it.downloadedAt != null && !it.content.isNullOrBlank() }\n                .map { chapter ->',
+              1,
+          )
+          block = block.replace('storyDetailTab = "intro"', 'storyDetailTab = "chapters"', 1)
+          block = block.replace('sourceId = "offline"', 'sourceId = entity.sourceId', 1)
+          update_fn = '''    fun updateDownloadedStory(entity: StoryEntity) {
+        if (entity.sourceId == "offline") {
+            showMessage("Truyện nhập từ tệp không có nguồn trực tuyến để cập nhật.")
+            return
+        }
+        val source = container.sourceRegistry.get(entity.sourceId)
+        if (source == null) {
+            showMessage("Nguồn dùng để tải truyện này hiện không khả dụng.")
+            return
+        }
+        viewModelScope.launch {
+            mutableState.update { it.copy(loading = true, message = null) }
+            val detail = when (val result = source.story(entity.remoteUrl.ifBlank { entity.id })) {
+                is AppResult.Success -> result.value
+                is AppResult.Failure -> {
+                    mutableState.update { it.copy(loading = false, message = result.message) }
+                    return@launch
+                }
+            }
+            val chapters = when (val plan = StoryDownloadPlanner().collectChapters(source, detail)) {
+                is AppResult.Success -> plan.value
+                is AppResult.Failure -> {
+                    mutableState.update { it.copy(loading = false, message = plan.message) }
+                    return@launch
+                }
+            }
+            val downloaded = container.libraryRepository.listOfflineChapters(entity.id)
+                .filter { it.downloadedAt != null && !it.content.isNullOrBlank() }
+            val nextIndex = (downloaded.maxOfOrNull { it.chapterIndex } ?: -1) + 1
+            if (nextIndex >= chapters.size) {
+                mutableState.update { it.copy(loading = false, message = "Không có chương tiếp theo.") }
+                return@launch
+            }
+            val remaining = chapters.size - nextIndex
+            val request = DownloadRequest.create(
+                sourceId = entity.sourceId,
+                storyId = entity.id,
+                selectionMode = DownloadSelectionMode.RANGE,
+                startChapterIndex = nextIndex,
+                endChapterIndex = chapters.lastIndex,
+            )
+            mutableState.update { it.copy(loading = false) }
+            queueDownload(
+                request = request,
+                estimatedTotal = remaining,
+                successMessage = "Đã thêm $remaining chương tiếp theo vào hàng đợi tải.",
+            )
+        }
+    }
+
+'''
+          vm.write_text(text[:start] + block + update_fn + text[end:])
+
+          for app_path in [
+              'app/src/main/java/vn/nghetruyen/app/ui/NgheTruyenApp.kt',
+              'app/src/main/java/vn/nghetruyen/app/ui/ReferenceNgheTruyenApp.kt',
+          ]:
+              replace_once(
+                  app_path,
+                  '                        onStoryClick = viewModel::openLibraryStory,\n                        onRemoveFromReading = viewModel::removeFromReading,',
+                  '                        onStoryClick = viewModel::openLibraryStory,\n                        onUpdateDownloadedStory = viewModel::updateDownloadedStory,\n                        onRemoveFromReading = viewModel::removeFromReading,',
+              )
+
+          gate = Path('scripts/check_downloaded_xpk_parity.py')
+          gate.write_text('''#!/usr/bin/env python3
+from pathlib import Path
+
+library = Path("app/src/main/java/vn/nghetruyen/app/ui/screens/LibraryScreen.kt").read_text()
+vm = Path("app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt").read_text()
+app = Path("app/src/main/java/vn/nghetruyen/app/ui/NgheTruyenApp.kt").read_text()
+reference = Path("app/src/main/java/vn/nghetruyen/app/ui/ReferenceNgheTruyenApp.kt").read_text()
+
+start = library.index("private fun DownloadedSection(")
+end = library.index("private fun StoryEntityList", start)
+downloaded = library[start:end]
+for marker in [
+    'text = "TÙY CHỌN"',
+    'text = "CẬP NHẬT / TẢI TIẾP"',
+    'text = "XÓA DỮ LIỆU ĐÃ TẢI"',
+    'onUpdateDownloadedStory(story)',
+    '.clickable { onStoryClick(story) }',
+]:
+    assert marker in downloaded, f"Downloaded XPK flow missing: {marker}"
+assert "XÓA BẢN NGOẠI TUYẾN" not in downloaded, "Legacy direct-delete button returned"
+
+start = vm.index("fun openOfflineStory(entity: StoryEntity)")
+end = vm.index("fun loadStoryComments", start)
+offline = vm[start:end]
+for marker in [
+    'storyDetailTab = "chapters"',
+    'sourceId = entity.sourceId',
+    '.filter { it.downloadedAt != null && !it.content.isNullOrBlank() }',
+    'fun updateDownloadedStory(entity: StoryEntity)',
+    'StoryDownloadPlanner().collectChapters(source, detail)',
+    'selectionMode = DownloadSelectionMode.RANGE',
+    'queueDownload(',
+]:
+    assert marker in offline, f"Downloaded ViewModel parity missing: {marker}"
+for source in [app, reference]:
+    assert 'onUpdateDownloadedStory = viewModel::updateDownloadedStory' in source
+print("DOWNLOADED_XPK_PARITY=PASS")
+''')
+
+          m0 = Path('scripts/m0_gate.sh')
+          text = m0.read_text()
+          anchor = '  scripts/check_xpk_final_ui_parity.py\n)'
+          if text.count(anchor) != 1:
+              raise SystemExit('m0_gate downloaded parity anchor changed')
+          m0.write_text(text.replace(anchor, '  scripts/check_xpk_final_ui_parity.py\n  scripts/check_downloaded_xpk_parity.py\n)', 1))
+          PY
+      - name: Run parity gates
+        run: |
+          python3 scripts/check_downloaded_xpk_parity.py
+          python3 scripts/check_ui_control_parity.py
+          python3 scripts/check_reference_workflow_parity.py
+          python3 scripts/check_music_runtime_parity.py
+          python3 scripts/check_music_playback_parity.py
+          python3 scripts/check_music_normalization_flow_parity.py
+          python3 scripts/check_xpk_final_ui_parity.py
+          python3 scripts/check_xpk_parity_v290.py
+      - name: Run full unit tests
+        run: ./gradlew --no-daemon --console=plain test testDebugUnitTest
+      - name: Compile debug Kotlin
+        run: ./gradlew --no-daemon --console=plain :app:compileDebugKotlin
+      - name: Commit parity fix and clean diagnostic workflows
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            app/src/main/java/vn/nghetruyen/app/ui/screens/LibraryScreen.kt \
+            app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt \
+            app/src/main/java/vn/nghetruyen/app/ui/NgheTruyenApp.kt \
+            app/src/main/java/vn/nghetruyen/app/ui/ReferenceNgheTruyenApp.kt \
+            scripts/check_downloaded_xpk_parity.py \
+            scripts/m0_gate.sh
+          git rm -f .github/workflows/agent-fix-downloaded-xpk.yml
+          git rm -f .github/workflows/agent-debug-m0-static.yml .github/workflows/agent-debug-m0-static-steps.yml || true
+          git commit -m 'ui: align downloaded-library workflow with XPK'
+          git push origin HEAD:agent/settings-a11y-labels

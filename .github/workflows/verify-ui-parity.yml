@@ -1,0 +1,42 @@
+name: Verify UI parity compile
+
+on:
+  push:
+    branches:
+      - agent/settings-a11y-labels
+    paths:
+      - .github/workflows/verify-ui-parity.yml
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v6
+      - uses: android-actions/setup-android@v3
+      - name: Install SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Verify parity policy
+        run: python3 scripts/check_ui_control_parity.py
+      - name: Compile UI changes
+        run: ./gradlew --no-daemon --stacktrace :app:compileDebugKotlin
+      - name: Record successful verification
+        run: |
+          printf 'UI_CONTROL_PARITY=PASS\nKOTLIN_COMPILE=PASS\n' > UI_CONTROL_PARITY_VERIFIED.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add UI_CONTROL_PARITY_VERIFIED.txt
+          git commit -m 'test: record UI parity compile pass'
+          git push origin HEAD:agent/settings-a11y-labels

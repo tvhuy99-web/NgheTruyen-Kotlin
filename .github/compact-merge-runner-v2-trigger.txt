@@ -1,0 +1,1 @@
+trigger compact UI merge validation v2

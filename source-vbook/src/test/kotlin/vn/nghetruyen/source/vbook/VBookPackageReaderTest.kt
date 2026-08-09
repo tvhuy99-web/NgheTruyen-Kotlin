@@ -34,7 +34,7 @@ class VBookPackageReaderTest {
     }
 
     @Test
-    fun encryptedMetadataWithNonUtf8ScriptRequiresDecoderInsteadOfGuessing() {
+    fun nonUtf8ScriptIsRejectedFromActualBytesRegardlessOfEncryptFlag() {
         val encryptedPlugin = PLUGIN.replace("\"encrypt\":false", "\"encrypt\":true")
         val zip = packageZip(mapOf(
             "plugin.json" to encryptedPlugin.toByteArray(),
@@ -42,7 +42,7 @@ class VBookPackageReaderTest {
         ))
         val pkg = VBookPackageReader.read(zip)
         val failure = runCatching { pkg.decodeScripts() }.exceptionOrNull()
-        assertTrue(failure?.message.orEmpty().contains("ENCRYPTED_SCRIPT_DECODER_REQUIRED"))
+        assertTrue(failure?.message.orEmpty().contains("VBOOK_UTF8_INVALID:src/search.js"))
     }
 
     private fun packageZip(files: Map<String, ByteArray>): ByteArray {

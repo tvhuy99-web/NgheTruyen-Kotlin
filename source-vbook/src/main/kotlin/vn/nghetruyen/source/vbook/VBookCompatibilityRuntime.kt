@@ -437,6 +437,19 @@ class VBookCompatibilityRuntime(
             };
 
             $prelude
+            function __vbookCanonicalScriptResult(raw) {
+              if (typeof raw === 'string') return raw;
+              if (raw === null || raw === undefined) return JSON.stringify(raw);
+              var text;
+              try { text = String(raw); } catch (ignored) { text = ''; }
+              if (text) {
+                try {
+                  JSON.parse(text);
+                  return text;
+                } catch (ignored) {}
+              }
+              return JSON.stringify(raw);
+            }
             function execute(payload) {
               payload = payload || {};
               var script = String(payload.script || '');
@@ -450,8 +463,8 @@ class VBookCompatibilityRuntime(
                 case 4: raw = Script.execute(script, 'execute', String(args[0]), String(args[1]), String(args[2]), String(args[3])); break;
                 default: throw new Error('VBOOK_SCRIPT_ARGUMENT_COUNT_UNSUPPORTED:' + args.length);
               }
-              if (typeof raw !== 'string') raw = JSON.stringify(raw);
-              return JSON.stringify({code:0,data:{"$RAW_RESULT_KEY":String(raw)},data2:null});
+              raw = __vbookCanonicalScriptResult(raw);
+              return JSON.stringify({code:0,data:{"$RAW_RESULT_KEY":raw},data2:null});
             }
         """.trimIndent()
     }

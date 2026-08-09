@@ -21,8 +21,11 @@ data class VBookCandidateValidation(
     val profile: SourceCompatibilityProfile?,
     val failures: List<SourceFailure>,
     val warnings: List<String>,
+    /** Engine features used by this package that are known incomplete in the current host. */
+    val blockingFeatures: Set<VBookFeature> = emptySet(),
 ) {
-    val activatable: Boolean get() = failures.isEmpty() && state == SourceCompatibilityState.SUPPORTED
+    val activatable: Boolean get() =
+        failures.isEmpty() && blockingFeatures.isEmpty() && state == SourceCompatibilityState.SUPPORTED
 }
 
 fun interface VBookCompileProbe {
@@ -117,13 +120,24 @@ class VBookCandidateValidator(
                 sourceId = candidate.artifactId,
             )
         }
+
+        val blockingFeatures = parsed.features.filterTo(linkedSetOf()) { feature ->
+            if (feature == VBookFeature.METADATA_ENCRYPT) return@filterTo false
+            VBookEngineFeatureMatrix.support(feature).implementation in setOf(
+                VBookFeatureImplementationLevel.PARTIAL,
+                VBookFeatureImplementationLevel.PACKAGE_LAYER_PENDING,
+            )
+        }
+        if (blockingFeatures.isNotEmpty()) {
+            warnings += "VBOOK_ENGINE_FEATURE_PARTIAL:${blockingFeatures.sortedBy(Enum<*>::name).joinToString { it.name }}"
+        }
         if (parsed.manifest.metadata.encrypt) {
-            // `encrypt` is package/build metadata. Plain source trees are valid inputs, while encrypted ZIP
-            // payload decoding must be proven separately before claiming package-level parity.
-            warnings += "VBOOK_ENCRYPTED_DISTRIBUTION_REQUIRES_PACKAGE_DECODER_PROOF"
+            // The flag is common on readable official packages and is not itself proof that the ZIP bytes
+            // are encrypted. Package decoding must be decided from the actual archive format, not this flag.
+            warnings += "VBOOK_ENCRYPT_METADATA_PRESENT_PACKAGE_DECODER_UNCERTIFIED"
         }
         if (VBookFeature.LEGACY_HTTP_SOURCE in parsed.features) {
-            warnings += "VBOOK_LEGACY_HTTP_REQUIRES_EXPLICIT_CLEARTEXT_POLICY"
+            warnings += "VBOOK_LEGACY_HTTP_SCOPED_TO_VBOOK_SANDBOX"
         }
         if (parsed.unknownScriptRoles.isNotEmpty()) {
             warnings += "VBOOK_UNKNOWN_SCRIPT_ROLES:${parsed.unknownScriptRoles.sorted().joinToString()}"
@@ -132,13 +146,19 @@ class VBookCandidateValidator(
         val profile = parsed.detection.profile.takeUnless { it == VBookContractProfile.UNKNOWN }?.let {
             SourceCompatibilityProfile(SourceEcosystem.VBOOK, if (it == VBookContractProfile.CURRENT_JS) "current-js" else "legacy-js")
         }
+        val state = when {
+            failures.isNotEmpty() -> SourceCompatibilityState.UNSUPPORTED
+            blockingFeatures.isNotEmpty() -> SourceCompatibilityState.PARTIAL
+            else -> SourceCompatibilityState.SUPPORTED
+        }
         return VBookCandidateValidation(
             candidate = candidate,
             audit = parsed,
-            state = if (failures.isEmpty()) SourceCompatibilityState.SUPPORTED else SourceCompatibilityState.UNSUPPORTED,
+            state = state,
             profile = profile,
             failures = failures,
             warnings = warnings,
+            blockingFeatures = blockingFeatures,
         )
     }
 }

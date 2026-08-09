@@ -11,11 +11,17 @@ end = library.index("private fun StoryEntityList", start)
 downloaded = library[start:end]
 
 for marker in [
-    '"TÙY CHỌN"',
     '"CẬP NHẬT / TẢI TIẾP"',
     '"XÓA DỮ LIỆU ĐÃ TẢI"',
     'onUpdateDownloadedStory(story)',
-    '.clickable { onStoryClick(story) }',
+    'DownloadedLibraryCallbacks.chapters(app, story)',
+    '"CHƯƠNG: ${story.title.ifBlank { "Truyện" }}',
+    '"TÌM CHƯƠNG ĐÃ TẢI"',
+    '"Nhập tên, số chương hoặc vài ký tự liên quan"',
+    '"HIỆN TẤT CẢ"',
+    '"Không tìm thấy chương phù hợp với “${chapterQuery.trim()}”."',
+    'DownloadedLibraryCallbacks.selectChapter(chapter)',
+    'onStoryClick(story)',
     '"Chạm để mở danh sách chương đã tải"',
 ]:
     assert marker in downloaded, f"Downloaded XPK flow missing: {marker}"
@@ -23,10 +29,14 @@ assert "XÓA BẢN NGOẠI TUYẾN" not in downloaded, "Legacy direct-delete but
 
 for marker in [
     "object DownloadedLibraryCallbacks",
+    "suspend fun chapters(app: NgheTruyenApplication, story: StoryEntity)",
+    "fun selectChapter(chapter: ChapterEntity)",
+    "consumeSelectedChapter(storyId: String)",
     "viewModel.openDownloadedStoryFromLibrary(story)",
     "viewModel.updateDownloadedStoryFromLibrary(story)",
     "fun AppViewModel.openDownloadedStoryFromLibrary(entity: StoryEntity)",
-    'setStoryDetailTab("chapters")',
+    "openChapter(",
+    "ChapterSummary(",
     "fun AppViewModel.updateDownloadedStoryFromLibrary(entity: StoryEntity)",
     "StoryDownloadPlanner().collectChapters(source, detail)",
     ".filter { it.downloadedAt != null && !it.content.isNullOrBlank() }",

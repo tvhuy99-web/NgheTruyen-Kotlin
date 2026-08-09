@@ -28,8 +28,10 @@ required = {
     "ReaderScreen.kt": [
         'ReaderIntSlider("Cỡ chữ"',
         'ReaderIntSlider("Khoảng cách dòng"',
-        'ReaderIntSlider("Crossfade"',
         'ReaderFloatSlider("Mức chuẩn hóa"',
+        'ReaderFloatSlider("Giảm nhạc khi giọng đọc phát"',
+        'ReaderIntSlider("Attack"',
+        'ReaderIntSlider("Release"',
         'TtsSlider("Tốc độ đọc"',
         'TtsSlider("Cao độ"',
         'TtsSlider("Âm lượng"',
@@ -101,7 +103,9 @@ for token in [
 if "ValueStepper(" in reader:
     raise SystemExit("ReaderScreen.kt: ValueStepper remains")
 
-# Reference uses Spinner-like selectors for processing method/Sonic quality. Do not regress to paired buttons.
+# The XPK reader music dialog contains target LUFS/duck/attack/release. Kotlin-only
+# extensions such as crossfade/avoid-repeat may remain in Personal advanced settings,
+# but must not be required inside the reference Reader workflow.
 for token in [
     'TextButton({ ttsDraft = ttsDraft.copy(processingMethod',
     'TextButton({ ttsDraft = ttsDraft.copy(sonicAccurate',
@@ -112,7 +116,6 @@ for token in ['+ "HỆ THỐNG"', '+ "SONIC"', '+ "NHANH"', '+ "CHÍNH XÁC"']:
     if token in role:
         raise SystemExit(f"GlobalVoiceRoleEditorDialog.kt: paired selector button remains: {token}")
 
-# Reference profile editor has no separate aliases field and no extra Sonic speed/pitch sliders.
 for token, message in [
     ('label = { Text("Bí danh") }', "extra Bí danh field remains"),
     ('CompactVoiceValueRow("Tốc độ Sonic"', "extra Tốc độ Sonic slider remains"),

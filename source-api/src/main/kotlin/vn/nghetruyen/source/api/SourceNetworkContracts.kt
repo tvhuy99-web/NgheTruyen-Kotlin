@@ -48,6 +48,8 @@ data class SourceNetworkResponse(
     val cipherSuite: String? = null,
     val timing: SourceNetworkTiming,
     val traceId: String,
+    /** HTTP reason phrase when the transport exposes one. HTTP/2+ may legitimately return an empty string. */
+    val statusText: String = "",
     val fromReplay: Boolean = false,
 ) {
     fun bodyText(defaultCharset: Charset = Charsets.UTF_8): String =

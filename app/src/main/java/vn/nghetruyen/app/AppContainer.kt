@@ -49,9 +49,18 @@ class AppContainer(context: Context) {
     val sourceRegistry: SourceRegistry by lazy {
         SourceRegistry(
             sessionStore = sourceSessionStore,
-            sourcePackSources = sourcePlatformManager.activeStorySources() + vBookSourcePlatform.activeStorySources(),
+            sourcePackSources = currentExternalStorySources(),
         )
     }
+
+    /** One refresh point after native or vBook install/update/rollback. */
+    fun refreshSourceRegistry() {
+        sourceRegistry.refreshSourcePacks(currentExternalStorySources())
+    }
+
+    private fun currentExternalStorySources() =
+        sourcePlatformManager.activeStorySources() + vBookSourcePlatform.activeStorySources()
+
     val sourceHealthChecker: SourceHealthChecker by lazy { SourceHealthChecker(sourceRegistry) }
     val bookImporter: BookImporter by lazy { BookImporter(appContext.contentResolver) }
     val downloadScheduler: DownloadScheduler by lazy { DownloadScheduler(appContext) }

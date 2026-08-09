@@ -14,8 +14,9 @@ import java.util.LinkedHashMap
  * vBook-only network decorator used to bridge the mature text-oriented JS host to the raw-byte
  * contract without weakening or modifying the generic network broker.
  *
- * Internal control headers are removed before any upstream request. A charset decode is served
- * from the already captured response, so POST requests are never replayed just to decode text.
+ * Internal control headers are removed before any upstream request. Charset/base64 operations are
+ * served lazily from the already captured response, so POST requests are never replayed merely to
+ * decode or encode their response body.
  */
 class VBookRawNetworkBroker(
     private val delegate: SourceNetworkBroker,
@@ -37,27 +38,34 @@ class VBookRawNetworkBroker(
 
     override fun execute(manifest: SourceManifest, request: SourceNetworkRequest): SourcePlatformResult<SourceNetworkResponse> {
         val requestKey = request.headers[INTERNAL_REQUEST_KEY]
+        val operation = request.headers[INTERNAL_OPERATION]?.lowercase()
         val decodeCharset = request.headers[INTERNAL_DECODE_CHARSET]
         val requestedTimeout = request.headers[INTERNAL_TIMEOUT_MS]?.toLongOrNull()?.coerceIn(100L, 120_000L)
-        val sanitizedHeaders = request.headers.filterKeys {
-            it != INTERNAL_REQUEST_KEY && it != INTERNAL_DECODE_CHARSET && it != INTERNAL_TIMEOUT_MS
-        }
+        val sanitizedHeaders = request.headers.filterKeys { key -> key !in INTERNAL_CONTROL_HEADERS }
 
-        if (!decodeCharset.isNullOrBlank()) {
+        if (!operation.isNullOrBlank()) {
             val key = requestKey?.takeIf(String::isNotBlank)
                 ?: return failure(request, "VBOOK_RAW_CACHE_KEY_REQUIRED")
             val cached = synchronized(this) { cache[CacheKey(request.sourceId, key)] }
                 ?: return failure(request, "VBOOK_RAW_RESPONSE_CACHE_MISS")
-            val charset = runCatching { Charset.forName(decodeCharset) }.getOrElse {
-                return failure(request, "VBOOK_FETCH_CHARSET_INVALID:$decodeCharset")
+            val bytes = when (operation) {
+                OP_TEXT -> {
+                    val charsetName = decodeCharset?.takeIf(String::isNotBlank)
+                        ?: return failure(request, "VBOOK_FETCH_CHARSET_REQUIRED")
+                    val charset = runCatching { Charset.forName(charsetName) }.getOrElse {
+                        return failure(request, "VBOOK_FETCH_CHARSET_INVALID:$charsetName")
+                    }
+                    cached.response.body.toString(charset).toByteArray(Charsets.UTF_8)
+                }
+                OP_BASE64 -> Base64.getEncoder().encode(cached.response.body)
+                else -> return failure(request, "VBOOK_RAW_OPERATION_INVALID:$operation")
             }
-            val decoded = cached.response.body.toString(charset).toByteArray(Charsets.UTF_8)
             return SourcePlatformResult.Success(cached.response.copy(
-                body = decoded,
+                body = bytes,
                 charsetName = Charsets.UTF_8.name(),
                 traceId = request.traceId,
                 fromReplay = true,
-                headers = enrichHeaders(cached.response.headers, cached.response.body, key),
+                headers = enrichHeaders(cached.response.headers, cached.response.body.size, key),
             ))
         }
 
@@ -71,7 +79,7 @@ class VBookRawNetworkBroker(
         val key = requestKey?.takeIf(String::isNotBlank)
         if (key != null) put(CacheKey(request.sourceId, key), response)
         return SourcePlatformResult.Success(response.copy(
-            headers = enrichHeaders(response.headers, response.body, key),
+            headers = enrichHeaders(response.headers, response.body.size, key),
         ))
     }
 
@@ -90,10 +98,10 @@ class VBookRawNetworkBroker(
 
     private fun enrichHeaders(
         headers: Map<String, List<String>>,
-        body: ByteArray,
+        rawSize: Int,
         key: String?,
     ): Map<String, List<String>> = LinkedHashMap(headers).apply {
-        put(INTERNAL_RAW_BASE64.lowercase(), listOf(Base64.getEncoder().encodeToString(body)))
+        put(INTERNAL_RAW_SIZE.lowercase(), listOf(rawSize.toString()))
         if (key != null) put(INTERNAL_RESPONSE_KEY.lowercase(), listOf(key))
     }
 
@@ -107,9 +115,19 @@ class VBookRawNetworkBroker(
 
     companion object {
         const val INTERNAL_REQUEST_KEY = "X-Nghe-VBook-Request-Key"
+        const val INTERNAL_OPERATION = "X-Nghe-VBook-Operation"
         const val INTERNAL_DECODE_CHARSET = "X-Nghe-VBook-Decode-Charset"
         const val INTERNAL_TIMEOUT_MS = "X-Nghe-VBook-Timeout-Ms"
-        const val INTERNAL_RAW_BASE64 = "X-Nghe-VBook-Raw-Base64"
+        const val INTERNAL_RAW_SIZE = "X-Nghe-VBook-Raw-Size"
         const val INTERNAL_RESPONSE_KEY = "X-Nghe-VBook-Response-Key"
+        const val OP_TEXT = "text"
+        const val OP_BASE64 = "base64"
+
+        private val INTERNAL_CONTROL_HEADERS = setOf(
+            INTERNAL_REQUEST_KEY,
+            INTERNAL_OPERATION,
+            INTERNAL_DECODE_CHARSET,
+            INTERNAL_TIMEOUT_MS,
+        )
     }
 }

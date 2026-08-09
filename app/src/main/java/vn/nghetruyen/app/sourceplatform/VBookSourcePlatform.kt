@@ -16,6 +16,7 @@ import vn.nghetruyen.app.ai.TranslationEngine
 import vn.nghetruyen.app.sources.EncryptedSourceSessionStore
 import vn.nghetruyen.app.sources.StorySource
 import vn.nghetruyen.source.api.SourceCapabilityBrokers
+import vn.nghetruyen.source.api.SourcePlatformResult
 import vn.nghetruyen.source.diagnostics.PersistentDiagnosticStore
 import vn.nghetruyen.source.network.OkHttpSourceNetworkBroker
 import vn.nghetruyen.source.network.OkHttpSourceWebSocketBroker
@@ -196,9 +197,14 @@ class VBookSourcePlatform(
         return coordinator.rollback(current.identity, clockMs())
     }
 
-    /** Removes install-state/config pointers; immutable artifact bytes remain archived for audit. */
+    /** Removes install/config/runtime state pointers while retaining immutable artifact bytes for audit. */
     fun uninstallBySourceId(sourceId: String): Boolean {
         val current = installedBySourceId(sourceId)
+        when (val cleared = brokers.storage.clear(sourceId)) {
+            is SourcePlatformResult.Success -> Unit
+            is SourcePlatformResult.Failure -> error("VBOOK_STORAGE_CLEANUP_${cleared.error.code}:${cleared.error.message}")
+        }
+        brokers.cookies.clear(sourceId)
         configStore.clear(current.identity.canonicalKey())
         return store.uninstall(current.identity)
     }

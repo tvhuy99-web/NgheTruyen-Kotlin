@@ -260,11 +260,15 @@ object VBookContractDetector {
         }
 
         val profile = when {
-            current == 0 && legacy == 0 -> VBookContractProfile.UNKNOWN
+            // The documented current contract is the canonical baseline. Signal-free minimal packages
+            // are valid current extensions; legacy must be positively identified by historical fields
+            // or response/config syntax instead of making current authors add artificial markers.
+            current == 0 && legacy == 0 -> VBookContractProfile.CURRENT_JS
             current >= legacy + 2 -> VBookContractProfile.CURRENT_JS
             legacy >= current + 2 -> VBookContractProfile.LEGACY_JS
             else -> VBookContractProfile.UNKNOWN
         }
+        if (current == 0 && legacy == 0) reasons += "no legacy signal; defaulting to canonical current contract"
         return VBookContractDetection(profile, current, legacy, reasons.distinct())
     }
 }

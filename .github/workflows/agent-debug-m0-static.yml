@@ -1,0 +1,56 @@
+name: Agent diagnose M0 static gates
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    if: github.event.pull_request.head.ref == 'agent/settings-a11y-labels'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/settings-a11y-labels
+      - name: Run preflight and static gates independently
+        shell: bash
+        run: |
+          set +e
+          failed=0
+          echo '=== PREFLIGHT ==='
+          python3 scripts/m0_preflight.py --json /tmp/preflight.json --markdown /tmp/preflight.md --strict
+          rc=$?
+          echo "RESULT preflight rc=$rc"
+          if [[ $rc -ne 0 ]]; then failed=1; fi
+          gates=(
+            scripts/validate_release.py
+            scripts/check_source_platform_foundation.py
+            scripts/check_milestone2_source_platform.py
+            scripts/check_milestone4_foundation.py
+            scripts/check_milestone4_complete.py
+            scripts/check_milestone5_foundation.py
+            scripts/check_audio_export_static.py
+            scripts/check_p1_ui_static.py
+            scripts/check_p2_ui_static.py
+            scripts/check_p4_transfer_static.py
+            scripts/check_milestone3_ui_static.py
+            scripts/check_milestone3_download_static.py
+            scripts/check_milestone3_kindle.py
+            scripts/check_ui_control_parity.py
+            scripts/check_reference_workflow_parity.py
+            scripts/check_music_runtime_parity.py
+            scripts/check_music_playback_parity.py
+            scripts/check_music_normalization_flow_parity.py
+            scripts/check_xpk_final_ui_parity.py
+          )
+          for gate in "${gates[@]}"; do
+            echo "=== $gate ==="
+            python3 "$gate"
+            rc=$?
+            echo "RESULT $gate rc=$rc"
+            if [[ $rc -ne 0 ]]; then failed=1; fi
+          done
+          exit $failed

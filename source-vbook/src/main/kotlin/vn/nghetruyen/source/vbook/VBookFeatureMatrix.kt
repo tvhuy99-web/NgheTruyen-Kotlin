@@ -81,6 +81,7 @@ object VBookEngineFeatureMatrix {
             VBookFeature.FETCH_QUERIES,
             VBookFeature.FETCH_TIMEOUT,
             VBookFeature.FETCH_HEADER,
+            VBookFeature.FETCH_STATUS_TEXT,
             VBookFeature.FETCH_CHARSET,
             VBookFeature.FETCH_BASE64,
             VBookFeature.FETCH_BLOB,
@@ -103,16 +104,14 @@ object VBookEngineFeatureMatrix {
                 when {
                     feature in setOf(VBookFeature.FETCH_CHARSET, VBookFeature.FETCH_BASE64, VBookFeature.FETCH_BLOB) ->
                         "Implemented through VBookRawNetworkBroker: raw bytes are cached per response, binary methods use exact base64, and explicit charset decoding reuses the captured bytes without replaying the upstream request."
+                    feature == VBookFeature.FETCH_STATUS_TEXT ->
+                        "Implemented from transport reason metadata. Empty statusText remains valid for transports such as HTTP/2 where no reason phrase is exposed."
+                    feature == VBookFeature.FETCH_REQUEST_INFO ->
+                        "Implemented from captured final request metadata after defaults, cookies and redirects, with internal compatibility headers removed."
                     feature == VBookFeature.LEGACY_HTTP_SOURCE ->
                         "Implemented through VBookNetworkPolicy and SourceOriginPolicy: cleartext is derived per extension and only VBOOK_JS_COMPAT may enable it; public-address DNS restrictions remain enforced."
                     else -> "Implementation exists; certification remains a separate differential-test state."
                 },
-            )
-
-            VBookFeature.FETCH_STATUS_TEXT -> VBookFeatureSupport(
-                feature,
-                VBookFeatureImplementationLevel.PARTIAL,
-                "The generic transport contract now carries statusText, but all concrete network brokers must populate the transport reason phrase before this can be certified.",
             )
 
             VBookFeature.METADATA_ENCRYPT -> VBookFeatureSupport(

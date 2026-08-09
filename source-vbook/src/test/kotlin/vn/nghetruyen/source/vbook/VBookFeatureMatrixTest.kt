@@ -34,21 +34,42 @@ class VBookFeatureMatrixTest {
     }
 
     @Test
-    fun partialWebsocketOrQuickTranslatorBlocksWhenCorpusUsesIt() {
+    fun persistentWebsocketOrAdvancedQuickTranslatorStillBlocksWhenCorpusUsesIt() {
         val report = VBookCorpusReport(
             extensionCount = 2,
             profiles = mapOf(VBookContractProfile.CURRENT_JS to 2),
             contentTypes = mapOf(VBookContentType.TTS to 1, VBookContentType.NOVEL to 1),
             features = listOf(
-                VBookCorpusFeatureRow(VBookFeature.WEBSOCKET_FRAMES, 1, listOf("tts")),
-                VBookCorpusFeatureRow(VBookFeature.QUICK_TRANSLATOR, 1, listOf("novel")),
+                VBookCorpusFeatureRow(VBookFeature.WEBSOCKET, 1, listOf("tts")),
+                VBookCorpusFeatureRow(VBookFeature.QUICK_TRANSLATOR_OPTIONS, 1, listOf("novel")),
             ),
             extensionsWithMissingRequiredScripts = emptyList(),
             extensionsWithMissingDynamicScripts = emptyList(),
         )
         val matrix = VBookEngineFeatureMatrix.matrix(report)
-        assertTrue(matrix.blockingFeatures.any { it.feature == VBookFeature.WEBSOCKET_FRAMES })
-        assertTrue(matrix.blockingFeatures.any { it.feature == VBookFeature.QUICK_TRANSLATOR })
+        assertTrue(matrix.blockingFeatures.any { it.feature == VBookFeature.WEBSOCKET })
+        assertTrue(matrix.blockingFeatures.any { it.feature == VBookFeature.QUICK_TRANSLATOR_OPTIONS })
         assertFalse(matrix.canClaimFullCorpusParity)
+    }
+
+    @Test
+    fun websocketHeadersFramesAndBaseQtAreImplementationCompleteButNeedCertification() {
+        val report = VBookCorpusReport(
+            extensionCount = 1,
+            profiles = mapOf(VBookContractProfile.CURRENT_JS to 1),
+            contentTypes = mapOf(VBookContentType.TTS to 1),
+            features = listOf(
+                VBookCorpusFeatureRow(VBookFeature.WEBSOCKET_HEADERS, 1, listOf("x")),
+                VBookCorpusFeatureRow(VBookFeature.WEBSOCKET_FRAMES, 1, listOf("x")),
+                VBookCorpusFeatureRow(VBookFeature.QUICK_TRANSLATOR, 1, listOf("x")),
+            ),
+            extensionsWithMissingRequiredScripts = emptyList(),
+            extensionsWithMissingDynamicScripts = emptyList(),
+        )
+        val matrix = VBookEngineFeatureMatrix.matrix(report)
+        assertTrue(matrix.blockingFeatures.isEmpty())
+        assertTrue(matrix.uncertifiedRequiredFeatures.map { it.feature }.containsAll(
+            setOf(VBookFeature.WEBSOCKET_HEADERS, VBookFeature.WEBSOCKET_FRAMES, VBookFeature.QUICK_TRANSLATOR),
+        ))
     }
 }

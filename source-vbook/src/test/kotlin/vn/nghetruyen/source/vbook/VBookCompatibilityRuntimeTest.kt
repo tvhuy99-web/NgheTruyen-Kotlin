@@ -6,6 +6,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import vn.nghetruyen.source.api.JsonValue
 import vn.nghetruyen.source.api.SemanticVersion
+import vn.nghetruyen.source.api.SourceBrowserAction
+import vn.nghetruyen.source.api.SourceBrowserBroker
+import vn.nghetruyen.source.api.SourceBrowserCapability
+import vn.nghetruyen.source.api.SourceBrowserRequestMetadata
+import vn.nghetruyen.source.api.SourceBrowserResponse
 import vn.nghetruyen.source.api.SourceCapabilities
 import vn.nghetruyen.source.api.SourceCapabilityBrokers
 import vn.nghetruyen.source.api.SourceContentType
@@ -138,7 +143,131 @@ class VBookCompatibilityRuntimeTest {
         assertEquals("undefined", first.string("hiddenInternal"))
     }
 
-    private fun manifest(network: Boolean = false): SourceManifest = SourceManifest(
+    @Test
+    fun domCollectionsAndMutationFollowCurrentVBookShape() {
+        val resources = resources(
+            CURRENT_PLUGIN,
+            mapOf(
+                "src/search.js" to """
+                    function execute(query, page) {
+                      var doc = Html.parse("<div id='content'><script>bad()</script><p>A</p><p data-x='1'>B</p></div>");
+                      doc.select('script').forEach(function(el){ el.remove(); });
+                      var paragraphs = doc.select('p');
+                      var nested = doc.select('#content').select('p');
+                      return Response.success([{
+                        html:doc.select('#content').html(),
+                        count:String(paragraphs.size()),
+                        empty:String(paragraphs.isEmpty()),
+                        mapped:paragraphs.map(function(el){return el.text();}).join('|'),
+                        attr:String(paragraphs.get(1).attributes()['data-x']),
+                        nested:nested.text()
+                      }], '');
+                    }
+                """.trimIndent(),
+                "src/explore.js" to "function execute(){return Response.success([]);}",
+            ),
+        )
+
+        val result = VBookCompatibilityRuntime().executeDeclared(
+            sourceManifest = manifest(),
+            resources = resources,
+            role = VBookScriptRole.SEARCH,
+            input = "q",
+            traceId = "dom-current",
+        ) as SourcePlatformResult.Success
+
+        val row = (result.value.data as JsonValue.Arr).values.first() as JsonValue.Obj
+        assertFalse(row.string("html").orEmpty().contains("script", ignoreCase = true))
+        assertEquals("2", row.string("count"))
+        assertEquals("false", row.string("empty"))
+        assertEquals("A|B", row.string("mapped"))
+        assertEquals("1", row.string("attr"))
+        assertEquals("A B", row.string("nested"))
+    }
+
+    @Test
+    fun browserLoadHtmlUsesHtmlThenBaseUrlAndWaitUrlObservesNetworkRequests() {
+        var loadHtmlUrl: String? = null
+        var loadHtmlValue: String? = null
+        var requestMetadataCalls = 0
+        val browser = SourceBrowserBroker { _, request ->
+            when (request.action) {
+                SourceBrowserAction.LOAD_HTML -> {
+                    loadHtmlUrl = request.url
+                    loadHtmlValue = request.value
+                    SourcePlatformResult.Success(SourceBrowserResponse(
+                        finalUrl = request.url,
+                        value = "ok",
+                        traceId = request.traceId,
+                    ))
+                }
+                SourceBrowserAction.REQUEST_METADATA -> {
+                    requestMetadataCalls++
+                    SourcePlatformResult.Success(SourceBrowserResponse(
+                        finalUrl = "https://page.example/current",
+                        requestMetadata = listOf(SourceBrowserRequestMetadata(
+                            url = "https://api.example/data?id=7",
+                            method = "GET",
+                            mainFrame = false,
+                            resourceType = "fetch",
+                            timestampEpochMs = 10,
+                        )),
+                        traceId = request.traceId,
+                    ))
+                }
+                SourceBrowserAction.CLOSE_SESSION -> SourcePlatformResult.Success(SourceBrowserResponse(
+                    finalUrl = "https://page.example/current",
+                    traceId = request.traceId,
+                ))
+                else -> SourcePlatformResult.Success(SourceBrowserResponse(
+                    finalUrl = "https://page.example/current",
+                    traceId = request.traceId,
+                ))
+            }
+        }
+        val runtime = VBookCompatibilityRuntime(SourceCapabilityBrokers(browser = browser))
+        val resources = resources(
+            CURRENT_PLUGIN,
+            mapOf(
+                "src/search.js" to """
+                    function execute(query, page) {
+                      var browser = Engine.newBrowser();
+                      try {
+                        browser.loadHtml('<html><body>fixture</body></html>', 'https://base.example/path/');
+                        var matched = browser.waitUrl(['*api.example/data*'], 500);
+                        return Response.success([{
+                          matched:String(matched),
+                          current:String(browser.currentUrl())
+                        }], '');
+                      } finally {
+                        browser.close();
+                      }
+                    }
+                """.trimIndent(),
+                "src/explore.js" to "function execute(){return Response.success([]);}",
+            ),
+        )
+
+        val result = runtime.executeDeclared(
+            sourceManifest = manifest(browser = true),
+            resources = resources,
+            role = VBookScriptRole.SEARCH,
+            input = "q",
+            traceId = "browser-current",
+        ) as SourcePlatformResult.Success
+
+        assertEquals("https://base.example/path/", loadHtmlUrl)
+        assertEquals("<html><body>fixture</body></html>", loadHtmlValue)
+        assertTrue(requestMetadataCalls >= 1)
+        val row = (result.value.data as JsonValue.Arr).values.first() as JsonValue.Obj
+        assertEquals("https://api.example/data?id=7", row.string("matched"))
+        assertEquals("https://page.example/current", row.string("current"))
+    }
+
+    private fun manifest(
+        network: Boolean = false,
+        browser: Boolean = false,
+    ): SourceManifest = SourceManifest(
         schemaVersion = 2,
         id = "test.vbook.source",
         name = "VBook fixture",
@@ -154,6 +283,14 @@ class VBookCompatibilityRuntimeTest {
                 maxRequestBytes = 1024 * 1024,
                 publicInternet = true,
             ) else null,
+            browser = if (browser) SourceBrowserCapability(
+                navigate = true,
+                domSnapshot = true,
+                click = true,
+                input = true,
+                requestMetadata = true,
+                pageJavaScript = true,
+            ) else SourceBrowserCapability(),
         ),
         actions = emptyMap(),
     )

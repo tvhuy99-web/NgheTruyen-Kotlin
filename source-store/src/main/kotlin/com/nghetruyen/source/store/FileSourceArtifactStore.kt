@@ -87,6 +87,27 @@ class FileSourceArtifactStore(private val root: Path) : SourceArtifactRegistry, 
         state(identity).getProperty("previous")?.takeIf(String::isNotBlank)?.let(::descriptor)
             ?.takeIf { it.identity == identity && it.state == SourceArtifactState.PREVIOUS_KNOWN_GOOD }
 
+    /** Restores installed active sources directly from the atomic identity pointers after restart. */
+    @Synchronized
+    fun activeArtifacts(ecosystem: SourceEcosystem? = null): List<SourceArtifactDescriptor> {
+        if (!Files.isDirectory(identities)) return emptyList()
+        val paths = Files.list(identities).use { stream ->
+            stream.filter(Files::isRegularFile).toList()
+        }
+        return paths.mapNotNull { path ->
+            runCatching {
+                val state = readProperties(path)
+                val activeId = state.getProperty("active")?.takeIf(String::isNotBlank) ?: return@runCatching null
+                val value = descriptor(activeId) ?: return@runCatching null
+                require(value.state == SourceArtifactState.ACTIVE) { "SOURCE_ACTIVE_POINTER_STATE_INVALID:$activeId" }
+                require(state.getProperty("ecosystem") == value.identity.ecosystem.name) { "SOURCE_ACTIVE_POINTER_IDENTITY_MISMATCH" }
+                require(state.getProperty("repositoryId") == value.identity.repositoryId) { "SOURCE_ACTIVE_POINTER_IDENTITY_MISMATCH" }
+                require(state.getProperty("remoteIdentity") == value.identity.remoteIdentity) { "SOURCE_ACTIVE_POINTER_IDENTITY_MISMATCH" }
+                value.takeIf { ecosystem == null || it.identity.ecosystem == ecosystem }
+            }.getOrNull()
+        }.sortedBy { it.identity.canonicalKey() }
+    }
+
     @Synchronized
     override fun commit(transition: SourceArtifactTransition) {
         transition.afterActive?.let(::writeDescriptor)

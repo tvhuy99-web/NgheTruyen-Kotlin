@@ -83,26 +83,38 @@ class FileSourceArtifactStore(private val root: Path) : SourceArtifactRegistry, 
             ?.takeIf { it.identity == identity && it.state == SourceArtifactState.ACTIVE }
 
     @Synchronized
+    fun disabled(identity: SourceArtifactIdentity): SourceArtifactDescriptor? =
+        state(identity).getProperty("disabled")?.takeIf(String::isNotBlank)?.let(::descriptor)
+            ?.takeIf { it.identity == identity && it.state == SourceArtifactState.DISABLED }
+
+    @Synchronized
     override fun previousKnownGood(identity: SourceArtifactIdentity): SourceArtifactDescriptor? =
         state(identity).getProperty("previous")?.takeIf(String::isNotBlank)?.let(::descriptor)
             ?.takeIf { it.identity == identity && it.state == SourceArtifactState.PREVIOUS_KNOWN_GOOD }
 
     /** Restores installed active sources directly from the atomic identity pointers after restart. */
     @Synchronized
-    fun activeArtifacts(ecosystem: SourceEcosystem? = null): List<SourceArtifactDescriptor> {
+    fun activeArtifacts(ecosystem: SourceEcosystem? = null): List<SourceArtifactDescriptor> =
+        installedArtifacts(ecosystem).filter { it.state == SourceArtifactState.ACTIVE }
+
+    /** Current installed artifact for each identity, including disabled artifacts but not old/quarantined versions. */
+    @Synchronized
+    fun installedArtifacts(ecosystem: SourceEcosystem? = null): List<SourceArtifactDescriptor> {
         if (!Files.isDirectory(identities)) return emptyList()
-        val paths = Files.list(identities).use { stream ->
-            stream.filter(Files::isRegularFile).toList()
-        }
+        val paths = Files.list(identities).use { stream -> stream.filter(Files::isRegularFile).toList() }
         return paths.mapNotNull { path ->
             runCatching {
-                val state = readProperties(path)
-                val activeId = state.getProperty("active")?.takeIf(String::isNotBlank) ?: return@runCatching null
-                val value = descriptor(activeId) ?: return@runCatching null
-                require(value.state == SourceArtifactState.ACTIVE) { "SOURCE_ACTIVE_POINTER_STATE_INVALID:$activeId" }
-                require(state.getProperty("ecosystem") == value.identity.ecosystem.name) { "SOURCE_ACTIVE_POINTER_IDENTITY_MISMATCH" }
-                require(state.getProperty("repositoryId") == value.identity.repositoryId) { "SOURCE_ACTIVE_POINTER_IDENTITY_MISMATCH" }
-                require(state.getProperty("remoteIdentity") == value.identity.remoteIdentity) { "SOURCE_ACTIVE_POINTER_IDENTITY_MISMATCH" }
+                val pointer = readProperties(path)
+                val artifactId = pointer.getProperty("active")?.takeIf(String::isNotBlank)
+                    ?: pointer.getProperty("disabled")?.takeIf(String::isNotBlank)
+                    ?: return@runCatching null
+                val value = descriptor(artifactId) ?: return@runCatching null
+                require(value.state in setOf(SourceArtifactState.ACTIVE, SourceArtifactState.DISABLED)) {
+                    "SOURCE_INSTALLED_POINTER_STATE_INVALID:$artifactId"
+                }
+                require(pointer.getProperty("ecosystem") == value.identity.ecosystem.name) { "SOURCE_INSTALLED_POINTER_IDENTITY_MISMATCH" }
+                require(pointer.getProperty("repositoryId") == value.identity.repositoryId) { "SOURCE_INSTALLED_POINTER_IDENTITY_MISMATCH" }
+                require(pointer.getProperty("remoteIdentity") == value.identity.remoteIdentity) { "SOURCE_INSTALLED_POINTER_IDENTITY_MISMATCH" }
                 value.takeIf { ecosystem == null || it.identity.ecosystem == ecosystem }
             }.getOrNull()
         }.sortedBy { it.identity.canonicalKey() }
@@ -117,10 +129,16 @@ class FileSourceArtifactStore(private val root: Path) : SourceArtifactRegistry, 
         val current = state(transition.identity)
         val next = Properties().apply { putAll(current) }
         val after = transition.afterActive
-        if (after?.state == SourceArtifactState.ACTIVE) {
-            next.setProperty("active", after.artifactId)
-        } else if (transition.beforeActive != null) {
-            next.remove("active")
+        when (after?.state) {
+            SourceArtifactState.ACTIVE -> {
+                next.setProperty("active", after.artifactId)
+                next.remove("disabled")
+            }
+            SourceArtifactState.DISABLED -> {
+                next.setProperty("disabled", after.artifactId)
+                next.remove("active")
+            }
+            else -> if (transition.beforeActive != null) next.remove("active")
         }
         transition.previousKnownGood?.let { next.setProperty("previous", it.artifactId) }
 
@@ -136,6 +154,10 @@ class FileSourceArtifactStore(private val root: Path) : SourceArtifactRegistry, 
         next.setProperty("remoteIdentity", transition.identity.remoteIdentity)
         atomicWrite(identityPath(transition.identity), encode(next), replace = true)
     }
+
+    /** Uninstall current identity pointers while intentionally retaining immutable archived bytes. */
+    @Synchronized
+    fun uninstall(identity: SourceArtifactIdentity): Boolean = Files.deleteIfExists(identityPath(identity))
 
     @Synchronized
     fun descriptor(artifactId: String): SourceArtifactDescriptor? {

@@ -24,10 +24,25 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Apply normalization flow patch
-        run: python3 scripts/agent_apply_xpk_music_phase4.py
-      - name: Inspect patched Compose line
-        run: nl -ba app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt | sed -n '298,314p'
+      - name: Fix and apply normalization flow patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/agent_apply_xpk_music_phase4.py')
+          s = p.read_text()
+          old = """marker = '    if (showMusicLibrary) {\\n'\nprogress = '''"""
+          new = """marker = '    if (showMusicLibrary) {\\n'\nprogress = '''"""
+          if old not in s:
+              raise SystemExit('phase4 progress marker declaration missing')
+          # Replace the final generic rep with a scoped insertion after the actual music dialog.
+          old_tail = "s = rep(s, marker, progress + marker, 'normalization progress dialog')"
+          new_tail = "music_dialog = s.index('title = { Text(\\\"NHẠC NỀN\\\") }')\nmarker_pos = s.index(marker, music_dialog)\ns = s[:marker_pos] + progress + s[marker_pos:]"
+          if old_tail not in s:
+              raise SystemExit('phase4 generic insertion missing')
+          p.write_text(s.replace(old_tail, new_tail, 1))
+          PY
+          python3 scripts/agent_apply_xpk_music_phase4.py
       - name: Run parity gates
         run: |
           python3 scripts/check_ui_control_parity.py
@@ -42,6 +57,7 @@ jobs:
         run: |
           rm -f scripts/agent_apply_xpk_music_phase4.py
           rm -f .github/workflows/agent-run-xpk-music-phase4.yml
+          rm -f .github/workflows/agent-inspect-phase4-line.yml
           git config user.name "openai-agent"
           git config user.email "openai-agent@users.noreply.github.com"
           git add -A

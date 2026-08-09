@@ -81,6 +81,9 @@ object VBookEngineFeatureMatrix {
             VBookFeature.FETCH_QUERIES,
             VBookFeature.FETCH_TIMEOUT,
             VBookFeature.FETCH_HEADER,
+            VBookFeature.FETCH_CHARSET,
+            VBookFeature.FETCH_BASE64,
+            VBookFeature.FETCH_BLOB,
             VBookFeature.FETCH_REQUEST_INFO,
             VBookFeature.HTML_DOM,
             VBookFeature.LOCAL_CONFIG,
@@ -96,15 +99,9 @@ object VBookEngineFeatureMatrix {
             VBookFeature.SCRIPT_EXECUTE -> VBookFeatureSupport(
                 feature,
                 VBookFeatureImplementationLevel.IMPLEMENTED,
-                "Implementation exists; certification remains a separate differential-test state.",
-            )
-
-            VBookFeature.FETCH_CHARSET,
-            VBookFeature.FETCH_BASE64,
-            VBookFeature.FETCH_BLOB -> VBookFeatureSupport(
-                feature,
-                VBookFeatureImplementationLevel.PARTIAL,
-                "The network broker preserves raw bytes, but VBookJsRuntime still constructs fetch responses from bodyText(); the raw-byte host bridge must be wired before certification.",
+                if (feature in setOf(VBookFeature.FETCH_CHARSET, VBookFeature.FETCH_BASE64, VBookFeature.FETCH_BLOB))
+                    "Implemented through VBookRawNetworkBroker: raw bytes are cached per response, binary methods use exact base64, and explicit charset decoding reuses the captured bytes without replaying the upstream request."
+                else "Implementation exists; certification remains a separate differential-test state.",
             )
 
             VBookFeature.METADATA_ENCRYPT -> VBookFeatureSupport(

@@ -39,14 +39,20 @@ class AppContainer(context: Context) {
         AndroidVBookQuickTranslationRegistry.install(libraryRepository)
     }
 
-    val sourcePlatformManager: SourcePlatformManager by lazy {
-        vBookQuickTranslationInstalled
-        SourcePlatformManager(appContext, sourceSessionStore, aiServices)
-    }
-
     val vBookSourcePlatform: VBookSourcePlatform by lazy {
         vBookQuickTranslationInstalled
         VBookSourcePlatform(appContext, sourceSessionStore, aiServices)
+    }
+
+    val sourcePlatformManager: SourcePlatformManager by lazy {
+        vBookQuickTranslationInstalled
+        SourcePlatformManager(
+            context = appContext,
+            sourceSessionStore = sourceSessionStore,
+            translationEngine = aiServices,
+            vBookSourcePlatform = vBookSourcePlatform,
+            onVBookChanged = { refreshSourceRegistry() },
+        )
     }
 
     val sourceRegistry: SourceRegistry by lazy {
@@ -56,9 +62,9 @@ class AppContainer(context: Context) {
         )
     }
 
-    /** One refresh point after native or vBook install/update/rollback. */
+    /** One authoritative refresh point after native or vBook install/update/rollback. */
     fun refreshSourceRegistry() {
-        sourceRegistry.refreshSourcePacks(currentExternalStorySources())
+        sourceRegistry.replaceExternalSources(currentExternalStorySources())
     }
 
     fun installOrUpdateVBook(

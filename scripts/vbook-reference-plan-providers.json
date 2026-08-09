@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "server": "http://127.0.0.1:8080",
+  "cases": [
+    {
+      "id": "current-comic-page-role",
+      "artifactId": "current-comic-fixture",
+      "extension": "../source-vbook/src/test/resources/reference-fixtures/current-providers/comic",
+      "profile": "CURRENT_JS",
+      "script": "page.js",
+      "args": ["https://example.invalid/comic/a/1"],
+      "features": ["CONTENT_COMIC"]
+    },
+    {
+      "id": "current-tts-voice-role",
+      "artifactId": "current-tts-fixture",
+      "extension": "../source-vbook/src/test/resources/reference-fixtures/current-providers/tts",
+      "profile": "CURRENT_JS",
+      "script": "voice.js",
+      "args": [],
+      "features": ["CONTENT_TTS"]
+    },
+    {
+      "id": "current-tts-execute-role",
+      "artifactId": "current-tts-fixture",
+      "extension": "../source-vbook/src/test/resources/reference-fixtures/current-providers/tts",
+      "profile": "CURRENT_JS",
+      "script": "tts.js",
+      "args": ["xin chào", "voice-b"],
+      "features": ["CONTENT_TTS"]
+    },
+    {
+      "id": "current-translate-language-role",
+      "artifactId": "current-translate-fixture",
+      "extension": "../source-vbook/src/test/resources/reference-fixtures/current-providers/translate",
+      "profile": "CURRENT_JS",
+      "script": "language.js",
+      "args": [],
+      "features": ["CONTENT_TRANSLATE"]
+    },
+    {
+      "id": "current-translate-execute-role",
+      "artifactId": "current-translate-fixture",
+      "extension": "../source-vbook/src/test/resources/reference-fixtures/current-providers/translate",
+      "profile": "CURRENT_JS",
+      "script": "translate.js",
+      "args": ["你好", "zh", "vi", "fixture-source"],
+      "features": ["CONTENT_TRANSLATE"]
+    }
+  ]
+}

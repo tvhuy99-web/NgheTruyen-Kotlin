@@ -62,8 +62,11 @@ jobs:
                   break
           if flat_menu is None:
               raise SystemExit('flat_menu assignment not found')
+
           reader_path = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt')
           reader = reader_path.read_text()
+          if 'import androidx.compose.foundation.layout.Box\n' not in reader:
+              reader = reader.replace('import androidx.compose.foundation.layout.Arrangement\n', 'import androidx.compose.foundation.layout.Arrangement\nimport androidx.compose.foundation.layout.Box\n', 1)
           mode_marker = '    if (showReaderModeDialog) {'
           mode_pos = reader.find(mode_marker)
           if mode_pos < 0:
@@ -75,6 +78,27 @@ jobs:
           else:
               reader = reader[:mode_pos] + flat_menu + reader[mode_pos:]
           reader_path.write_text(reader)
+
+          # The project has a second app host used for reference-mode validation.
+          # Keep its callback wiring identical to the primary host.
+          ref_path = Path('app/src/main/java/vn/nghetruyen/app/ui/ReferenceNgheTruyenApp.kt')
+          ref = ref_path.read_text()
+          ref = ref.replace(
+              '                        onStoryClick = viewModel::openLibraryStory,\n',
+              '                        onStoryClick = viewModel::openLibraryStory,\n                        onRemoveFromReading = viewModel::removeFromReading,\n',
+              1,
+          )
+          ref = ref.replace(
+              '                        onFollowingClick = viewModel::openFollowedStory,\n',
+              '                        onFollowingClick = viewModel::openFollowedStory,\n                        onUnfollow = viewModel::unfollowStory,\n',
+              1,
+          )
+          ref = ref.replace(
+              '                    onOpenStoryAiOptions = viewModel::openStoryAiOptions,\n                    onOpenStoryVoiceCastOptions = viewModel::openStoryVoiceCastOptions,\n',
+              '                    onSaveVoiceRole = viewModel::saveVoiceRoleForCurrentStory,\n                    onPreviewVoiceRole = viewModel::previewVoiceRole,\n                    onDeleteVoiceRole = viewModel::deleteVoiceRole,\n                    onSaveAiProfile = viewModel::saveStoryAiProfileForCurrentStory,\n',
+              1,
+          )
+          ref_path.write_text(ref)
 
           p = Path('scripts/m0_gate.sh')
           s = p.read_text()
@@ -101,8 +125,7 @@ jobs:
           end = vm.find("\n    fun ", start + 1)
           if end < 0: end = vm.find("\n    private fun ", start + 1)
           if end < 0: end = len(vm)
-          target_function = vm[start:end]
-          if "destination = Destination.Story" in target_function: raise SystemExit("REFERENCE_WORKFLOW story settings still force destination change")
+          if "destination = Destination.Story" in vm[start:end]: raise SystemExit("REFERENCE_WORKFLOW story settings still force destination change")
           for marker in ["ĐỌC TIẾP", "XÓA KHỎI ĐANG ĐỌC", "MỞ TRUYỆN", "BỎ ĐÁNH DẤU", "BỎ THEO DÕI"]:
               if marker not in library: raise SystemExit("REFERENCE_WORKFLOW missing Library action: " + marker)
           for marker in ["backgroundMusicAttackMillis: Int = 1850", "backgroundMusicReleaseMillis: Int = 2050", "sceneMusicTargetLufs: Float = -24.0f", "SceneMusicPlaybackMode.SEQUENTIAL"]:

@@ -31,11 +31,23 @@ jobs:
           from pathlib import Path
           p = Path('scripts/agent_apply_xpk_phase1.py')
           s = p.read_text()
-          old = 'display_start = s.index("    if (showDisplayDialog) {")'
-          new = 'display_start = s.index("    if (showDisplayDialog) {", mode_start)'
-          if old not in s:
-              raise SystemExit('display patch anchor not found')
-          p.write_text(s.replace(old, new, 1))
+          replacements = [
+              (
+                  'display_start = s.index("    if (showDisplayDialog) {")',
+                  'display_start = s.index("    if (showDisplayDialog) {", mode_start)',
+                  'display patch anchor',
+              ),
+              (
+                  'music_start = s.index("    if (showMusicDialog) {")',
+                  'music_start = s.index("    if (showMusicDialog) {", sleep_start)',
+                  'music patch anchor',
+              ),
+          ]
+          for old, new, label in replacements:
+              if old not in s:
+                  raise SystemExit(label + ' not found')
+              s = s.replace(old, new, 1)
+          p.write_text(s)
           PY
           set +e
           output="$(python3 scripts/agent_apply_xpk_phase1.py 2>&1)"

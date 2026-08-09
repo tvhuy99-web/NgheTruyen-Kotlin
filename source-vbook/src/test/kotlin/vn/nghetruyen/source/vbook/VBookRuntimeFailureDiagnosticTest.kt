@@ -1,7 +1,10 @@
 package vn.nghetruyen.source.vbook
 
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
+import vn.nghetruyen.source.api.JsonValue
 import vn.nghetruyen.source.api.SemanticVersion
 import vn.nghetruyen.source.api.SourceCapabilities
 import vn.nghetruyen.source.api.SourceContentType
@@ -11,10 +14,24 @@ import vn.nghetruyen.source.api.SourceRuntimeMode
 import vn.nghetruyen.source.api.SourceRuntimePolicy
 import vn.nghetruyen.source.runtime.SourceResourceProvider
 
-/** Keeps the focused CI useful: if the facade regresses, print its own failure rather than a cast. */
 class VBookRuntimeFailureDiagnosticTest {
     @Test
-    fun currentSearchFailureReportsRuntimeCause() {
+    fun scriptThatDoesNotUseStorageDoesNotRequireStorageBroker() {
+        val result = execute("function execute(q,p){return Response.success([{name:q+'@'+DOMAIN}],p+'/next');}")
+        val success = result as? SourcePlatformResult.Success ?: failWithCause(result)
+        val item = ((success.value.data as JsonValue.Arr).values.first() as JsonValue.Obj)
+        assertEquals("q@configured.example", item.string("name"))
+        assertEquals("cursor/next", success.value.continuation.token)
+    }
+
+    @Test
+    fun deniedStorageStillRejectsActualMutation() {
+        val result = execute("function execute(q,p){localStorage.setItem('k','v');return Response.success([],'');}")
+        val failure = result as? SourcePlatformResult.Failure ?: fail("Expected denied storage mutation to fail")
+        assertTrue(failure.error.message.contains("SOURCE_STORAGE_BROKER_UNAVAILABLE"))
+    }
+
+    private fun execute(script: String): SourcePlatformResult<VBookCompatibilityRuntime.ExecutionResult> {
         val plugin = """
             {
               "metadata":{"name":"x","author":"a","version":1,"source":"https://x.example","description":"","locale":"vi","regexp":"x","type":"novel","encrypt":false},
@@ -24,7 +41,7 @@ class VBookRuntimeFailureDiagnosticTest {
         """.trimIndent()
         val files = mapOf(
             "plugin.json" to plugin.toByteArray(),
-            "src/search.js" to "function execute(q,p){return Response.success([{name:q+'@'+DOMAIN}],p+'/next');}".toByteArray(),
+            "src/search.js" to script.toByteArray(),
             "src/explore.js" to "function execute(){return Response.success([]);}".toByteArray(),
         )
         val resources = object : SourceResourceProvider {
@@ -32,8 +49,8 @@ class VBookRuntimeFailureDiagnosticTest {
         }
         val manifest = SourceManifest(
             schemaVersion = 2,
-            id = "test.vbook.diagnostic",
-            name = "VBook diagnostic",
+            id = "test.vbook.storage-optional",
+            name = "VBook storage optional",
             version = SemanticVersion(1, 0, 0),
             apiVersion = 2,
             contentType = SourceContentType.NOVEL,
@@ -42,19 +59,23 @@ class VBookRuntimeFailureDiagnosticTest {
             capabilities = SourceCapabilities(),
             actions = emptyMap(),
         )
-        when (val result = VBookCompatibilityRuntime().executeDeclared(
+        return VBookCompatibilityRuntime().executeDeclared(
             sourceManifest = manifest,
             resources = resources,
             role = VBookScriptRole.SEARCH,
             input = "q",
             continuation = VBookContinuation("cursor"),
             runtimeConfig = mapOf("DOMAIN" to "configured.example"),
-            traceId = "diagnostic",
-        )) {
-            is SourcePlatformResult.Success -> Unit
-            is SourcePlatformResult.Failure -> fail(
-                "VBOOK_DIAGNOSTIC_FAILURE code=${result.error.code} message=${result.error.message} cause=${result.error.cause?.javaClass?.name}:${result.error.cause?.message}",
-            )
-        }
+            traceId = "storage-optional",
+        )
+    }
+
+    private fun failWithCause(result: SourcePlatformResult<*>): Nothing {
+        val failure = result as? SourcePlatformResult.Failure
+        fail(
+            "VBOOK_RUNTIME_FAILURE code=${failure?.error?.code} message=${failure?.error?.message} " +
+                "cause=${failure?.error?.cause?.javaClass?.name}:${failure?.error?.cause?.message}",
+        )
+        error("unreachable")
     }
 }

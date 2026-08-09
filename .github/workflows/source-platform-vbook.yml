@@ -55,7 +55,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -77,3 +77,26 @@ jobs:
           :source-vbook:test
           :app:compileDebugKotlin
           --stacktrace
+
+      - name: Print vBook test failures
+        if: failure()
+        shell: bash
+        run: |
+          shopt -s nullglob
+          files=(source-vbook/build/test-results/test/TEST-*.xml)
+          if ((${#files[@]} == 0)); then
+            echo 'No vBook XML test results were produced.'
+            exit 0
+          fi
+          python3 - <<'PY'
+          import glob, xml.etree.ElementTree as ET
+          for path in glob.glob('source-vbook/build/test-results/test/TEST-*.xml'):
+              root = ET.parse(path).getroot()
+              for case in root.findall('testcase'):
+                  failure = case.find('failure') or case.find('error')
+                  if failure is not None:
+                      print(f"\n=== {root.get('name')} :: {case.get('name')} ===")
+                      print(failure.get('message', ''))
+                      text = (failure.text or '').splitlines()
+                      print('\n'.join(text[:35]))
+          PY

@@ -5,6 +5,8 @@ import com.nghetruyen.source.platform.SourceTrustState
 import com.nghetruyen.source.repository.VBookUpdateResult
 import com.nghetruyen.source.store.SourceArtifactLifecycle
 import vn.nghetruyen.source.vbook.VBookAggregatedItem
+import vn.nghetruyen.source.vbook.VBookManifestParser
+import vn.nghetruyen.source.vbook.VBookPackageReader
 import vn.nghetruyen.source.vbook.VBookRepositorySnapshot
 
 class VBookPreparedCatalogInstall internal constructor(
@@ -28,10 +30,16 @@ class VBookCatalogInstallService(
     /** Download once and bind the user-visible preview to these exact immutable bytes. */
     fun prepare(item: VBookAggregatedItem): VBookPreparedCatalogInstall {
         val bytes = repositories.downloadPackage(item)
+        val packageManifest = VBookManifestParser.parse(VBookPackageReader.read(bytes).pluginJson())
+        val packageVersion = packageManifest.metadata.version.toString()
+        val advertisedVersion = item.item.version.trim()
+        require(advertisedVersion.isBlank() || advertisedVersion == packageVersion) {
+            "VBOOK_PACKAGE_VERSION_MISMATCH:expected=$advertisedVersion:actual=$packageVersion"
+        }
         val preview = platform.preview(
             repositoryId = item.repositoryId,
             remoteIdentity = item.remoteIdentity,
-            version = item.item.version,
+            version = packageVersion,
             packageBytes = bytes,
         )
         return VBookPreparedCatalogInstall(
@@ -55,7 +63,7 @@ class VBookCatalogInstallService(
         val result = platform.installOrUpdate(
             repositoryId = prepared.item.repositoryId,
             remoteIdentity = prepared.item.remoteIdentity,
-            version = prepared.item.item.version,
+            version = prepared.preview.version,
             packageBytes = prepared.bytes,
             trust = trust,
         )

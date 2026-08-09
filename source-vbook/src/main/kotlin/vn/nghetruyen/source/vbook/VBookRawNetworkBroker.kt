@@ -39,11 +39,15 @@ class VBookRawNetworkBroker(
     }
 
     override fun execute(manifest: SourceManifest, request: SourceNetworkRequest): SourcePlatformResult<SourceNetworkResponse> {
-        val requestKey = request.headers[INTERNAL_REQUEST_KEY]
-        val operation = request.headers[INTERNAL_OPERATION]?.lowercase()
-        val decodeCharset = request.headers[INTERNAL_DECODE_CHARSET]
-        val requestedTimeout = request.headers[INTERNAL_TIMEOUT_MS]?.toLongOrNull()?.coerceIn(100L, 120_000L)
-        val sanitizedHeaders = request.headers.filterKeys { key -> key !in INTERNAL_CONTROL_HEADERS }
+        val requestKey = request.headers.controlHeader(INTERNAL_REQUEST_KEY)
+        val operation = request.headers.controlHeader(INTERNAL_OPERATION)?.lowercase()
+        val decodeCharset = request.headers.controlHeader(INTERNAL_DECODE_CHARSET)
+        val requestedTimeout = request.headers.controlHeader(INTERNAL_TIMEOUT_MS)
+            ?.toLongOrNull()
+            ?.coerceIn(100L, 120_000L)
+        val sanitizedHeaders = request.headers.filterKeys { key ->
+            !key.startsWith(INTERNAL_PREFIX, ignoreCase = true)
+        }
 
         if (!operation.isNullOrBlank()) {
             val key = requestKey?.takeIf(String::isNotBlank)
@@ -120,6 +124,9 @@ class VBookRawNetworkBroker(
         if (key != null) put(INTERNAL_RESPONSE_KEY.lowercase(), listOf(key))
     }
 
+    private fun Map<String, String>.controlHeader(name: String): String? =
+        entries.firstOrNull { (key, _) -> key.equals(name, ignoreCase = true) }?.value
+
     private fun failure(request: SourceNetworkRequest, message: String) = SourcePlatformResult.Failure(
         SourcePlatformFailure(
             code = vn.nghetruyen.source.api.SourceErrorCode.NETWORK_IO_ERROR,
@@ -129,6 +136,7 @@ class VBookRawNetworkBroker(
     )
 
     companion object {
+        const val INTERNAL_PREFIX = "X-Nghe-VBook-"
         const val INTERNAL_REQUEST_KEY = "X-Nghe-VBook-Request-Key"
         const val INTERNAL_OPERATION = "X-Nghe-VBook-Operation"
         const val INTERNAL_DECODE_CHARSET = "X-Nghe-VBook-Decode-Charset"
@@ -139,12 +147,5 @@ class VBookRawNetworkBroker(
         const val OP_TEXT = "text"
         const val OP_BASE64 = "base64"
         const val OP_REQUEST = "request"
-
-        private val INTERNAL_CONTROL_HEADERS = setOf(
-            INTERNAL_REQUEST_KEY,
-            INTERNAL_OPERATION,
-            INTERNAL_DECODE_CHARSET,
-            INTERNAL_TIMEOUT_MS,
-        )
     }
 }

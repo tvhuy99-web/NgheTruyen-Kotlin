@@ -49,24 +49,22 @@ object DownloadedLibraryCallbacks {
 fun AppViewModel.openDownloadedStoryFromLibrary(entity: StoryEntity) {
     val chapter = DownloadedLibraryCallbacks.consumeSelectedChapter(entity.id)
     openLibraryStory(entity)
-    if (!entity.isOffline) return
+    // LibraryScreen shares this callback with the Reading shelf. Only a chapter
+    // explicitly selected from the Downloaded dialog should alter navigation.
+    if (!entity.isOffline || chapter == null) return
     viewModelScope.launch {
         state.filter { snapshot ->
             snapshot.destination == Destination.Story && snapshot.storyDetail?.story?.id == entity.id
         }.first()
-        if (chapter != null) {
-            openChapter(
-                ChapterSummary(
-                    id = chapter.id,
-                    storyId = chapter.storyId,
-                    index = chapter.chapterIndex,
-                    title = chapter.title,
-                    url = chapter.remoteUrl,
-                ),
-            )
-        } else {
-            setStoryDetailTab("chapters")
-        }
+        openChapter(
+            ChapterSummary(
+                id = chapter.id,
+                storyId = chapter.storyId,
+                index = chapter.chapterIndex,
+                title = chapter.title,
+                url = chapter.remoteUrl,
+            ),
+        )
     }
 }
 

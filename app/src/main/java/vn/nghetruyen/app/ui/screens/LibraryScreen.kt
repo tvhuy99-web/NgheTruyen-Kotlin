@@ -54,6 +54,7 @@ fun LibraryScreen(
     onSectionSelected: (LibrarySection) -> Unit,
     onImportFile: () -> Unit,
     onStoryClick: (StoryEntity) -> Unit,
+    onRemoveFromReading: (String) -> Unit,
     onPauseDownload: (String) -> Unit,
     onResumeDownload: (String) -> Unit,
     onRetryDownload: (String) -> Unit,
@@ -69,6 +70,7 @@ fun LibraryScreen(
     onHistoryClick: (ReadingHistoryEntity) -> Unit,
     onClearReadingHistory: () -> Unit,
     onFollowingClick: (FollowedStoryEntity) -> Unit,
+    onUnfollow: (String) -> Unit,
 ) {
     val view = LocalView.current
     var query by remember { mutableStateOf("") }
@@ -201,7 +203,7 @@ fun LibraryScreen(
                 LibraryControl("HÀNG ĐỢI TẢI") { showDownloadQueue = true }
                 LibraryControl("LỊCH SỬ ĐỌC") { showReadingHistory = true }
                 LibraryControl("NHẬP TRUYỆN", onImportFile)
-                StoryEntityList(readingVisible, onStoryClick, "Chưa có truyện đang đọc.")
+                StoryEntityList(readingVisible, onStoryClick, onRemoveFromReading, "Chưa có truyện đang đọc.")
             }
 
             LibrarySection.DOWNLOADED -> {
@@ -252,7 +254,7 @@ fun LibraryScreen(
             LibrarySection.FOLLOWING -> {
                 LibraryControl("TÌM TRUYỆN") { showSearch = true }
                 LibraryControl("KIỂM TRA CẬP NHẬT", onCheckFollowing)
-                FollowingList(followingVisible, onFollowingClick)
+                FollowingList(followingVisible, onFollowingClick, onUnfollow)
             }
         }
     }
@@ -478,32 +480,30 @@ private fun DownloadJobControls(
 }
 
 @Composable
-private fun BookmarkList(
-    bookmarks: List<BookmarkEntity>,
-    onBookmarkOpen: (BookmarkEntity) -> Unit,
-    onBookmarkDelete: (String) -> Unit,
-) {
-    if (bookmarks.isEmpty()) {
-        Text("Chưa có truyện đã đánh dấu.", modifier = Modifier.padding(16.dp))
-        return
-    }
-    LazyColumn(modifier = Modifier.fillMaxSize()) {
-        items(bookmarks, key = { "bookmark:${it.id}" }) { item ->
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).clickable { onBookmarkOpen(item) },
-            ) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    Text(item.label.removePrefix("Truyện: ").ifBlank { "Đánh dấu đoạn ${item.paragraphIndex + 1}" }, fontWeight = FontWeight.SemiBold)
-                    if (!item.label.startsWith("Truyện:")) Text("Đoạn ${item.paragraphIndex + 1}")
-                    ReferenceActionButton(
-                        text = "XÓA ĐÁNH DẤU",
-                        onClick = { onBookmarkDelete(item.id) },
-                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-                    )
-                }
+private fun BookmarkList(bookmarks: List<BookmarkEntity>, onBookmarkOpen: (BookmarkEntity) -> Unit, onBookmarkDelete: (String) -> Unit) {
+    var selected by remember { mutableStateOf<BookmarkEntity?>(null) }
+    var deleteConfirm by remember { mutableStateOf<BookmarkEntity?>(null) }
+    selected?.let { item -> AlertDialog(
+        onDismissRequest = { selected = null }, title = { Text(item.label.removePrefix("Truyện: ").ifBlank { "ĐÁNH DẤU" }) },
+        text = { Column {
+            ReferenceActionButton("MỞ TRUYỆN", { selected = null; onBookmarkOpen(item) }, modifier = Modifier.fillMaxWidth())
+            ReferenceActionButton("BỎ ĐÁNH DẤU", { selected = null; deleteConfirm = item }, modifier = Modifier.fillMaxWidth().padding(top = 2.dp))
+        } }, confirmButton = { TextButton(onClick = { selected = null }) { Text("ĐÓNG") } },
+    ) }
+    deleteConfirm?.let { item -> AlertDialog(
+        onDismissRequest = { deleteConfirm = null }, title = { Text("BỎ ĐÁNH DẤU") }, text = { Text("Bỏ đánh dấu truyện này?") },
+        confirmButton = { TextButton(onClick = { onBookmarkDelete(item.id); deleteConfirm = null }) { Text("BỎ ĐÁNH DẤU") } },
+        dismissButton = { TextButton(onClick = { deleteConfirm = null }) { Text("HỦY") } },
+    ) }
+    if (bookmarks.isEmpty()) { Text("Chưa có truyện đã đánh dấu.", modifier = Modifier.padding(16.dp)); return }
+    LazyColumn(modifier = Modifier.fillMaxSize()) { items(bookmarks, key = { "bookmark:${it.id}" }) { item ->
+        Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).clickable { selected = item }) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Text(item.label.removePrefix("Truyện: ").ifBlank { "Đánh dấu đoạn ${item.paragraphIndex + 1}" }, fontWeight = FontWeight.SemiBold)
+                if (!item.label.startsWith("Truyện:")) Text("Đoạn ${item.paragraphIndex + 1}")
             }
         }
-    }
+    } }
 }
 
 @Composable
@@ -537,30 +537,28 @@ private fun NoteList(
 }
 
 @Composable
-private fun FollowingList(
-    items: List<FollowedStoryEntity>,
-    onOpen: (FollowedStoryEntity) -> Unit,
-) {
-    if (items.isEmpty()) {
-        Text("Chưa theo dõi truyện nào.", modifier = Modifier.padding(16.dp))
-        return
-    }
-    LazyColumn(modifier = Modifier.fillMaxSize()) {
-        items(items, key = { it.storyId }) { item ->
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).clickable { onOpen(item) },
-            ) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    Text(item.title, fontWeight = FontWeight.SemiBold)
-                    Text(item.latestKnownChapter.ifBlank { "Chạm để kiểm tra truyện" })
-                    if (item.newChapterCount > 0) {
-                        Text("${item.newChapterCount} chương mới chưa xem", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                    }
-                    Text(item.sourceId, style = MaterialTheme.typography.labelSmall)
-                }
-            }
-        }
-    }
+private fun FollowingList(items: List<FollowedStoryEntity>, onOpen: (FollowedStoryEntity) -> Unit, onUnfollow: (String) -> Unit) {
+    var selected by remember { mutableStateOf<FollowedStoryEntity?>(null) }
+    var unfollowConfirm by remember { mutableStateOf<FollowedStoryEntity?>(null) }
+    selected?.let { item -> AlertDialog(
+        onDismissRequest = { selected = null }, title = { Text(item.title) }, text = { Column {
+            ReferenceActionButton("MỞ TRUYỆN", { selected = null; onOpen(item) }, modifier = Modifier.fillMaxWidth())
+            ReferenceActionButton("BỎ THEO DÕI", { selected = null; unfollowConfirm = item }, modifier = Modifier.fillMaxWidth().padding(top = 2.dp))
+        } }, confirmButton = { TextButton(onClick = { selected = null }) { Text("ĐÓNG") } },
+    ) }
+    unfollowConfirm?.let { item -> AlertDialog(
+        onDismissRequest = { unfollowConfirm = null }, title = { Text("BỎ THEO DÕI") }, text = { Text("Bỏ theo dõi “${item.title}”?") },
+        confirmButton = { TextButton(onClick = { onUnfollow(item.storyId); unfollowConfirm = null }) { Text("BỎ THEO DÕI") } },
+        dismissButton = { TextButton(onClick = { unfollowConfirm = null }) { Text("HỦY") } },
+    ) }
+    if (items.isEmpty()) { Text("Chưa theo dõi truyện nào.", modifier = Modifier.padding(16.dp)); return }
+    LazyColumn(modifier = Modifier.fillMaxSize()) { items(items, key = { it.storyId }) { item ->
+        Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).clickable { selected = item }) { Column(modifier = Modifier.padding(14.dp)) {
+            Text(item.title, fontWeight = FontWeight.SemiBold); Text(item.latestKnownChapter.ifBlank { "Chạm để mở tùy chọn" })
+            if (item.newChapterCount > 0) Text("${item.newChapterCount} chương mới chưa xem", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+            Text(item.sourceId, style = MaterialTheme.typography.labelSmall)
+        } }
+    } }
 }
 
 @Composable
@@ -636,28 +634,28 @@ private fun DownloadedSection(
 }
 
 @Composable
-private fun StoryEntityList(
-    items: List<StoryEntity>,
-    onStoryClick: (StoryEntity) -> Unit,
-    emptyText: String,
-) {
-    if (items.isEmpty()) {
-        Text(emptyText, modifier = Modifier.padding(16.dp))
-        return
-    }
-    LazyColumn(modifier = Modifier.fillMaxSize()) {
-        items(items, key = { it.id }) { story ->
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).clickable { onStoryClick(story) },
-            ) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    Text(story.title, fontWeight = FontWeight.SemiBold)
-                    if (story.author.isNotBlank()) Text(story.author)
-                    Text(if (story.isOffline) "Có thể đọc ngoại tuyến" else story.sourceId)
-                }
-            }
-        }
-    }
+private fun StoryEntityList(items: List<StoryEntity>, onStoryClick: (StoryEntity) -> Unit, onRemoveFromReading: (String) -> Unit, emptyText: String) {
+    var selected by remember { mutableStateOf<StoryEntity?>(null) }
+    var removeConfirm by remember { mutableStateOf<StoryEntity?>(null) }
+    selected?.let { story -> AlertDialog(
+        onDismissRequest = { selected = null }, title = { Text(story.title) }, text = { Column {
+            ReferenceActionButton("ĐỌC TIẾP", { selected = null; onStoryClick(story) }, modifier = Modifier.fillMaxWidth())
+            ReferenceActionButton("XÓA KHỎI ĐANG ĐỌC", { selected = null; removeConfirm = story }, modifier = Modifier.fillMaxWidth().padding(top = 2.dp))
+        } }, confirmButton = { TextButton(onClick = { selected = null }) { Text("ĐÓNG") } },
+    ) }
+    removeConfirm?.let { story -> AlertDialog(
+        onDismissRequest = { removeConfirm = null }, title = { Text("XÓA KHỎI ĐANG ĐỌC") },
+        text = { Text("Xóa “${story.title}” khỏi Đang đọc? Truyện đã tải, dấu trang và lịch sử đọc vẫn được giữ.") },
+        confirmButton = { TextButton(onClick = { onRemoveFromReading(story.id); removeConfirm = null }) { Text("XÓA") } },
+        dismissButton = { TextButton(onClick = { removeConfirm = null }) { Text("HỦY") } },
+    ) }
+    if (items.isEmpty()) { Text(emptyText, modifier = Modifier.padding(16.dp)); return }
+    LazyColumn(modifier = Modifier.fillMaxSize()) { items(items, key = { it.id }) { story ->
+        Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).clickable { selected = story }) { Column(modifier = Modifier.padding(14.dp)) {
+            Text(story.title, fontWeight = FontWeight.SemiBold); if (story.author.isNotBlank()) Text(story.author)
+            Text(if (story.isOffline) "Có thể đọc ngoại tuyến" else story.sourceId)
+        } }
+    } }
 }
 
 private fun formatStorageBytes(bytes: Long): String = when {

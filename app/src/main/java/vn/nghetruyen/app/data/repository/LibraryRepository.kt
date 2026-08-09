@@ -148,6 +148,8 @@ class LibraryRepository(private val db: AppDatabase) {
 
     suspend fun clearReadingHistory() = db.readingHistoryDao().clear()
 
+    suspend fun removeFromReading(storyId: String) = db.progressDao().deleteForStory(storyId)
+
 
     suspend fun saveNote(
         storyId: String,

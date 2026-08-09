@@ -97,6 +97,7 @@ fun NgheTruyenApp(
                         onSectionSelected = viewModel::setLibrarySection,
                         onImportFile = onImportFile,
                         onStoryClick = viewModel::openLibraryStory,
+                        onRemoveFromReading = viewModel::removeFromReading,
                         onPauseDownload = viewModel::pauseDownload,
                         onResumeDownload = viewModel::resumeDownload,
                         onRetryDownload = viewModel::retryDownload,
@@ -112,6 +113,7 @@ fun NgheTruyenApp(
                         onHistoryClick = viewModel::openReadingHistory,
                         onClearReadingHistory = viewModel::clearReadingHistory,
                         onFollowingClick = viewModel::openFollowedStory,
+                        onUnfollow = viewModel::unfollowStory,
                     )
                     RootTab.PERSONAL -> PersonalScreen(
                         state = state,
@@ -298,8 +300,10 @@ fun NgheTruyenApp(
                     onVoiceCast = viewModel::voiceCast,
                     onPlanSceneMusic = viewModel::planSceneMusic,
                     onPlanNarration = viewModel::planNarration,
-                    onOpenStoryAiOptions = viewModel::openStoryAiOptions,
-                    onOpenStoryVoiceCastOptions = viewModel::openStoryVoiceCastOptions,
+                    onSaveVoiceRole = viewModel::saveVoiceRoleForCurrentStory,
+                    onPreviewVoiceRole = viewModel::previewVoiceRole,
+                    onDeleteVoiceRole = viewModel::deleteVoiceRole,
+                    onSaveAiProfile = viewModel::saveStoryAiProfileForCurrentStory,
                     onEngineSelected = viewModel::selectTtsEngine,
                     onVoiceSelected = viewModel::selectTtsVoice,
                     onRefreshVoices = viewModel::refreshTtsVoices,

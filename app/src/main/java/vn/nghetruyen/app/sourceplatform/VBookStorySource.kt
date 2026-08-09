@@ -296,7 +296,13 @@ class VBookStorySource(
     )
 
     private class PackageResources(private val pkg: VBookPackage) : SourceResourceProvider {
-        override fun read(path: String, maxBytes: Int): ByteArray? =
-            pkg.entries[path]?.takeIf { it.size <= maxBytes }?.copyOf()
+        override fun read(path: String, maxBytes: Int): ByteArray? {
+            val bytes = when (path) {
+                "plugin.json" -> pkg.pluginJsonBytes
+                "icon.png" -> pkg.iconBytes
+                else -> pkg.scripts[path]
+            } ?: return null
+            return bytes.takeIf { it.size <= maxBytes }?.copyOf()
+        }
     }
 }

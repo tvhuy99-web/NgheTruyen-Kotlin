@@ -133,7 +133,7 @@ fun GlobalVoiceRoleEditorDialog(
     val voiceLabel = filteredVoices.firstOrNull { it.name == draft.voiceName }?.displayName
         ?: draft.voiceName
         ?: "Giọng mặc định"
-    val dialogTitle = title ?: if (draft.originalRoleId == null) "THÊM GIỌNG" else "SỬA HỒ SƠ GIỌNG"
+    val dialogTitle = title ?: "HỒ SƠ GIỌNG TTS"
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -161,21 +161,13 @@ fun GlobalVoiceRoleEditorDialog(
                     minLines = 2,
                     modifier = Modifier.fillMaxWidth().padding(top = 5.dp),
                 )
-                OutlinedTextField(
-                    value = draft.aliases,
-                    onValueChange = { onDraftChange(draft.copy(aliases = it.take(500))) },
-                    label = { Text("Bí danh") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth().padding(top = 5.dp),
-                )
-                if (!draft.isNarrator) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Bật", Modifier.weight(1f))
-                        Switch(
-                            checked = draft.enabled,
-                            onCheckedChange = { onDraftChange(draft.copy(enabled = it)) },
-                        )
-                    }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (draft.isNarrator) "Người kể chuyện luôn được bật" else "Bật hồ sơ này", Modifier.weight(1f))
+                    Switch(
+                        checked = if (draft.isNarrator) true else draft.enabled,
+                        onCheckedChange = { if (!draft.isNarrator) onDraftChange(draft.copy(enabled = it)) },
+                        enabled = !draft.isNarrator,
+                    )
                 }
 
                 Text("Bộ đọc TTS", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
@@ -290,7 +282,7 @@ fun GlobalVoiceRoleEditorDialog(
                 CompactVoiceValueRow("Tốc độ đọc", draft.rate, 0.25f, 3f) {
                     onDraftChange(draft.copy(rate = it))
                 }
-                CompactVoiceValueRow("Cao độ TTS", draft.pitch, 0.5f, 2f) {
+                CompactVoiceValueRow("Cao độ", draft.pitch, 0.5f, 2f) {
                     onDraftChange(draft.copy(pitch = it))
                 }
                 CompactVoiceValueRow(
@@ -325,13 +317,13 @@ fun GlobalVoiceRoleEditorDialog(
                 enabled = draft.roleName.isNotBlank(),
                 onClick = { onSave(draft.copy(enabled = if (draft.isNarrator) true else draft.enabled)) },
             ) {
-                Text("LƯU")
+                Text("LƯU HỒ SƠ")
             }
         },
         dismissButton = {
             Row {
                 if (onDelete != null && !draft.isNarrator && draft.originalRoleId != null) {
-                    TextButton(onClick = onDelete) { Text("XÓA") }
+                    TextButton(onClick = onDelete) { Text("XÓA HỒ SƠ") }
                 }
                 TextButton(onClick = onDismiss) { Text("HỦY") }
             }

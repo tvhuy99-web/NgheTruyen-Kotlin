@@ -542,12 +542,16 @@ fun StoryDetailScreen(
 
     if (advancedMode == "ai") {
         var modeExpanded by remember { mutableStateOf(false) }
+        val effectiveStoryAiMode = when (aiMode) {
+            "TRANSLATE" -> "TRANSLATE"
+            "IMPROVE" -> "IMPROVE"
+            else -> if (state.aiOnline.mode.equals("improve", ignoreCase = true)) "IMPROVE" else "TRANSLATE"
+        }
         AlertDialog(
             onDismissRequest = { advancedMode = null },
-            title = { Text("THIẾT LẬP AI CHO TRUYỆN NÀY") },
+            title = { Text("AI RIÊNG CHO TRUYỆN") },
             text = {
                 Column(Modifier.heightIn(max = 600.dp).verticalScroll(rememberScrollState())) {
-                    Text("AI RIÊNG CHO TRUYỆN", fontWeight = FontWeight.Bold)
                     Text(detail.story.title, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 8.dp))
                     Text("Chế độ của truyện này")
                     Button(onClick = { modeExpanded = true }, modifier = Modifier.fillMaxWidth()) {
@@ -558,20 +562,39 @@ fun StoryDetailScreen(
                             DropdownMenuItem(text = { Text(label) }, onClick = { aiMode = value; if (value != "TRANSLATE") aiAutoRun = false; modeExpanded = false })
                         }
                     }
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Tự động dịch", Modifier.weight(1f))
-                        Switch(aiAutoRun, { aiAutoRun = it }, enabled = aiMode == "TRANSLATE")
+                    if (effectiveStoryAiMode == "TRANSLATE") {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Tự động dịch khi mở chương", Modifier.weight(1f))
+                            Switch(aiAutoRun, { aiAutoRun = it })
+                        }
+                        Text(
+                            "Chỉ dùng với chế độ Dịch chương gốc. Nếu đang ở chế độ TTS và TTS đã bật, bản dịch sẽ tự đọc. Ở chế độ Văn bản, công cụ chỉ dịch và hiển thị, không tự bật TTS.",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(bottom = 10.dp),
+                        )
                     }
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Lời nhắc riêng", Modifier.weight(1f))
+                        Text("Dùng lời nhắc riêng cho truyện này", Modifier.weight(1f))
                         Switch(aiCustomPrompts, { aiCustomPrompts = it })
                     }
-                    if (aiCustomPrompts) {
-                        Text("Lời nhắc dịch", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
-                        OutlinedTextField(aiTranslatePrompt, { aiTranslatePrompt = it.take(16_000) }, minLines = 5, modifier = Modifier.fillMaxWidth())
-                        Text("Lời nhắc VietPhrase", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
-                        OutlinedTextField(aiImprovePrompt, { aiImprovePrompt = it.take(16_000) }, minLines = 5, modifier = Modifier.fillMaxWidth())
-                    }
+                    Text("Lời nhắc riêng khi dịch", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                    Text("Biến: {{CHAPTER_TITLE}}, {{CHAPTER_TEXT}}", style = MaterialTheme.typography.bodySmall)
+                    OutlinedTextField(
+                        aiTranslatePrompt,
+                        { aiTranslatePrompt = it.take(16_000) },
+                        minLines = 8,
+                        enabled = aiCustomPrompts,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text("Lời nhắc riêng khi cải thiện VietPhrase", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                    Text("Biến: {{SOURCE_TITLE}}, {{SOURCE_TEXT}}, {{VIETPHRASE_TITLE}}, {{VIETPHRASE_TEXT}}", style = MaterialTheme.typography.bodySmall)
+                    OutlinedTextField(
+                        aiImprovePrompt,
+                        { aiImprovePrompt = it.take(16_000) },
+                        minLines = 10,
+                        enabled = aiCustomPrompts,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
             },
             confirmButton = {
@@ -612,6 +635,15 @@ fun StoryDetailScreen(
                             StoryVoiceCastMode.OFF to "Tắt phân vai cho truyện này",
                         ).forEach { (value, label) -> DropdownMenuItem(text = { Text(label) }, onClick = { voiceMode = value; modeExpanded = false }) }
                     }
+                    Text(
+                        when (voiceMode) {
+                            StoryVoiceCastMode.PRIVATE -> "Truyện sử dụng một bộ hồ sơ độc lập, kể cả khi công tắc cấu hình chung đang tắt."
+                            StoryVoiceCastMode.OFF -> "Không sử dụng phân vai AI cho truyện này. Bộ hồ sơ riêng đã tạo trước đó vẫn được giữ lại."
+                            else -> "Truyện dùng bộ hồ sơ trong cài đặt chung và phụ thuộc công tắc bật mặc định ở đó."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text("Tự động phân vai rồi đọc khi mở chương ở chế độ TTS", Modifier.weight(1f))
                         Switch(voiceAutoRun, { voiceAutoRun = it }, enabled = voiceMode != StoryVoiceCastMode.OFF)
@@ -621,11 +653,21 @@ fun StoryDetailScreen(
                         Switch(expressive, { expressive = it }, enabled = voiceMode != StoryVoiceCastMode.OFF)
                     }
                     if (expressive && voiceMode != StoryVoiceCastMode.OFF) {
+                        Text(
+                            "AI xử lý phân vai và ba thông số phần trăm trong cùng một lượt. Không dùng nhãn buồn, vui hay tức giận. Chỉ lời thoại trực tiếp được đổi giọng và thông số; lời kể cùng nội tâm luôn giữ giọng Người kể chuyện ở thông số gốc. Mức AI trả về được áp trực tiếp trong giới hạn bên dưới. Âm lượng chỉ có thể tăng khi mức gốc còn dưới 100%.",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(top = 5.dp, bottom = 6.dp),
+                        )
                         ReferencePercentSlider("Giới hạn tốc độ", speedLimit) { speedLimit = it }
                         ReferencePercentSlider("Giới hạn cao độ", pitchLimit) { pitchLimit = it }
                         ReferencePercentSlider("Giới hạn âm lượng", volumeLimit) { volumeLimit = it }
                         ReferenceActionButton("XEM / SỬA HƯỚNG DẪN THÔNG SỐ", { showExpressionPromptDialog = true }, normalColor = ReferenceGray, modifier = Modifier.fillMaxWidth())
                     }
+                    Text(
+                        "Thứ tự luôn là: tải chương → dịch tự động (nếu bật) → phân vai → TTS. Vì vậy hai tác vụ AI không chạy chồng lên nhau.",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
                     if (voiceMode == StoryVoiceCastMode.PRIVATE) {
                         val privateRoles = state.voiceRoles.filter { it.storyId == detail.story.id }
                         Text("Bộ hồ sơ riêng: ${privateRoles.size} vai", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
@@ -635,9 +677,14 @@ fun StoryDetailScreen(
                     OutlinedTextField(
                         voiceNote,
                         { voiceNote = it.take(4_000) },
-                        placeholder = { Text("Ghi chú cho AI") },
-                        minLines = 3,
+                        placeholder = { Text("Ví dụ: thông báo trong ngoặc vuông thuộc vai Hệ thống; lời truyền âm dùng giọng của người phát...") },
+                        minLines = 5,
                         modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        "Tên, mô tả và cách tổ chức nhân vật do người dùng quyết định. Ứng dụng chỉ cung cấp cấu trúc hồ sơ, ID ổn định và giọng Người kể chuyện bắt buộc.",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 8.dp),
                     )
                 }
             },
@@ -655,7 +702,22 @@ fun StoryDetailScreen(
         AlertDialog(
             onDismissRequest = { showExpressionPromptDialog = false },
             title = { Text("HƯỚNG DẪN ĐIỀU CHỈNH THÔNG SỐ") },
-            text = { OutlinedTextField(draft, { draft = it.take(8_000) }, minLines = 8, modifier = Modifier.fillMaxWidth()) },
+            text = {
+                Column {
+                    Text(
+                        "Đây là phần hướng dẫn ngữ cảnh được gửi cho AI. Giới hạn ba thanh, ID, mã giọng và cấu trúc JSON vẫn được ứng dụng bảo vệ riêng, nên nội dung ở đây không thể mở khóa vượt giới hạn.",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                    OutlinedTextField(
+                        draft,
+                        { draft = it.take(8_000) },
+                        placeholder = { Text("Nhập hướng dẫn cách AI chọn phần trăm tốc độ, cao độ và âm lượng theo ngữ cảnh...") },
+                        minLines = 12,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
             confirmButton = { TextButton(onClick = { expressionPrompt = draft; showExpressionPromptDialog = false }) { Text("DÙNG LỜI NHẮC NÀY") } },
             dismissButton = { TextButton(onClick = { draft = ""; expressionPrompt = ""; showExpressionPromptDialog = false }) { Text("KHÔI PHỤC LỜI NHẮC MẶC ĐỊNH") } },
         )
@@ -682,8 +744,8 @@ fun StoryDetailScreen(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
                         )
                     }
-                    ReferenceActionButton("THÊM VAI", { roleDraft = defaultRoleDraft(); showVoiceRoleDialog = true }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
-                    ReferenceActionButton("SAO CHÉP TỪ CẤU HÌNH CHUNG", { copyGlobalConfirm = true }, normalColor = ReferenceGray, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+                    ReferenceActionButton("THÊM VAI HOẶC NHÂN VẬT", { roleDraft = defaultRoleDraft(); showVoiceRoleDialog = true }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+                    ReferenceActionButton("SAO CHÉP LẠI TỪ CẤU HÌNH CHUNG", { copyGlobalConfirm = true }, normalColor = ReferenceGray, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
                     ReferenceActionButton("KHÔI PHỤC 7 HỒ SƠ MẪU", { restorePrivateConfirm = true }, normalColor = ReferenceGray, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
                 }
             },

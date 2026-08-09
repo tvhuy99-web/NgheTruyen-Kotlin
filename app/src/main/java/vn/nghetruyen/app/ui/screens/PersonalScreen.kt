@@ -1337,9 +1337,14 @@ private fun ReferenceVoiceCastSettingsCard(
     Card(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 5.dp)) {
         Column(Modifier.padding(12.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Bật mặc định", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                Text("Bật mặc định cho truyện dùng cấu hình chung", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
                 Switch(checked = state.autoVoiceCastEnabled, onCheckedChange = onAutoVoiceCastChange)
             }
+            Text(
+                "Bộ hồ sơ này là tiêu chuẩn dùng chung. Chỉ các hồ sơ đang bật, có ngôn ngữ và đã chọn giọng hợp lệ mới được gửi cho AI; có thể dùng giọng mặc định của bộ đọc.",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
             roles.forEach { role ->
                 ReferenceActionButton(
                     text = (if (role.enabled) "" else "TẮT • ") +
@@ -1441,6 +1446,7 @@ private fun PlaybackAutomationCard(
     onTtsTargetLufsChange: (Float) -> Unit,
 ) {
     var sceneModeExpanded by remember { mutableStateOf(false) }
+    var ttsCacheExpanded by remember { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 5.dp)) {
         Column(Modifier.padding(16.dp)) {
             Text("Tai nghe & tự động", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -1484,10 +1490,14 @@ private fun PlaybackAutomationCard(
             )
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             SettingSwitch("Cache TTS/Sonic", state.ttsCacheEnabled, onTtsCacheEnabledChange)
-            Text("Giới hạn cache TTS: ${state.ttsCacheLimitMiB} MiB")
-            Row(Modifier.fillMaxWidth()) {
-                Button({ onTtsCacheLimitChange(state.ttsCacheLimitMiB / 2) }, Modifier.weight(1f).padding(2.dp)) { Text("CACHE -") }
-                Button({ onTtsCacheLimitChange(state.ttsCacheLimitMiB * 2) }, Modifier.weight(1f).padding(2.dp)) { Text("CACHE +") }
+            Text("Giới hạn cache TTS", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 7.dp))
+            Box(Modifier.fillMaxWidth()) {
+                Button(onClick = { ttsCacheExpanded = true }, modifier = Modifier.fillMaxWidth()) { Text("${state.ttsCacheLimitMiB} MiB") }
+                DropdownMenu(expanded = ttsCacheExpanded, onDismissRequest = { ttsCacheExpanded = false }) {
+                    listOf(16, 32, 64, 128, 256, 512).forEach { value ->
+                        DropdownMenuItem(text = { Text("$value MiB") }, onClick = { ttsCacheExpanded = false; onTtsCacheLimitChange(value) })
+                    }
+                }
             }
             SettingSwitch("Chuẩn hóa âm lượng", state.normalizeTtsVolumeEnabled, onNormalizeTtsVolumeChange)
             ReferenceFloatSettingsSlider(

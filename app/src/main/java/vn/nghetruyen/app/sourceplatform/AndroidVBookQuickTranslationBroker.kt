@@ -96,3 +96,21 @@ class AndroidVBookQuickTranslationBroker(
         private const val MAX_INPUT_BYTES = 512 * 1024
     }
 }
+
+/**
+ * Narrow integration bridge for the legacy SourcePlatformManager constructor.
+ * It is installed once by AppContainer and can later be removed when the manager takes the
+ * dedicated quickTranslation broker directly.
+ */
+object AndroidVBookQuickTranslationRegistry : SourceTranslationBroker {
+    @Volatile private var delegate: SourceTranslationBroker = SourceTranslationBroker.DENY_ALL
+
+    fun install(libraryRepository: LibraryRepository) {
+        delegate = AndroidVBookQuickTranslationBroker(libraryRepository)
+    }
+
+    override fun translate(
+        manifest: SourceManifest,
+        request: SourceTranslationRequest,
+    ): SourcePlatformResult<SourceTranslationResponse> = delegate.translate(manifest, request)
+}

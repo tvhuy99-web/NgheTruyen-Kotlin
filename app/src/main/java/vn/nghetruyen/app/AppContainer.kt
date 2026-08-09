@@ -20,6 +20,7 @@ import vn.nghetruyen.app.playback.TtsVoiceCatalog
 import vn.nghetruyen.app.sources.EncryptedSourceSessionStore
 import vn.nghetruyen.app.sourceplatform.AndroidVBookQuickTranslationRegistry
 import vn.nghetruyen.app.sourceplatform.SourcePlatformManager
+import vn.nghetruyen.app.sourceplatform.UnifiedSourcePlatformManager
 import vn.nghetruyen.app.sourceplatform.VBookSourcePlatform
 import vn.nghetruyen.app.sources.SourceHealthChecker
 import vn.nghetruyen.app.sources.SourceRegistry
@@ -44,7 +45,7 @@ class AppContainer(context: Context) {
         VBookSourcePlatform(appContext, sourceSessionStore, aiServices)
     }
 
-    val sourcePlatformManager: SourcePlatformManager by lazy {
+    private val legacySourcePlatformManager: SourcePlatformManager by lazy {
         vBookQuickTranslationInstalled
         SourcePlatformManager(
             context = appContext,
@@ -52,6 +53,14 @@ class AppContainer(context: Context) {
             translationEngine = aiServices,
             vBookSourcePlatform = vBookSourcePlatform,
             onVBookChanged = { refreshSourceRegistry() },
+        )
+    }
+
+    val sourcePlatformManager: UnifiedSourcePlatformManager by lazy {
+        UnifiedSourcePlatformManager(
+            legacy = legacySourcePlatformManager,
+            vBook = vBookSourcePlatform,
+            onExternalSourcesChanged = { refreshSourceRegistry() },
         )
     }
 
@@ -91,8 +100,7 @@ class AppContainer(context: Context) {
         return restored
     }
 
-    private fun currentExternalStorySources() =
-        sourcePlatformManager.activeStorySources() + vBookSourcePlatform.activeStorySources()
+    private fun currentExternalStorySources() = sourcePlatformManager.activeStorySources()
 
     val sourceHealthChecker: SourceHealthChecker by lazy { SourceHealthChecker(sourceRegistry) }
     val bookImporter: BookImporter by lazy { BookImporter(appContext.contentResolver) }

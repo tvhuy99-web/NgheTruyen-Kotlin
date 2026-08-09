@@ -21,6 +21,7 @@ class VBookWebSocketBroker(
         manifest: SourceManifest,
         request: SourceWebSocketRequest,
     ): SourcePlatformResult<SourceWebSocketResponse> {
+        VBookSafeRhinoBoundary.installCurrentContext()
         val (headers, messages) = decodeHeaderCarrier(request)
         return when (val result = delegate.exchange(manifest, request.copy(headers = headers, messages = messages))) {
             is SourcePlatformResult.Failure -> result
@@ -62,7 +63,6 @@ class VBookWebSocketBroker(
     private fun encodeFrame(frame: SourceWebSocketFrame): String {
         val type = if (frame.type == "binary") "b" else "t"
         val data = if (frame.type == "binary") {
-            // Normalize binary payload to canonical base64 and reject malformed broker output.
             Base64.getEncoder().encodeToString(Base64.getDecoder().decode(frame.data))
         } else frame.data
         return FRAME_PREFIX + type + ":" + Base64.getEncoder().encodeToString(data.toByteArray(Charsets.UTF_8))

@@ -179,7 +179,7 @@ internal object TruyenComParser {
             if (!isStoryUrl(url)) return@mapNotNull null
             val title = link.text().normalizeText()
             if (title.isBlank()) return@mapNotNull null
-            val box = link.closest("article, li, .row, .item, .story, [class*=truyen]")
+            val box = link.closest("article, li, .row, .item, .story")
             StorySummary(
                 id = storyId(url),
                 sourceId = TruyenComSource.ID,

@@ -19,7 +19,7 @@ import java.util.Base64
 
 class VBookRawNetworkBrokerTest {
     @Test
-    fun charsetDecodeUsesCapturedBytesWithoutSecondUpstreamRequest() {
+    fun cachedFormatsUseCapturedBytesWithoutSecondUpstreamRequest() {
         var upstreamCalls = 0
         val gbk = Charset.forName("GBK")
         val raw = "中文测试".toByteArray(gbk)
@@ -40,7 +40,7 @@ class VBookRawNetworkBrokerTest {
         ) as SourcePlatformResult.Success
 
         assertEquals(1, upstreamCalls)
-        assertEquals(Base64.getEncoder().encodeToString(raw), original.value.headers.getValue("x-nghe-vbook-raw-base64").single())
+        assertEquals(raw.size.toString(), original.value.headers.getValue("x-nghe-vbook-raw-size").single())
 
         val decoded = broker.execute(
             manifest(),
@@ -49,7 +49,20 @@ class VBookRawNetworkBrokerTest {
                 url = "https://x.example/raw",
                 headers = mapOf(
                     VBookRawNetworkBroker.INTERNAL_REQUEST_KEY to key,
+                    VBookRawNetworkBroker.INTERNAL_OPERATION to VBookRawNetworkBroker.OP_TEXT,
                     VBookRawNetworkBroker.INTERNAL_DECODE_CHARSET to "GBK",
+                ),
+                allowHttpError = true,
+            ),
+        ) as SourcePlatformResult.Success
+        val base64 = broker.execute(
+            manifest(),
+            SourceNetworkRequest(
+                sourceId = "fixture",
+                url = "https://x.example/raw",
+                headers = mapOf(
+                    VBookRawNetworkBroker.INTERNAL_REQUEST_KEY to key,
+                    VBookRawNetworkBroker.INTERNAL_OPERATION to VBookRawNetworkBroker.OP_BASE64,
                 ),
                 allowHttpError = true,
             ),
@@ -57,14 +70,18 @@ class VBookRawNetworkBrokerTest {
 
         assertEquals(1, upstreamCalls)
         assertEquals("中文测试", decoded.value.body.toString(Charsets.UTF_8))
+        assertEquals(Base64.getEncoder().encodeToString(raw), base64.value.body.toString(Charsets.UTF_8))
         assertTrue(decoded.value.fromReplay)
+        assertTrue(base64.value.fromReplay)
     }
 
     @Test
-    fun internalControlHeadersNeverReachUpstream() {
+    fun internalControlHeadersNeverReachUpstreamAndTimeoutIsApplied() {
         var seenHeaders = emptyMap<String, String>()
+        var timeoutMs = 0L
         val delegate = SourceNetworkBroker { _, request ->
             seenHeaders = request.headers
+            timeoutMs = request.timeoutMs
             SourcePlatformResult.Success(response(request, "ok".toByteArray()))
         }
         val broker = VBookRawNetworkBroker(delegate)
@@ -76,11 +93,13 @@ class VBookRawNetworkBrokerTest {
                 headers = mapOf(
                     "X-Public" to "yes",
                     VBookRawNetworkBroker.INTERNAL_REQUEST_KEY to "secret-control",
+                    VBookRawNetworkBroker.INTERNAL_TIMEOUT_MS to "4321",
                 ),
                 allowHttpError = true,
             ),
         )
         assertEquals(mapOf("X-Public" to "yes"), seenHeaders)
+        assertEquals(4321L, timeoutMs)
     }
 
     private fun response(request: SourceNetworkRequest, body: ByteArray) = SourceNetworkResponse(

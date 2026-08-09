@@ -15,6 +15,7 @@ import vn.nghetruyen.app.importers.BookImporter
 import vn.nghetruyen.app.following.FollowingUpdateScheduler
 import vn.nghetruyen.app.playback.TtsVoiceCatalog
 import vn.nghetruyen.app.sources.EncryptedSourceSessionStore
+import vn.nghetruyen.app.sourceplatform.AndroidVBookQuickTranslationRegistry
 import vn.nghetruyen.app.sourceplatform.SourcePlatformManager
 import vn.nghetruyen.app.sources.SourceHealthChecker
 import vn.nghetruyen.app.sources.SourceRegistry
@@ -30,12 +31,8 @@ class AppContainer(context: Context) {
     val libraryRepository: LibraryRepository by lazy { LibraryRepository(database) }
     val sourceSessionStore: EncryptedSourceSessionStore by lazy { EncryptedSourceSessionStore(appContext) }
     val sourcePlatformManager: SourcePlatformManager by lazy {
-        SourcePlatformManager(
-            context = appContext,
-            sourceSessionStore = sourceSessionStore,
-            translationEngine = aiServices,
-            libraryRepository = libraryRepository,
-        )
+        AndroidVBookQuickTranslationRegistry.install(libraryRepository)
+        SourcePlatformManager(appContext, sourceSessionStore, aiServices)
     }
     val sourceRegistry: SourceRegistry by lazy {
         SourceRegistry(

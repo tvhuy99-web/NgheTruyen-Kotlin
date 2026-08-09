@@ -13,7 +13,7 @@ jobs:
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.head_repository.full_name == github.repository &&
-      github.event.workflow_run.head_branch == 'agent/compact-merge-runner-v3'
+      github.event.workflow_run.head_branch == 'agent/compact-merge-runner-v4'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -38,9 +38,11 @@ jobs:
             exit 1
           fi
           git checkout origin/main -- \
+            app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt \
             app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt \
             app/src/main/java/vn/nghetruyen/app/ui/components/GlobalVoiceRoleEditorDialog.kt
-          git add app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt \
+          git add app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt \
+                  app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt \
                   app/src/main/java/vn/nghetruyen/app/ui/components/GlobalVoiceRoleEditorDialog.kt
           git commit --amend --no-edit
           git push --force origin HEAD:refs/heads/agent/compact-ui-integrated

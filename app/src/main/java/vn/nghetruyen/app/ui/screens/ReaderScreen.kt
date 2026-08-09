@@ -619,9 +619,11 @@ fun ReaderScreen(
                 }
                 Text(if (ttsLoading) "Đang quét bộ đọc và giọng…" else "Đã nhận ${state.ttsEngines.size} bộ đọc.", style = MaterialTheme.typography.bodySmall)
                 ReaderMenuButton("QUÉT LẠI BỘ ĐỌC") { onRefreshVoices() }
-                ReaderMenuButton("SAO CHÉP CHẨN ĐOÁN BỘ ĐỌC") {
-                    clipboard.setText(AnnotatedString("Bộ đọc: ${ttsDraft.enginePackage ?: "Mặc định hệ thống"}\nNgôn ngữ: ${ttsDraft.languageTag}\nGiọng: ${ttsDraft.voiceName ?: "Mặc định"}\nSố bộ đọc/giọng: ${state.ttsEngines.size}/${ttsVoices.size}"))
-                    onMessage("Đã sao chép chẩn đoán bộ đọc.")
+                if (!ttsLoading && state.ttsEngines.isEmpty()) {
+                    ReaderMenuButton("SAO CHÉP CHẨN ĐOÁN BỘ ĐỌC") {
+                        clipboard.setText(AnnotatedString("Bộ đọc: ${ttsDraft.enginePackage ?: "Mặc định hệ thống"}\nNgôn ngữ: ${ttsDraft.languageTag}\nGiọng: ${ttsDraft.voiceName ?: "Mặc định"}\nSố bộ đọc/giọng: ${state.ttsEngines.size}/${ttsVoices.size}"))
+                        onMessage("Đã sao chép chẩn đoán bộ đọc.")
+                    }
                 }
                 Text("Ngôn ngữ", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 6.dp))
                 Button(onClick = { languageExpanded = true }, modifier = Modifier.fillMaxWidth()) { Text(ttsDraft.languageTag.ifBlank { "vi-VN" }) }
@@ -813,6 +815,10 @@ fun ReaderScreen(
         val enabledCount = musicLibraryDraft.count(SceneMusicTrackEntity::enabled)
         val normalizedCount = musicLibraryDraft.count { it.normalizationVersion >= PcmLoudnessEstimator.VERSION && it.normalizationError.isBlank() }
         val describedCount = musicLibraryDraft.count { it.tagsCsv.isNotBlank() }
+        val catalogChars = musicLibraryDraft.sumOf { track ->
+            if (track.enabled) track.id.length + track.title.length + track.tagsCsv.trim().length + 8 else 0
+        }
+        val estimatedCatalogTokens = ((catalogChars + 3) / 4).coerceAtLeast(0)
         fun stopPreview() {
             runCatching { musicPreviewPlayer?.stop() }
             runCatching { musicPreviewPlayer?.release() }
@@ -830,7 +836,11 @@ fun ReaderScreen(
             title = { Text("DANH SÁCH NHẠC NỀN") },
             text = { Column(Modifier.heightIn(max = 620.dp).verticalScroll(rememberScrollState())) {
                 Text(
-                    "${musicLibraryDraft.size} bài • $enabledCount bật • $normalizedCount chuẩn hóa • $describedCount mô tả",
+                    "Kho nhạc: ${musicLibraryDraft.size} bài\n" +
+                        "Bài đang bật: $enabledCount bài\n" +
+                        "Đã chuẩn hóa: $normalizedCount bài\n" +
+                        "Đã có mô tả: $describedCount bài\n" +
+                        "Ước tính khi gửi danh mục AI: khoảng $estimatedCatalogTokens token",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 OutlinedTextField(
@@ -1003,16 +1013,18 @@ fun ReaderScreen(
                 onDismissRequest = { editingTrack = null },
                 title = { Text("SỬA THÔNG TIN AI") },
                 text = { Column {
+                    Text("Tên bài gửi cho AI")
                     OutlinedTextField(title, { title = it.take(120) }, placeholder = { Text("Tên bài") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                    Text("Mô tả cho AI", modifier = Modifier.padding(top = 8.dp))
+                    Text("Mô tả tham khảo cho AI, không bắt buộc AI làm theo", modifier = Modifier.padding(top = 8.dp))
                     OutlinedTextField(
                         description,
                         { description = it.take(301) },
-                        placeholder = { Text("Mô tả ngắn") },
+                        placeholder = { Text("Tông/diễn biến: ...; Dùng: ...; Tránh: ...") },
                         minLines = 4,
                         maxLines = 7,
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    Text("Tối đa 300 ký tự. Chỉ ghi thông tin thực sự giúp AI phân biệt và chọn bài.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
                 } },
                 confirmButton = { TextButton(onClick = {
                     if (description.length > 300) onMessage("Mô tả có ${description.length} ký tự, vượt giới hạn 300.")

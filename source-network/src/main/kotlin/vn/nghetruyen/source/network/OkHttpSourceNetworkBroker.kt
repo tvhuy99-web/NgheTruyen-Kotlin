@@ -172,6 +172,7 @@ class OkHttpSourceNetworkBroker(
                         cipherSuite = response.handshake?.cipherSuite?.javaName,
                         timing = SourceNetworkTiming(started, completed),
                         traceId = initial.traceId,
+                        statusText = response.message,
                     )
                 }
             }

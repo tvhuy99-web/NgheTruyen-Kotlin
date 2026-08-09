@@ -11,20 +11,11 @@ object VBookQuickTranslatorPrelude {
           carrier.instruction = '${VBookTranslationBrokerRouter.QUICK_TRANSLATOR_PREFIX}' + JSON.stringify(originalExtras);
           var result = __vbookNativeQtTranslate(String(text == null ? '' : text), String(to || 'vp'), carrier);
           if (!result || typeof result !== 'object') return result;
-          var segments = result.segments;
-          if (!segments || Number(segments.length || 0) === 0) {
-            result.segments = undefined;
-            return result;
-          }
-          var normalized = [];
-          for (var si = 0; si < segments.length; si++) {
-            var item = segments[si];
-            if (typeof item === 'string') {
-              try { item = JSON.parse(item); } catch (ignored) {}
-            }
-            normalized.push(item);
-          }
-          result.segments = normalized;
+          // The generic host currently exposes its legacy segments as a Java array. Reading that
+          // value would violate the deny-all ClassShutter. Offset-compatible Quick Translator
+          // segments remain explicitly PARTIAL, so hide the unsafe representation rather than
+          // weakening the sandbox. translateText/provider and all extras still cross normally.
+          result.segments = undefined;
           return result;
         };
     """.trimIndent()

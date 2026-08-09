@@ -4,6 +4,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import vn.nghetruyen.source.api.JsonCodec
+import vn.nghetruyen.source.api.JsonValue
 import vn.nghetruyen.source.api.SemanticVersion
 import vn.nghetruyen.source.api.SourceCapabilities
 import vn.nghetruyen.source.api.SourceContentType
@@ -50,8 +52,15 @@ class VBookRawNetworkBrokerTest {
         ) as SourcePlatformResult.Success
 
         assertEquals(1, upstreamCalls)
-        assertEquals(raw.size.toString(), original.value.headers.getValue("x-nghe-vbook-raw-size").single())
-        assertEquals("OK", original.value.headers.getValue("x-nghe-vbook-status-text").single())
+        assertTrue(original.value.headers.isEmpty())
+        val envelope = JsonCodec.parse(original.value.body.toString(Charsets.UTF_8)) as JsonValue.Obj
+        assertEquals(1, envelope.int("__ngheVBookFetch"))
+        assertEquals(key, envelope.string("responseKey"))
+        assertEquals(raw.size, envelope.int("rawSize"))
+        assertEquals("OK", envelope.string("statusText"))
+        assertEquals("application/octet-stream", envelope.obj("headers")?.string("content-type"))
+        assertEquals("https://cdn.example/final", envelope.obj("request")?.string("url"))
+        assertEquals("Reference-UA", envelope.obj("request")?.obj("headers")?.string("User-Agent"))
 
         val decoded = broker.execute(
             manifest(),
@@ -62,6 +71,18 @@ class VBookRawNetworkBrokerTest {
                     VBookRawNetworkBroker.INTERNAL_REQUEST_KEY to key,
                     VBookRawNetworkBroker.INTERNAL_OPERATION to VBookRawNetworkBroker.OP_TEXT,
                     VBookRawNetworkBroker.INTERNAL_DECODE_CHARSET to "GBK",
+                ),
+                allowHttpError = true,
+            ),
+        ) as SourcePlatformResult.Success
+        val defaultDecoded = broker.execute(
+            manifest(),
+            SourceNetworkRequest(
+                sourceId = "fixture",
+                url = "https://x.example/raw",
+                headers = mapOf(
+                    VBookRawNetworkBroker.INTERNAL_REQUEST_KEY to key,
+                    VBookRawNetworkBroker.INTERNAL_OPERATION to VBookRawNetworkBroker.OP_TEXT,
                 ),
                 allowHttpError = true,
             ),
@@ -93,10 +114,12 @@ class VBookRawNetworkBrokerTest {
 
         assertEquals(1, upstreamCalls)
         assertEquals("中文测试", decoded.value.body.toString(Charsets.UTF_8))
+        assertTrue(defaultDecoded.value.body.isNotEmpty())
         assertEquals(Base64.getEncoder().encodeToString(raw), base64.value.body.toString(Charsets.UTF_8))
         assertTrue(decoded.value.fromReplay)
         assertTrue(base64.value.fromReplay)
         assertTrue(requestInfo.value.fromReplay)
+        assertTrue(decoded.value.headers.isEmpty())
         val metadataJson = requestInfo.value.body.toString(Charsets.UTF_8)
         assertTrue(metadataJson.contains("https://cdn.example/final"))
         assertTrue(metadataJson.contains("Reference-UA"))

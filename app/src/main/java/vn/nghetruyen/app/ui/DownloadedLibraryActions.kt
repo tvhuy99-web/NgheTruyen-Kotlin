@@ -6,15 +6,20 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import vn.nghetruyen.app.NgheTruyenApplication
 import vn.nghetruyen.app.core.common.AppResult
+import vn.nghetruyen.app.core.model.ChapterSummary
 import vn.nghetruyen.app.core.model.DownloadSelectionMode
 import vn.nghetruyen.app.core.model.DownloadState
+import vn.nghetruyen.app.data.local.ChapterEntity
 import vn.nghetruyen.app.data.local.StoryEntity
 import vn.nghetruyen.app.downloads.DownloadRequest
 import vn.nghetruyen.app.downloads.DownloadStorageGuard
 import vn.nghetruyen.app.downloads.StoryDownloadPlanner
+import java.util.concurrent.atomic.AtomicReference
 
 /** Keeps the main UI wiring explicit while downloaded-library behavior lives beside its workflow. */
 object DownloadedLibraryCallbacks {
+    private val selectedChapter = AtomicReference<ChapterEntity?>(null)
+
     fun open(viewModel: AppViewModel, story: StoryEntity) {
         viewModel.openDownloadedStoryFromLibrary(story)
     }
@@ -22,17 +27,46 @@ object DownloadedLibraryCallbacks {
     fun update(viewModel: AppViewModel, story: StoryEntity) {
         viewModel.updateDownloadedStoryFromLibrary(story)
     }
+
+    /** Returns only chapter bodies that still exist locally, in canonical chapter order. */
+    suspend fun chapters(app: NgheTruyenApplication, story: StoryEntity): List<ChapterEntity> =
+        app.container.libraryRepository.listOfflineChapters(story.id)
+            .filter { chapter ->
+                !chapter.content.isNullOrBlank() && (story.sourceId == "offline" || chapter.downloadedAt != null)
+            }
+            .sortedWith(compareBy<ChapterEntity> { it.chapterIndex }.thenBy { it.title })
+
+    /** Hands one selected downloaded chapter to the existing story-open callback exactly once. */
+    fun selectChapter(chapter: ChapterEntity) {
+        selectedChapter.set(chapter)
+    }
+
+    internal fun consumeSelectedChapter(storyId: String): ChapterEntity? =
+        selectedChapter.getAndSet(null)?.takeIf { it.storyId == storyId }
 }
 
 /** XPK-style entry point for a story on the Downloaded shelf. */
 fun AppViewModel.openDownloadedStoryFromLibrary(entity: StoryEntity) {
+    val chapter = DownloadedLibraryCallbacks.consumeSelectedChapter(entity.id)
     openLibraryStory(entity)
     if (!entity.isOffline) return
     viewModelScope.launch {
         state.filter { snapshot ->
             snapshot.destination == Destination.Story && snapshot.storyDetail?.story?.id == entity.id
         }.first()
-        setStoryDetailTab("chapters")
+        if (chapter != null) {
+            openChapter(
+                ChapterSummary(
+                    id = chapter.id,
+                    storyId = chapter.storyId,
+                    index = chapter.chapterIndex,
+                    title = chapter.title,
+                    url = chapter.remoteUrl,
+                ),
+            )
+        } else {
+            setStoryDetailTab("chapters")
+        }
     }
 }
 

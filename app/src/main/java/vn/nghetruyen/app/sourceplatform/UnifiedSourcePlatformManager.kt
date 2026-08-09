@@ -1,8 +1,11 @@
 package vn.nghetruyen.app.sourceplatform
 
+import com.nghetruyen.source.platform.SourceArtifactIdentity
+import com.nghetruyen.source.platform.SourceEcosystem
+import com.nghetruyen.source.repository.VBookUpdateDisposition
 import vn.nghetruyen.app.sources.StorySource
 import vn.nghetruyen.source.api.SourceRuntimeMode
-import vn.nghetruyen.source.vbook.VBookAggregatedItem
+import vn.nghetruyen.source.vbook.VBookHostManifestFactory
 import vn.nghetruyen.source.vbook.VBookRepositorySnapshot
 import java.io.ByteArrayInputStream
 import java.io.InputStream
@@ -20,26 +23,14 @@ class UnifiedSourcePlatformManager(
     private val onExternalSourcesChanged: () -> Unit,
 ) {
     private val vBookSnapshots = linkedMapOf<String, VBookRepositorySnapshot>()
+    private val vBookCatalog = VBookCatalogInstallService(vBookRepositories, vBook)
+    private var pendingVBookCatalog: VBookPreparedCatalogInstall? = null
 
     fun activeStorySources(): List<StorySource> = legacy.activeStorySources() + vBook.activeStorySources()
 
     fun installedPacks(): List<SourcePackUiInfo> = buildList {
         addAll(legacy.installedPacks())
-        addAll(vBook.installedSources().map { installed ->
-            SourcePackUiInfo(
-                id = installed.sourceId,
-                name = installed.name,
-                version = installed.version,
-                enabled = installed.enabled,
-                installedVersions = installed.installedVersions,
-                canRollback = installed.canRollback,
-                signerKeyId = "vbook-unmodified",
-                runtimeMode = SourceRuntimeMode.VBOOK_JS_COMPAT.name,
-                commentCapability = "VBOOK_DYNAMIC",
-                commentFixtureCount = 0,
-                removable = true,
-            )
-        })
+        addAll(vBook.installedSources().map(::installedUi))
     }.distinctBy(SourcePackUiInfo::id)
 
     fun repositories(): List<SourceRepositoryUiInfo> = buildList {
@@ -64,6 +55,7 @@ class UnifiedSourcePlatformManager(
             snapshot.items.forEach { aggregated ->
                 val local = installed[aggregated.repositoryId to aggregated.remoteIdentity]
                 val state = repositoryState(local?.version, aggregated.item.version)
+                val packageIsHttps = aggregated.item.packageUrl.startsWith("https://", ignoreCase = true)
                 add(SourceRepositoryPackageUiInfo(
                     repositoryId = uiId,
                     sourceId = aggregated.installIdentity,
@@ -76,11 +68,15 @@ class UnifiedSourcePlatformManager(
                             if (isNotEmpty()) append(" · ")
                             append("Catalog: ").append(aggregated.repository.author)
                         }
+                        if (!packageIsHttps) {
+                            if (isNotEmpty()) append(" · ")
+                            append("Gói HTTP không an toàn")
+                        }
                     },
                     changelog = "",
                     packageBytes = 0,
-                    status = state,
-                    canInstall = state in setOf("NOT_INSTALLED", "UPDATE_AVAILABLE", "VERSION_UNKNOWN"),
+                    status = if (packageIsHttps) state else "INSECURE_PACKAGE_URL",
+                    canInstall = packageIsHttps && state in setOf("NOT_INSTALLED", "UPDATE_AVAILABLE", "VERSION_UNKNOWN"),
                 ))
             }
         }
@@ -88,6 +84,7 @@ class UnifiedSourcePlatformManager(
 
     /** Try the native signed-repository schema first; fall back to the canonical vBook index schema. */
     fun refreshRepository(url: String): Result<SourceRepositoryUiInfo> {
+        clearPendingCatalogInstall()
         val native = legacy.refreshRepository(url)
         if (native.isSuccess) return native
         return runCatching {
@@ -105,31 +102,89 @@ class UnifiedSourcePlatformManager(
     }
 
     fun removeRepository(repositoryId: String): Result<Unit> {
+        clearPendingCatalogInstall()
         if (vBookSnapshots.remove(repositoryId) != null) return Result.success(Unit)
         return legacy.removeRepository(repositoryId)
     }
 
     /**
-     * For vBook rows, download exactly once then reuse the local raw-import preview path. The legacy
-     * manager only supplies the existing UI preview surface; confirmation still commits raw bytes to
-     * VBookSourcePlatform rather than SourcePackStore.
+     * Bind repository preview and confirmation to the same exact ZIP and canonical catalog identity.
+     * The legacy manager is used only to render the existing permission-preview UI; it never owns
+     * confirmation for a catalog vBook package.
      */
     fun prepareRepositoryInstall(repositoryId: String, sourceId: String): Result<SourceInstallPreview> {
-        val snapshot = vBookSnapshots[repositoryId] ?: return legacy.prepareRepositoryInstall(repositoryId, sourceId)
+        val snapshot = vBookSnapshots[repositoryId] ?: run {
+            clearPendingCatalogInstall()
+            return legacy.prepareRepositoryInstall(repositoryId, sourceId)
+        }
         return runCatching {
             val item = snapshot.items.firstOrNull { it.installIdentity == sourceId }
                 ?: error("Không tìm thấy tiện ích vBook trong repository snapshot.")
-            val bytes = vBookRepositories.downloadPackage(item)
-            ByteArrayInputStream(bytes).use { legacy.prepareVBookImport(it).getOrThrow() }
+            require(item.item.packageUrl.startsWith("https://", ignoreCase = true)) {
+                "VBOOK_REPOSITORY_PACKAGE_HTTPS_REQUIRED"
+            }
+            val prepared = vBookCatalog.prepare(item)
+            require(prepared.preview.activatable) {
+                val blockers = prepared.preview.blockingFeatures.sortedBy(Enum<*>::name).joinToString { it.name }
+                val failures = prepared.preview.validation.failures.joinToString("; ") { it.message }
+                "VBOOK_IMPORT_NOT_ACTIVATABLE:${listOf(blockers, failures).filter(String::isNotBlank).joinToString(" | ")}"
+            }
+            val presentation = ByteArrayInputStream(prepared.bytes).use { legacy.prepareVBookImport(it).getOrThrow() }
+            pendingVBookCatalog = prepared
+            val identity = SourceArtifactIdentity(SourceEcosystem.VBOOK, item.repositoryId, item.remoteIdentity)
+            presentation.copy(
+                sourceId = VBookHostManifestFactory.stableSourceId(identity.canonicalKey()),
+                name = prepared.preview.name,
+                version = prepared.preview.version ?: item.item.version,
+            )
+        }.onFailure {
+            pendingVBookCatalog = null
+            legacy.cancelPendingInstall()
         }
     }
 
-    fun prepareInstall(input: InputStream) = legacy.prepareInstall(input)
-    fun prepareVBookImport(input: InputStream) = legacy.prepareVBookImport(input)
-    fun prepareNativeLuaImport(input: InputStream) = legacy.prepareNativeLuaImport(input)
-    fun pendingInstallWarnings() = legacy.pendingInstallWarnings()
-    fun confirmPendingInstall() = legacy.confirmPendingInstall()
-    fun cancelPendingInstall() = legacy.cancelPendingInstall()
+    fun prepareInstall(input: InputStream): Result<SourceInstallPreview> {
+        clearPendingCatalogInstall()
+        return legacy.prepareInstall(input)
+    }
+
+    fun prepareVBookImport(input: InputStream): Result<SourceInstallPreview> {
+        clearPendingCatalogInstall()
+        return legacy.prepareVBookImport(input)
+    }
+
+    fun prepareNativeLuaImport(input: InputStream): Result<SourceInstallPreview> {
+        clearPendingCatalogInstall()
+        return legacy.prepareNativeLuaImport(input)
+    }
+
+    fun pendingInstallWarnings(): List<String> = buildList {
+        addAll(legacy.pendingInstallWarnings())
+        pendingVBookCatalog?.preview?.warnings?.let(::addAll)
+    }.distinct()
+
+    fun confirmPendingInstall(): Result<SourcePackUiInfo> {
+        val prepared = pendingVBookCatalog ?: return legacy.confirmPendingInstall()
+        pendingVBookCatalog = null
+        legacy.cancelPendingInstall()
+        return runCatching {
+            val result = vBookCatalog.installPrepared(prepared)
+            require(result.disposition == VBookUpdateDisposition.ACTIVATED && result.active != null) {
+                val blockers = result.validation.blockingFeatures.sortedBy(Enum<*>::name).joinToString { it.name }
+                "VBOOK_INSTALL_QUARANTINED:${blockers.ifBlank { result.validation.failures.joinToString("; ") { it.message } }}"
+            }
+            onExternalSourcesChanged()
+            val info = vBook.installedSources().firstOrNull {
+                it.repositoryId == prepared.item.repositoryId && it.remoteIdentity == prepared.item.remoteIdentity
+            } ?: error("VBOOK_INSTALLED_SOURCE_NOT_FOUND_AFTER_ACTIVATION")
+            installedUi(info)
+        }
+    }
+
+    fun cancelPendingInstall() {
+        pendingVBookCatalog = null
+        legacy.cancelPendingInstall()
+    }
 
     fun trustKeys() = legacy.trustKeys()
     fun enrollTrustKey(keyId: String, algorithm: String, publicKeyBase64: String, fingerprint: String) =
@@ -182,6 +237,24 @@ class UnifiedSourcePlatformManager(
     fun diagnosticSummaries(limit: Int = 20) = legacy.diagnosticSummaries(limit)
     fun exportDiagnostics() = legacy.exportDiagnostics()
     fun clearDiagnostics() = legacy.clearDiagnostics()
+
+    private fun installedUi(installed: VBookInstalledSourceInfo): SourcePackUiInfo = SourcePackUiInfo(
+        id = installed.sourceId,
+        name = installed.name,
+        version = installed.version,
+        enabled = installed.enabled,
+        installedVersions = installed.installedVersions,
+        canRollback = installed.canRollback,
+        signerKeyId = "vbook-unmodified",
+        runtimeMode = SourceRuntimeMode.VBOOK_JS_COMPAT.name,
+        commentCapability = "VBOOK_DYNAMIC",
+        commentFixtureCount = 0,
+        removable = true,
+    )
+
+    private fun clearPendingCatalogInstall() {
+        pendingVBookCatalog = null
+    }
 
     private fun repositoryState(local: String?, remote: String): String {
         if (local == null) return "NOT_INSTALLED"

@@ -27,6 +27,25 @@ missing = [item for item in required_reader if item not in reader]
 if missing:
     raise SystemExit("REFERENCE_WORKFLOW missing Reader markers: " + repr(missing))
 
+reader_options_start = reader.find('    if (showReaderOptions) {')
+reader_options_end = reader.find('    if (showReaderModeDialog) {', reader_options_start)
+if reader_options_start < 0 or reader_options_end < 0:
+    raise SystemExit("REFERENCE_WORKFLOW standard Reader options block missing")
+reader_options = reader[reader_options_start:reader_options_end]
+for extra in [
+    'Text("MỞ RỘNG"',
+    'ĐÁNH DẤU ĐOẠN',
+    'GHI CHÚ ĐOẠN',
+    'SỬA GHI CHÚ ĐOẠN',
+    'ÁP DỤNG VIETPHRASE',
+    'CẢI THIỆN VIETPHRASE',
+    'LẬP NHẠC CẢNH',
+    'PHÂN VAI + NHẠC',
+    'XEM NHẬT KÝ CHẨN ĐOÁN',
+]:
+    if extra in reader_options:
+        raise SystemExit("REFERENCE_WORKFLOW Kotlin-only action leaked into standard Reader options: " + extra)
+
 for obsolete in [
     'title = { Text("AI & CHUYỂN NGỮ") }',
     'title = { Text("KHÁC") }',

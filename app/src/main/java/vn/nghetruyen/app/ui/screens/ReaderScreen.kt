@@ -485,18 +485,6 @@ fun ReaderScreen(
                 ReaderMenuButton("CÀI ĐẶT TTS") { showReaderOptions = false; showTtsDialog = true }
                 ReaderMenuButton("SAO CHÉP CHƯƠNG") { showReaderOptions = false; showCopyDialog = true }
                 ReaderMenuButton("THÔNG TIN CHƯƠNG") { showReaderOptions = false; showChapterInfoDialog = true }
-                Text("MỞ RỘNG", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
-                ReaderMenuButton("ĐÁNH DẤU ĐOẠN ${activeIndex + 1}") { showReaderOptions = false; onBookmark() }
-                ReaderMenuButton(if (activeNote == null) "GHI CHÚ ĐOẠN ${activeIndex + 1}" else "SỬA GHI CHÚ ĐOẠN ${activeIndex + 1}") {
-                    showReaderOptions = false; noteDraft = activeNote?.text.orEmpty(); showNoteDialog = true
-                }
-                if (state.vietPhraseRules.isNotEmpty() || state.vietPhraseDictionaryStates.isNotEmpty()) {
-                    ReaderMenuButton("ÁP DỤNG VIETPHRASE") { showReaderOptions = false; onApplyVietPhrase() }
-                    ReaderMenuButton("CẢI THIỆN VIETPHRASE") { showReaderOptions = false; onImproveVietPhrase() }
-                }
-                ReaderMenuButton("LẬP NHẠC CẢNH") { showReaderOptions = false; onPlanSceneMusic() }
-                ReaderMenuButton("PHÂN VAI + NHẠC") { showReaderOptions = false; onPlanNarration() }
-                ReaderMenuButton("XEM NHẬT KÝ CHẨN ĐOÁN") { showReaderOptions = false; showDiagnosticLogDialog = true }
             } },
             confirmButton = { TextButton(onClick = { showReaderOptions = false }) { Text("ĐÓNG") } },
         )

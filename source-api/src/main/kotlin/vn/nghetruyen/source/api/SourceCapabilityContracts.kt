@@ -47,8 +47,6 @@ data class SourceBrowserRequestMetadata(
     val timestampEpochMs: Long,
 )
 
-
-
 data class SourceBrowserDialog(
     val id: Long,
     val type: String,
@@ -152,11 +150,23 @@ data class SourceWebSocketRequest(
     val traceId: String = UUID.randomUUID().toString(),
 )
 
+data class SourceWebSocketFrame(
+    val type: String,
+    /** Text payload for text frames; base64 payload for binary frames. */
+    val data: String,
+) {
+    init {
+        require(type in setOf("text", "binary")) { "SOURCE_WEBSOCKET_FRAME_TYPE_INVALID" }
+    }
+}
+
 data class SourceWebSocketResponse(
     val messages: List<String>,
     val closeCode: Int?,
     val closeReason: String?,
     val traceId: String,
+    /** Rich frame representation for vBook-compatible hosts. Empty means legacy text-only broker. */
+    val frames: List<SourceWebSocketFrame> = emptyList(),
 )
 
 fun interface SourceWebSocketBroker {
@@ -173,8 +183,6 @@ fun interface SourceWebSocketBroker {
     }
 }
 
-
-
 data class SourceTranslationRequest(
     val sourceId: String,
     val text: String,
@@ -185,6 +193,16 @@ data class SourceTranslationRequest(
     val instruction: String = "",
     val maxOutputBytes: Int = 2 * 1024 * 1024,
     val traceId: String = UUID.randomUUID().toString(),
+    /** Ecosystem-specific, string-only options. Generic translators may safely ignore them. */
+    val options: Map<String, String> = emptyMap(),
+)
+
+data class SourceTranslationSegment(
+    val srcStart: Int,
+    val srcLen: Int,
+    val transStart: Int,
+    val transLen: Int,
+    val type: Int,
 )
 
 data class SourceTranslationResponse(
@@ -192,6 +210,8 @@ data class SourceTranslationResponse(
     val segments: List<String> = emptyList(),
     val provider: String? = null,
     val traceId: String,
+    /** Offset metadata used by vBook Quick Translator; empty means unavailable. */
+    val segmentMetadata: List<SourceTranslationSegment> = emptyList(),
 )
 
 fun interface SourceTranslationBroker {
@@ -235,8 +255,6 @@ fun interface SourceNativeHookBroker {
         }
     }
 }
-
-
 
 data class SourceGraphicsImage(
     val base64: String,

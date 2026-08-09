@@ -61,7 +61,6 @@ class VBookCompatibilityRuntime(
         val invocation = if (profile == VBookContractProfile.CURRENT_JS) {
             VBookInvocationPlanner.current(role, script, input, continuation, text, voiceId, from, to, source)
         } else {
-            // Legacy core signatures are stable for the common roles. Unknown/dynamic legacy calls use executeDynamic.
             val args = when (role) {
                 VBookScriptRole.HOME, VBookScriptRole.EXPLORE, VBookScriptRole.GENRE,
                 VBookScriptRole.VOICE, VBookScriptRole.LANGUAGE -> emptyList()
@@ -73,10 +72,7 @@ class VBookCompatibilityRuntime(
             }
             VBookInvocationPlanner.legacy(script, args)
         }
-        return execute(
-            sourceManifest, resources, plugin, profile, invocation,
-            persistedConfig, runtimeConfig, traceId,
-        )
+        return execute(sourceManifest, resources, plugin, profile, invocation, persistedConfig, runtimeConfig, traceId)
     }
 
     fun executeDynamic(
@@ -122,7 +118,12 @@ class VBookCompatibilityRuntime(
         val config = VBookConfigValues.resolve(plugin, persistedConfig, runtimeConfig)
         val dispatcher = buildDispatcher(profile, config)
         val overlay = OverlayResources(resources, DISPATCH_PATH, dispatcher.toByteArray(Charsets.UTF_8))
-        val manifest = sourceManifest.copy(
+        val manifest = VBookNetworkPolicy.effectiveManifest(
+            base = sourceManifest,
+            plugin = plugin,
+            resources = resources,
+            additionalScriptPaths = setOf(normalizedScript),
+        ).copy(
             actions = mapOf(
                 SourceActionName.UI_ACTION to SourceActionSpec(
                     entry = DISPATCH_PATH,
@@ -193,7 +194,7 @@ class VBookCompatibilityRuntime(
         }))
         val prelude = VBookConfigPrelude.build(profile, config)
         val responsePrelude = when (profile) {
-            VBookContractProfile.CURRENT_JS -> "" // host bootstrap already implements code 0/1
+            VBookContractProfile.CURRENT_JS -> ""
             VBookContractProfile.LEGACY_JS -> """
                 Response = Object.freeze({
                   success:function(data,data2){return JSON.stringify({code:200,data:data,data2:(data2===undefined?null:data2)});},

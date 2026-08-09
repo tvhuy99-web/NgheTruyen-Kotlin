@@ -105,9 +105,23 @@ interface SourceStorageBroker {
             private fun failure(request: SourceStorageRequest) = SourcePlatformResult.Failure(
                 SourcePlatformFailure(SourceErrorCode.STORAGE_UNAVAILABLE, "SOURCE_STORAGE_BROKER_UNAVAILABLE", request.traceId),
             )
+
             override fun get(manifest: SourceManifest, request: SourceStorageRequest) = failure(request)
             override fun put(manifest: SourceManifest, request: SourceStorageRequest) = failure(request)
             override fun delete(manifest: SourceManifest, request: SourceStorageRequest) = failure(request)
+
+            /**
+             * Enumeration is observational and safe to expose as an empty namespace when no storage
+             * backend exists. This prevents host bootstrap/introspection from turning an unused
+             * capability into a mandatory dependency. Actual reads and mutations remain denied.
+             */
+            override fun keys(
+                manifest: SourceManifest,
+                sourceId: String,
+                prefix: String,
+                traceId: String,
+            ): SourcePlatformResult<List<String>> = SourcePlatformResult.Success(emptyList())
+
             override fun clear(sourceId: String) = SourcePlatformResult.Failure(
                 SourcePlatformFailure(SourceErrorCode.STORAGE_UNAVAILABLE, "SOURCE_STORAGE_BROKER_UNAVAILABLE"),
             )

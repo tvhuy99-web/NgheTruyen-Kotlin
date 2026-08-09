@@ -34,9 +34,9 @@ import java.util.Locale
 class MainActivity : ComponentActivity() {
     private val viewModel: AppViewModel by viewModels()
 
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         val snapshot = viewModel.state.value
-        val key = when (event.keyCode) {
+        val key = when (keyCode) {
             KeyEvent.KEYCODE_VOLUME_UP -> ReaderVolumeKeyPolicy.Key.VOLUME_UP
             KeyEvent.KEYCODE_VOLUME_DOWN -> ReaderVolumeKeyPolicy.Key.VOLUME_DOWN
             else -> ReaderVolumeKeyPolicy.Key.OTHER
@@ -44,7 +44,7 @@ class MainActivity : ComponentActivity() {
         val delta = ReaderVolumeKeyPolicy.paragraphDelta(
             readerVisible = snapshot.destination == Destination.Reader,
             navigationEnabled = snapshot.readerMode == ReaderMode.TTS && snapshot.readerDisplay.volumeKeysNavigate,
-            actionDown = event.action == KeyEvent.ACTION_DOWN,
+            actionDown = true,
             repeatCount = event.repeatCount,
             key = key,
         )
@@ -52,7 +52,7 @@ class MainActivity : ComponentActivity() {
             viewModel.moveParagraph(delta)
             return true
         }
-        return super.dispatchKeyEvent(event)
+        return super.onKeyDown(keyCode, event)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

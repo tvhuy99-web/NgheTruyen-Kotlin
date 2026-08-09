@@ -1,32 +1,61 @@
 package vn.nghetruyen.source.vbook
 
-enum class VBookFeatureSupportLevel {
-    SUPPORTED,
+enum class VBookFeatureImplementationLevel {
+    IMPLEMENTED,
     PARTIAL,
     PACKAGE_LAYER_PENDING,
     REFERENCE_REJECTS,
 }
 
+enum class VBookFeatureCertificationState {
+    UNTESTED,
+    CERTIFIED,
+    DIVERGED,
+    NOT_APPLICABLE,
+}
+
 data class VBookFeatureSupport(
     val feature: VBookFeature,
-    val level: VBookFeatureSupportLevel,
+    val implementation: VBookFeatureImplementationLevel,
     val note: String,
+)
+
+data class VBookFeatureCertification(
+    val feature: VBookFeature,
+    val state: VBookFeatureCertificationState,
+    val caseIds: Set<String> = emptySet(),
+    val detail: String = "",
 )
 
 data class VBookCorpusCompatibilityMatrix(
     val rows: List<VBookFeatureSupport>,
     val requiredByCorpus: Map<VBookFeature, Int>,
+    val certifications: Map<VBookFeature, VBookFeatureCertification> = emptyMap(),
 ) {
     val blockingFeatures: List<VBookFeatureSupport>
         get() = rows.filter { row ->
             (requiredByCorpus[row.feature] ?: 0) > 0 &&
-                row.level in setOf(VBookFeatureSupportLevel.PARTIAL, VBookFeatureSupportLevel.PACKAGE_LAYER_PENDING)
+                row.implementation in setOf(
+                    VBookFeatureImplementationLevel.PARTIAL,
+                    VBookFeatureImplementationLevel.PACKAGE_LAYER_PENDING,
+                )
         }
+
+    val uncertifiedRequiredFeatures: List<VBookFeatureSupport>
+        get() = rows.filter { row ->
+            (requiredByCorpus[row.feature] ?: 0) > 0 &&
+                row.implementation == VBookFeatureImplementationLevel.IMPLEMENTED &&
+                certifications[row.feature]?.state != VBookFeatureCertificationState.CERTIFIED
+        }
+
+    val canClaimFullCorpusParity: Boolean
+        get() = blockingFeatures.isEmpty() && uncertifiedRequiredFeatures.isEmpty() &&
+            certifications.values.none { it.state == VBookFeatureCertificationState.DIVERGED }
 }
 
 /**
- * Declares implementation truth, not product marketing. A feature becomes SUPPORTED only after
- * its semantic differential fixture passes. PARTIAL rows remain visible in corpus reports.
+ * Declares code coverage only. IMPLEMENTED is deliberately not the same as CERTIFIED.
+ * Certification is produced by differential fixtures against the reference runtime.
  */
 object VBookEngineFeatureMatrix {
     private val support = VBookFeature.entries.associateWith { feature ->
@@ -66,28 +95,28 @@ object VBookEngineFeatureMatrix {
             VBookFeature.CRYPTO,
             VBookFeature.SCRIPT_EXECUTE -> VBookFeatureSupport(
                 feature,
-                VBookFeatureSupportLevel.SUPPORTED,
-                "Implemented by the contract dispatcher and existing capability brokers; keep guarded by differential fixtures.",
+                VBookFeatureImplementationLevel.IMPLEMENTED,
+                "Implementation exists; certification remains a separate differential-test state.",
             )
 
             VBookFeature.FETCH_CHARSET,
             VBookFeature.FETCH_BASE64,
             VBookFeature.FETCH_BLOB -> VBookFeatureSupport(
                 feature,
-                VBookFeatureSupportLevel.PARTIAL,
-                "API shape exists, but byte-exact parity requires the raw network body bridge rather than UTF-8 text reconstruction.",
+                VBookFeatureImplementationLevel.PARTIAL,
+                "The network broker preserves raw bytes, but VBookJsRuntime still constructs fetch responses from bodyText(); the raw-byte host bridge must be wired before certification.",
             )
 
             VBookFeature.METADATA_ENCRYPT -> VBookFeatureSupport(
                 feature,
-                VBookFeatureSupportLevel.PACKAGE_LAYER_PENDING,
-                "Source-tree execution is supported; encrypted distribution ZIP decoding still requires a proven package-format implementation.",
+                VBookFeatureImplementationLevel.PACKAGE_LAYER_PENDING,
+                "Plain source-tree/package execution is supported; encrypted distribution payload decoding is intentionally not guessed without a proven reference format.",
             )
 
             VBookFeature.LEGACY_HTTP_SOURCE -> VBookFeatureSupport(
                 feature,
-                VBookFeatureSupportLevel.PARTIAL,
-                "Artifact parses correctly; cleartext network access must be granted per extension instead of enabled globally.",
+                VBookFeatureImplementationLevel.PARTIAL,
+                "Artifact parsing is supported; cleartext egress requires a vBook-specific, per-extension policy instead of globally weakening native-source HTTPS rules.",
             )
 
             VBookFeature.JS_FORBIDDEN_ASYNC_AWAIT,
@@ -97,19 +126,23 @@ object VBookEngineFeatureMatrix {
             VBookFeature.JS_FORBIDDEN_NAMED_CAPTURE,
             VBookFeature.JS_FORBIDDEN_LOOKBEHIND -> VBookFeatureSupport(
                 feature,
-                VBookFeatureSupportLevel.REFERENCE_REJECTS,
-                "The reference Rhino contract rejects this syntax; encountering it is an extension authoring error, not an NgheTruyen compatibility gap.",
+                VBookFeatureImplementationLevel.REFERENCE_REJECTS,
+                "The reference current Rhino contract rejects this syntax; encountering it is an extension-authoring error, not a host parity gap.",
             )
         }
     }
 
     fun support(feature: VBookFeature): VBookFeatureSupport = support.getValue(feature)
 
-    fun matrix(report: VBookCorpusReport): VBookCorpusCompatibilityMatrix {
+    fun matrix(
+        report: VBookCorpusReport,
+        certifications: Collection<VBookFeatureCertification> = emptyList(),
+    ): VBookCorpusCompatibilityMatrix {
         val counts = report.features.associate { it.feature to it.extensionCount }
         return VBookCorpusCompatibilityMatrix(
             rows = VBookFeature.entries.map(::support),
             requiredByCorpus = counts,
+            certifications = certifications.associateBy(VBookFeatureCertification::feature),
         )
     }
 }

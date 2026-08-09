@@ -11,7 +11,7 @@ jobs:
   validate:
     if: >-
       github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.head.ref == 'agent/compact-merge-runner'
+      github.event.pull_request.head.ref == 'agent/compact-merge-runner-v2'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:

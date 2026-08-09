@@ -143,6 +143,9 @@ class ReaderPlaybackService : Service() {
     private var sceneMusicCues: List<SceneMusicCueEntity> = emptyList()
     private var sceneMusicTracks: Map<String, SceneMusicTrackEntity> = emptyMap()
     private var activeSceneTrackId: String? = null
+    private var musicPreviewActive = false
+    private var musicPreviewPlainWasPlaying = false
+    private var musicPreviewSceneWasActive = false
     private var interruptionMode: AudioInterruptionMode = AudioInterruptionMode.PAUSE
     private var backgroundPlayer: MediaPlayer? = null
     private var sonicPlayer: MediaPlayer? = null
@@ -156,7 +159,12 @@ class ReaderPlaybackService : Service() {
     private var activeSonicVolume = 1f
     private var backgroundMusicUri: String? = null
     private var backgroundMusicVolume: Float = 0.18f
-    private var backgroundMusicDuckFactor: Float = 0.25f
+    private var backgroundMusicDuckFactor: Float = 0.63095734f
+    private var backgroundMusicEnabled = false
+    private var backgroundMusicAttackMillis = 1850
+    private var backgroundMusicReleaseMillis = 2050
+    private var backgroundMusicTracks: List<SceneMusicTrackEntity> = emptyList()
+    private val backgroundMusicShuffleBag = ArrayDeque<String>()
     private var headsetMultiClickEnabled = true
     private var pauseOnHeadsetDisconnect = true
     private var restorePlaybackAfterProcessDeath = true
@@ -166,8 +174,8 @@ class ReaderPlaybackService : Service() {
     private var narrationPrefetchWindowChapters = 2
     private var sceneMusicCrossfadeMillis = 1_600
     private var sceneMusicContinueAcrossChapters = true
-    private var sceneMusicPlaybackMode = SceneMusicPlaybackMode.SMART_AVOID_REPEAT
-    private var sceneMusicTargetLufs = -18.0f
+    private var sceneMusicPlaybackMode = SceneMusicPlaybackMode.SEQUENTIAL
+    private var sceneMusicTargetLufs = -24.0f
     private var sceneMusicAvoidRepeatWindow = 4
     private var sonicProcessingEnabled = true
     private var sonicDefaultSpeed = 1.0f
@@ -258,6 +266,8 @@ class ReaderPlaybackService : Service() {
             ACTION_PREVIOUS, ACTION_REWIND -> skip(-1)
             ACTION_STOP -> stopPlayback()
             ACTION_REFRESH -> refreshVoiceAndNotification()
+            ACTION_MUSIC_PREVIEW_BEGIN -> beginMusicPreview()
+            ACTION_MUSIC_PREVIEW_END -> endMusicPreview()
             ACTION_SET_SLEEP_TIMER -> scheduleSleepTimer(intent.getIntExtra(EXTRA_SLEEP_MINUTES, 0))
             ACTION_CANCEL_SLEEP_TIMER -> cancelSleepTimer()
             ACTION_SLEEP_TIMER_EXPIRED -> expireSleepTimer()
@@ -355,6 +365,11 @@ class ReaderPlaybackService : Service() {
         pauseOnHeadsetDisconnect = settings.pauseOnHeadsetDisconnect
         restorePlaybackAfterProcessDeath = settings.restorePlaybackAfterProcessDeath
         autoVoiceCastEnabled = settings.autoVoiceCastEnabled
+        backgroundMusicEnabled = settings.backgroundMusicEnabled
+        backgroundMusicDuckFactor = settings.backgroundMusicDuckFactor
+        backgroundMusicAttackMillis = settings.backgroundMusicAttackMillis.coerceIn(0, 2_000)
+        backgroundMusicReleaseMillis = settings.backgroundMusicReleaseMillis.coerceIn(0, 5_000)
+        sceneMusicController.setDuckTiming(backgroundMusicAttackMillis, backgroundMusicReleaseMillis)
         autoSceneMusicEnabled = settings.autoSceneMusicEnabled
         prefetchNarrationPlansEnabled = settings.prefetchNarrationPlansEnabled
         narrationPrefetchWindowChapters = settings.narrationPrefetchWindowChapters
@@ -1308,6 +1323,9 @@ class ReaderPlaybackService : Service() {
         pendingForceNoSonic = false
         pendingPreviewText = null
         pendingPreviewConfig = null
+        musicPreviewActive = false
+        musicPreviewPlainWasPlaying = false
+        musicPreviewSceneWasActive = false
         resumeAfterTransientFocusLoss = false
         cancelSpeechWatchdog()
         completionGuard.cancel()
@@ -1323,6 +1341,7 @@ class ReaderPlaybackService : Service() {
         narrationPrefetchJob?.cancel()
         narrationPlanningChapterId = ""
         narrationReloadPending = false
+        backgroundMusicShuffleBag.clear()
         sleepTimerJob = null
         PlaybackQueueStore.setSleepTimer(null)
         ReaderSleepTimerAlarm.clear(this)
@@ -1446,19 +1465,34 @@ class ReaderPlaybackService : Service() {
         val musicPlan = if (musicSourceHash != null) {
             container.libraryRepository.getChapterTransform(chapterId, ChapterAiWorkflow.KIND_SCENE_MUSIC)
         } else null
-        sceneMusicCues = if (musicPlan?.sourceSha256 == musicSourceHash) {
+        val orderedMusicTracks = enabledMusicTracks.sortedWith(
+            compareBy<SceneMusicTrackEntity> { it.orderIndex }.thenBy { it.title.lowercase() },
+        )
+        val previousTrackIds = backgroundMusicTracks.map(SceneMusicTrackEntity::id)
+        backgroundMusicTracks = orderedMusicTracks
+        if (previousTrackIds != orderedMusicTracks.map(SceneMusicTrackEntity::id)) backgroundMusicShuffleBag.clear()
+        sceneMusicCues = if (
+            backgroundMusicEnabled && autoSceneMusicEnabled && musicPlan?.sourceSha256 == musicSourceHash
+        ) {
             container.libraryRepository.listSceneMusicCues(chapterId)
         } else emptyList()
         sceneMusicTracks = if (sceneMusicCues.isNotEmpty()) {
-            enabledMusicTracks.associateBy { it.id }
+            orderedMusicTracks.associateBy { it.id }
         } else emptyMap()
         activeSceneTrackId = sceneMusicController.activeTrackId
         PlaybackQueueStore.updateVoice(config.rate, config.pitch, config.volume)
         withContext(Dispatchers.Main) {
             applyRuntimeVoice(config)
             if (sceneMusicCues.isEmpty()) {
-                val carryingSceneAcrossChapter = sceneMusicContinueAcrossChapters && sceneMusicController.activeTrackId != null
-                if (!carryingSceneAcrossChapter) {
+                if (backgroundMusicEnabled && backgroundMusicTracks.isNotEmpty()) {
+                    configureBackgroundMusic(null, false, 0f, settings.backgroundMusicDuckFactor)
+                    val activeId = sceneMusicController.activeTrackId
+                    if (activeId != null && backgroundMusicTracks.none { it.id == activeId }) {
+                        sceneMusicController.stop(clearTrack = true)
+                    }
+                    if (PlaybackQueueStore.state.value.isPlaying) ensureBackgroundPlaylist(advance = false)
+                    else sceneMusicController.pause()
+                } else {
                     sceneMusicController.stop(clearTrack = true)
                     configureBackgroundMusic(
                         settings.backgroundMusicUri,
@@ -1466,9 +1500,6 @@ class ReaderPlaybackService : Service() {
                         settings.backgroundMusicVolume,
                         settings.backgroundMusicDuckFactor,
                     )
-                } else {
-                    configureBackgroundMusic(null, false, 0f, settings.backgroundMusicDuckFactor)
-                    sceneMusicController.keepCurrent(settings.backgroundMusicDuckFactor)
                 }
             } else {
                 configureBackgroundMusic(null, false, 0f, settings.backgroundMusicDuckFactor)
@@ -1556,7 +1587,10 @@ class ReaderPlaybackService : Service() {
     }
 
     private fun updateSceneMusicForParagraph(paragraphIndex: Int) {
-        if (sceneMusicCues.isEmpty()) return
+        if (sceneMusicCues.isEmpty()) {
+            if (backgroundMusicEnabled && backgroundMusicTracks.isNotEmpty()) ensureBackgroundPlaylist(advance = false)
+            return
+        }
         val cue = sceneMusicCues.lastOrNull { it.startParagraph <= paragraphIndex }
         val snapshot = PlaybackQueueStore.state.value
         val track = cue?.let { selectedCue ->
@@ -1578,11 +1612,24 @@ class ReaderPlaybackService : Service() {
         backgroundPlayer?.release()
         backgroundPlayer = null
         backgroundMusicUri = null
-        val loudnessGain = PcmLoudnessEstimator.normalizationGain(track.loudnessLufsEstimate, sceneMusicTargetLufs)
+        val normalizationGain = if (
+            PcmLoudnessEstimator.isReady(
+                version = track.normalizationVersion,
+                error = track.normalizationError,
+                loudnessLufs = track.loudnessLufsEstimate,
+                targetLufs = sceneMusicTargetLufs,
+                storedTargetLufs = track.normalizationTargetLufs,
+                gainDb = track.normalizationGainDb,
+            )
+        ) {
+            PcmLoudnessEstimator.gainDbToLinear(track.normalizationGainDb)
+        } else {
+            1f
+        }
         sceneMusicController.transition(
             trackId = track.id,
             uri = track.uri,
-            volume = (track.volume * cue.volume.coerceIn(0f, 1f) * loudnessGain).coerceIn(0f, 0.6f),
+            volume = (track.volume * cue.volume.coerceIn(0f, 1f) * normalizationGain).coerceIn(0f, 0.6f),
             duckFactor = backgroundMusicDuckFactor,
             crossfadeMillis = sceneMusicCrossfadeMillis,
         )
@@ -1594,6 +1641,102 @@ class ReaderPlaybackService : Service() {
             serviceScope.launch { container.libraryRepository.markSceneMusicPlayed(track.id) }
         }
         activeSceneTrackId = track.id
+    }
+
+    private fun beginMusicPreview() {
+        if (musicPreviewActive) return
+        musicPreviewActive = true
+        musicPreviewPlainWasPlaying = backgroundPlayer?.runCatching { isPlaying }?.getOrDefault(false) == true
+        musicPreviewSceneWasActive = sceneMusicController.activeTrackId != null
+        if (musicPreviewPlainWasPlaying) backgroundPlayer?.runCatching { pause() }
+        if (musicPreviewSceneWasActive) sceneMusicController.pause()
+    }
+
+    private fun endMusicPreview() {
+        if (!musicPreviewActive) return
+        val restorePlain = musicPreviewPlainWasPlaying
+        val restoreScene = musicPreviewSceneWasActive
+        musicPreviewActive = false
+        musicPreviewPlainWasPlaying = false
+        musicPreviewSceneWasActive = false
+        val speaking = PlaybackQueueStore.state.value.isPlaying
+        if (restoreScene && sceneMusicController.activeTrackId != null) {
+            sceneMusicController.setSpeaking(speaking)
+            sceneMusicController.resume()
+        } else if (restorePlain && backgroundPlayer != null) {
+            updateBackgroundMusic(ducked = speaking)
+        }
+    }
+
+    private fun trackNormalizationGain(track: SceneMusicTrackEntity): Float {
+        if (track.normalizationVersion < PcmLoudnessEstimator.VERSION || track.normalizationError.isNotBlank()) return 1f
+        if (!track.loudnessLufsEstimate.isFinite() || !track.peakDbfs.isFinite()) return 1f
+        val gainDb = PcmLoudnessEstimator.calculateNormalization(
+            track.loudnessLufsEstimate,
+            track.peakDbfs,
+            sceneMusicTargetLufs,
+        ).gainDb
+        return PcmLoudnessEstimator.gainDbToLinear(gainDb)
+    }
+
+    private fun chooseBackgroundPlaylistTrack(advance: Boolean): SceneMusicTrackEntity? {
+        val tracks = backgroundMusicTracks.filter(SceneMusicTrackEntity::enabled)
+        if (tracks.isEmpty()) return null
+        val currentId = sceneMusicController.activeTrackId
+        if (!advance) return tracks.firstOrNull { it.id == currentId } ?: tracks.first()
+        if (sceneMusicPlaybackMode == SceneMusicPlaybackMode.SHUFFLE && tracks.size > 1) {
+            val valid = tracks.associateBy(SceneMusicTrackEntity::id)
+            while (backgroundMusicShuffleBag.isNotEmpty() &&
+                (backgroundMusicShuffleBag.first() !in valid || backgroundMusicShuffleBag.first() == currentId)
+            ) {
+                backgroundMusicShuffleBag.removeFirst()
+            }
+            if (backgroundMusicShuffleBag.isEmpty()) {
+                tracks.map(SceneMusicTrackEntity::id)
+                    .filter { it != currentId }
+                    .shuffled()
+                    .forEach(backgroundMusicShuffleBag::addLast)
+            }
+            val nextId = if (backgroundMusicShuffleBag.isEmpty()) null else backgroundMusicShuffleBag.removeFirst()
+            return nextId?.let(valid::get) ?: tracks.first()
+        }
+        val currentIndex = tracks.indexOfFirst { it.id == currentId }
+        val nextIndex = if (currentIndex < 0) 0 else (currentIndex + 1) % tracks.size
+        return tracks[nextIndex]
+    }
+
+    private fun ensureBackgroundPlaylist(advance: Boolean): Boolean {
+        if (!backgroundMusicEnabled || backgroundMusicTracks.isEmpty() || sceneMusicCues.isNotEmpty()) return false
+        val track = chooseBackgroundPlaylistTrack(advance) ?: return false
+        val tracks = backgroundMusicTracks.filter(SceneMusicTrackEntity::enabled)
+        val current = sceneMusicController.activeTrackId
+        if (!advance && current == track.id) {
+            sceneMusicController.setDuckTiming(backgroundMusicAttackMillis, backgroundMusicReleaseMillis)
+            sceneMusicController.keepCurrent(backgroundMusicDuckFactor)
+            sceneMusicController.resume()
+            activeSceneTrackId = current
+            return true
+        }
+        sceneMusicController.setDuckTiming(backgroundMusicAttackMillis, backgroundMusicReleaseMillis)
+        sceneMusicController.transition(
+            trackId = track.id,
+            uri = track.uri,
+            volume = (track.volume * trackNormalizationGain(track)).coerceIn(0f, 1f),
+            duckFactor = backgroundMusicDuckFactor,
+            crossfadeMillis = if (advance) 3_000 else 420,
+            looping = tracks.size == 1,
+            onCompletion = if (tracks.size > 1) {
+                {
+                    if (PlaybackQueueStore.state.value.isPlaying && backgroundMusicEnabled && sceneMusicCues.isEmpty()) {
+                        ensureBackgroundPlaylist(advance = true)
+                    }
+                }
+            } else null,
+        )
+        sceneMusicController.setSpeaking(PlaybackQueueStore.state.value.isPlaying)
+        activeSceneTrackId = track.id
+        serviceScope.launch { container.libraryRepository.markSceneMusicPlayed(track.id) }
+        return true
     }
 
     private fun configureBackgroundMusic(uri: String?, enabled: Boolean, volume: Float, duckFactor: Float) {
@@ -1644,8 +1787,15 @@ class ReaderPlaybackService : Service() {
     }
 
     private fun updateBackgroundMusic(ducked: Boolean, pause: Boolean = false) {
-        if (sceneMusicCues.isNotEmpty() || sceneMusicController.activeTrackId != null) {
-            if (pause) sceneMusicController.pause() else {
+        val usesTrackLibrary = backgroundMusicEnabled && backgroundMusicTracks.isNotEmpty()
+        if (sceneMusicCues.isNotEmpty() || sceneMusicController.activeTrackId != null || usesTrackLibrary) {
+            sceneMusicController.setDuckTiming(backgroundMusicAttackMillis, backgroundMusicReleaseMillis)
+            if (pause) {
+                sceneMusicController.pause()
+            } else {
+                if (sceneMusicCues.isEmpty() && sceneMusicController.activeTrackId == null && usesTrackLibrary) {
+                    ensureBackgroundPlaylist(advance = false)
+                }
                 sceneMusicController.setSpeaking(ducked)
                 sceneMusicController.resume()
             }
@@ -1889,6 +2039,9 @@ class ReaderPlaybackService : Service() {
         pendingPlay = false
         pendingPreviewText = null
         pendingPreviewConfig = null
+        musicPreviewActive = false
+        musicPreviewPlainWasPlaying = false
+        musicPreviewSceneWasActive = false
         resumeAfterTransientFocusLoss = false
         activeUtteranceId = null
         previewUtteranceId = null
@@ -1943,6 +2096,8 @@ class ReaderPlaybackService : Service() {
         const val ACTION_REWIND = "vn.nghetruyen.action.REWIND"
         const val ACTION_STOP = "vn.nghetruyen.action.STOP"
         const val ACTION_REFRESH = "vn.nghetruyen.action.REFRESH"
+        const val ACTION_MUSIC_PREVIEW_BEGIN = "vn.nghetruyen.action.MUSIC_PREVIEW_BEGIN"
+        const val ACTION_MUSIC_PREVIEW_END = "vn.nghetruyen.action.MUSIC_PREVIEW_END"
         const val ACTION_SET_SLEEP_TIMER = "vn.nghetruyen.action.SET_SLEEP_TIMER"
         const val ACTION_CANCEL_SLEEP_TIMER = "vn.nghetruyen.action.CANCEL_SLEEP_TIMER"
         const val ACTION_SLEEP_TIMER_EXPIRED = "vn.nghetruyen.action.SLEEP_TIMER_EXPIRED"

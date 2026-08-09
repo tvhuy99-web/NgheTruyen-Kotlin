@@ -129,7 +129,7 @@ def main() -> None:
     )
     require(
         "app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt",
-        "PlaybackAutomationCard", "Dừng khi ngắt tai nghe", "Tự phân vai AI", "Crossfade:",
+        "PlaybackAutomationCard", "Dừng khi ngắt tai nghe", "Tự phân vai AI", 'label = "Crossfade"',
     )
     manifest = require(
         "app/src/main/AndroidManifest.xml",

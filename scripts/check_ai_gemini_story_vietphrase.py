@@ -91,9 +91,12 @@ def main() -> int:
     require(
         "app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt",
         "AI RIÊNG CHO TRUYỆN",
-        "Lời nhắc dịch",
-        "Lời nhắc VietPhrase",
-        "Tự động dịch",
+        "Lời nhắc riêng khi dịch",
+        "Lời nhắc riêng khi cải thiện VietPhrase",
+        "Tự động dịch khi mở chương",
+        "Dùng lời nhắc riêng cho truyện này",
+        "{{CHAPTER_TITLE}}, {{CHAPTER_TEXT}}",
+        "{{SOURCE_TITLE}}, {{SOURCE_TEXT}}, {{VIETPHRASE_TITLE}}, {{VIETPHRASE_TEXT}}",
     )
     require(
         "app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt",

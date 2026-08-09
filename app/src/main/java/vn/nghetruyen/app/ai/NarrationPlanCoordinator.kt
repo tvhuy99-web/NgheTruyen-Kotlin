@@ -329,7 +329,8 @@ class NarrationPlanCoordinator(
     private fun SceneMusicTrackEntity.toOption(): SceneMusicTrackOption = SceneMusicTrackOption(
         id = id,
         title = title,
-        tags = tagsCsv.split(',').map(String::trim).filter(String::isNotBlank),
+        // Legacy column name. XPK treats this as one freeform AI description.
+        tags = tagsCsv.trim().takeIf(String::isNotBlank)?.let(::listOf).orEmpty(),
     )
 
     private suspend fun effectiveAiMetadata(storyId: String, globalProvider: String, globalModel: String): Pair<String, String> {

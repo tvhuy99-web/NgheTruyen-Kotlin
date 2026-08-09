@@ -193,7 +193,7 @@ data class MainUiState(
     val backgroundMusicUri: String? = null,
     val backgroundMusicEnabled: Boolean = false,
     val backgroundMusicVolume: Float = 0.18f,
-    val backgroundMusicDuckFactor: Float = 0.25f,
+    val backgroundMusicDuckFactor: Float = 0.63095734f,
     val headsetMultiClickEnabled: Boolean = true,
     val headsetSingleClickAction: String = "TOGGLE",
     val headsetDoubleClickAction: String = "NEXT",
@@ -207,8 +207,8 @@ data class MainUiState(
     val narrationPrefetchWindowChapters: Int = 2,
     val sceneMusicCrossfadeMillis: Int = 1_600,
     val sceneMusicContinueAcrossChapters: Boolean = true,
-    val sceneMusicPlaybackMode: SceneMusicPlaybackMode = SceneMusicPlaybackMode.SMART_AVOID_REPEAT,
-    val sceneMusicTargetLufs: Float = -18f,
+    val sceneMusicPlaybackMode: SceneMusicPlaybackMode = SceneMusicPlaybackMode.SEQUENTIAL,
+    val sceneMusicTargetLufs: Float = -24f,
     val sceneMusicAvoidRepeatWindow: Int = 4,
     val sonicProcessingEnabled: Boolean = true,
     val sonicDefaultSpeed: Float = 1f,
@@ -677,11 +677,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
 
     fun setReaderMode(mode: ReaderMode) {
-        if (mode == ReaderMode.TEXT) {
-            ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_PAUSE)
-        }
+        ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_PAUSE)
         mutableState.update { it.copy(readerMode = mode) }
-        viewModelScope.launch { container.settingsRepository.setReaderMode(mode) }
+        viewModelScope.launch {
+            container.settingsRepository.setReaderMode(mode)
+            if (mode == ReaderMode.TTS) ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
+        }
         showMessage(if (mode == ReaderMode.TTS) "Đã chuyển sang chế độ TTS." else "Đã chuyển sang chế độ Văn bản.")
     }
 
@@ -1342,15 +1343,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun openStoryVoiceCastOptions() = openStoryAdvancedOptions("voice")
 
     private fun openStoryAdvancedOptions(mode: String) {
-        ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_PAUSE)
-        mutableState.update {
-            it.copy(
-                destination = Destination.Story,
-                storyAdvancedOptionsRequested = true,
-                storyAdvancedOptionsMode = mode,
-                loading = false,
-            )
-        }
+        mutableState.update { it.copy(storyAdvancedOptionsRequested = true, storyAdvancedOptionsMode = mode, loading = false) }
     }
 
     fun backToChapterList() {
@@ -3006,6 +2999,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             container.libraryRepository.clearReadingHistory()
             showMessage("Đã xóa lịch sử đọc.")
+        }
+    }
+
+    fun removeFromReading(storyId: String) {
+        viewModelScope.launch {
+            container.libraryRepository.removeFromReading(storyId)
+            showMessage("Đã xóa truyện khỏi danh sách Đang đọc. Truyện đã tải, dấu trang và lịch sử vẫn được giữ.")
+        }
+    }
+
+    fun unfollowStory(storyId: String) {
+        viewModelScope.launch {
+            container.libraryRepository.unfollow(storyId)
+            showMessage("Đã bỏ theo dõi truyện.")
         }
     }
 

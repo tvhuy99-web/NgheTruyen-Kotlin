@@ -227,10 +227,13 @@ def main() -> int:
     require(
         "app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt",
         "display.layoutMode == ReaderLayoutMode.SCROLL",
-        "showNoteDialog = true",
-        "ÁP DỤNG VIETPHRASE",
-        "CẢI THIỆN VIETPHRASE",
-        "PHÂN VAI + NHẠC",
+        "TRỞ LẠI DANH SÁCH CHƯƠNG",
+        "LƯU VỊ TRÍ ĐỌC",
+        "HIỂN THỊ VĂN BẢN",
+        "XUẤT ÂM THANH (CẦN CHẾ ĐỘ TTS)",
+        "THIẾT LẬP AI CHO TRUYỆN NÀY",
+        "PHÂN VAI TTS CHO TRUYỆN NÀY",
+        "CÀI ĐẶT TTS",
         "TIẾP TỤC BẰNG BẢN GỐC",
         "AudioExportRequest(",
     )
@@ -288,8 +291,9 @@ def main() -> int:
         "app/src/main/java/vn/nghetruyen/app/data/local/AppDatabase.kt",
         'tableName = "reading_history"',
         "interface ReadingHistoryDao",
-        "version = 22",
+        "version = 23",
         "MIGRATION_21_22",
+        "MIGRATION_22_23",
         "abstract fun readingHistoryDao()",
         "suspend fun update(item: VietPhraseEntity): Int",
     )

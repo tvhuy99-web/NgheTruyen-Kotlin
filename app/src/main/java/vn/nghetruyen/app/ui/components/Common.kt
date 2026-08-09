@@ -42,6 +42,13 @@ val ReferenceGray = Color(0xFF5F6368)
 val ReferenceText = Color(0xFF111111)
 val ReferenceSecondaryText = Color(0xFF555555)
 
+private val HiddenSettingsHomeActions = setOf(
+    "TTS & GIỌNG ĐỌC",
+    "XUẤT SÁCH NÓI",
+    "CHẨN ĐOÁN",
+    "NHẠC NỀN & NHẠC CẢNH",
+)
+
 @Composable
 fun ScreenHeading(text: String, modifier: Modifier = Modifier) {
     Text(
@@ -70,9 +77,26 @@ fun ReferenceActionButton(
     normalContentColor: Color = Color.White,
     roleValue: Role = Role.Button,
 ) {
+    // These entries are intentionally hidden only for the compact Settings home list.
+    // Their feature screens and contextual Reader/Story actions remain available.
+    val isHiddenSettingsHomeAction =
+        text in HiddenSettingsHomeActions &&
+            minHeight == 50.dp &&
+            normalColor == ReferencePanelBackground &&
+            normalContentColor == ReferenceText
+    if (isHiddenSettingsHomeAction) return
+
     val background = if (selected) selectedColor else normalColor
     val foreground = if (selected) Color.White else normalContentColor
-    val hasCustomAccessibilityLabel = accessibilityLabel.trim() != text.trim()
+    val spokenLabel = when {
+        accessibilityLabel.trim() != text.trim() -> accessibilityLabel.trim()
+        text == "ĐỌC NGAY" -> "Đọc truyện"
+        text.startsWith("ĐỌC TIẾP") -> {
+            val chapter = text.removePrefix("ĐỌC TIẾP").trim().replace('\n', ' ')
+            if (chapter.isBlank()) "Đọc truyện tiếp" else "Đọc truyện tiếp. $chapter"
+        }
+        else -> text.trim().replace('\n', ' ')
+    }
     Button(
         onClick = onClick,
         enabled = enabled,
@@ -90,9 +114,7 @@ fun ReferenceActionButton(
                 if (roleValue == Role.Tab || selected) {
                     this.selected = selected
                 }
-                if (hasCustomAccessibilityLabel) {
-                    contentDescription = accessibilityLabel
-                }
+                contentDescription = spokenLabel
             },
     ) {
         Text(
@@ -100,7 +122,7 @@ fun ReferenceActionButton(
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.SemiBold,
             textAlign = TextAlign.Center,
-            modifier = if (hasCustomAccessibilityLabel) Modifier.clearAndSetSemantics { } else Modifier,
+            modifier = Modifier.clearAndSetSemantics { },
         )
     }
 }

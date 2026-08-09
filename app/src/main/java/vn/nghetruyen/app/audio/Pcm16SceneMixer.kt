@@ -55,9 +55,10 @@ object Pcm16SceneMixer {
                     var framePosition = 0L
                     while (remaining > 0L) {
                         val wanted = min(buffer.size.toLong(), remaining).toInt()
-                        val read = input.readNBytes(buffer, 0, wanted)
+                        val read = readUpTo(input, buffer, wanted)
                         if (read <= 0) throw EOFException("Dữ liệu lời đọc bị cắt ngắn.")
                         val aligned = read - read % bytesPerFrame
+                        if (aligned <= 0) throw EOFException("Dữ liệu lời đọc kết thúc giữa một frame PCM.")
                         var offset = 0
                         while (offset < aligned) {
                             for (channel in 0 until narration.channelCount) {
@@ -138,6 +139,17 @@ object Pcm16SceneMixer {
             output.writeLe32(dataSize)
             FileInputStream(rawPcm).use { it.copyTo(output) }
         }
+    }
+
+    private fun readUpTo(input: BufferedInputStream, buffer: ByteArray, length: Int): Int {
+        var total = 0
+        while (total < length) {
+            val read = input.read(buffer, total, length - total)
+            if (read < 0) break
+            if (read == 0) continue
+            total += read
+        }
+        return total
     }
 
     private fun sample16(bytes: ByteArray, offset: Int): Short =

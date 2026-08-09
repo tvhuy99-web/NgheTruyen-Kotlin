@@ -290,6 +290,12 @@ data class SceneMusicTrackEntity(
     val volume: Float,
     val enabled: Boolean,
     @ColumnInfo(defaultValue = "-18.0") val loudnessLufsEstimate: Float = -18.0f,
+    @ColumnInfo(defaultValue = "0.0") val peakDbfs: Float = 0f,
+    @ColumnInfo(defaultValue = "-24.0") val normalizationTargetLufs: Float = -24f,
+    @ColumnInfo(defaultValue = "0.0") val normalizationGainDb: Float = 0f,
+    @ColumnInfo(defaultValue = "0") val normalizationPeakLimited: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val normalizationVersion: Int = 0,
+    @ColumnInfo(defaultValue = "''") val normalizationError: String = "",
     @ColumnInfo(defaultValue = "0") val playCount: Int = 0,
     @ColumnInfo(defaultValue = "0") val lastPlayedAt: Long = 0L,
     @ColumnInfo(defaultValue = "0") val orderIndex: Int = 0,
@@ -1114,7 +1120,7 @@ interface ChapterDownloadFailureDao {
         DownloadJobEntity::class,
         ChapterDownloadFailureEntity::class,
     ],
-    version = 22,
+    version = 23,
     // Legacy wiring validator token: version = 18
     exportSchema = true,
 )
@@ -1800,6 +1806,17 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_22_23 = object : Migration(22, 23) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE scene_music_tracks ADD COLUMN peakDbfs REAL NOT NULL DEFAULT 0.0")
+                db.execSQL("ALTER TABLE scene_music_tracks ADD COLUMN normalizationTargetLufs REAL NOT NULL DEFAULT -24.0")
+                db.execSQL("ALTER TABLE scene_music_tracks ADD COLUMN normalizationGainDb REAL NOT NULL DEFAULT 0.0")
+                db.execSQL("ALTER TABLE scene_music_tracks ADD COLUMN normalizationPeakLimited INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE scene_music_tracks ADD COLUMN normalizationVersion INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE scene_music_tracks ADD COLUMN normalizationError TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         fun create(context: Context): AppDatabase = Room.databaseBuilder(
             context.applicationContext,
             AppDatabase::class.java,
@@ -1826,6 +1843,7 @@ abstract class AppDatabase : RoomDatabase() {
             MIGRATION_19_20,
             MIGRATION_20_21,
             MIGRATION_21_22,
+            MIGRATION_22_23,
         ).build()
     }
 }

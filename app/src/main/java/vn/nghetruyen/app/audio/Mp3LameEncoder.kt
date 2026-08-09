@@ -56,10 +56,10 @@ object Mp3LameEncoder {
                     val encoded = ByteArray(ENCODED_BUFFER_BYTES)
                     while (remaining > 0L) {
                         val wanted = minOf(pcm.size.toLong(), remaining).toInt()
-                        val read = input.readNBytes(pcm, 0, wanted)
+                        val read = readUpTo(input, pcm, wanted)
                         if (read <= 0) throw EOFException("Dữ liệu WAV bị cắt ngắn.")
                         val aligned = read - (read % bytesPerFrame)
-                        if (aligned <= 0) break
+                        if (aligned <= 0) throw EOFException("Dữ liệu WAV kết thúc giữa một frame PCM.")
                         val frames = aligned / bytesPerFrame
                         var cursor = 0
                         for (index in 0 until frames) {
@@ -86,6 +86,17 @@ object Mp3LameEncoder {
     }
 
     fun bitrateFor(wav: File): Int = if (WaveFileAssembler.inspect(wav).channelCount == 1) 96 else 160
+
+    private fun readUpTo(input: BufferedInputStream, buffer: ByteArray, length: Int): Int {
+        var total = 0
+        while (total < length) {
+            val read = input.read(buffer, total, length - total)
+            if (read < 0) break
+            if (read == 0) continue
+            total += read
+        }
+        return total
+    }
 
     private fun sample16(bytes: ByteArray, offset: Int): Short =
         (((bytes[offset + 1].toInt() and 0xff) shl 8) or (bytes[offset].toInt() and 0xff)).toShort()

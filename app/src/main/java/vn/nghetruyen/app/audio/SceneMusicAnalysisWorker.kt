@@ -11,8 +11,13 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import vn.nghetruyen.app.NgheTruyenApplication
 import java.io.File
+import java.util.UUID
 
-/** Decodes a local track and stores a bounded loudness estimate for normalization. */
+/**
+ * Measures a scene track once, then stores the XPK-style fixed normalization gain.
+ * If loudness and peak measurements are already available, a new target LUFS only
+ * recalculates gain and does not decode the file again.
+ */
 class SceneMusicAnalysisWorker(
     appContext: Context,
     params: WorkerParameters,
@@ -23,6 +28,40 @@ class SceneMusicAnalysisWorker(
         val trackId = inputData.getString(KEY_TRACK_ID).orEmpty()
         if (trackId.isBlank()) return Result.failure()
         val track = container.libraryRepository.getSceneMusicTrack(trackId) ?: return Result.failure()
+        val requestedTarget = inputData.getFloat(KEY_TARGET_LUFS, Float.NaN)
+        val target = (requestedTarget.takeIf(Float::isFinite)
+            ?: container.settingsRepository.snapshot().sceneMusicTargetLufs)
+            .coerceIn(PcmLoudnessEstimator.MIN_TARGET_LUFS, PcmLoudnessEstimator.MAX_TARGET_LUFS)
+
+        if (track.normalizationVersion >= PcmLoudnessEstimator.VERSION &&
+            track.normalizationError.isBlank() &&
+            track.loudnessLufsEstimate.isFinite() &&
+            track.peakDbfs.isFinite()
+        ) {
+            val normalization = PcmLoudnessEstimator.calculateNormalization(
+                track.loudnessLufsEstimate,
+                track.peakDbfs,
+                target,
+            )
+            container.libraryRepository.updateSceneMusicNormalization(
+                id = trackId,
+                loudnessLufs = track.loudnessLufsEstimate,
+                peakDbfs = track.peakDbfs,
+                targetLufs = normalization.targetLufs,
+                gainDb = normalization.gainDb,
+                peakLimited = normalization.peakLimited,
+                version = PcmLoudnessEstimator.VERSION,
+            )
+            return Result.success(
+                workDataOf(
+                    KEY_LOUDNESS to track.loudnessLufsEstimate,
+                    KEY_PEAK to track.peakDbfs,
+                    KEY_GAIN_DB to normalization.gainDb,
+                    KEY_REUSED_MEASUREMENT to true,
+                ),
+            )
+        }
+
         val temp = File(applicationContext.cacheDir, "scene-analysis/$trackId.wav")
         return runCatching {
             temp.parentFile?.mkdirs()
@@ -33,27 +72,63 @@ class SceneMusicAnalysisWorker(
                 targetChannels = 2,
                 destination = temp,
             )
-            val loudness = PcmLoudnessEstimator.estimateLufs(temp)
-            container.libraryRepository.updateSceneMusicLoudness(trackId, loudness)
-            Result.success(workDataOf(KEY_LOUDNESS to loudness))
-        }.getOrElse { Result.failure(workDataOf(KEY_ERROR to (it.message ?: "Không phân tích được nhạc cảnh.").take(300))) }
-            .also { temp.delete() }
+            val analysis = PcmLoudnessEstimator.analyze(temp)
+            val normalization = PcmLoudnessEstimator.calculateNormalization(
+                analysis.loudnessLufs,
+                analysis.peakDbfs,
+                target,
+            )
+            container.libraryRepository.updateSceneMusicNormalization(
+                id = trackId,
+                loudnessLufs = analysis.loudnessLufs,
+                peakDbfs = analysis.peakDbfs,
+                targetLufs = normalization.targetLufs,
+                gainDb = normalization.gainDb,
+                peakLimited = normalization.peakLimited,
+                version = PcmLoudnessEstimator.VERSION,
+            )
+            Result.success(
+                workDataOf(
+                    KEY_LOUDNESS to analysis.loudnessLufs,
+                    KEY_PEAK to analysis.peakDbfs,
+                    KEY_GAIN_DB to normalization.gainDb,
+                    KEY_REUSED_MEASUREMENT to false,
+                ),
+            )
+        }.getOrElse { error ->
+            container.libraryRepository.markSceneMusicNormalizationError(
+                trackId,
+                error.message ?: "Không phân tích được nhạc nền.",
+            )
+            Result.failure(workDataOf(KEY_ERROR to (error.message ?: "Không phân tích được nhạc nền.").take(300)))
+        }.also { temp.delete() }
     }
 
     companion object {
         private const val KEY_TRACK_ID = "track_id"
+        private const val KEY_TARGET_LUFS = "target_lufs"
         private const val KEY_LOUDNESS = "loudness_lufs"
+        private const val KEY_PEAK = "peak_dbfs"
+        private const val KEY_GAIN_DB = "normalization_gain_db"
+        private const val KEY_REUSED_MEASUREMENT = "reused_measurement"
         private const val KEY_ERROR = "error"
 
-        fun enqueue(context: Context, trackId: String) {
+        fun enqueue(context: Context, trackId: String, targetLufs: Float? = null): UUID {
+            val data = Data.Builder().putString(KEY_TRACK_ID, trackId)
+            targetLufs?.takeIf(Float::isFinite)?.let { data.putFloat(KEY_TARGET_LUFS, it) }
             val request = OneTimeWorkRequestBuilder<SceneMusicAnalysisWorker>()
-                .setInputData(Data.Builder().putString(KEY_TRACK_ID, trackId).build())
+                .setInputData(data.build())
                 .build()
             WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
                 "scene-music-analysis-$trackId",
                 ExistingWorkPolicy.REPLACE,
                 request,
             )
+            return request.id
+        }
+
+        fun cancel(context: Context, workId: UUID) {
+            WorkManager.getInstance(context.applicationContext).cancelWorkById(workId)
         }
     }
 }

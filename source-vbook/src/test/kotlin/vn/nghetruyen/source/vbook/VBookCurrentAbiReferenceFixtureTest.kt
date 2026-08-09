@@ -7,16 +7,60 @@ import org.junit.Test
 import vn.nghetruyen.source.api.JsonValue
 import vn.nghetruyen.source.api.SemanticVersion
 import vn.nghetruyen.source.api.SourceCapabilities
+import vn.nghetruyen.source.api.SourceCapabilityBrokers
 import vn.nghetruyen.source.api.SourceContentType
+import vn.nghetruyen.source.api.SourceCryptoBroker
+import vn.nghetruyen.source.api.SourceCryptoOperation
 import vn.nghetruyen.source.api.SourceManifest
 import vn.nghetruyen.source.api.SourcePlatformResult
 import vn.nghetruyen.source.api.SourceRuntimeMode
 import vn.nghetruyen.source.api.SourceRuntimePolicy
+import vn.nghetruyen.source.api.SourceStorageBroker
+import vn.nghetruyen.source.api.SourceStorageRequest
 import vn.nghetruyen.source.runtime.SourceResourceProvider
+import java.security.MessageDigest
 
 class VBookCurrentAbiReferenceFixtureTest {
     private val resources = ClasspathFixtureResources("reference-fixtures/current-abi")
-    private val runtime = VBookCompatibilityRuntime()
+    private val storageValues = linkedMapOf<String, ByteArray>()
+    private val storage = VBookStorageBoundaryBroker(object : SourceStorageBroker {
+        override fun get(manifest: SourceManifest, request: SourceStorageRequest) =
+            SourcePlatformResult.Success(storageValues[request.key]?.copyOf())
+
+        override fun put(manifest: SourceManifest, request: SourceStorageRequest): SourcePlatformResult<Unit> {
+            storageValues[request.key] = request.value?.copyOf() ?: ByteArray(0)
+            return SourcePlatformResult.Success(Unit)
+        }
+
+        override fun delete(manifest: SourceManifest, request: SourceStorageRequest): SourcePlatformResult<Unit> {
+            storageValues.remove(request.key)
+            return SourcePlatformResult.Success(Unit)
+        }
+
+        override fun keys(manifest: SourceManifest, sourceId: String, prefix: String, traceId: String) =
+            SourcePlatformResult.Success(storageValues.keys.filter { it.startsWith(prefix) }.sorted())
+
+        override fun clearPrefix(manifest: SourceManifest, sourceId: String, prefix: String, traceId: String): SourcePlatformResult<Unit> {
+            storageValues.keys.filter { it.startsWith(prefix) }.toList().forEach(storageValues::remove)
+            return SourcePlatformResult.Success(Unit)
+        }
+
+        override fun clear(sourceId: String): SourcePlatformResult<Unit> {
+            storageValues.clear()
+            return SourcePlatformResult.Success(Unit)
+        }
+    })
+    private val crypto = SourceCryptoBroker { _, request ->
+        val algorithm = when (request.operation) {
+            SourceCryptoOperation.MD5 -> "MD5"
+            SourceCryptoOperation.SHA1 -> "SHA-1"
+            SourceCryptoOperation.SHA256 -> "SHA-256"
+            SourceCryptoOperation.SHA512 -> "SHA-512"
+            else -> error("Fixture does not need ${request.operation}")
+        }
+        SourcePlatformResult.Success(MessageDigest.getInstance(algorithm).digest(request.payload))
+    }
+    private val runtime = VBookCompatibilityRuntime(SourceCapabilityBrokers(storage = storage, crypto = crypto))
 
     @Test
     fun currentCoreFixtureExecutesWithOpaqueCursorDomConfigAndCrypto() {

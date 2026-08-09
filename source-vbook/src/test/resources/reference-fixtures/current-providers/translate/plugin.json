@@ -1,0 +1,18 @@
+{
+  "metadata": {
+    "name": "NgheTruyen Translate ABI Fixture",
+    "author": "NgheTruyen",
+    "version": 1,
+    "source": "https://example.invalid",
+    "description": "Deterministic translate differential fixture",
+    "locale": "vi",
+    "regexp": "example\\.invalid",
+    "type": "translate",
+    "nsfw": false
+  },
+  "script": {
+    "language": "language.js",
+    "translate": "translate.js"
+  },
+  "config": {}
+}

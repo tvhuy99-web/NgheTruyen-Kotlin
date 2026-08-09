@@ -111,8 +111,13 @@ for token in ['+ "HỆ THỐNG"', '+ "SONIC"', '+ "NHANH"', '+ "CHÍNH XÁC"']:
     if token in role:
         raise SystemExit(f"GlobalVoiceRoleEditorDialog.kt: paired selector button remains: {token}")
 
-# Reference profile editor has no separate aliases field; aliases belong in the description guidance.
-if 'label = { Text("Bí danh") }' in role:
-    raise SystemExit("GlobalVoiceRoleEditorDialog.kt: extra Bí danh field remains")
+# Reference profile editor has no separate aliases field and no extra Sonic speed/pitch sliders.
+for token, message in [
+    ('label = { Text("Bí danh") }', "extra Bí danh field remains"),
+    ('CompactVoiceValueRow("Tốc độ Sonic"', "extra Tốc độ Sonic slider remains"),
+    ('CompactVoiceValueRow("Cao độ Sonic"', "extra Cao độ Sonic slider remains"),
+]:
+    if token in role:
+        raise SystemExit(f"GlobalVoiceRoleEditorDialog.kt: {message}")
 
 print("UI_CONTROL_PARITY=PASS")

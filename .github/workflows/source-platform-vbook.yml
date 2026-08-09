@@ -5,6 +5,8 @@ on:
     paths:
       - 'app/src/main/java/vn/nghetruyen/app/sourceplatform/**'
       - 'app/src/main/java/vn/nghetruyen/app/AppContainer.kt'
+      - 'app/src/main/res/xml/backup_rules.xml'
+      - 'app/src/main/res/xml/data_extraction_rules.xml'
       - 'source-api/**'
       - 'source-package/**'
       - 'source-store/**'
@@ -29,6 +31,8 @@ on:
     paths:
       - 'app/src/main/java/vn/nghetruyen/app/sourceplatform/**'
       - 'app/src/main/java/vn/nghetruyen/app/AppContainer.kt'
+      - 'app/src/main/res/xml/backup_rules.xml'
+      - 'app/src/main/res/xml/data_extraction_rules.xml'
       - 'source-api/**'
       - 'source-package/**'
       - 'source-store/**'

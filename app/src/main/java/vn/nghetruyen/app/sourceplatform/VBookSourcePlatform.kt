@@ -25,6 +25,7 @@ import vn.nghetruyen.source.vbook.VBookCandidate
 import vn.nghetruyen.source.vbook.VBookCandidateValidation
 import vn.nghetruyen.source.vbook.VBookConfigService
 import vn.nghetruyen.source.vbook.VBookConfigSnapshot
+import vn.nghetruyen.source.vbook.VBookCompositeConfigReader
 import vn.nghetruyen.source.vbook.VBookContentType
 import vn.nghetruyen.source.vbook.VBookFeature
 import vn.nghetruyen.source.vbook.VBookHostManifestFactory
@@ -78,7 +79,9 @@ class VBookSourcePlatform(
     private val cookiePartition = PersistentSourceCookiePartition(appContext)
     private val translationBroker = AndroidSourceTranslationBroker(translationEngine)
     private val configStore = AndroidVBookConfigStore(appContext)
-    private val configService = VBookConfigService(configStore)
+    private val secretStore = AndroidVBookSecretStore(appContext)
+    private val configReader = VBookCompositeConfigReader(configStore, secretStore)
+    private val configService = VBookConfigService(configStore, secretStore)
     private val brokers = SourceCapabilityBrokers(
         network = OkHttpSourceNetworkBroker(cookiePartition, diagnostics),
         browser = AndroidSourceBrowserBroker(appContext, cookiePartition, diagnostics),
@@ -206,6 +209,7 @@ class VBookSourcePlatform(
         }
         brokers.cookies.clear(sourceId)
         configStore.clear(current.identity.canonicalKey())
+        secretStore.clear(current.identity.canonicalKey())
         return store.uninstall(current.identity)
     }
 
@@ -217,7 +221,7 @@ class VBookSourcePlatform(
             if (plugin.metadata.type !in setOf(VBookContentType.NOVEL, VBookContentType.CHINESE_NOVEL)) {
                 return@runCatching null
             }
-            VBookStorySource(artifact, bytes, brokers, configStore)
+            VBookStorySource(artifact, bytes, brokers, configReader)
         }.getOrNull()
     }
 
@@ -230,7 +234,7 @@ class VBookSourcePlatform(
                     artifactIdentity = artifact.identity.canonicalKey(),
                     packageBytes = bytes,
                     brokers = brokers,
-                    configReader = configStore,
+                    configReader = configReader,
                 )
             }.getOrNull()?.takeIf { contentType == null || it.contentType == contentType }
         }

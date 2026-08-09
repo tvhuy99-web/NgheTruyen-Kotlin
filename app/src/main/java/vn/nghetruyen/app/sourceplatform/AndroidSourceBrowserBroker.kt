@@ -20,6 +20,7 @@ import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
+import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import vn.nghetruyen.source.api.SourceBrowserAction
@@ -37,9 +38,11 @@ import vn.nghetruyen.source.diagnostics.DiagnosticEvent
 import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 import vn.nghetruyen.source.diagnostics.DiagnosticSink
 import vn.nghetruyen.source.network.SourceOriginPolicy
+import vn.nghetruyen.source.network.PublicAddressPolicy
 import org.json.JSONTokener
 import vn.nghetruyen.source.api.SourceBrowserDialog
 import java.io.ByteArrayInputStream
+import java.net.InetAddress
 import java.util.ArrayDeque
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -58,6 +61,7 @@ class AndroidSourceBrowserBroker(
     private val cookiePartition: SourceCookiePartition,
     private val diagnostics: DiagnosticSink = DiagnosticSink.NONE,
     private val clockMs: () -> Long = System::currentTimeMillis,
+    private val resolver: (String) -> List<InetAddress> = { host -> InetAddress.getAllByName(host).toList() },
 ) : SourceBrowserBroker {
     private val appContext = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
@@ -529,12 +533,14 @@ class AndroidSourceBrowserBroker(
     }
 
     private fun isAllowedInitial(manifest: SourceManifest, url: String): Boolean = runCatching {
-        SourceOriginPolicy.requireInitialUrl(manifest, url)
+        val uri = SourceOriginPolicy.requireInitialUrl(manifest, url)
+        PublicAddressPolicy.requirePublic(resolver(uri.host))
         true
     }.getOrDefault(false)
 
     private fun isAllowedRedirect(manifest: SourceManifest, url: String): Boolean = runCatching {
-        SourceOriginPolicy.requireRedirectUrl(manifest, url)
+        val uri = SourceOriginPolicy.requireRedirectUrl(manifest, url)
+        PublicAddressPolicy.requirePublic(resolver(uri.host))
         true
     }.getOrDefault(false)
 
@@ -573,7 +579,12 @@ class AndroidSourceBrowserBroker(
         main.post { CookieManager.getInstance().removeAllCookies { latch.countDown() } }
         latch.await(10, TimeUnit.SECONDS)
         CookieManager.getInstance().flush()
-        runCatching { runOnMain(10_000) { WebView(appContext).apply { clearCache(true); clearHistory(); clearFormData(); destroy() } } }
+        runCatching {
+            runOnMain(10_000) {
+                WebStorage.getInstance().deleteAllData()
+                WebView(appContext).apply { clearCache(true); clearHistory(); clearFormData(); destroy() }
+            }
+        }
     }
 
     private fun <T> runOnMain(timeoutMs: Long, block: () -> T): T {

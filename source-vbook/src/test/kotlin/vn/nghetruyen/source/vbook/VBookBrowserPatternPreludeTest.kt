@@ -1,10 +1,20 @@
 package vn.nghetruyen.source.vbook
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.mozilla.javascript.Context
 
 class VBookBrowserPatternPreludeTest {
+    @Test
+    fun hostMatcherUsesTheSameLiteralGlobAndRegexSemantics() {
+        assertTrue(VBookBrowserUrlMatcher.matches("https://api.example/data?id=7", "api.example/data"))
+        assertTrue(VBookBrowserUrlMatcher.matches("https://api.example/data?id=7", "*api.example/data*"))
+        assertTrue(VBookBrowserUrlMatcher.matches("https://www.alicesw.com/home/chapter/info?id=1", ".*?alicesw.com/home/chapter/info.*?"))
+        assertFalse(VBookBrowserUrlMatcher.matches("https://api.example/data?id=7", "regex:["))
+    }
+
     @Test
     fun matcherSupportsLiteralAndCommunityRegexPatternsWithoutThrowing() {
         val cx = Context.enter()

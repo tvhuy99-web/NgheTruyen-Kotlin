@@ -8,7 +8,7 @@ class VBookConfigServiceTest {
     @Test
     fun stableExtensionKeyKeepsValuesWhenManifestVersionChanges() {
         val store = InMemoryVBookConfigStore()
-        val service = VBookConfigService(store)
+        val service = VBookConfigService(store, InMemoryVBookConfigStore())
         val key = "repo-id:remote-id"
         val v1 = manifest(version = 1)
         service.save(key, v1, mapOf(
@@ -29,7 +29,7 @@ class VBookConfigServiceTest {
     @Test
     fun removedConfigKeysAreDiscardedInsteadOfLeakingIntoNewScriptScope() {
         val store = InMemoryVBookConfigStore()
-        val service = VBookConfigService(store)
+        val service = VBookConfigService(store, InMemoryVBookConfigStore())
         store.write("x", mapOf("OLD_KEY" to "secret", "timeout" to "5000"))
         val restored = service.load("x", manifest(2)).values
         assertEquals(null, restored["OLD_KEY"])
@@ -39,7 +39,7 @@ class VBookConfigServiceTest {
 
     @Test
     fun connectionValuesAreValidatedAndClampedAtPersistenceBoundary() {
-        val service = VBookConfigService(InMemoryVBookConfigStore())
+        val service = VBookConfigService(InMemoryVBookConfigStore(), InMemoryVBookConfigStore())
         val saved = service.save("x", manifest(1), mapOf(
             "thread_num" to "999",
             "timeout" to "1",
@@ -48,6 +48,31 @@ class VBookConfigServiceTest {
         assertEquals(8, saved.threadNum)
         assertEquals(100L, saved.timeoutMs)
         assertEquals(120_000L, saved.delayMs)
+    }
+
+    @Test
+    fun sensitiveFieldsArePersistedSeparatelyFromPortableConfig() {
+        val config = InMemoryVBookConfigStore()
+        val secrets = InMemoryVBookConfigStore()
+        val service = VBookConfigService(config, secrets)
+        val manifest = VBookManifestParser.parse("""
+            {
+              "metadata":{"name":"x","author":"a","version":1,"source":"https://x.example","description":"","locale":"vi","regexp":"x","type":"novel","nsfw":false},
+              "script":{"search":"search.js","detail":"detail.js","toc":"toc.js","chap":"chap.js"},
+              "config":{
+                "DOMAIN":{"title":"Domain","default":"default.example","mode":"input","format":"text"},
+                "API_TOKEN":{"title":"Access token","default":"","mode":"input","format":"text"},
+                "API_KEY":{"title":"API key","default":"","mode":"input","format":"text"},
+                "PIN":{"title":"PIN","default":"","mode":"input","format":"text","secret":true}
+              }
+            }
+        """.trimIndent())
+
+        service.save("x", manifest, mapOf("DOMAIN" to "site.example", "API_TOKEN" to "abc", "API_KEY" to "xyz", "PIN" to "1234"))
+
+        assertEquals(mapOf("DOMAIN" to "site.example"), config.read("x"))
+        assertEquals(mapOf("API_TOKEN" to "abc", "API_KEY" to "xyz", "PIN" to "1234"), secrets.read("x"))
+        assertEquals("abc", service.load("x", manifest).values["API_TOKEN"])
     }
 
     private fun manifest(version: Int): VBookExtensionManifest = VBookManifestParser.parse("""

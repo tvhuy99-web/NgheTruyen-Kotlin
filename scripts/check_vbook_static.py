@@ -25,6 +25,12 @@ def main() -> None:
     sandbox = read("source-js-sandbox/src/main/kotlin/com/nghetruyen/source/sandbox/JsSandbox.kt")
     boundary = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookRhinoValues.kt")
     importer = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookPluginImporter.kt")
+    browser = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidSourceBrowserBroker.kt")
+    config_service = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookConfigService.kt")
+    config_store = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidVBookConfigStore.kt")
+    secret_store = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidVBookSecretStore.kt")
+    backup_rules = read("app/src/main/res/xml/backup_rules.xml")
+    extraction_rules = read("app/src/main/res/xml/data_extraction_rules.xml")
 
     require(
         sandbox,
@@ -59,6 +65,33 @@ def main() -> None:
         "context.newObject",
     )
     assert "Context.javaToJS" not in runtime, "vBook runtime must not expose JVM collections through Context.javaToJS"
+    require(
+        browser,
+        "Android browser broker",
+        "PublicAddressPolicy.requirePublic",
+        "WebStorage.getInstance().deleteAllData()",
+        "allowFileAccess = false",
+        "allowContentAccess = false",
+    )
+    require(
+        config_service,
+        "vBook config/secret split",
+        "class VBookCompositeConfigReader",
+        "private val secretStore: VBookConfigStore",
+        "manifest.config[key]?.sensitive == true",
+    )
+    require(config_store, "portable vBook config", 'PREFERENCES = "vbook_config_v2"')
+    assert "AndroidKeyStore" not in config_store, "portable vBook config must not depend on a device-bound key"
+    require(
+        secret_store,
+        "encrypted vBook secrets",
+        'PREFERENCES = "encrypted_vbook_secrets_v1"',
+        'KEYSTORE = "AndroidKeyStore"',
+        "AES/GCM/NoPadding",
+        "cipher.updateAAD(extensionKey.toByteArray(Charsets.UTF_8))",
+    )
+    for rules, label in ((backup_rules, "backup rules"), (extraction_rules, "data extraction rules")):
+        require(rules, label, 'path="encrypted_vbook_secrets_v1.xml"', 'path="encrypted_vbook_config_v1.xml"')
     for forbidden in ("addJavascriptInterface", "ProcessBuilder(", "Class.forName("):
         assert forbidden not in runtime, f"Forbidden vBook bridge token: {forbidden}"
 

@@ -1622,11 +1622,8 @@ private class BrowserCompatObject(
         else -> listOf(Context.toString(value))
     }.map(String::trim).filter(String::isNotBlank)
 
-    private fun matches(value: String, pattern: String): Boolean = when {
-        pattern.startsWith("regex:") -> runCatching { Regex(pattern.removePrefix("regex:")).containsMatchIn(value) }.getOrDefault(false)
-        '*' in pattern -> runCatching { Regex(Regex.escape(pattern).replace("\\*", ".*"), RegexOption.IGNORE_CASE).matches(value) }.getOrDefault(false)
-        else -> value.contains(pattern, ignoreCase = true)
-    }
+    private fun matches(value: String, pattern: String): Boolean =
+        VBookBrowserUrlMatcher.matches(value, pattern)
 
     private fun cookieNames(cookie: String): List<String> = cookie.split(';').mapNotNull { token -> token.substringBefore('=').trim().takeIf(String::isNotBlank) }.distinct()
     private fun Int?.orZero(): Int = this ?: 0

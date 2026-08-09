@@ -88,6 +88,7 @@ data class VBookConfigField(
     val mode: VBookConfigMode,
     val format: VBookConfigFormat,
     val legacyPrimitive: Boolean,
+    val sensitive: Boolean,
     val raw: JsonValue,
 )
 
@@ -173,6 +174,7 @@ object VBookManifestParser {
                 mode = VBookConfigMode.UNKNOWN,
                 format = VBookConfigFormat.UNKNOWN,
                 legacyPrimitive = true,
+                sensitive = isSensitiveConfig(key, key, "", null, raw),
                 raw = raw,
             )
         }
@@ -199,9 +201,39 @@ object VBookManifestParser {
             mode = mode,
             format = format,
             legacyPrimitive = false,
+            sensitive = isSensitiveConfig(key, obj.string("title") ?: key, obj.string("subtitle").orEmpty(), obj, raw),
             raw = raw,
         )
     }
+
+    private fun isSensitiveConfig(
+        key: String,
+        title: String,
+        subtitle: String,
+        descriptor: JsonValue.Obj?,
+        raw: JsonValue,
+    ): Boolean {
+        if (descriptor?.bool("secret") == true || descriptor?.bool("secure") == true || descriptor?.bool("sensitive") == true) {
+            return true
+        }
+        val inputType = descriptor?.string("type")?.lowercase().orEmpty()
+        if (inputType in setOf("password", "secret", "token")) return true
+        val normalized = listOf(key, title, subtitle).joinToString(" ")
+            .lowercase()
+            .replace(Regex("[^a-z0-9]+"), " ")
+        val compact = normalized.replace(" ", "")
+        return SENSITIVE_CONFIG_WORDS.any { word -> Regex("(?:^| )${Regex.escape(word)}(?: |${'$'})").containsMatchIn(normalized) } ||
+            SENSITIVE_CONFIG_COMPACT_WORDS.any(compact::contains) ||
+            (raw is JsonValue.Obj && raw.string("format")?.equals("password", ignoreCase = true) == true)
+    }
+
+    private val SENSITIVE_CONFIG_WORDS = setOf(
+        "password", "passwd", "passphrase", "token", "secret", "cookie", "authorization",
+        "credential", "credentials", "apikey", "sessionid", "session", "bearer",
+    )
+    private val SENSITIVE_CONFIG_COMPACT_WORDS = setOf(
+        "apikey", "accesstoken", "authtoken", "clientsecret", "sessionid",
+    )
 
     private fun scalar(value: JsonValue): String = when (value) {
         is JsonValue.Str -> value.value

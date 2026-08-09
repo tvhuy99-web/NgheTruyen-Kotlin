@@ -9,6 +9,17 @@ interface VBookConfigStore : VBookConfigReader {
     fun clear(extensionKey: String)
 }
 
+class VBookCompositeConfigReader(
+    private val config: VBookConfigReader,
+    private val secrets: VBookConfigReader,
+) : VBookConfigReader {
+    override fun read(extensionKey: String): Map<String, String> =
+        LinkedHashMap<String, String>().apply {
+            putAll(config.read(extensionKey))
+            putAll(secrets.read(extensionKey))
+        }
+}
+
 data class VBookConfigSnapshot(
     val extensionKey: String,
     val values: VBookConfigValues,
@@ -19,11 +30,12 @@ data class VBookConfigSnapshot(
  * Package update and rollback therefore preserve user choices.
  */
 class VBookConfigService(
-    private val store: VBookConfigStore,
+    private val configStore: VBookConfigStore,
+    private val secretStore: VBookConfigStore,
 ) {
     fun load(extensionKey: String, manifest: VBookExtensionManifest): VBookConfigSnapshot {
         require(extensionKey.isNotBlank()) { "VBOOK_CONFIG_EXTENSION_KEY_REQUIRED" }
-        val persisted = sanitize(manifest, store.read(extensionKey))
+        val persisted = persisted(extensionKey, manifest)
         return VBookConfigSnapshot(extensionKey, VBookConfigValues.resolve(manifest, persisted))
     }
 
@@ -33,18 +45,19 @@ class VBookConfigService(
         changes: Map<String, String>,
     ): VBookConfigSnapshot {
         require(extensionKey.isNotBlank()) { "VBOOK_CONFIG_EXTENSION_KEY_REQUIRED" }
-        val existing = sanitize(manifest, store.read(extensionKey)).toMutableMap()
+        val existing = persisted(extensionKey, manifest).toMutableMap()
         changes.forEach { (key, raw) ->
             require(key in allowedKeys(manifest)) { "VBOOK_CONFIG_KEY_UNKNOWN:$key" }
             existing[key] = validateValue(manifest, key, raw)
         }
         val sanitized = sanitize(manifest, existing)
-        store.write(extensionKey, sanitized)
+        persistSplit(extensionKey, manifest, sanitized)
         return VBookConfigSnapshot(extensionKey, VBookConfigValues.resolve(manifest, sanitized))
     }
 
     fun reset(extensionKey: String, manifest: VBookExtensionManifest): VBookConfigSnapshot {
-        store.clear(extensionKey)
+        configStore.clear(extensionKey)
+        secretStore.clear(extensionKey)
         return VBookConfigSnapshot(extensionKey, VBookConfigValues.resolve(manifest))
     }
 
@@ -53,6 +66,21 @@ class VBookConfigService(
             if (key !in allowedKeys(manifest)) null
             else runCatching { key to validateValue(manifest, key, value) }.getOrNull()
         }.toMap(LinkedHashMap())
+
+    private fun persisted(extensionKey: String, manifest: VBookExtensionManifest): Map<String, String> =
+        sanitize(
+            manifest,
+            LinkedHashMap<String, String>().apply {
+                putAll(configStore.read(extensionKey))
+                putAll(secretStore.read(extensionKey))
+            },
+        )
+
+    private fun persistSplit(extensionKey: String, manifest: VBookExtensionManifest, values: Map<String, String>) {
+        val (secrets, regular) = values.entries.partition { (key, _) -> manifest.config[key]?.sensitive == true }
+        configStore.write(extensionKey, regular.associateTo(LinkedHashMap()) { it.toPair() })
+        secretStore.write(extensionKey, secrets.associateTo(LinkedHashMap()) { it.toPair() })
+    }
 
     private fun validateValue(manifest: VBookExtensionManifest, key: String, raw: String): String {
         require(raw.length <= MAX_VALUE_LENGTH) { "VBOOK_CONFIG_VALUE_TOO_LONG:$key" }

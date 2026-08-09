@@ -54,22 +54,18 @@ def main() -> int:
         if not complete and not args.allow_upstream_errors:
             raise RuntimeError("VBOOK_CORPUS_INCOMPLETE")
 
-        # The Kotlin analyzer is the source of truth for detector/feature semantics.
         run([
             "bash", "./gradlew",
-            ":source-vbook:classes",
+            ":source-vbook:auditCorpus",
+            f"-PvbookCorpusDir={CORPUS / 'packages'}",
+            f"-PvbookAuditOut={AUDIT}",
             "--no-daemon",
         ])
-        classpath_file = BUILD / "runtime-classpath.txt"
-        # Gradle task is added only if/when a dedicated application plugin is introduced. Until
-        # then the normal source-vbook tests execute the same analyzer and fixtures. Keep the
-        # explicit report requirement so a lab cannot claim proof from acquisition alone.
         if not AUDIT.is_file():
-            print(
-                "VBOOK_AUDIT_REPORT_REQUIRED: generate corpus-audit.json with "
-                "VBookCorpusAuditMain from source-vbook runtime classpath before certification",
-                file=sys.stderr,
-            )
+            raise RuntimeError(f"VBOOK_AUDIT_REPORT_MISSING:{AUDIT}")
+        audit = json.loads(AUDIT.read_text(encoding="utf-8"))
+        if audit.get("schema") != 2:
+            raise RuntimeError("VBOOK_AUDIT_SCHEMA_2_REQUIRED")
 
         if args.reference_server:
             env = os.environ.copy()
@@ -82,7 +78,8 @@ def main() -> int:
                 "--out", str(REFERENCE),
             ], env=env)
 
-        if AUDIT.is_file() and REFERENCE.is_file():
+        coverage_state = "NOT_RUN"
+        if REFERENCE.is_file():
             coverage = [
                 sys.executable,
                 "scripts/check_vbook_differential_coverage.py",
@@ -91,8 +88,10 @@ def main() -> int:
             ]
             for feature in args.allow_uncovered:
                 coverage.extend(["--allow-uncovered", feature])
-            # 2 = uncovered implementation proof, 3 = implementation blocker, 4 = reference errors.
             run(coverage)
+            coverage_state = "PASS"
+        elif args.reference_server:
+            raise RuntimeError(f"VBOOK_REFERENCE_CAPTURE_MISSING:{REFERENCE}")
 
         if not args.skip_tests:
             run([
@@ -107,10 +106,13 @@ def main() -> int:
 
         print(json.dumps({
             "corpusComplete": complete,
-            "auditPresent": AUDIT.is_file(),
+            "extensionCount": audit.get("extensionCount"),
+            "blockingFeatures": audit.get("blockingFeatures", []),
+            "auditPresent": True,
             "referencePresent": REFERENCE.is_file(),
+            "referenceCoverage": coverage_state,
             "status": "LAB_EXECUTED",
-        }, indent=2))
+        }, ensure_ascii=False, indent=2))
         return 0
     except Exception as exc:
         print(f"VBOOK_COMPAT_LAB_FAILED:{exc}", file=sys.stderr)

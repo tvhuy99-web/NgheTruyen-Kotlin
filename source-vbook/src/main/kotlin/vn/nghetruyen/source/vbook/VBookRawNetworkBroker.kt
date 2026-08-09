@@ -65,7 +65,7 @@ class VBookRawNetworkBroker(
                 charsetName = Charsets.UTF_8.name(),
                 traceId = request.traceId,
                 fromReplay = true,
-                headers = enrichHeaders(cached.response.headers, cached.response.body.size, key),
+                headers = enrichHeaders(cached.response.headers, cached.response, key),
             ))
         }
 
@@ -79,7 +79,7 @@ class VBookRawNetworkBroker(
         val key = requestKey?.takeIf(String::isNotBlank)
         if (key != null) put(CacheKey(request.sourceId, key), response)
         return SourcePlatformResult.Success(response.copy(
-            headers = enrichHeaders(response.headers, response.body.size, key),
+            headers = enrichHeaders(response.headers, response, key),
         ))
     }
 
@@ -98,10 +98,11 @@ class VBookRawNetworkBroker(
 
     private fun enrichHeaders(
         headers: Map<String, List<String>>,
-        rawSize: Int,
+        response: SourceNetworkResponse,
         key: String?,
     ): Map<String, List<String>> = LinkedHashMap(headers).apply {
-        put(INTERNAL_RAW_SIZE.lowercase(), listOf(rawSize.toString()))
+        put(INTERNAL_RAW_SIZE.lowercase(), listOf(response.body.size.toString()))
+        put(INTERNAL_STATUS_TEXT.lowercase(), listOf(response.statusText))
         if (key != null) put(INTERNAL_RESPONSE_KEY.lowercase(), listOf(key))
     }
 
@@ -119,6 +120,7 @@ class VBookRawNetworkBroker(
         const val INTERNAL_DECODE_CHARSET = "X-Nghe-VBook-Decode-Charset"
         const val INTERNAL_TIMEOUT_MS = "X-Nghe-VBook-Timeout-Ms"
         const val INTERNAL_RAW_SIZE = "X-Nghe-VBook-Raw-Size"
+        const val INTERNAL_STATUS_TEXT = "X-Nghe-VBook-Status-Text"
         const val INTERNAL_RESPONSE_KEY = "X-Nghe-VBook-Response-Key"
         const val OP_TEXT = "text"
         const val OP_BASE64 = "base64"

@@ -238,6 +238,15 @@ class VBookCompatibilityRuntime(
               var headers = response.headers || {}, keys = Object.keys(headers);
               for (var i=0;i<keys.length;i++) if (keys[i].toLowerCase().indexOf('x-nghe-vbook-') === 0) delete headers[keys[i]];
             }
+            function __vbookCachedResponse(url, nativeOptions, nativeHeaders, responseKey, operation, charset) {
+              var cacheOptions = __vbookCopyObject(nativeOptions);
+              var cacheHeaders = __vbookCopyObject(nativeHeaders);
+              cacheHeaders['${VBookRawNetworkBroker.INTERNAL_REQUEST_KEY}'] = responseKey;
+              cacheHeaders['${VBookRawNetworkBroker.INTERNAL_OPERATION}'] = operation;
+              if (charset !== undefined && charset !== null) cacheHeaders['${VBookRawNetworkBroker.INTERNAL_DECODE_CHARSET}'] = String(charset);
+              cacheOptions.headers = cacheHeaders;
+              return __vbookNativeFetch(url, cacheOptions);
+            }
             fetch = function(url, options) {
               options = options || {};
               url = String(url || '');
@@ -254,14 +263,15 @@ class VBookCompatibilityRuntime(
               var nativeHeaders = __vbookCopyObject(publicHeaders);
               var requestKey = 'vbr-' + String(Date.now()) + '-' + String(++__vbookFetchSeq);
               nativeHeaders['${VBookRawNetworkBroker.INTERNAL_REQUEST_KEY}'] = requestKey;
+              if (options.timeout !== undefined && options.timeout !== null) nativeHeaders['${VBookRawNetworkBroker.INTERNAL_TIMEOUT_MS}'] = String(options.timeout);
               nativeOptions.headers = nativeHeaders;
+              if (nativeOptions.body && typeof nativeOptions.body === 'object') nativeOptions.body = JSON.stringify(nativeOptions.body);
               delete nativeOptions.queries;
               var response = __vbookNativeFetch(url, nativeOptions);
-              var rawBase64 = __vbookHeaderValue(response, '${VBookRawNetworkBroker.INTERNAL_RAW_BASE64}');
               var responseKey = __vbookHeaderValue(response, '${VBookRawNetworkBroker.INTERNAL_RESPONSE_KEY}') || requestKey;
+              var rawSizeText = __vbookHeaderValue(response, '${VBookRawNetworkBroker.INTERNAL_RAW_SIZE}');
               var nativeText = response.text;
               var nativeHtml = response.html;
-              var nativeJson = response.json;
               response.header = function(name) {
                 name = String(name || '').toLowerCase();
                 if (name.indexOf('x-nghe-vbook-') === 0) return undefined;
@@ -269,19 +279,16 @@ class VBookCompatibilityRuntime(
               };
               response.statusText = response.statusText === undefined ? '' : response.statusText;
               response.request = {url:url, headers:publicHeaders};
-              response.base64 = function(){ return rawBase64 || Crypto.utf8ToBase64(nativeText()); };
+              response.base64 = function(){
+                return __vbookCachedResponse(url, nativeOptions, nativeHeaders, responseKey, '${VBookRawNetworkBroker.OP_BASE64}', null).body;
+              };
               response.blob = function(){
-                var b64=response.base64(), type=response.header('content-type') || '';
-                return {size:Crypto.base64Length(b64), type:String(type).split(';')[0], base64:function(){return b64;}};
+                var type=response.header('content-type') || '', rawSize=Number(rawSizeText || 0);
+                return {size:rawSize, type:String(type).split(';')[0], base64:function(){return response.base64();}};
               };
               response.text = function(charset) {
                 if (charset === undefined || charset === null || String(charset).length === 0) return nativeText();
-                var decodeOptions = __vbookCopyObject(nativeOptions);
-                var decodeHeaders = __vbookCopyObject(nativeHeaders);
-                decodeHeaders['${VBookRawNetworkBroker.INTERNAL_REQUEST_KEY}'] = responseKey;
-                decodeHeaders['${VBookRawNetworkBroker.INTERNAL_DECODE_CHARSET}'] = String(charset);
-                decodeOptions.headers = decodeHeaders;
-                return __vbookNativeFetch(url, decodeOptions).body;
+                return __vbookCachedResponse(url, nativeOptions, nativeHeaders, responseKey, '${VBookRawNetworkBroker.OP_TEXT}', String(charset)).body;
               };
               response.string = response.text;
               response.json = function(){ return JSON.parse(response.text()); };

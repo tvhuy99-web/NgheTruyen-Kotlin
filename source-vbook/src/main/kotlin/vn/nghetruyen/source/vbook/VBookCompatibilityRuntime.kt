@@ -147,7 +147,7 @@ class VBookCompatibilityRuntime(
         profile: VBookContractProfile,
         requestedTraceId: String,
     ): SourcePlatformResult<ExecutionResult> = runCatching {
-        val obj = response.data as? JsonValue.Obj ?: error("VBOOK_DISPATCH_RESULT_OBJECT_REQUIRED")
+        val obj = response.value as? JsonValue.Obj ?: error("VBOOK_DISPATCH_RESULT_OBJECT_REQUIRED")
         val encoded = obj.string(RAW_RESULT_KEY) ?: error("VBOOK_DISPATCH_RAW_RESULT_MISSING")
         val rawValue = JsonValue.Str(encoded)
         val envelope = VBookResponseEnvelopeParser.parse(rawValue, profile)

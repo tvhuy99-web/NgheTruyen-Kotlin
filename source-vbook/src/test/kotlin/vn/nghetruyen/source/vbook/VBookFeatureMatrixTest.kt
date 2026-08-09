@@ -1,5 +1,6 @@
 package vn.nghetruyen.source.vbook
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -71,5 +72,25 @@ class VBookFeatureMatrixTest {
         assertTrue(matrix.uncertifiedRequiredFeatures.map { it.feature }.containsAll(
             setOf(VBookFeature.WEBSOCKET_HEADERS, VBookFeature.WEBSOCKET_FRAMES, VBookFeature.QUICK_TRANSLATOR),
         ))
+    }
+
+    @Test
+    fun encryptFlagIsMetadataOnlyAndNeedsNoRuntimeCertification() {
+        val report = VBookCorpusReport(
+            extensionCount = 1,
+            profiles = mapOf(VBookContractProfile.CURRENT_JS to 1),
+            contentTypes = mapOf(VBookContentType.TTS to 1),
+            features = listOf(VBookCorpusFeatureRow(VBookFeature.METADATA_ENCRYPT, 1, listOf("tts"))),
+            extensionsWithMissingRequiredScripts = emptyList(),
+            extensionsWithMissingDynamicScripts = emptyList(),
+        )
+        val matrix = VBookEngineFeatureMatrix.matrix(report)
+        assertEquals(
+            VBookFeatureImplementationLevel.METADATA_ONLY,
+            VBookEngineFeatureMatrix.support(VBookFeature.METADATA_ENCRYPT).implementation,
+        )
+        assertTrue(matrix.blockingFeatures.isEmpty())
+        assertTrue(matrix.uncertifiedRequiredFeatures.isEmpty())
+        assertTrue(matrix.canClaimFullCorpusParity)
     }
 }

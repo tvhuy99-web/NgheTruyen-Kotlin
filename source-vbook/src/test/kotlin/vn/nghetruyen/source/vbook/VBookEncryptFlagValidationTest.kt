@@ -1,12 +1,13 @@
 package vn.nghetruyen.source.vbook
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VBookEncryptFlagValidationTest {
     @Test
-    fun readableEncryptFlagDoesNotBlockActivationButKeepsDistributionWarning() {
+    fun readableEncryptFlagIsMetadataOnlyAndDoesNotBlockActivation() {
         val plugin = """
             {
               "metadata":{"name":"Encrypted flag","author":"test","version":1,"source":"https://site.example","description":"","locale":"vi","regexp":"site","type":"novel","nsfw":false,"encrypt":true},
@@ -24,6 +25,10 @@ class VBookEncryptFlagValidationTest {
         val validation = VBookCandidateValidator().validate(VBookCandidate("encrypt-readable", plugin, scripts))
         assertTrue(validation.activatable)
         assertFalse(VBookFeature.METADATA_ENCRYPT in validation.blockingFeatures)
-        assertTrue(validation.warnings.any { it.contains("ENCRYPTED_DISTRIBUTION") })
+        assertFalse(validation.warnings.any { it.contains("ENCRYPT", ignoreCase = true) })
+        assertEquals(
+            VBookFeatureImplementationLevel.METADATA_ONLY,
+            VBookEngineFeatureMatrix.support(VBookFeature.METADATA_ENCRYPT).implementation,
+        )
     }
 }

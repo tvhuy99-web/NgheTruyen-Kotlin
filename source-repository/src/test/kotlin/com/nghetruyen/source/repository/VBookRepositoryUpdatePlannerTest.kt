@@ -32,7 +32,7 @@ class VBookRepositoryUpdatePlannerTest {
                 VBookRepositoryCatalog(
                     repo,
                     VBookCatalog(
-                        metadata = VBookCatalogMetadata(author = "A"),
+                        metadata = VBookCatalogMetadata(author = "A", description = "", unknown = emptyMap()),
                         items = listOf(currentItem.item, updateItem.item, newItem.item),
                     ),
                 ),
@@ -59,12 +59,13 @@ class VBookRepositoryUpdatePlannerTest {
             packageUrl = "https://pkg.example/$suffix/plugin.zip",
             version = version,
             source = "https://site.example/$suffix",
-            icon = null,
+            iconUrl = null,
             description = "",
             rawType = "novel",
             contentType = VBookContentType.NOVEL,
             locale = "vi",
             nsfw = false,
+            unknown = emptyMap(),
         )
         val repositoryId = VBookRepositoryAggregator.repositoryId(repo.link)
         return VBookAggregatedItem(repositoryId, repo, catalogItem)

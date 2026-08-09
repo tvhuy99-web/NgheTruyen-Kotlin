@@ -31,7 +31,20 @@ jobs:
       - name: clean
         run: ./gradlew --no-daemon --stacktrace --warning-mode all clean
       - name: tests
-        run: ./gradlew --no-daemon --stacktrace --warning-mode all test testDebugUnitTest
+        shell: bash
+        run: |
+          set +e
+          ./gradlew --no-daemon --console=plain test testDebugUnitTest > /tmp/unit-tests.log 2>&1
+          rc=$?
+          set -e
+          if [[ $rc -ne 0 ]]; then
+            echo '=== FAILED TEST SUMMARY ==='
+            grep -E -n 'FAILED|FAILURE:|AssertionError|expected:|but was:|Caused by:|There were failing tests|tests completed' /tmp/unit-tests.log | tail -n 160 || true
+            echo '=== FINAL TEST LOG ==='
+            tail -n 120 /tmp/unit-tests.log
+            exit $rc
+          fi
+          echo 'UNIT_TESTS=PASS'
       - name: lint
         run: ./gradlew --no-daemon --stacktrace --warning-mode all lintDebug
       - name: assemble_and_bundle

@@ -202,24 +202,26 @@ class VBookProviderSession(
         ).flatMap { result -> parseTranslation(result.data, traceId) }
     }
 
-    private fun parseTranslation(data: JsonValue, traceId: String): SourcePlatformResult<VBookTranslationOutput> = when (data) {
-        is JsonValue.Str -> SourcePlatformResult.Success(VBookTranslationOutput(data.value))
-        is JsonValue.Obj -> {
-            val text = data.string("translateText") ?: data.string("text")
-                ?: return invalid("VBOOK_TRANSLATE_TEXT_REQUIRED", traceId)
-            val segments = data.array("segments")?.values.orEmpty().mapNotNull { raw ->
-                val obj = raw as? JsonValue.Obj ?: return@mapNotNull null
-                val srcStart = obj.int("srcStart") ?: return@mapNotNull null
-                val srcLen = obj.int("srcLen") ?: return@mapNotNull null
-                val transStart = obj.int("transStart") ?: return@mapNotNull null
-                val transLen = obj.int("transLen") ?: return@mapNotNull null
-                val type = obj.int("type") ?: 0
-                if (minOf(srcStart, srcLen, transStart, transLen) < 0) return@mapNotNull null
-                VBookTranslationSegment(srcStart, srcLen, transStart, transLen, type)
+    private fun parseTranslation(data: JsonValue, traceId: String): SourcePlatformResult<VBookTranslationOutput> {
+        return when (data) {
+            is JsonValue.Str -> SourcePlatformResult.Success(VBookTranslationOutput(data.value))
+            is JsonValue.Obj -> {
+                val text = data.string("translateText") ?: data.string("text")
+                    ?: return invalid("VBOOK_TRANSLATE_TEXT_REQUIRED", traceId)
+                val segments = data.array("segments")?.values.orEmpty().mapNotNull { raw ->
+                    val obj = raw as? JsonValue.Obj ?: return@mapNotNull null
+                    val srcStart = obj.int("srcStart") ?: return@mapNotNull null
+                    val srcLen = obj.int("srcLen") ?: return@mapNotNull null
+                    val transStart = obj.int("transStart") ?: return@mapNotNull null
+                    val transLen = obj.int("transLen") ?: return@mapNotNull null
+                    val type = obj.int("type") ?: 0
+                    if (minOf(srcStart, srcLen, transStart, transLen) < 0) return@mapNotNull null
+                    VBookTranslationSegment(srcStart, srcLen, transStart, transLen, type)
+                }
+                SourcePlatformResult.Success(VBookTranslationOutput(text, segments))
             }
-            SourcePlatformResult.Success(VBookTranslationOutput(text, segments))
+            else -> invalid("VBOOK_TRANSLATE_RESULT_INVALID", traceId)
         }
-        else -> invalid("VBOOK_TRANSLATE_RESULT_INVALID", traceId)
     }
 
     private fun execute(
@@ -249,7 +251,7 @@ class VBookProviderSession(
         invalid("VBOOK_PROVIDER_TYPE_REQUIRED:$expected:actual=$contentType", traceId)
 
     private fun invalid(message: String, traceId: String): SourcePlatformResult.Failure = SourcePlatformResult.Failure(
-        SourcePlatformFailure(SourceErrorCode.VBOOK_RESPONSE_INVALID, message, traceId),
+        SourcePlatformFailure(SourceErrorCode.VBOOK_SCRIPT_ERROR, message, traceId),
     )
 
     private fun scalarString(value: JsonValue): String? = when (value) {

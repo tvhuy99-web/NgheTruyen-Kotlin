@@ -11,6 +11,9 @@ import org.junit.Test
 import vn.nghetruyen.source.vbook.VBookAggregatedItem
 import vn.nghetruyen.source.vbook.VBookCatalog
 import vn.nghetruyen.source.vbook.VBookCatalogItem
+import vn.nghetruyen.source.vbook.VBookCatalogMetadata
+import vn.nghetruyen.source.vbook.VBookContentType
+import vn.nghetruyen.source.vbook.VBookRepositoryAggregator
 import vn.nghetruyen.source.vbook.VBookRepositoryCatalog
 import vn.nghetruyen.source.vbook.VBookRepositoryDescriptor
 import vn.nghetruyen.source.vbook.VBookRepositorySnapshot
@@ -19,13 +22,21 @@ class VBookRepositoryUpdatePlannerTest {
     @Test
     fun numericVersionsUseStableIdentityAndUnknownVersionsAreNotGuessed() {
         val repo = VBookRepositoryDescriptor("https://repo.example/a.json", "A", "")
-        val currentItem = item(repo, "one", 2)
-        val updateItem = item(repo, "two", 3)
-        val newItem = item(repo, "three", 1)
+        val currentItem = item(repo, "one", "2")
+        val updateItem = item(repo, "two", "3")
+        val newItem = item(repo, "three", "1")
         val snapshot = VBookRepositorySnapshot(
             indexUrl = "https://index.example/repository.json",
             indexSha256 = "0".repeat(64),
-            repositories = listOf(VBookRepositoryCatalog(repo, VBookCatalog("A", "", listOf(currentItem.item, updateItem.item, newItem.item)))),
+            repositories = listOf(
+                VBookRepositoryCatalog(
+                    repo,
+                    VBookCatalog(
+                        metadata = VBookCatalogMetadata(author = "A"),
+                        items = listOf(currentItem.item, updateItem.item, newItem.item),
+                    ),
+                ),
+            ),
             items = listOf(currentItem, updateItem, newItem),
             errors = emptyList(),
         )
@@ -41,21 +52,21 @@ class VBookRepositoryUpdatePlannerTest {
         assertEquals(1, plan.updates.size)
     }
 
-    private fun item(repo: VBookRepositoryDescriptor, suffix: String, version: Int): VBookAggregatedItem {
+    private fun item(repo: VBookRepositoryDescriptor, suffix: String, version: String): VBookAggregatedItem {
         val catalogItem = VBookCatalogItem(
             name = suffix,
             author = "A",
             packageUrl = "https://pkg.example/$suffix/plugin.zip",
             version = version,
             source = "https://site.example/$suffix",
-            iconUrl = null,
+            icon = null,
             description = "",
-            type = null,
-            locale = null,
-            adult = false,
-            unknown = emptyMap(),
+            rawType = "novel",
+            contentType = VBookContentType.NOVEL,
+            locale = "vi",
+            nsfw = false,
         )
-        val repositoryId = vn.nghetruyen.source.vbook.VBookRepositoryAggregator.repositoryId(repo.link)
+        val repositoryId = VBookRepositoryAggregator.repositoryId(repo.link)
         return VBookAggregatedItem(repositoryId, repo, catalogItem)
     }
 

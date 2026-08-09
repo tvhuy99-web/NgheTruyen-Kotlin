@@ -4,6 +4,7 @@ enum class VBookFeatureImplementationLevel {
     IMPLEMENTED,
     PARTIAL,
     PACKAGE_LAYER_PENDING,
+    METADATA_ONLY,
     REFERENCE_REJECTS,
 }
 
@@ -138,8 +139,8 @@ object VBookEngineFeatureMatrix {
             )
             feature == VBookFeature.METADATA_ENCRYPT -> VBookFeatureSupport(
                 feature,
-                VBookFeatureImplementationLevel.PACKAGE_LAYER_PENDING,
-                "Readable packages with metadata.encrypt=true are accepted; proprietary encrypted-distribution decoding remains unclaimed until its package format is proven against the reference.",
+                VBookFeatureImplementationLevel.METADATA_ONLY,
+                "The official vBook VS Code tester strips metadata.encrypt during build and test packaging. The host therefore treats the flag as authoring/build metadata; actual script bytes are validated independently.",
             )
             feature in referenceRejects -> VBookFeatureSupport(
                 feature,
@@ -174,7 +175,7 @@ object VBookEngineFeatureMatrix {
         VBookFeature.BROWSER_LOAD_HTML ->
             "Compatibility wrapper translates vBook loadHtml(html, baseUrl) into the legacy internal host argument order."
         VBookFeature.BROWSER_WAIT_URL ->
-            "Compatibility wrapper waits against captured network-request URLs rather than the current page URL."
+            "Compatibility wrapper waits against captured network-request URLs and accepts literal or regex-style patterns used by current community extensions."
         VBookFeature.WEBSOCKET_HEADERS ->
             "The current compatibility prelude carries constructor headers through an internal vBook-only marker; the network broker validates them before opening the public WSS connection."
         VBookFeature.WEBSOCKET_FRAMES ->

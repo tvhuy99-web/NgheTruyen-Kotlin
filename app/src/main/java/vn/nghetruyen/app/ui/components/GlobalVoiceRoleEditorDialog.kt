@@ -305,7 +305,7 @@ fun GlobalVoiceRoleEditorDialog(
         },
         confirmButton = {
             TextButton(
-                enabled = draft.roleName.isNotBlank(),
+                enabled = draft.roleName.isNotBlank() && draft.description.isNotBlank(),
                 onClick = { onSave(draft.copy(enabled = if (draft.isNarrator) true else draft.enabled)) },
             ) {
                 Text("LƯU HỒ SƠ")

@@ -75,6 +75,7 @@ required = {
         'label = "Âm lượng"',
         "steps = (intervals - 1).coerceAtLeast(0)",
         'Text("LƯU HỒ SƠ")',
+        "enabled = draft.roleName.isNotBlank() && draft.description.isNotBlank()",
         'Text("XÓA HỒ SƠ")',
     ],
 }

@@ -6,6 +6,7 @@ import vn.nghetruyen.source.api.SourceActionName
 import vn.nghetruyen.source.api.SourceActionRequest
 import vn.nghetruyen.source.api.SourceActionResponse
 import vn.nghetruyen.source.api.SourceActionSpec
+import vn.nghetruyen.source.api.SourceCapabilityBrokers
 import vn.nghetruyen.source.api.SourceErrorCode
 import vn.nghetruyen.source.api.SourceManifest
 import vn.nghetruyen.source.api.SourcePlatformFailure
@@ -22,6 +23,10 @@ import vn.nghetruyen.source.runtime.SourceResourceProvider
 class VBookCompatibilityRuntime(
     private val runtime: VBookJsRuntime = VBookJsRuntime(),
 ) {
+    constructor(brokers: SourceCapabilityBrokers) : this(
+        VBookJsRuntime(brokers.copy(network = VBookRawNetworkBroker(brokers.network))),
+    )
+
     data class ExecutionResult(
         val data: JsonValue,
         val continuation: VBookContinuation,
@@ -93,7 +98,7 @@ class VBookCompatibilityRuntime(
             resources = resources,
             plugin = plugin,
             profile = profile,
-            invocation = VBookScriptInvocation(VBookPaths.normalizeScriptPath(scriptPath), args.map(String::toString)),
+            invocation = VBookScriptInvocation(VBookPaths.normalizeScriptPath(scriptPath), args),
             persistedConfig = persistedConfig,
             runtimeConfig = runtimeConfig,
             traceId = traceId,
@@ -149,8 +154,7 @@ class VBookCompatibilityRuntime(
     ): SourcePlatformResult<ExecutionResult> = runCatching {
         val obj = response.value as? JsonValue.Obj ?: error("VBOOK_DISPATCH_RESULT_OBJECT_REQUIRED")
         val encoded = obj.string(RAW_RESULT_KEY) ?: error("VBOOK_DISPATCH_RAW_RESULT_MISSING")
-        val rawValue = JsonValue.Str(encoded)
-        val envelope = VBookResponseEnvelopeParser.parse(rawValue, profile)
+        val envelope = VBookResponseEnvelopeParser.parse(JsonValue.Str(encoded), profile)
         ExecutionResult(
             data = envelope.data,
             continuation = envelope.continuation,
@@ -218,33 +222,75 @@ class VBookCompatibilityRuntime(
               finally { __vbookInsideLoad = false; }
             };
             var __vbookNativeFetch = fetch;
+            var __vbookFetchSeq = 0;
+            function __vbookCopyObject(source) {
+              var target = {}, keys = Object.keys(source || {});
+              for (var i=0;i<keys.length;i++) target[keys[i]] = source[keys[i]];
+              return target;
+            }
+            function __vbookHeaderValue(response, wanted) {
+              wanted = String(wanted || '').toLowerCase();
+              var headers = response.headers || {}, keys = Object.keys(headers);
+              for (var i=0;i<keys.length;i++) if (keys[i].toLowerCase() === wanted) return headers[keys[i]];
+              return undefined;
+            }
+            function __vbookStripInternalHeaders(response) {
+              var headers = response.headers || {}, keys = Object.keys(headers);
+              for (var i=0;i<keys.length;i++) if (keys[i].toLowerCase().indexOf('x-nghe-vbook-') === 0) delete headers[keys[i]];
+            }
             fetch = function(url, options) {
               options = options || {};
               url = String(url || '');
               if (options.queries) {
-                var parts = [], keys = Object.keys(options.queries);
-                for (var qi=0; qi<keys.length; qi++) {
-                  var qk=keys[qi], qv=options.queries[qk];
+                var parts = [], qkeys = Object.keys(options.queries);
+                for (var qi=0; qi<qkeys.length; qi++) {
+                  var qk=qkeys[qi], qv=options.queries[qk];
                   parts.push(encodeURIComponent(String(qk)) + '=' + encodeURIComponent(String(qv == null ? '' : qv)));
                 }
                 if (parts.length) url += (url.indexOf('?') >= 0 ? '&' : '?') + parts.join('&');
               }
-              var response = __vbookNativeFetch(url, options);
-              if (typeof response.header !== 'function') {
-                response.header = function(name) {
-                  name = String(name || '').toLowerCase();
-                  var headers = response.headers || {}, keys = Object.keys(headers);
-                  for (var i=0;i<keys.length;i++) if (keys[i].toLowerCase() === name) return headers[keys[i]];
-                  return undefined;
-                };
-              }
-              if (response.statusText === undefined) response.statusText = '';
-              if (!response.request) response.request = {url:url, headers:options.headers || {}};
-              if (typeof response.base64 !== 'function') response.base64 = function(){ return Crypto.utf8ToBase64(response.text()); };
-              if (typeof response.blob !== 'function') response.blob = function(){
+              var nativeOptions = __vbookCopyObject(options);
+              var publicHeaders = __vbookCopyObject(options.headers || {});
+              var nativeHeaders = __vbookCopyObject(publicHeaders);
+              var requestKey = 'vbr-' + String(Date.now()) + '-' + String(++__vbookFetchSeq);
+              nativeHeaders['${VBookRawNetworkBroker.INTERNAL_REQUEST_KEY}'] = requestKey;
+              nativeOptions.headers = nativeHeaders;
+              delete nativeOptions.queries;
+              var response = __vbookNativeFetch(url, nativeOptions);
+              var rawBase64 = __vbookHeaderValue(response, '${VBookRawNetworkBroker.INTERNAL_RAW_BASE64}');
+              var responseKey = __vbookHeaderValue(response, '${VBookRawNetworkBroker.INTERNAL_RESPONSE_KEY}') || requestKey;
+              var nativeText = response.text;
+              var nativeHtml = response.html;
+              var nativeJson = response.json;
+              response.header = function(name) {
+                name = String(name || '').toLowerCase();
+                if (name.indexOf('x-nghe-vbook-') === 0) return undefined;
+                return __vbookHeaderValue(response, name);
+              };
+              response.statusText = response.statusText === undefined ? '' : response.statusText;
+              response.request = {url:url, headers:publicHeaders};
+              response.base64 = function(){ return rawBase64 || Crypto.utf8ToBase64(nativeText()); };
+              response.blob = function(){
                 var b64=response.base64(), type=response.header('content-type') || '';
                 return {size:Crypto.base64Length(b64), type:String(type).split(';')[0], base64:function(){return b64;}};
               };
+              response.text = function(charset) {
+                if (charset === undefined || charset === null || String(charset).length === 0) return nativeText();
+                var decodeOptions = __vbookCopyObject(nativeOptions);
+                var decodeHeaders = __vbookCopyObject(nativeHeaders);
+                decodeHeaders['${VBookRawNetworkBroker.INTERNAL_REQUEST_KEY}'] = responseKey;
+                decodeHeaders['${VBookRawNetworkBroker.INTERNAL_DECODE_CHARSET}'] = String(charset);
+                decodeOptions.headers = decodeHeaders;
+                return __vbookNativeFetch(url, decodeOptions).body;
+              };
+              response.string = response.text;
+              response.json = function(){ return JSON.parse(response.text()); };
+              response.html = function(charset){
+                if (charset === undefined || charset === null || String(charset).length === 0) return nativeHtml();
+                return Html.parse(response.text(charset), response.url || url);
+              };
+              response.document = response.html;
+              __vbookStripInternalHeaders(response);
               return response;
             };
             $prelude

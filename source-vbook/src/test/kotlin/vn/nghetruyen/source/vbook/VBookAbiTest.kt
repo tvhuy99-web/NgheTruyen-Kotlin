@@ -58,11 +58,42 @@ class VBookAbiTest {
                 "DOMAIN" to "https://x.example/\"quoted\"",
                 "ENABLED" to "true",
                 "thread_num" to "9",
+                "timeout" to "15000",
+                "delay" to "500",
+                "ignore" to "false",
             )),
         )
         assertTrue(prelude.contains("const DOMAIN = \"https://x.example/\\\"quoted\\\"\";"))
         assertTrue(prelude.contains("const ENABLED = \"true\";"))
         assertFalse(prelude.contains("thread_num"))
+        assertFalse(prelude.contains("const timeout"))
+        assertFalse(prelude.contains("const delay"))
+        assertFalse(prelude.contains("const ignore"))
+    }
+
+    @Test
+    fun connectionSettingsHaveVBookDefaultsAndAllowHostOverrides() {
+        val manifest = VBookManifestParser.parse("""
+            {
+              "metadata":{"name":"x","author":"a","version":1,"source":"https://x.example","description":"","locale":"vi","regexp":"x","type":"novel","nsfw":false},
+              "script":{"search":"search.js","detail":"detail.js","toc":"toc.js","chap":"chap.js"},
+              "config":{"DOMAIN":{"title":"Domain","default":"https://x.example","mode":"input","format":"text"}}
+            }
+        """.trimIndent())
+        val defaults = VBookConfigValues.resolve(manifest)
+        assertEquals(3, defaults.connectionSettings().threadNum)
+        assertEquals(30_000L, defaults.connectionSettings().timeoutMs)
+        assertEquals(0L, defaults.connectionSettings().delayMs)
+        assertEquals("30000", defaults["timeout"])
+
+        val overridden = VBookConfigValues.resolve(
+            manifest,
+            persisted = mapOf("thread_num" to "6", "timeout" to "14000"),
+            runtimeOverrides = mapOf("delay" to "250", "timeout" to "9000"),
+        ).connectionSettings()
+        assertEquals(6, overridden.threadNum)
+        assertEquals(9_000L, overridden.timeoutMs)
+        assertEquals(250L, overridden.delayMs)
     }
 
     @Test
@@ -101,15 +132,38 @@ class VBookAbiTest {
     }
 
     @Test
-    fun dynamicActionIsPackageLocalAndProducesOpaquePageInvocation() {
-        val action = VBookDynamicActionParser.parse(
+    fun dynamicActionsPreserveInitialDataArgumentAndThenUseOpaqueContinuation() {
+        val simple = VBookDynamicActionParser.parse(
             JsonValue.Obj(linkedMapOf(
                 "title" to JsonValue.Str("Hot"),
                 "input" to JsonValue.Str("/hot"),
                 "script" to JsonValue.Str("hot.js"),
             )),
         )!!
-        assertEquals("src/hot.js", action.scriptPath)
-        assertEquals(listOf("/hot", "cursor-z"), action.invocation(VBookContinuation("cursor-z")).args)
+        assertEquals("src/hot.js", simple.scriptPath)
+        assertEquals(listOf("/hot"), simple.invocation().args)
+        assertEquals(listOf("/hot", "cursor-z"), simple.invocation(VBookContinuation("cursor-z")).args)
+
+        val explore = VBookDynamicActionParser.parse(
+            JsonValue.Obj(linkedMapOf(
+                "type" to JsonValue.Str("list"),
+                "input" to JsonValue.Str("/latest"),
+                "data" to JsonValue.Str("server-a"),
+                "script" to JsonValue.Str("list.js"),
+            )),
+        )!!
+        assertTrue(explore.hasDataArgument)
+        assertEquals(listOf("/latest", "server-a"), explore.invocation().args)
+        assertEquals(listOf("/latest", "opaque-next"), explore.invocation(VBookContinuation("opaque-next")).args)
+
+        val explicitEmptyData = VBookDynamicActionParser.parse(
+            JsonValue.Obj(linkedMapOf(
+                "input" to JsonValue.Str("/all"),
+                "data" to JsonValue.Str(""),
+                "script" to JsonValue.Str("all.js"),
+            )),
+        )!!
+        assertTrue(explicitEmptyData.hasDataArgument)
+        assertEquals(listOf("/all", ""), explicitEmptyData.invocation().args)
     }
 }

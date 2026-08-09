@@ -18,7 +18,13 @@ class VBookCompatibilityRuntime(
     private val runtime: VBookJsRuntime = VBookJsRuntime(),
 ) {
     constructor(brokers: SourceCapabilityBrokers) : this(
-        VBookJsRuntime(brokers.copy(network = VBookRawNetworkBroker(brokers.network))),
+        VBookJsRuntime(
+            brokers.copy(
+                network = VBookRawNetworkBroker(brokers.network),
+                translation = VBookTranslationBrokerRouter(brokers.translation, brokers.quickTranslation),
+                websocket = VBookWebSocketBroker(brokers.websocket),
+            ),
+        ),
     )
 
     data class ExecutionResult(
@@ -155,7 +161,15 @@ class VBookCompatibilityRuntime(
             config.values.forEach { (key, value) -> put(key, JsonValue.Str(value)) }
         }))
         val connection = config.connectionSettings()
-        val prelude = VBookConfigPrelude.build(profile, config)
+        val prelude = buildString {
+            append(VBookConfigPrelude.build(profile, config))
+            if (profile == VBookContractProfile.CURRENT_JS) {
+                if (isNotEmpty()) append('\n')
+                append(VBookQuickTranslatorPrelude.build())
+                append('\n')
+                append(VBookWebSocketPrelude.build())
+            }
+        }
         val responsePrelude = when (profile) {
             VBookContractProfile.CURRENT_JS -> ""
             VBookContractProfile.LEGACY_JS -> """
@@ -267,7 +281,6 @@ class VBookCompatibilityRuntime(
               return arr;
             }
             function __vbookDecorateWrappedArray(items,state){
-              var nativeLike={length:items.length,get:function(i){return items[i]&&items[i].__native;}};
               var arr=items;
               arr.size=function(){return arr.length;};
               arr.isEmpty=function(){return arr.length===0;};
@@ -373,7 +386,12 @@ class VBookCompatibilityRuntime(
                   var qk=qkeys[qi], qv=options.queries[qk];
                   parts.push(encodeURIComponent(String(qk)) + '=' + encodeURIComponent(String(qv == null ? '' : qv)));
                 }
-                if (parts.length) url += (url.indexOf('?') >= 0 ? '&' : '?') + parts.join('&');
+                if (parts.length) {
+                  var hashIndex = url.indexOf('#');
+                  var fragment = hashIndex >= 0 ? url.substring(hashIndex) : '';
+                  var baseUrl = hashIndex >= 0 ? url.substring(0, hashIndex) : url;
+                  url = baseUrl + (baseUrl.indexOf('?') >= 0 ? '&' : '?') + parts.join('&') + fragment;
+                }
               }
               var nativeOptions = __vbookCopyObject(options);
               var publicHeaders = __vbookCopyObject(options.headers || {});

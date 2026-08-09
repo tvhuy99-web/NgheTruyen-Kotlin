@@ -93,10 +93,12 @@ jobs:
           for path in glob.glob('source-vbook/build/test-results/test/TEST-*.xml'):
               root = ET.parse(path).getroot()
               for case in root.findall('testcase'):
-                  failure = case.find('failure') or case.find('error')
+                  failure = case.find('failure')
+                  if failure is None:
+                      failure = case.find('error')
                   if failure is not None:
                       print(f"\n=== {root.get('name')} :: {case.get('name')} ===")
                       print(failure.get('message', ''))
                       text = (failure.text or '').splitlines()
-                      print('\n'.join(text[:35]))
+                      print('\n'.join(text[:45]))
           PY

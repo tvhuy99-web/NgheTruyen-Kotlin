@@ -70,6 +70,7 @@ import vn.nghetruyen.app.ai.vietphrase.VietPhraseOptions
 import vn.nghetruyen.app.ai.vietphrase.VietPhraseRule
 import vn.nghetruyen.app.ai.vietphrase.VietPhraseScope
 import vn.nghetruyen.app.audio.ReferenceAudioExportRuntime
+import vn.nghetruyen.app.audio.PcmLoudnessEstimator
 import vn.nghetruyen.app.audio.SceneMusicAnalysisWorker
 import vn.nghetruyen.app.audio.AudioExportRequest
 import vn.nghetruyen.app.audio.AudioExportScope
@@ -728,6 +729,7 @@ fun ReaderScreen(
                     settings.setBackgroundMusicDuckFactor(10.0.pow(-musicDuckDb / 20.0).toFloat())
                     settings.setBackgroundMusicAttackMillis(musicAttackMs)
                     settings.setBackgroundMusicReleaseMillis(musicReleaseMs)
+                    state.sceneMusicTracks.forEach { SceneMusicAnalysisWorker.enqueue(context, it.id) }
                     ReaderPlaybackService.command(context, ReaderPlaybackService.ACTION_REFRESH)
                     onMessage("Đã lưu cài đặt nhạc nền."); showMusicDialog = false
                 }
@@ -740,12 +742,13 @@ fun ReaderScreen(
         val normalizedSearch = musicSearch.trim().lowercase()
         val visibleTracks = musicLibraryDraft.filter { normalizedSearch.isBlank() || it.title.lowercase().contains(normalizedSearch) }
         val enabledCount = musicLibraryDraft.count(SceneMusicTrackEntity::enabled)
-        val normalizedCount = musicLibraryDraft.count { kotlin.math.abs(it.loudnessLufsEstimate + 18f) > 0.05f }
+        val normalizedCount = musicLibraryDraft.count { it.normalizationVersion >= PcmLoudnessEstimator.VERSION && it.normalizationError.isBlank() }
         val describedCount = musicLibraryDraft.count { it.tagsCsv.isNotBlank() }
         fun stopPreview() {
             runCatching { musicPreviewPlayer?.stop() }
             runCatching { musicPreviewPlayer?.release() }
             musicPreviewPlayer = null
+            ReaderPlaybackService.command(context, ReaderPlaybackService.ACTION_MUSIC_PREVIEW_END)
         }
         fun cancelLibrary() {
             stopPreview()
@@ -836,14 +839,45 @@ fun ReaderScreen(
                     ReaderMenuButton("NGHE THỬ") {
                         runCatching { musicPreviewPlayer?.stop() }
                         runCatching { musicPreviewPlayer?.release() }
+                        musicPreviewPlayer = null
+                        ReaderPlaybackService.command(context, ReaderPlaybackService.ACTION_MUSIC_PREVIEW_BEGIN)
+                        val gainDb = if (
+                            track.normalizationVersion >= PcmLoudnessEstimator.VERSION &&
+                            track.normalizationError.isBlank() &&
+                            track.loudnessLufsEstimate.isFinite() &&
+                            track.peakDbfs.isFinite()
+                        ) {
+                            PcmLoudnessEstimator.calculateNormalization(
+                                track.loudnessLufsEstimate,
+                                track.peakDbfs,
+                                musicTargetLufs,
+                            ).gainDb
+                        } else 0f
+                        val previewLevel = (track.volume * PcmLoudnessEstimator.gainDbToLinear(gainDb)).coerceIn(0f, 1f)
                         musicPreviewPlayer = runCatching { MediaPlayer.create(context, Uri.parse(track.uri)) }.getOrNull()?.also { player ->
+                            player.setVolume(previewLevel, previewLevel)
                             player.setOnCompletionListener { completed ->
                                 runCatching { completed.release() }
-                                if (musicPreviewPlayer === completed) musicPreviewPlayer = null
+                                if (musicPreviewPlayer === completed) {
+                                    musicPreviewPlayer = null
+                                    ReaderPlaybackService.command(context, ReaderPlaybackService.ACTION_MUSIC_PREVIEW_END)
+                                }
                             }
                             player.start()
+                            scope.launch {
+                                delay(15_000)
+                                if (musicPreviewPlayer === player) {
+                                    runCatching { player.stop() }
+                                    runCatching { player.release() }
+                                    musicPreviewPlayer = null
+                                    ReaderPlaybackService.command(context, ReaderPlaybackService.ACTION_MUSIC_PREVIEW_END)
+                                }
+                            }
                         }
-                        if (musicPreviewPlayer == null) onMessage("Không nghe thử được bài nhạc này.")
+                        if (musicPreviewPlayer == null) {
+                            ReaderPlaybackService.command(context, ReaderPlaybackService.ACTION_MUSIC_PREVIEW_END)
+                            onMessage("Không nghe thử được bài nhạc này.")
+                        }
                         selectedMusicTrackId = null
                     }
                     ReaderMenuButton("SỬA TÊN VÀ MÔ TẢ") { editingTrack = track; selectedMusicTrackId = null }
@@ -1014,6 +1048,7 @@ fun ReaderScreen(
                 runCatching { musicPreviewPlayer?.stop() }
                 runCatching { musicPreviewPlayer?.release() }
                 musicPreviewPlayer = null
+                ReaderPlaybackService.command(context, ReaderPlaybackService.ACTION_MUSIC_PREVIEW_END)
                 musicLibraryDraft = emptyList()
                 showMusicClearAllConfirm = false
             }) { Text("XÓA") } },

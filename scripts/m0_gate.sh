@@ -42,6 +42,7 @@ STATIC_GATES=(
   scripts/check_milestone3_kindle.py
   scripts/check_ui_control_parity.py
   scripts/check_reference_workflow_parity.py
+  scripts/check_music_runtime_parity.py
 )
 for gate in "${STATIC_GATES[@]}"; do
   printf 'RUN_STATIC_GATE=%s\n' "$gate"

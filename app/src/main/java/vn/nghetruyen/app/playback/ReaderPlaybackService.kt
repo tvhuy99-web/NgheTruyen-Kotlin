@@ -143,6 +143,9 @@ class ReaderPlaybackService : Service() {
     private var sceneMusicCues: List<SceneMusicCueEntity> = emptyList()
     private var sceneMusicTracks: Map<String, SceneMusicTrackEntity> = emptyMap()
     private var activeSceneTrackId: String? = null
+    private var musicPreviewActive = false
+    private var musicPreviewPlainWasPlaying = false
+    private var musicPreviewSceneWasActive = false
     private var interruptionMode: AudioInterruptionMode = AudioInterruptionMode.PAUSE
     private var backgroundPlayer: MediaPlayer? = null
     private var sonicPlayer: MediaPlayer? = null
@@ -156,7 +159,7 @@ class ReaderPlaybackService : Service() {
     private var activeSonicVolume = 1f
     private var backgroundMusicUri: String? = null
     private var backgroundMusicVolume: Float = 0.18f
-    private var backgroundMusicDuckFactor: Float = 0.25f
+    private var backgroundMusicDuckFactor: Float = 0.63095734f
     private var headsetMultiClickEnabled = true
     private var pauseOnHeadsetDisconnect = true
     private var restorePlaybackAfterProcessDeath = true
@@ -166,8 +169,8 @@ class ReaderPlaybackService : Service() {
     private var narrationPrefetchWindowChapters = 2
     private var sceneMusicCrossfadeMillis = 1_600
     private var sceneMusicContinueAcrossChapters = true
-    private var sceneMusicPlaybackMode = SceneMusicPlaybackMode.SMART_AVOID_REPEAT
-    private var sceneMusicTargetLufs = -18.0f
+    private var sceneMusicPlaybackMode = SceneMusicPlaybackMode.SEQUENTIAL
+    private var sceneMusicTargetLufs = -24.0f
     private var sceneMusicAvoidRepeatWindow = 4
     private var sonicProcessingEnabled = true
     private var sonicDefaultSpeed = 1.0f
@@ -258,6 +261,8 @@ class ReaderPlaybackService : Service() {
             ACTION_PREVIOUS, ACTION_REWIND -> skip(-1)
             ACTION_STOP -> stopPlayback()
             ACTION_REFRESH -> refreshVoiceAndNotification()
+            ACTION_MUSIC_PREVIEW_BEGIN -> beginMusicPreview()
+            ACTION_MUSIC_PREVIEW_END -> endMusicPreview()
             ACTION_SET_SLEEP_TIMER -> scheduleSleepTimer(intent.getIntExtra(EXTRA_SLEEP_MINUTES, 0))
             ACTION_CANCEL_SLEEP_TIMER -> cancelSleepTimer()
             ACTION_SLEEP_TIMER_EXPIRED -> expireSleepTimer()
@@ -1308,6 +1313,9 @@ class ReaderPlaybackService : Service() {
         pendingForceNoSonic = false
         pendingPreviewText = null
         pendingPreviewConfig = null
+        musicPreviewActive = false
+        musicPreviewPlainWasPlaying = false
+        musicPreviewSceneWasActive = false
         resumeAfterTransientFocusLoss = false
         cancelSpeechWatchdog()
         completionGuard.cancel()
@@ -1578,11 +1586,24 @@ class ReaderPlaybackService : Service() {
         backgroundPlayer?.release()
         backgroundPlayer = null
         backgroundMusicUri = null
-        val loudnessGain = PcmLoudnessEstimator.normalizationGain(track.loudnessLufsEstimate, sceneMusicTargetLufs)
+        val normalizationGain = if (
+            PcmLoudnessEstimator.isReady(
+                version = track.normalizationVersion,
+                error = track.normalizationError,
+                loudnessLufs = track.loudnessLufsEstimate,
+                targetLufs = sceneMusicTargetLufs,
+                storedTargetLufs = track.normalizationTargetLufs,
+                gainDb = track.normalizationGainDb,
+            )
+        ) {
+            PcmLoudnessEstimator.gainDbToLinear(track.normalizationGainDb)
+        } else {
+            1f
+        }
         sceneMusicController.transition(
             trackId = track.id,
             uri = track.uri,
-            volume = (track.volume * cue.volume.coerceIn(0f, 1f) * loudnessGain).coerceIn(0f, 0.6f),
+            volume = (track.volume * cue.volume.coerceIn(0f, 1f) * normalizationGain).coerceIn(0f, 0.6f),
             duckFactor = backgroundMusicDuckFactor,
             crossfadeMillis = sceneMusicCrossfadeMillis,
         )
@@ -1594,6 +1615,31 @@ class ReaderPlaybackService : Service() {
             serviceScope.launch { container.libraryRepository.markSceneMusicPlayed(track.id) }
         }
         activeSceneTrackId = track.id
+    }
+
+    private fun beginMusicPreview() {
+        if (musicPreviewActive) return
+        musicPreviewActive = true
+        musicPreviewPlainWasPlaying = backgroundPlayer?.runCatching { isPlaying }?.getOrDefault(false) == true
+        musicPreviewSceneWasActive = sceneMusicController.activeTrackId != null
+        if (musicPreviewPlainWasPlaying) backgroundPlayer?.runCatching { pause() }
+        if (musicPreviewSceneWasActive) sceneMusicController.pause()
+    }
+
+    private fun endMusicPreview() {
+        if (!musicPreviewActive) return
+        val restorePlain = musicPreviewPlainWasPlaying
+        val restoreScene = musicPreviewSceneWasActive
+        musicPreviewActive = false
+        musicPreviewPlainWasPlaying = false
+        musicPreviewSceneWasActive = false
+        val speaking = PlaybackQueueStore.state.value.isPlaying
+        if (restoreScene && sceneMusicController.activeTrackId != null) {
+            sceneMusicController.setSpeaking(speaking)
+            sceneMusicController.resume()
+        } else if (restorePlain && backgroundPlayer != null) {
+            updateBackgroundMusic(ducked = speaking)
+        }
     }
 
     private fun configureBackgroundMusic(uri: String?, enabled: Boolean, volume: Float, duckFactor: Float) {
@@ -1889,6 +1935,9 @@ class ReaderPlaybackService : Service() {
         pendingPlay = false
         pendingPreviewText = null
         pendingPreviewConfig = null
+        musicPreviewActive = false
+        musicPreviewPlainWasPlaying = false
+        musicPreviewSceneWasActive = false
         resumeAfterTransientFocusLoss = false
         activeUtteranceId = null
         previewUtteranceId = null
@@ -1943,6 +1992,8 @@ class ReaderPlaybackService : Service() {
         const val ACTION_REWIND = "vn.nghetruyen.action.REWIND"
         const val ACTION_STOP = "vn.nghetruyen.action.STOP"
         const val ACTION_REFRESH = "vn.nghetruyen.action.REFRESH"
+        const val ACTION_MUSIC_PREVIEW_BEGIN = "vn.nghetruyen.action.MUSIC_PREVIEW_BEGIN"
+        const val ACTION_MUSIC_PREVIEW_END = "vn.nghetruyen.action.MUSIC_PREVIEW_END"
         const val ACTION_SET_SLEEP_TIMER = "vn.nghetruyen.action.SET_SLEEP_TIMER"
         const val ACTION_CANCEL_SLEEP_TIMER = "vn.nghetruyen.action.CANCEL_SLEEP_TIMER"
         const val ACTION_SLEEP_TIMER_EXPIRED = "vn.nghetruyen.action.SLEEP_TIMER_EXPIRED"

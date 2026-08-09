@@ -1116,13 +1116,8 @@ class LibraryRepository(private val db: AppDatabase) {
         db.sceneMusicTrackDao().upsert(
             current.copy(
                 title = title.trim().ifBlank { current.title }.take(120),
-                tagsCsv = tagsCsv.split(',')
-                    .map(String::trim)
-                    .filter(String::isNotBlank)
-                    .distinctBy { it.lowercase(Locale.ROOT) }
-                    .take(20)
-                    .joinToString(",")
-                    .take(500),
+                // Legacy column name; XPK stores one freeform AI description, not CSV tags.
+                tagsCsv = tagsCsv.trim().take(300),
                 updatedAt = System.currentTimeMillis(),
             ),
         )
@@ -1134,11 +1129,41 @@ class LibraryRepository(private val db: AppDatabase) {
     suspend fun listEnabledSceneMusicTracks(): List<SceneMusicTrackEntity> = db.sceneMusicTrackDao().listEnabled()
     suspend fun getSceneMusicTrack(id: String): SceneMusicTrackEntity? = db.sceneMusicTrackDao().get(id)
 
-    suspend fun updateSceneMusicLoudness(id: String, loudnessLufsEstimate: Float) {
+    suspend fun updateSceneMusicNormalization(
+        id: String,
+        loudnessLufs: Float,
+        peakDbfs: Float,
+        targetLufs: Float,
+        gainDb: Float,
+        peakLimited: Boolean,
+        version: Int,
+    ) {
         val current = db.sceneMusicTrackDao().get(id) ?: return
         db.sceneMusicTrackDao().upsert(
             current.copy(
-                loudnessLufsEstimate = loudnessLufsEstimate.coerceIn(-70f, 0f),
+                loudnessLufsEstimate = loudnessLufs.coerceIn(-120f, 12f),
+                peakDbfs = peakDbfs.coerceIn(-120f, 12f),
+                normalizationTargetLufs = targetLufs.coerceIn(-36f, -18f),
+                normalizationGainDb = gainDb.coerceIn(-36f, 12f),
+                normalizationPeakLimited = peakLimited,
+                normalizationVersion = version.coerceAtLeast(0),
+                normalizationError = "",
+                updatedAt = System.currentTimeMillis(),
+            ),
+        )
+    }
+
+    suspend fun markSceneMusicNormalizationError(id: String, error: String) {
+        val current = db.sceneMusicTrackDao().get(id) ?: return
+        db.sceneMusicTrackDao().upsert(
+            current.copy(
+                loudnessLufsEstimate = -70f,
+                peakDbfs = 0f,
+                normalizationTargetLufs = -24f,
+                normalizationGainDb = 0f,
+                normalizationPeakLimited = false,
+                normalizationVersion = 0,
+                normalizationError = error.trim().take(300),
                 updatedAt = System.currentTimeMillis(),
             ),
         )

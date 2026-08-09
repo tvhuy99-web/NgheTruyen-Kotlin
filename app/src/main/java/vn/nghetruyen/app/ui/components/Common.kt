@@ -46,6 +46,7 @@ private val HiddenSettingsHomeActions = setOf(
     "TTS & GIỌNG ĐỌC",
     "XUẤT SÁCH NÓI",
     "CHẨN ĐOÁN",
+    "NHẠC NỀN & NHẠC CẢNH",
 )
 
 @Composable
@@ -76,7 +77,7 @@ fun ReferenceActionButton(
     normalContentColor: Color = Color.White,
     roleValue: Role = Role.Button,
 ) {
-    // These three entries are intentionally hidden only for the compact Settings home list.
+    // These entries are intentionally hidden only for the compact Settings home list.
     // Their feature screens and contextual Reader/Story actions remain available.
     val isHiddenSettingsHomeAction =
         text in HiddenSettingsHomeActions &&

@@ -39,15 +39,13 @@ object VBookBrowserPatternPrelude {
           out.waitUrl = function(patterns, timeoutMs) {
             var list = Array.isArray(patterns) ? patterns : [patterns];
             var timeout = Number(timeoutMs || 15000);
-            var deadline = new Date().getTime() + timeout;
-            do {
-              var urls = nativeBrowser.urls();
-              for (var ui=0;ui<Number(urls && urls.length || 0);ui++) {
-                var candidate = String(urls[ui]);
-                for (var pi=0;pi<list.length;pi++) if (__vbookBrowserMatch(candidate, list[pi])) return candidate;
-              }
-              sleep(100);
-            } while (new Date().getTime() < deadline);
+            // Current vBook documents waitUrl as waiting for a network-request URL. The native
+            // waitRequest host returns one metadata object, avoiding the Java-array urls() bridge.
+            var metadata = nativeBrowser.waitRequest(list, timeout);
+            if (!metadata || metadata === false) return false;
+            var candidate = String(metadata.url || '');
+            if (!candidate) return false;
+            for (var pi=0;pi<list.length;pi++) if (__vbookBrowserMatch(candidate,list[pi])) return candidate;
             return false;
           };
           return out;

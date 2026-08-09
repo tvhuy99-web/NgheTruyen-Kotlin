@@ -74,8 +74,8 @@ class VBookCorpusAnalyzerTest {
         )
 
         assertTrue(VBookFeature.FETCH_CHARSET in audit.features)
-        assertTrue(audit.evidence.any { it.feature == VBookFeature.FETCH_CHARSET && "gbk" in it.value })
-        assertFalse(audit.evidence.any { it.feature == VBookFeature.FETCH_CHARSET && "shift_jis" in it.value })
+        assertTrue(audit.evidence.any { it.feature == VBookFeature.FETCH_CHARSET && "gbk" in it.evidence })
+        assertFalse(audit.evidence.any { it.feature == VBookFeature.FETCH_CHARSET && "shift_jis" in it.evidence })
     }
 
     @Test

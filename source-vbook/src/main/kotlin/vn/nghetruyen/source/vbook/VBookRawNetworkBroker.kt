@@ -43,6 +43,7 @@ class VBookRawNetworkBroker(
     }
 
     override fun execute(manifest: SourceManifest, request: SourceNetworkRequest): SourcePlatformResult<SourceNetworkResponse> {
+        VBookSafeRhinoBoundary.installCurrentContext()
         val requestKey = request.headers.controlHeader(INTERNAL_REQUEST_KEY)
         val operation = request.headers.controlHeader(INTERNAL_OPERATION)?.lowercase()
         val decodeCharset = request.headers.controlHeader(INTERNAL_DECODE_CHARSET)
@@ -81,7 +82,6 @@ class VBookRawNetworkBroker(
                 charsetName = Charsets.UTF_8.name(),
                 traceId = request.traceId,
                 fromReplay = true,
-                // The safe current-vBook shim never inspects Java response collections for cache reads.
                 headers = emptyMap(),
             ))
         }
@@ -104,8 +104,6 @@ class VBookRawNetworkBroker(
         return SourcePlatformResult.Success(response.copy(
             body = envelope.toByteArray(Charsets.UTF_8),
             charsetName = Charsets.UTF_8.name(),
-            // Avoid exposing Java Maps to the deny-all Rhino ClassShutter. The envelope contains a
-            // JSON copy that the current-vBook prelude materializes as a native JS object.
             headers = emptyMap(),
         ))
     }

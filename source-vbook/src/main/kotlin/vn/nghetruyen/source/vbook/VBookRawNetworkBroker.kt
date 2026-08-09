@@ -1,0 +1,107 @@
+package vn.nghetruyen.source.vbook
+
+import vn.nghetruyen.source.api.SourceManifest
+import vn.nghetruyen.source.api.SourceNetworkBroker
+import vn.nghetruyen.source.api.SourceNetworkRequest
+import vn.nghetruyen.source.api.SourceNetworkResponse
+import vn.nghetruyen.source.api.SourcePlatformFailure
+import vn.nghetruyen.source.api.SourcePlatformResult
+import java.nio.charset.Charset
+import java.util.Base64
+import java.util.LinkedHashMap
+
+/**
+ * vBook-only network decorator used to bridge the mature text-oriented JS host to the raw-byte
+ * contract without weakening or modifying the generic network broker.
+ *
+ * Internal control headers are removed before any upstream request. A charset decode is served
+ * from the already captured response, so POST requests are never replayed just to decode text.
+ */
+class VBookRawNetworkBroker(
+    private val delegate: SourceNetworkBroker,
+    private val maxCachedResponses: Int = 32,
+    private val maxCachedBytes: Long = 32L * 1024L * 1024L,
+) : SourceNetworkBroker {
+    private data class CacheKey(val sourceId: String, val key: String)
+    private data class Cached(val response: SourceNetworkResponse, val bytes: Int)
+
+    private val cache = object : LinkedHashMap<CacheKey, Cached>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<CacheKey, Cached>?): Boolean = size > maxCachedResponses
+    }
+    private var cachedBytes: Long = 0
+
+    init {
+        require(maxCachedResponses in 1..256)
+        require(maxCachedBytes in 1024L..256L * 1024L * 1024L)
+    }
+
+    override fun execute(manifest: SourceManifest, request: SourceNetworkRequest): SourcePlatformResult<SourceNetworkResponse> {
+        val requestKey = request.headers[INTERNAL_REQUEST_KEY]
+        val decodeCharset = request.headers[INTERNAL_DECODE_CHARSET]
+        val sanitizedHeaders = request.headers.filterKeys { it != INTERNAL_REQUEST_KEY && it != INTERNAL_DECODE_CHARSET }
+
+        if (!decodeCharset.isNullOrBlank()) {
+            val key = requestKey?.takeIf(String::isNotBlank)
+                ?: return failure(request, "VBOOK_RAW_CACHE_KEY_REQUIRED")
+            val cached = synchronized(this) { cache[CacheKey(request.sourceId, key)] }
+                ?: return failure(request, "VBOOK_RAW_RESPONSE_CACHE_MISS")
+            val charset = runCatching { Charset.forName(decodeCharset) }.getOrElse {
+                return failure(request, "VBOOK_FETCH_CHARSET_INVALID:$decodeCharset")
+            }
+            val decoded = cached.response.body.toString(charset).toByteArray(Charsets.UTF_8)
+            return SourcePlatformResult.Success(cached.response.copy(
+                body = decoded,
+                charsetName = Charsets.UTF_8.name(),
+                traceId = request.traceId,
+                fromReplay = true,
+                headers = enrichHeaders(cached.response.headers, cached.response.body, key),
+            ))
+        }
+
+        val result = delegate.execute(manifest, request.copy(headers = sanitizedHeaders))
+        if (result !is SourcePlatformResult.Success) return result
+        val response = result.value
+        val key = requestKey?.takeIf(String::isNotBlank)
+        if (key != null) put(CacheKey(request.sourceId, key), response)
+        return SourcePlatformResult.Success(response.copy(
+            headers = enrichHeaders(response.headers, response.body, key),
+        ))
+    }
+
+    @Synchronized
+    private fun put(key: CacheKey, response: SourceNetworkResponse) {
+        cache.remove(key)?.let { cachedBytes -= it.bytes.toLong() }
+        if (response.body.size.toLong() > maxCachedBytes) return
+        cache[key] = Cached(response, response.body.size)
+        cachedBytes += response.body.size
+        while (cache.isNotEmpty() && (cache.size > maxCachedResponses || cachedBytes > maxCachedBytes)) {
+            val first = cache.entries.iterator().next()
+            cachedBytes -= first.value.bytes.toLong()
+            cache.remove(first.key)
+        }
+    }
+
+    private fun enrichHeaders(
+        headers: Map<String, List<String>>,
+        body: ByteArray,
+        key: String?,
+    ): Map<String, List<String>> = LinkedHashMap(headers).apply {
+        put(INTERNAL_RAW_BASE64.lowercase(), listOf(Base64.getEncoder().encodeToString(body)))
+        if (key != null) put(INTERNAL_RESPONSE_KEY.lowercase(), listOf(key))
+    }
+
+    private fun failure(request: SourceNetworkRequest, message: String) = SourcePlatformResult.Failure(
+        SourcePlatformFailure(
+            code = vn.nghetruyen.source.api.SourceErrorCode.NETWORK_IO_ERROR,
+            message = message,
+            traceId = request.traceId,
+        ),
+    )
+
+    companion object {
+        const val INTERNAL_REQUEST_KEY = "X-Nghe-VBook-Request-Key"
+        const val INTERNAL_DECODE_CHARSET = "X-Nghe-VBook-Decode-Charset"
+        const val INTERNAL_RAW_BASE64 = "X-Nghe-VBook-Raw-Base64"
+        const val INTERNAL_RESPONSE_KEY = "X-Nghe-VBook-Response-Key"
+    }
+}

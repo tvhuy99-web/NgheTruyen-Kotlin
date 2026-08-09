@@ -17,6 +17,7 @@ import vn.nghetruyen.app.playback.TtsVoiceCatalog
 import vn.nghetruyen.app.sources.EncryptedSourceSessionStore
 import vn.nghetruyen.app.sourceplatform.AndroidVBookQuickTranslationRegistry
 import vn.nghetruyen.app.sourceplatform.SourcePlatformManager
+import vn.nghetruyen.app.sourceplatform.VBookSourcePlatform
 import vn.nghetruyen.app.sources.SourceHealthChecker
 import vn.nghetruyen.app.sources.SourceRegistry
 import vn.nghetruyen.app.transfer.BackupTransferManager
@@ -30,14 +31,25 @@ class AppContainer(context: Context) {
     val settingsRepository: SettingsRepository by lazy { SettingsRepository(appContext) }
     val libraryRepository: LibraryRepository by lazy { LibraryRepository(database) }
     val sourceSessionStore: EncryptedSourceSessionStore by lazy { EncryptedSourceSessionStore(appContext) }
-    val sourcePlatformManager: SourcePlatformManager by lazy {
+
+    private val vBookQuickTranslationInstalled: Unit by lazy {
         AndroidVBookQuickTranslationRegistry.install(libraryRepository)
+    }
+
+    val sourcePlatformManager: SourcePlatformManager by lazy {
+        vBookQuickTranslationInstalled
         SourcePlatformManager(appContext, sourceSessionStore, aiServices)
     }
+
+    val vBookSourcePlatform: VBookSourcePlatform by lazy {
+        vBookQuickTranslationInstalled
+        VBookSourcePlatform(appContext, sourceSessionStore, aiServices)
+    }
+
     val sourceRegistry: SourceRegistry by lazy {
         SourceRegistry(
             sessionStore = sourceSessionStore,
-            sourcePackSources = sourcePlatformManager.activeStorySources(),
+            sourcePackSources = sourcePlatformManager.activeStorySources() + vBookSourcePlatform.activeStorySources(),
         )
     }
     val sourceHealthChecker: SourceHealthChecker by lazy { SourceHealthChecker(sourceRegistry) }

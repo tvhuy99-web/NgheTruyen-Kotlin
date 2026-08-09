@@ -69,8 +69,18 @@ class VBookUpdateCoordinator(
         if (!validation.activatable) {
             val failure = validation.failures.firstOrNull() ?: SourceFailure(
                 SourceFailureCode.ARTIFACT_UPDATE_REJECTED,
-                "VBOOK_CANDIDATE_NOT_ACTIVATABLE",
+                if (validation.blockingFeatures.isNotEmpty()) {
+                    "VBOOK_ENGINE_FEATURE_PARTIAL:${validation.blockingFeatures.sortedBy(Enum<*>::name).joinToString { it.name }}"
+                } else {
+                    "VBOOK_CANDIDATE_NOT_ACTIVATABLE:${validation.state}"
+                },
                 sourceId = payload.artifactId,
+                details = buildMap {
+                    if (validation.blockingFeatures.isNotEmpty()) {
+                        put("blockingFeatures", validation.blockingFeatures.sortedBy(Enum<*>::name).joinToString { it.name })
+                    }
+                    validation.profile?.let { put("profile", it.id) }
+                },
             )
             activator.quarantine(descriptor, failure)
             return VBookUpdateResult(

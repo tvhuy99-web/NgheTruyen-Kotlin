@@ -1,19 +1,17 @@
-name: Agent isolate M0 Gradle stage
+name: Agent patch TruyenCom parser and verify tests
 
 on:
   pull_request:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  diagnose:
+  patch-and-test:
     if: github.event.pull_request.head.ref == 'agent/settings-a11y-labels'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    env:
-      EXPECTED_DEBUG_CERT_SHA256: 534bf882c96a59ccf4310d18d02b14b62aa68e2beff3b6d05bf308e9909eb2f4
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
         with:
@@ -28,34 +26,31 @@ jobs:
         run: |
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
-      - name: clean
-        run: ./gradlew --no-daemon --stacktrace --warning-mode all clean
-      - name: tests
-        shell: bash
+      - name: Fix TruyenCom story-row container
         run: |
-          set +e
-          ./gradlew --no-daemon --console=plain test testDebugUnitTest > /tmp/unit-tests.log 2>&1
-          rc=$?
-          set -e
-          if [[ $rc -ne 0 ]]; then
-            echo '=== FAILED TEST SUMMARY ==='
-            grep -E -n 'FAILED|FAILURE:|AssertionError|expected:|but was:|Caused by:|There were failing tests|tests completed' /tmp/unit-tests.log | tail -n 160 || true
-            echo '=== FINAL TEST LOG ==='
-            tail -n 120 /tmp/unit-tests.log
-            exit $rc
-          fi
-          echo 'UNIT_TESTS=PASS'
-      - name: lint
-        run: ./gradlew --no-daemon --stacktrace --warning-mode all lintDebug
-      - name: assemble_and_bundle
-        run: ./gradlew --no-daemon --stacktrace --warning-mode all assembleDebug assembleDebugAndroidTest bundleRelease
-      - name: stable_debug_signature
-        shell: bash
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('app/src/main/java/vn/nghetruyen/app/sources/TruyenComSource.kt')
+          text = path.read_text()
+          old = 'val box = link.closest("article, li, .row, .item, .story, [class*=truyen]")'
+          new = 'val box = link.closest("article, li, .row, .item, .story")'
+          if text.count(old) != 1:
+              raise SystemExit(f'Expected exactly one TruyenCom container anchor, found {text.count(old)}')
+          path.write_text(text.replace(old, new))
+          PY
+      - name: Verify four previously failing tests
         run: |
-          APK="app/build/outputs/apk/debug/app-debug.apk"
-          APKSIGNER="${ANDROID_HOME}/build-tools/36.0.0/apksigner"
-          test -f "${APK}"
-          ACTUAL_CERT_SHA256="$("${APKSIGNER}" verify --print-certs "${APK}" | awk -F': ' '/certificate SHA-256 digest:/ {print tolower($NF); exit}')"
-          echo "Expected certificate: ${EXPECTED_DEBUG_CERT_SHA256}"
-          echo "Actual certificate:   ${ACTUAL_CERT_SHA256}"
-          test "${ACTUAL_CERT_SHA256}" = "${EXPECTED_DEBUG_CERT_SHA256}"
+          ./gradlew --no-daemon --console=plain \
+            :app:testDebugUnitTest :app:testReleaseUnitTest \
+            --tests 'vn.nghetruyen.app.audio.PcmLoudnessEstimatorTest' \
+            --tests 'vn.nghetruyen.app.sources.SourceRegistryTest' \
+            --tests 'vn.nghetruyen.app.sources.TruyenComSourceTest' \
+            --tests 'vn.nghetruyen.app.sources.TruyenCvSourceTest'
+      - name: Commit parser fix and remove helper
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/vn/nghetruyen/app/sources/TruyenComSource.kt
+          git rm .github/workflows/agent-debug-m0-gradle.yml
+          git commit -m 'fix: repair source parser unit regressions'
+          git push origin HEAD:agent/settings-a11y-labels

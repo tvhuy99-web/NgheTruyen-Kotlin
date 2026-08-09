@@ -27,7 +27,8 @@ class VBookRuntimeFailureDiagnosticTest {
     @Test
     fun deniedStorageStillRejectsActualMutation() {
         val result = execute("function execute(q,p){localStorage.setItem('k','v');return Response.success([],'');}")
-        val failure = result as? SourcePlatformResult.Failure ?: fail("Expected denied storage mutation to fail")
+        if (result !is SourcePlatformResult.Failure) fail("Expected denied storage mutation to fail")
+        val failure = result as SourcePlatformResult.Failure
         assertTrue(failure.error.message.contains("SOURCE_STORAGE_BROKER_UNAVAILABLE"))
     }
 

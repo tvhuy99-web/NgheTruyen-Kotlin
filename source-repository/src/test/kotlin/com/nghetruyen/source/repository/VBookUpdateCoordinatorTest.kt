@@ -6,10 +6,12 @@ import com.nghetruyen.source.platform.SourceArtifactState
 import com.nghetruyen.source.platform.SourceCompatibilityState
 import com.nghetruyen.source.platform.SourceEcosystem
 import com.nghetruyen.source.platform.SourceTrustState
+import com.nghetruyen.source.store.SourceArtifactArchive
 import com.nghetruyen.source.store.SourceArtifactLifecycle
 import com.nghetruyen.source.store.SourceArtifactRegistry
 import com.nghetruyen.source.store.SourceArtifactTransition
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -27,17 +29,19 @@ class VBookUpdateCoordinatorTest {
         val registry = MemoryRegistry()
         val archive = MemoryArchive()
         val coordinator = VBookUpdateCoordinator(VBookCandidateValidator(), registry, archive)
-        val first = coordinator.installOrUpdate(payload("v1", "1", GOOD_PLUGIN, GOOD_SCRIPTS), 11)
-        val second = coordinator.installOrUpdate(payload("v2", "2", GOOD_PLUGIN, GOOD_SCRIPTS), 21)
+        val first = coordinator.installOrUpdate(payload("v1", "1", goodPlugin(1), GOOD_SCRIPTS), 11)
+        val second = coordinator.installOrUpdate(payload("v2", "2", goodPlugin(2), GOOD_SCRIPTS), 21)
 
         assertEquals(VBookUpdateDisposition.ACTIVATED, first.disposition)
         assertEquals("v2", second.active!!.artifactId)
+        assertEquals("2", second.active!!.version)
         assertEquals("v1", registry.previousKnownGood(identity)!!.artifactId)
         assertTrue(archive.contains("v1") && archive.contains("v2"))
         assertEquals(second.descriptor.sha256, archive.sha256("v2"))
 
         val restored = coordinator.rollback(identity, 30)
         assertEquals("v1", restored.artifactId)
+        assertEquals("1", restored.version)
     }
 
     @Test
@@ -45,9 +49,9 @@ class VBookUpdateCoordinatorTest {
         val registry = MemoryRegistry()
         val archive = MemoryArchive()
         val coordinator = VBookUpdateCoordinator(VBookCandidateValidator(), registry, archive)
-        coordinator.installOrUpdate(payload("good", "1", GOOD_PLUGIN, GOOD_SCRIPTS), 11)
+        coordinator.installOrUpdate(payload("good", "1", goodPlugin(1), GOOD_SCRIPTS), 11)
         val badScripts = GOOD_SCRIPTS - "src/chap.js"
-        val result = coordinator.installOrUpdate(payload("bad", "2", GOOD_PLUGIN, badScripts), 21)
+        val result = coordinator.installOrUpdate(payload("bad", "2", goodPlugin(2), badScripts), 21)
 
         assertEquals(VBookUpdateDisposition.QUARANTINED, result.disposition)
         assertEquals("good", registry.active(identity)!!.artifactId)
@@ -60,7 +64,7 @@ class VBookUpdateCoordinatorTest {
         val registry = MemoryRegistry()
         val archive = MemoryArchive()
         val coordinator = VBookUpdateCoordinator(VBookCandidateValidator(), registry, archive)
-        coordinator.installOrUpdate(payload("good", "1", GOOD_PLUGIN, GOOD_SCRIPTS), 11)
+        coordinator.installOrUpdate(payload("good", "1", goodPlugin(1), GOOD_SCRIPTS), 11)
 
         val websocketScripts = GOOD_SCRIPTS + mapOf(
             "src/search.js" to """
@@ -71,14 +75,32 @@ class VBookUpdateCoordinatorTest {
                 }
             """.trimIndent(),
         )
-        val result = coordinator.installOrUpdate(payload("ws-v2", "2", GOOD_PLUGIN, websocketScripts), 21)
+        val result = coordinator.installOrUpdate(payload("ws-v2", "2", goodPlugin(2), websocketScripts), 21)
 
         assertEquals(VBookUpdateDisposition.QUARANTINED, result.disposition)
         assertEquals(SourceCompatibilityState.PARTIAL, result.validation.state)
         assertTrue(VBookFeature.WEBSOCKET in result.validation.blockingFeatures)
-        assertTrue(VBookFeature.WEBSOCKET_FRAMES in result.validation.blockingFeatures)
+        assertFalse(VBookFeature.WEBSOCKET_FRAMES in result.validation.blockingFeatures)
         assertEquals("good", registry.active(identity)!!.artifactId)
         assertEquals(SourceArtifactState.QUARANTINED, registry.quarantined.getValue("ws-v2").state)
+    }
+
+    @Test
+    fun advertisedVersionMismatchIsQuarantinedAndPackageVersionRemainsAuthoritative() {
+        val registry = MemoryRegistry()
+        val archive = MemoryArchive()
+        val coordinator = VBookUpdateCoordinator(VBookCandidateValidator(), registry, archive)
+        coordinator.installOrUpdate(payload("good", "1", goodPlugin(1), GOOD_SCRIPTS), 11)
+
+        val result = coordinator.installOrUpdate(
+            payload("mismatch", "2", goodPlugin(1), GOOD_SCRIPTS),
+            21,
+        )
+
+        assertEquals(VBookUpdateDisposition.QUARANTINED, result.disposition)
+        assertEquals("1", result.descriptor.version)
+        assertTrue(result.validation.failures.any { it.message.startsWith("VBOOK_PACKAGE_VERSION_MISMATCH") })
+        assertEquals("good", registry.active(identity)!!.artifactId)
     }
 
     @Test
@@ -86,7 +108,7 @@ class VBookUpdateCoordinatorTest {
         val registry = MemoryRegistry()
         val archive = MemoryArchive()
         val coordinator = VBookUpdateCoordinator(VBookCandidateValidator(), registry, archive)
-        coordinator.installOrUpdate(payload("good", "1", GOOD_PLUGIN, GOOD_SCRIPTS), 11)
+        coordinator.installOrUpdate(payload("good", "1", goodPlugin(1), GOOD_SCRIPTS), 11)
         val malformed = VBookUpdatePayload(
             artifactId = "corrupt",
             identity = identity,
@@ -162,13 +184,14 @@ class VBookUpdateCoordinatorTest {
     }
 
     companion object {
-        private val GOOD_PLUGIN = """
+        private fun goodPlugin(version: Int) = """
             {
-              "metadata":{"name":"x","author":"a","version":1,"source":"https://x.example","description":"","locale":"vi","regexp":"x","type":"novel","encrypt":false},
+              "metadata":{"name":"x","author":"a","version":$version,"source":"https://x.example","description":"","locale":"vi","regexp":"x","type":"novel","encrypt":false},
               "script":{"explore":"explore.js","search":"search.js","detail":"detail.js","toc":"toc.js","chap":"chap.js"},
               "config":{"DOMAIN":{"title":"Domain","default":"https://x.example","mode":"input","format":"text"}}
             }
         """.trimIndent()
+
         private val GOOD_SCRIPTS = mapOf(
             "src/explore.js" to "function execute(){return Response.success([]);}",
             "src/search.js" to "function execute(q,p){return Response.success([],p);}",

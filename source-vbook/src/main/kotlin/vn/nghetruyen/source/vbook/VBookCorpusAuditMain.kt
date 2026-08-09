@@ -47,18 +47,31 @@ private fun auditDirectory(dir: Path): VBookExtensionAudit {
 }
 
 private fun VBookCorpusReport.toJson(audits: List<VBookExtensionAudit>): JsonValue.Obj = JsonValue.Obj(linkedMapOf(
-    "schema" to JsonValue.Num(1.0, "1"),
+    "schema" to JsonValue.Num(2.0, "2"),
     "extensionCount" to number(extensionCount),
     "profiles" to JsonValue.Obj(profiles.entries.associateTo(linkedMapOf()) { it.key.name to number(it.value) }),
     "contentTypes" to JsonValue.Obj(contentTypes.entries.associateTo(linkedMapOf()) { it.key.name to number(it.value) }),
     "features" to JsonValue.Arr(features.map { row ->
+        val support = VBookEngineFeatureMatrix.support(row.feature)
         JsonValue.Obj(linkedMapOf(
             "id" to JsonValue.Str(row.feature.name),
             "count" to number(row.extensionCount),
+            "implementation" to JsonValue.Str(support.implementation.name),
+            "note" to JsonValue.Str(support.note),
             "extensions" to JsonValue.Arr(row.extensionIds.map(JsonValue::Str)),
         ))
     }),
+    "blockingFeatures" to JsonValue.Arr(
+        VBookEngineFeatureMatrix.matrix(this).blockingFeatures.map { JsonValue.Str(it.feature.name) },
+    ),
     "extensions" to JsonValue.Arr(audits.sortedBy(VBookExtensionAudit::id).map { audit ->
+        val blocking = audit.features.filter { feature ->
+            if (feature == VBookFeature.METADATA_ENCRYPT) return@filter false
+            VBookEngineFeatureMatrix.support(feature).implementation in setOf(
+                VBookFeatureImplementationLevel.PARTIAL,
+                VBookFeatureImplementationLevel.PACKAGE_LAYER_PENDING,
+            )
+        }
         JsonValue.Obj(linkedMapOf(
             "id" to JsonValue.Str(audit.id),
             "profile" to JsonValue.Str(audit.detection.profile.name),
@@ -68,6 +81,7 @@ private fun VBookCorpusReport.toJson(audits: List<VBookExtensionAudit>): JsonVal
             "missingRequiredScripts" to JsonValue.Arr(audit.missingRequiredScripts.sorted().map(JsonValue::Str)),
             "missingDynamicScripts" to JsonValue.Arr(audit.missingReferencedScripts.sorted().map(JsonValue::Str)),
             "features" to JsonValue.Arr(audit.features.map(Enum<*>::name).sorted().map(JsonValue::Str)),
+            "blockingFeatures" to JsonValue.Arr(blocking.map(Enum<*>::name).sorted().map(JsonValue::Str)),
         ))
     }),
 ))

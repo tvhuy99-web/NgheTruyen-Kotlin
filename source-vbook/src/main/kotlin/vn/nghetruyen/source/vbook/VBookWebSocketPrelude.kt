@@ -29,8 +29,8 @@ object VBookWebSocketPrelude {
               headerQueued = true;
             }
           }
-          out.connect = function() {
-            var connected = nativeSocket.connect.apply(nativeSocket, arguments);
+          out.connect = function(urlOverride) {
+            var connected = arguments.length ? nativeSocket.connect(urlOverride) : nativeSocket.connect();
             queueHeaders();
             return connected;
           };
@@ -38,19 +38,21 @@ object VBookWebSocketPrelude {
             queueHeaders();
             return nativeSocket.send(String(message == null ? '' : message));
           };
-          out.message = function() {
+          out.message = function(maxResponses) {
             queueHeaders();
-            return __vbookDecodeWsFrame(nativeSocket.message.apply(nativeSocket, arguments));
+            var raw = arguments.length ? nativeSocket.message(maxResponses) : nativeSocket.message();
+            return __vbookDecodeWsFrame(raw);
           };
           out.receive = out.message;
-          out.messages = function() {
+          out.messages = function(maxResponses) {
             queueHeaders();
-            var raw = nativeSocket.messages.apply(nativeSocket, arguments) || [];
+            var raw = arguments.length ? nativeSocket.messages(maxResponses) : nativeSocket.messages();
+            raw = raw || [];
             var result = [];
             for (var i=0; i<Number(raw.length || 0); i++) result.push(__vbookDecodeWsFrame(raw[i]));
             return result;
           };
-          out.close = function() { return nativeSocket.close.apply(nativeSocket, arguments); };
+          out.close = function() { return nativeSocket.close(); };
           out.isConnected = function() { return !!nativeSocket.connected; };
           Object.defineProperty(out, 'connected', {get:function(){return !!nativeSocket.connected;}});
           Object.defineProperty(out, 'closeCode', {get:function(){return nativeSocket.closeCode;}});

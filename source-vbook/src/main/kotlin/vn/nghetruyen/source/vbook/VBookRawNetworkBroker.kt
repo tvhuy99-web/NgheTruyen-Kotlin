@@ -38,7 +38,10 @@ class VBookRawNetworkBroker(
     override fun execute(manifest: SourceManifest, request: SourceNetworkRequest): SourcePlatformResult<SourceNetworkResponse> {
         val requestKey = request.headers[INTERNAL_REQUEST_KEY]
         val decodeCharset = request.headers[INTERNAL_DECODE_CHARSET]
-        val sanitizedHeaders = request.headers.filterKeys { it != INTERNAL_REQUEST_KEY && it != INTERNAL_DECODE_CHARSET }
+        val requestedTimeout = request.headers[INTERNAL_TIMEOUT_MS]?.toLongOrNull()?.coerceIn(100L, 120_000L)
+        val sanitizedHeaders = request.headers.filterKeys {
+            it != INTERNAL_REQUEST_KEY && it != INTERNAL_DECODE_CHARSET && it != INTERNAL_TIMEOUT_MS
+        }
 
         if (!decodeCharset.isNullOrBlank()) {
             val key = requestKey?.takeIf(String::isNotBlank)
@@ -58,7 +61,11 @@ class VBookRawNetworkBroker(
             ))
         }
 
-        val result = delegate.execute(manifest, request.copy(headers = sanitizedHeaders))
+        val delegatedRequest = request.copy(
+            headers = sanitizedHeaders,
+            timeoutMs = requestedTimeout ?: request.timeoutMs,
+        )
+        val result = delegate.execute(manifest, delegatedRequest)
         if (result !is SourcePlatformResult.Success) return result
         val response = result.value
         val key = requestKey?.takeIf(String::isNotBlank)
@@ -101,6 +108,7 @@ class VBookRawNetworkBroker(
     companion object {
         const val INTERNAL_REQUEST_KEY = "X-Nghe-VBook-Request-Key"
         const val INTERNAL_DECODE_CHARSET = "X-Nghe-VBook-Decode-Charset"
+        const val INTERNAL_TIMEOUT_MS = "X-Nghe-VBook-Timeout-Ms"
         const val INTERNAL_RAW_BASE64 = "X-Nghe-VBook-Raw-Base64"
         const val INTERNAL_RESPONSE_KEY = "X-Nghe-VBook-Response-Key"
     }

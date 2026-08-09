@@ -2,6 +2,7 @@ package com.nghetruyen.source.repository
 
 import com.nghetruyen.source.platform.SourceArtifactDescriptor
 import com.nghetruyen.source.platform.SourceArtifactIdentity
+import com.nghetruyen.source.platform.SourceCompatibilityState
 import com.nghetruyen.source.platform.SourceFailure
 import com.nghetruyen.source.platform.SourceFailureCode
 import com.nghetruyen.source.platform.SourceTrustState
@@ -11,11 +12,14 @@ import com.nghetruyen.source.store.SourceArtifactRegistry
 import vn.nghetruyen.source.vbook.VBookCandidate
 import vn.nghetruyen.source.vbook.VBookCandidateValidation
 import vn.nghetruyen.source.vbook.VBookCandidateValidator
+import vn.nghetruyen.source.vbook.VBookPackageReader
+import vn.nghetruyen.source.vbook.VBookScriptPayloadDecoder
 
 /** Immutable archive for original extension bytes. Implementations may be file-, database- or blob-backed. */
 interface SourceArtifactArchive {
     fun stage(descriptor: SourceArtifactDescriptor, originalBytes: ByteArray)
     fun contains(artifactId: String): Boolean
+    fun sha256(artifactId: String): String?
 }
 
 enum class VBookUpdateDisposition {
@@ -28,8 +32,6 @@ data class VBookUpdatePayload(
     val identity: SourceArtifactIdentity,
     val version: String?,
     val originalPackageBytes: ByteArray,
-    val pluginJson: String,
-    val scripts: Map<String, String>,
     val trust: SourceTrustState,
     val installedAtEpochMs: Long,
 )
@@ -42,23 +44,20 @@ data class VBookUpdateResult(
 )
 
 /**
- * Downloading and ZIP extraction happen before this coordinator. The coordinator enforces the
- * irreversible boundary: validate -> stage immutable bytes -> atomically move the active pointer.
+ * Validates the exact immutable bytes that are staged and later activated. A caller cannot validate
+ * one source tree and archive another package. Pointer changes remain atomic at the registry layer.
  */
 class VBookUpdateCoordinator(
     private val validator: VBookCandidateValidator,
     private val registry: SourceArtifactRegistry,
     private val archive: SourceArtifactArchive,
+    private val scriptDecoder: VBookScriptPayloadDecoder = VBookScriptPayloadDecoder.PLAIN_UTF8,
 ) {
     private val activator = SourceArtifactActivator(registry)
 
     fun installOrUpdate(payload: VBookUpdatePayload, activatedAtEpochMs: Long): VBookUpdateResult {
         require(payload.originalPackageBytes.isNotEmpty()) { "VBOOK_PACKAGE_BYTES_REQUIRED" }
-        val validation = validator.validate(VBookCandidate(
-            artifactId = payload.artifactId,
-            pluginJson = payload.pluginJson,
-            scripts = payload.scripts,
-        ))
+        val validation = validateExactPackage(payload)
         val descriptor = SourceArtifactLifecycle.candidate(
             artifactId = payload.artifactId,
             identity = payload.identity,
@@ -69,10 +68,9 @@ class VBookUpdateCoordinator(
             installedAtEpochMs = payload.installedAtEpochMs,
         )
 
-        // Archive is content-addressed/immutable. Staging before pointer commit is crash-safe:
-        // orphan candidates can be garbage-collected, while the existing active artifact remains valid.
         archive.stage(descriptor, payload.originalPackageBytes.copyOf())
         require(archive.contains(descriptor.artifactId)) { "SOURCE_ARTIFACT_ARCHIVE_STAGE_FAILED" }
+        require(archive.sha256(descriptor.artifactId) == descriptor.sha256) { "SOURCE_ARTIFACT_ARCHIVE_HASH_MISMATCH" }
 
         if (!validation.activatable) {
             val failure = validation.failures.firstOrNull() ?: SourceFailure(
@@ -100,4 +98,24 @@ class VBookUpdateCoordinator(
 
     fun rollback(identity: SourceArtifactIdentity, activatedAtEpochMs: Long): SourceArtifactDescriptor =
         activator.rollback(identity, activatedAtEpochMs)
+
+    private fun validateExactPackage(payload: VBookUpdatePayload): VBookCandidateValidation = runCatching {
+        val pkg = VBookPackageReader.read(payload.originalPackageBytes)
+        val pluginJson = pkg.pluginJson()
+        val scripts = pkg.decodeScripts(scriptDecoder)
+        validator.validate(VBookCandidate(payload.artifactId, pluginJson, scripts))
+    }.getOrElse { error ->
+        VBookCandidateValidation(
+            candidate = VBookCandidate(payload.artifactId, "", emptyMap()),
+            audit = null,
+            state = SourceCompatibilityState.UNSUPPORTED,
+            profile = null,
+            failures = listOf(SourceFailure(
+                SourceFailureCode.ARTIFACT_INVALID,
+                error.message ?: "VBOOK_PACKAGE_INVALID",
+                sourceId = payload.artifactId,
+            )),
+            warnings = emptyList(),
+        )
+    }
 }

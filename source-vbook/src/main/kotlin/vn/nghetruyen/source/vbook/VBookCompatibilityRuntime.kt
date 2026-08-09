@@ -122,6 +122,7 @@ class VBookCompatibilityRuntime(
             base = sourceManifest,
             plugin = plugin,
             resources = resources,
+            configValues = config,
             additionalScriptPaths = setOf(normalizedScript),
         ).copy(
             actions = mapOf(
@@ -192,6 +193,7 @@ class VBookCompatibilityRuntime(
         val configJson = JsonCodec.stringify(JsonValue.Obj(linkedMapOf<String, JsonValue>().apply {
             config.values.forEach { (key, value) -> put(key, JsonValue.Str(value)) }
         }))
+        val connection = config.connectionSettings()
         val prelude = VBookConfigPrelude.build(profile, config)
         val responsePrelude = when (profile) {
             VBookContractProfile.CURRENT_JS -> ""
@@ -207,6 +209,8 @@ class VBookCompatibilityRuntime(
             'use strict';
             $responsePrelude
             var __vbookConfigValues = $configJson;
+            var __vbookDefaultTimeoutMs = ${connection.timeoutMs};
+            var __vbookDelayMs = ${connection.delayMs};
             localConfig = Object.freeze({
               getItem:function(key){ key=String(key||''); return Object.prototype.hasOwnProperty.call(__vbookConfigValues,key) ? __vbookConfigValues[key] : undefined; },
               key:function(index){ var keys=Object.keys(__vbookConfigValues).sort(); return keys[Number(index)||0]; },
@@ -264,7 +268,10 @@ class VBookCompatibilityRuntime(
               var nativeHeaders = __vbookCopyObject(publicHeaders);
               var requestKey = 'vbr-' + String(Date.now()) + '-' + String(++__vbookFetchSeq);
               nativeHeaders['${VBookRawNetworkBroker.INTERNAL_REQUEST_KEY}'] = requestKey;
-              if (options.timeout !== undefined && options.timeout !== null) nativeHeaders['${VBookRawNetworkBroker.INTERNAL_TIMEOUT_MS}'] = String(options.timeout);
+              nativeHeaders['${VBookRawNetworkBroker.INTERNAL_TIMEOUT_MS}'] = String(
+                options.timeout === undefined || options.timeout === null ? __vbookDefaultTimeoutMs : options.timeout
+              );
+              if (__vbookDelayMs > 0) nativeHeaders['${VBookRawNetworkBroker.INTERNAL_DELAY_MS}'] = String(__vbookDelayMs);
               nativeOptions.headers = nativeHeaders;
               if (nativeOptions.body && typeof nativeOptions.body === 'object') nativeOptions.body = JSON.stringify(nativeOptions.body);
               delete nativeOptions.queries;

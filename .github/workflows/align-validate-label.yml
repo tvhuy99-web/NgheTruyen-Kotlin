@@ -1,0 +1,41 @@
+name: Align release gate label
+
+on:
+  push:
+    branches:
+      - agent/settings-a11y-labels
+    paths:
+      - .github/workflows/align-validate-label.yml
+
+permissions:
+  contents: write
+
+jobs:
+  align:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Align Story AI reference marker
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/validate_release.py')
+          s = p.read_text(encoding='utf-8')
+          old = '"THIẾT LẬP AI CHO TRUYỆN NÀY"'
+          new = '"AI RIÊNG CHO TRUYỆN"'
+          if s.count(old) != 1:
+              raise SystemExit(f'Expected one old Story AI marker, found {s.count(old)}')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          PY
+          git diff --check
+      - name: Commit gate update
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add scripts/validate_release.py
+          git commit -m 'test: align release gate with reference Story AI dialog'
+          git push origin HEAD:agent/settings-a11y-labels

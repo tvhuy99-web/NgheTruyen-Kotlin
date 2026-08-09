@@ -3,6 +3,7 @@ package vn.nghetruyen.app.sourceplatform
 import android.content.Context
 import com.nghetruyen.source.platform.SourceArtifactDescriptor
 import com.nghetruyen.source.platform.SourceArtifactIdentity
+import com.nghetruyen.source.platform.SourceArtifactState
 import com.nghetruyen.source.platform.SourceCompatibilityState
 import com.nghetruyen.source.platform.SourceEcosystem
 import com.nghetruyen.source.platform.SourceTrustState
@@ -25,6 +26,7 @@ import vn.nghetruyen.source.vbook.VBookConfigService
 import vn.nghetruyen.source.vbook.VBookConfigSnapshot
 import vn.nghetruyen.source.vbook.VBookContentType
 import vn.nghetruyen.source.vbook.VBookFeature
+import vn.nghetruyen.source.vbook.VBookHostManifestFactory
 import vn.nghetruyen.source.vbook.VBookManifestParser
 import vn.nghetruyen.source.vbook.VBookPackageReader
 import vn.nghetruyen.source.vbook.VBookValidationFactory
@@ -43,6 +45,19 @@ data class VBookInstallPreview(
 ) {
     val activatable: Boolean get() = validation.activatable
 }
+
+data class VBookInstalledSourceInfo(
+    val sourceId: String,
+    val repositoryId: String,
+    val remoteIdentity: String,
+    val name: String,
+    val version: String,
+    val enabled: Boolean,
+    val contentType: VBookContentType,
+    val profileId: String,
+    val canRollback: Boolean,
+    val installedVersions: List<String>,
+)
 
 /**
  * Persistent vBook subsystem. It deliberately does not install vBook packages into SourcePackStore.
@@ -142,6 +157,49 @@ class VBookSourcePlatform(
 
     fun activeArtifacts(): List<SourceArtifactDescriptor> = store.activeArtifacts(SourceEcosystem.VBOOK)
 
+    fun installedSources(): List<VBookInstalledSourceInfo> = store.installedArtifacts(SourceEcosystem.VBOOK).mapNotNull { current ->
+        val bytes = store.originalBytes(current.artifactId) ?: return@mapNotNull null
+        val manifest = runCatching { VBookManifestParser.parse(VBookPackageReader.read(bytes).pluginJson()) }.getOrNull()
+            ?: return@mapNotNull null
+        val previous = store.previousKnownGood(current.identity)
+        VBookInstalledSourceInfo(
+            sourceId = VBookHostManifestFactory.stableSourceId(current.identity.canonicalKey()),
+            repositoryId = current.identity.repositoryId,
+            remoteIdentity = current.identity.remoteIdentity,
+            name = manifest.metadata.name.ifBlank { current.identity.remoteIdentity },
+            version = current.version.orEmpty(),
+            enabled = current.state == SourceArtifactState.ACTIVE,
+            contentType = manifest.metadata.type,
+            profileId = current.compatibilityProfile?.id.orEmpty(),
+            canRollback = current.state == SourceArtifactState.ACTIVE && previous != null,
+            installedVersions = listOfNotNull(current.version, previous?.version).distinct(),
+        )
+    }
+
+    fun setEnabled(sourceId: String, enabled: Boolean): VBookInstalledSourceInfo {
+        val current = installedBySourceId(sourceId)
+        when {
+            enabled && current.state == SourceArtifactState.DISABLED ->
+                store.commit(SourceArtifactLifecycle.enable(current, clockMs()))
+            !enabled && current.state == SourceArtifactState.ACTIVE ->
+                store.commit(SourceArtifactLifecycle.disable(current))
+        }
+        return installedSources().first { it.sourceId == sourceId }
+    }
+
+    fun rollbackBySourceId(sourceId: String): SourceArtifactDescriptor {
+        val current = installedBySourceId(sourceId)
+        require(current.state == SourceArtifactState.ACTIVE) { "VBOOK_ROLLBACK_ACTIVE_REQUIRED" }
+        return coordinator.rollback(current.identity, clockMs())
+    }
+
+    /** Removes install-state/config pointers; immutable artifact bytes remain archived for audit. */
+    fun uninstallBySourceId(sourceId: String): Boolean {
+        val current = installedBySourceId(sourceId)
+        configStore.clear(current.identity.canonicalKey())
+        return store.uninstall(current.identity)
+    }
+
     fun activeStorySources(): List<StorySource> = activeArtifacts().mapNotNull { artifact ->
         val bytes = store.originalBytes(artifact.artifactId) ?: return@mapNotNull null
         runCatching {
@@ -156,29 +214,34 @@ class VBookSourcePlatform(
 
     fun config(repositoryId: String, remoteIdentity: String): VBookConfigSnapshot {
         val identity = SourceArtifactIdentity(SourceEcosystem.VBOOK, repositoryId.trim(), remoteIdentity.trim())
-        val active = store.active(identity) ?: error("VBOOK_ACTIVE_ARTIFACT_NOT_FOUND")
-        val bytes = store.originalBytes(active.artifactId) ?: error("VBOOK_ACTIVE_ARTIFACT_BYTES_MISSING")
+        val current = store.active(identity) ?: store.disabled(identity) ?: error("VBOOK_INSTALLED_ARTIFACT_NOT_FOUND")
+        val bytes = store.originalBytes(current.artifactId) ?: error("VBOOK_INSTALLED_ARTIFACT_BYTES_MISSING")
         val manifest = VBookManifestParser.parse(VBookPackageReader.read(bytes).pluginJson())
         return configService.load(identity.canonicalKey(), manifest)
     }
 
     fun saveConfig(repositoryId: String, remoteIdentity: String, changes: Map<String, String>): VBookConfigSnapshot {
         val identity = SourceArtifactIdentity(SourceEcosystem.VBOOK, repositoryId.trim(), remoteIdentity.trim())
-        val active = store.active(identity) ?: error("VBOOK_ACTIVE_ARTIFACT_NOT_FOUND")
-        val bytes = store.originalBytes(active.artifactId) ?: error("VBOOK_ACTIVE_ARTIFACT_BYTES_MISSING")
+        val current = store.active(identity) ?: store.disabled(identity) ?: error("VBOOK_INSTALLED_ARTIFACT_NOT_FOUND")
+        val bytes = store.originalBytes(current.artifactId) ?: error("VBOOK_INSTALLED_ARTIFACT_BYTES_MISSING")
         val manifest = VBookManifestParser.parse(VBookPackageReader.read(bytes).pluginJson())
         return configService.save(identity.canonicalKey(), manifest, changes)
     }
 
     fun resetConfig(repositoryId: String, remoteIdentity: String): VBookConfigSnapshot {
         val identity = SourceArtifactIdentity(SourceEcosystem.VBOOK, repositoryId.trim(), remoteIdentity.trim())
-        val active = store.active(identity) ?: error("VBOOK_ACTIVE_ARTIFACT_NOT_FOUND")
-        val bytes = store.originalBytes(active.artifactId) ?: error("VBOOK_ACTIVE_ARTIFACT_BYTES_MISSING")
+        val current = store.active(identity) ?: store.disabled(identity) ?: error("VBOOK_INSTALLED_ARTIFACT_NOT_FOUND")
+        val bytes = store.originalBytes(current.artifactId) ?: error("VBOOK_INSTALLED_ARTIFACT_BYTES_MISSING")
         val manifest = VBookManifestParser.parse(VBookPackageReader.read(bytes).pluginJson())
         return configService.reset(identity.canonicalKey(), manifest)
     }
 
     fun originalPackageBytes(artifactId: String): ByteArray? = store.originalBytes(artifactId)
+
+    private fun installedBySourceId(sourceId: String): SourceArtifactDescriptor =
+        store.installedArtifacts(SourceEcosystem.VBOOK).firstOrNull {
+            VBookHostManifestFactory.stableSourceId(it.identity.canonicalKey()) == sourceId
+        } ?: error("VBOOK_INSTALLED_SOURCE_NOT_FOUND:$sourceId")
 
     private fun artifactId(identity: SourceArtifactIdentity, packageSha: String): String =
         "vbook-" + SourceArtifactLifecycle.sha256(

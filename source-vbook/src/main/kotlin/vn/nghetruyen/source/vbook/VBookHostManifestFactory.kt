@@ -32,6 +32,7 @@ object VBookHostManifestFactory {
         val sourceId = stableSourceId(artifactIdentity)
         val allowCleartext = VBookNetworkPolicy.requiresLegacyCleartext(plugin, resources)
         val origin = sourceOrigin(plugin.metadata.source, allowCleartext)
+        val connection = VBookConfigValues.resolve(plugin).connectionSettings()
         val manifest = SourceManifest(
             schemaVersion = 2,
             id = sourceId,
@@ -61,7 +62,7 @@ object VBookHostManifestFactory {
                     maxResponseBytes = 16 * 1024 * 1024,
                     maxRequestBytes = 4 * 1024 * 1024,
                     requestsPerMinute = 600,
-                    maxConcurrent = 8,
+                    maxConcurrent = connection.threadNum,
                     publicInternet = true,
                     allowCleartext = allowCleartext,
                 ),

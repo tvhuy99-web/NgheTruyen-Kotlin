@@ -19,8 +19,11 @@ required = {
         "selectedEngineLabel",
         "selectedVoiceLabel",
         "sceneModeExpanded",
+        "ttsCacheExpanded",
         'Text("Bộ đọc TTS"',
         'Text("Giọng đọc"',
+        "Bật mặc định cho truyện dùng cấu hình chung",
+        "Bộ hồ sơ này là tiêu chuẩn dùng chung.",
     ],
     "ReaderScreen.kt": [
         'ReaderIntSlider("Cỡ chữ"',
@@ -38,24 +41,41 @@ required = {
         "Chế độ phát khi không dùng nhạc theo cảnh",
     ],
     "StoryDetailScreen.kt": [
+        'title = { Text("AI RIÊNG CHO TRUYỆN") }',
+        "Tự động dịch khi mở chương",
+        "Dùng lời nhắc riêng cho truyện này",
+        "Lời nhắc riêng khi dịch",
+        "Lời nhắc riêng khi cải thiện VietPhrase",
+        "Biến: {{CHAPTER_TITLE}}, {{CHAPTER_TEXT}}",
         "Tự động phân vai rồi đọc khi mở chương ở chế độ TTS",
         "AI tự điều chỉnh tốc độ, cao độ và âm lượng",
+        "Truyện sử dụng một bộ hồ sơ độc lập",
+        "Thứ tự luôn là: tải chương → dịch tự động",
         "steps = 99",
         "XEM / SỬA HƯỚNG DẪN THÔNG SỐ",
         "THIẾT LẬP BỘ GIỌNG RIÊNG",
+        "Ghi chú chung bổ sung cho AI",
+        "Tên, mô tả và cách tổ chức nhân vật do người dùng quyết định.",
+        "THÊM VAI HOẶC NHÂN VẬT",
+        "SAO CHÉP LẠI TỪ CẤU HÌNH CHUNG",
     ],
     "GlobalVoiceRoleEditorDialog.kt": [
+        'val dialogTitle = title ?: "HỒ SƠ GIỌNG TTS"',
         "Tên vai hoặc tên nhân vật",
         "Mô tả để AI nhận biết",
+        "Bật hồ sơ này",
+        "Người kể chuyện luôn được bật",
         "Bộ đọc TTS",
         "processingExpanded",
         "sonicQualityExpanded",
         "Android, tối đa 100%",
         "Sonic, tối đa 200%",
         'CompactVoiceValueRow("Tốc độ đọc"',
-        'CompactVoiceValueRow("Cao độ TTS"',
+        'CompactVoiceValueRow("Cao độ"',
         'label = "Âm lượng"',
         "steps = (intervals - 1).coerceAtLeast(0)",
+        'Text("LƯU HỒ SƠ")',
+        'Text("XÓA HỒ SƠ")',
     ],
 }
 texts = {
@@ -73,7 +93,7 @@ for token in [
     'Text("CHẬM")', 'Text("NHANH")', 'Text("TRẦM")', 'Text("CAO")',
     'Text("TỐC ĐỘ -")', 'Text("TỐC ĐỘ +")', 'Text("CAO ĐỘ -")', 'Text("CAO ĐỘ +")',
     'Text("GIỌNG NHỎ")', 'Text("GIỌNG LỚN")', 'Text("NHỎ HƠN")', 'Text("LỚN HƠN")',
-    'Text("-400 ms")', 'Text("+400 ms")',
+    'Text("-400 ms")', 'Text("+400 ms")', 'Text("CACHE -")', 'Text("CACHE +")',
 ]:
     if token in personal:
         raise SystemExit(f"PersonalScreen.kt: forbidden numeric button remains: {token}")
@@ -90,5 +110,9 @@ for token in [
 for token in ['+ "HỆ THỐNG"', '+ "SONIC"', '+ "NHANH"', '+ "CHÍNH XÁC"']:
     if token in role:
         raise SystemExit(f"GlobalVoiceRoleEditorDialog.kt: paired selector button remains: {token}")
+
+# Reference profile editor has no separate aliases field; aliases belong in the description guidance.
+if 'label = { Text("Bí danh") }' in role:
+    raise SystemExit("GlobalVoiceRoleEditorDialog.kt: extra Bí danh field remains")
 
 print("UI_CONTROL_PARITY=PASS")

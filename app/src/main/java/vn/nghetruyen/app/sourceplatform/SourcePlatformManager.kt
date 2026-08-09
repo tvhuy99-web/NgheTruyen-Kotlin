@@ -1,6 +1,8 @@
 package vn.nghetruyen.app.sourceplatform
 
 import android.content.Context
+import com.nghetruyen.source.platform.SourceArtifactIdentity
+import com.nghetruyen.source.platform.SourceEcosystem
 import vn.nghetruyen.app.BuildConfig
 import vn.nghetruyen.app.sources.SourceSessionStore
 import vn.nghetruyen.app.ai.TranslationEngine
@@ -15,10 +17,14 @@ import vn.nghetruyen.source.network.OkHttpSourceWebSocketBroker
 import vn.nghetruyen.source.network.PartitionedSourceCookieJar
 import vn.nghetruyen.source.runtime.FileSourceStorageBroker
 import vn.nghetruyen.source.runtime.JcaSourceCryptoBroker
-import vn.nghetruyen.source.vbook.VBookArchiveImporter
 import vn.nghetruyen.source.lua.LuaNativeHookBroker
 import vn.nghetruyen.source.lua.NativeLuaArchiveImporter
+import vn.nghetruyen.source.vbook.VBookHostManifestFactory
 import vn.nghetruyen.source.vbook.VBookJsRuntime
+import vn.nghetruyen.source.vbook.VBookManifestParser
+import vn.nghetruyen.source.vbook.VBookPackageLimits
+import vn.nghetruyen.source.vbook.VBookPackageReader
+import vn.nghetruyen.source.vbook.VBookPackageResourceProvider
 import vn.nghetruyen.source.diagnostics.BoundedDiagnosticRecorder
 import vn.nghetruyen.source.diagnostics.DiagnosticCategory
 import vn.nghetruyen.source.diagnostics.DiagnosticEvent
@@ -32,6 +38,7 @@ import vn.nghetruyen.source.packagekit.VerifiedSourcePack
 import vn.nghetruyen.source.repository.SourceRepositoryCatalog
 import vn.nghetruyen.source.repository.SourceRepositoryPackageStatus
 import vn.nghetruyen.source.repository.SourceRepositoryVerifier
+import vn.nghetruyen.source.repository.VBookUpdateDisposition
 import vn.nghetruyen.source.repository.VerifiedSourceRepository
 import vn.nghetruyen.source.runtime.DeclarativeSourceRuntime
 import vn.nghetruyen.source.runtime.MapSourceResourceProvider
@@ -39,6 +46,7 @@ import vn.nghetruyen.source.runtime.SourceFixtureExecutor
 import vn.nghetruyen.source.runtime.SourceFixtureRunner
 import vn.nghetruyen.source.store.SourcePackStore
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
@@ -46,6 +54,8 @@ import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
+import java.util.Locale
 import java.util.UUID
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
@@ -54,6 +64,8 @@ class SourcePlatformManager(
     context: Context,
     sourceSessionStore: SourceSessionStore,
     translationEngine: TranslationEngine,
+    private val vBookSourcePlatform: VBookSourcePlatform? = null,
+    private val onVBookChanged: () -> Unit = {},
 ) {
     private val appContext = context.applicationContext
     private val platformRoot = appContext.filesDir.resolve("source-platform-v2")
@@ -119,6 +131,7 @@ class SourcePlatformManager(
     private val repositories = linkedMapOf<String, CachedRepository>()
     private val builtinSourceIds = linkedSetOf<String>()
     private var pendingPack: VerifiedSourcePack? = null
+    private var pendingVBook: PendingVBookImport? = null
     private var pendingWarnings: List<String> = emptyList()
 
     init {
@@ -126,6 +139,7 @@ class SourcePlatformManager(
         bootstrapBuiltinPack()
     }
 
+    /** Legacy/native SourcePack sources only. vBook active artifacts live in VBookSourcePlatform. */
     fun activeStorySources(): List<StorySource> = store.list()
         .filter { it.enabled && it.active != null }
         .mapNotNull { installed -> store.readActivePack(installed.sourceId) }
@@ -237,10 +251,47 @@ class SourcePlatformManager(
         preparePack(pack)
     }
 
+    /**
+     * Preview a raw vBook ZIP without converting it to SourcePack. The existing UI preview model is
+     * reused only as presentation; the pending install retains the exact ZIP bytes and stable vBook
+     * identity, and confirmation is committed by VBookSourcePlatform.
+     */
     fun prepareVBookImport(input: InputStream): Result<SourceInstallPreview> = runCatching {
-        val (pack, warnings) = VBookArchiveImporter.import(input)
-        pendingWarnings = warnings
-        preparePack(pack)
+        val platform = vBookSourcePlatform ?: error("VBOOK_SUBSYSTEM_UNAVAILABLE")
+        val bytes = readBounded(input, VBookPackageLimits().maxZipBytes)
+        val pkg = VBookPackageReader.read(bytes)
+        val plugin = VBookManifestParser.parse(pkg.pluginJson())
+        val identity = manualVBookIdentity(plugin.metadata.author, plugin.metadata.name, plugin.metadata.type.name, plugin.metadata.locale)
+        val version = plugin.metadata.version.toString()
+        val preview = platform.preview(
+            repositoryId = identity.repositoryId,
+            remoteIdentity = identity.remoteIdentity,
+            version = version,
+            packageBytes = bytes,
+        )
+        require(preview.activatable) {
+            val blockers = preview.blockingFeatures.sortedBy(Enum<*>::name).joinToString { it.name }
+            val failures = preview.validation.failures.joinToString("; ") { it.message }
+            "VBOOK_IMPORT_NOT_ACTIVATABLE:${listOf(blockers, failures).filter(String::isNotBlank).joinToString(" | ")}"
+        }
+        val resources = VBookPackageResourceProvider(pkg)
+        val hostManifest = VBookHostManifestFactory.create(identity.canonicalKey(), plugin, resources)
+        val diff = store.permissionDiff(hostManifest)
+        pendingPack = null
+        pendingVBook = PendingVBookImport(identity, version, bytes.copyOf(), hostManifest.id, preview.name)
+        pendingWarnings = preview.warnings + listOf(
+            "VBOOK_RAW_PACKAGE_PRESERVED",
+            "VBOOK_RUNTIME:${preview.validation.profile?.id ?: "unknown"}",
+        )
+        SourceInstallPreview(
+            sourceId = hostManifest.id,
+            name = preview.name,
+            version = version,
+            signerKeyId = "vbook-unmodified",
+            permissionDiff = diff,
+            permissionSummary = permissionSummary(diff),
+            fixtureCount = preview.validation.audit?.features?.size ?: 0,
+        )
     }
 
     fun prepareNativeLuaImport(input: InputStream): Result<SourceInstallPreview> = runCatching {
@@ -261,6 +312,37 @@ class SourcePlatformManager(
     fun applyTrustKeyRotation(raw: ByteArray): Result<SourceTrustKeyUi> = trustRegistry.applyRotation(raw)
 
     fun confirmPendingInstall(): Result<SourcePackUiInfo> = runCatching {
+        val pendingVBookValue = pendingVBook
+        if (pendingVBookValue != null) {
+            val platform = vBookSourcePlatform ?: error("VBOOK_SUBSYSTEM_UNAVAILABLE")
+            val result = platform.installOrUpdate(
+                repositoryId = pendingVBookValue.identity.repositoryId,
+                remoteIdentity = pendingVBookValue.identity.remoteIdentity,
+                version = pendingVBookValue.version,
+                packageBytes = pendingVBookValue.bytes,
+            )
+            require(result.disposition == VBookUpdateDisposition.ACTIVATED && result.active != null) {
+                val blockers = result.validation.blockingFeatures.sortedBy(Enum<*>::name).joinToString { it.name }
+                "VBOOK_INSTALL_QUARANTINED:${blockers.ifBlank { result.validation.failures.joinToString("; ") { it.message } }}"
+            }
+            pendingVBook = null
+            pendingWarnings = emptyList()
+            onVBookChanged()
+            return@runCatching SourcePackUiInfo(
+                id = pendingVBookValue.sourceId,
+                name = pendingVBookValue.name,
+                version = pendingVBookValue.version,
+                enabled = true,
+                installedVersions = listOf(pendingVBookValue.version),
+                canRollback = false,
+                signerKeyId = "vbook-unmodified",
+                runtimeMode = SourceRuntimeMode.VBOOK_JS_COMPAT.name,
+                commentCapability = "VBOOK_DYNAMIC",
+                commentFixtureCount = 0,
+                removable = true,
+            )
+        }
+
         val pack = pendingPack ?: error("Không có gói nguồn đang chờ xác nhận.")
         val installed = when (val result = store.install(pack, activate = true)) {
             is SourcePlatformResult.Success -> result.value
@@ -273,6 +355,7 @@ class SourcePlatformManager(
 
     fun cancelPendingInstall() {
         pendingPack = null
+        pendingVBook = null
         pendingWarnings = emptyList()
     }
 
@@ -354,6 +437,7 @@ class SourcePlatformManager(
         validateCompatibility(pack)
         val selfTest = selfTest(pack)
         val diff = store.permissionDiff(pack.manifest)
+        pendingVBook = null
         pendingPack = pack
         return SourceInstallPreview(
             sourceId = pack.manifest.id,
@@ -492,6 +576,35 @@ class SourcePlatformManager(
         }
     }
 
+    private fun readBounded(input: InputStream, maxBytes: Int): ByteArray {
+        require(maxBytes > 0) { "VBOOK_IMPORT_LIMIT_INVALID" }
+        val output = ByteArrayOutputStream(minOf(maxBytes, 256 * 1024))
+        val buffer = ByteArray(16 * 1024)
+        var total = 0
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            total += read
+            require(total <= maxBytes) { "VBOOK_ZIP_SIZE_INVALID" }
+            output.write(buffer, 0, read)
+        }
+        return output.toByteArray().also { require(it.isNotEmpty()) { "VBOOK_ZIP_SIZE_INVALID" } }
+    }
+
+    private fun manualVBookIdentity(author: String, name: String, type: String, locale: String): SourceArtifactIdentity {
+        val canonical = listOf(author, name, type, locale)
+            .joinToString("\n") { it.trim().lowercase(Locale.ROOT) }
+        require(canonical.replace("\n", "").isNotBlank()) { "VBOOK_MANUAL_IDENTITY_METADATA_REQUIRED" }
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(canonical.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+        return SourceArtifactIdentity(
+            ecosystem = SourceEcosystem.VBOOK,
+            repositoryId = MANUAL_VBOOK_REPOSITORY_ID,
+            remoteIdentity = digest,
+        )
+    }
+
     private fun permissionSummary(diff: SourcePermissionDiff): List<String> = buildList {
         if (diff.addedOrigins.isNotEmpty()) add("Mạng: ${diff.addedOrigins.joinToString()}")
         if (diff.addedRedirectOrigins.isNotEmpty()) add("Chuyển hướng: ${diff.addedRedirectOrigins.joinToString()}")
@@ -504,6 +617,14 @@ class SourcePlatformManager(
         if (isEmpty()) add("Không yêu cầu thêm quyền")
     }
 
+    private data class PendingVBookImport(
+        val identity: SourceArtifactIdentity,
+        val version: String,
+        val bytes: ByteArray,
+        val sourceId: String,
+        val name: String,
+    )
+
     private data class CachedRepository(
         val url: String,
         val repository: VerifiedSourceRepository,
@@ -515,6 +636,7 @@ class SourcePlatformManager(
         val CURRENT_APP_VERSION: SemanticVersion = SemanticVersion.parse(BuildConfig.VERSION_NAME)
         private const val REPOSITORY_INDEX_FILE = "index.json"
         private const val REPOSITORY_URL_FILE = "url.txt"
+        private const val MANUAL_VBOOK_REPOSITORY_ID = "manual.vbook.local"
         private val REPOSITORY_ID = Regex("^[a-z][a-z0-9]*(\\.[a-z0-9][a-z0-9-]*){2,}$")
         private val BUILTIN_SOURCEPACK_ASSETS = listOf(
             "demo.ntsource",

@@ -12,7 +12,6 @@ s = p.read_text()
 s = rep(s, 'import androidx.compose.ui.unit.sp\n', 'import androidx.compose.ui.unit.sp\nimport androidx.work.WorkInfo\nimport androidx.work.WorkManager\n', 'work imports')
 s = rep(s, 'import kotlin.math.pow\n', 'import kotlin.math.pow\nimport java.util.UUID\n', 'uuid import')
 
-# State near music dialog state.
 anchor = '    var musicBulkErrors by remember { mutableStateOf<List<String>>(emptyList()) }\n'
 state = '''    var musicBulkErrors by remember { mutableStateOf<List<String>>(emptyList()) }
     var showMusicNormalizationProgress by remember { mutableStateOf(false) }
@@ -64,14 +63,12 @@ new_button = '''                ReaderMenuButton("CHUẨN HÓA TOÀN BỘ KHO NH
 '''
 s = rep(s, old_button, new_button, 'normalize all uses draft target')
 
-# Saving settings can recalc in the background but must explicitly pass the saved draft target.
 s = s.replace(
     '                    state.sceneMusicTracks.forEach { SceneMusicAnalysisWorker.enqueue(context, it.id) }\n',
     '                    state.sceneMusicTracks.forEach { SceneMusicAnalysisWorker.enqueue(context, it.id, musicTargetLufs) }\n',
     1,
 )
 
-# Insert progress dialog before library dialog.
 marker = '    if (showMusicLibrary) {\n'
 progress = '''    if (showMusicNormalizationProgress) {
         val total = musicNormalizationWorkIds.size
@@ -118,10 +115,14 @@ progress = '''    if (showMusicNormalizationProgress) {
     }
 
 '''
-s = rep(s, marker, progress + marker, 'normalization progress dialog')
+reader_options_pos = s.find('    if (showReaderOptions) {')
+music_dialog_pos = s.find('    if (showMusicDialog) {', reader_options_pos)
+library_pos = s.find(marker, music_dialog_pos)
+if reader_options_pos < 0 or music_dialog_pos < 0 or library_pos < 0:
+    raise SystemExit('missing marker: normalization progress dialog UI anchor')
+s = s[:library_pos] + progress + s[library_pos:]
 p.write_text(s)
 
-# Gate phase-4 semantics.
 Path('scripts/check_music_normalization_flow_parity.py').write_text('''#!/usr/bin/env python3
 from pathlib import Path
 worker = Path("app/src/main/java/vn/nghetruyen/app/audio/SceneMusicAnalysisWorker.kt").read_text()
@@ -130,6 +131,12 @@ for token in ["KEY_TARGET_LUFS", "targetLufs: Float? = null", "return request.id
     if token not in worker: raise SystemExit("MUSIC_NORMALIZE_FLOW worker missing: " + token)
 for token in ["SceneMusicAnalysisWorker.enqueue(context, track.id, musicTargetLufs)", "CHUẨN HÓA KHO NHẠC", "WorkInfo.State.SUCCEEDED", "WorkInfo.State.FAILED", "WorkInfo.State.CANCELLED", "getWorkInfoById(id).get()", "SceneMusicAnalysisWorker.cancel(context, it)", "Mục tiêu: %.0f LUFS", "không giải mã lại"]:
     if token not in reader: raise SystemExit("MUSIC_NORMALIZE_FLOW reader missing: " + token)
+menu = reader[reader.find('    if (showReaderOptions) {'):]
+music = menu[menu.find('    if (showMusicDialog) {'):]
+progress_pos = music.find('    if (showMusicNormalizationProgress) {')
+library_pos = music.find('    if (showMusicLibrary) {')
+if progress_pos < 0 or library_pos < 0 or progress_pos > library_pos:
+    raise SystemExit("MUSIC_NORMALIZE_FLOW progress dialog is not in the dialog UI region")
 print("MUSIC_NORMALIZATION_FLOW_PARITY=PASS")
 ''')
 

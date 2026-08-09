@@ -1,0 +1,184 @@
+name: Agent XPK final UI parity polish
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-xpk-final-polish
+  cancel-in-progress: true
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.ref == 'agent/settings-a11y-labels'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/settings-a11y-labels
+          fetch-depth: 0
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Apply final XPK UI parity fixes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              if old not in text:
+                  raise SystemExit(f"missing marker: {label}")
+              return text.replace(old, new, 1)
+
+          reader_path = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt')
+          reader = reader_path.read_text()
+
+          old_diag = '''                ReaderMenuButton("SAO CHÉP CHẨN ĐOÁN BỘ ĐỌC") {
+                      clipboard.setText(AnnotatedString("Bộ đọc: ${ttsDraft.enginePackage ?: "Mặc định hệ thống"}\\nNgôn ngữ: ${ttsDraft.languageTag}\\nGiọng: ${ttsDraft.voiceName ?: "Mặc định"}\\nSố bộ đọc/giọng: ${state.ttsEngines.size}/${ttsVoices.size}"))
+                      onMessage("Đã sao chép chẩn đoán bộ đọc.")
+                  }
+          '''.replace('\n          ', '\n')
+          new_diag = '''                if (!ttsLoading && state.ttsEngines.isEmpty()) {
+                      ReaderMenuButton("SAO CHÉP CHẨN ĐOÁN BỘ ĐỌC") {
+                          clipboard.setText(AnnotatedString("Bộ đọc: ${ttsDraft.enginePackage ?: "Mặc định hệ thống"}\\nNgôn ngữ: ${ttsDraft.languageTag}\\nGiọng: ${ttsDraft.voiceName ?: "Mặc định"}\\nSố bộ đọc/giọng: ${state.ttsEngines.size}/${ttsVoices.size}"))
+                          onMessage("Đã sao chép chẩn đoán bộ đọc.")
+                      }
+                  }
+          '''.replace('\n          ', '\n')
+          if 'if (!ttsLoading && state.ttsEngines.isEmpty()) {' not in reader:
+              reader = replace_once(reader, old_diag, new_diag, 'conditional TTS diagnostics')
+
+          stats_anchor = '        val describedCount = musicLibraryDraft.count { it.tagsCsv.isNotBlank() }\n'
+          if 'val estimatedCatalogTokens' not in reader:
+              stats_extra = '''        val catalogChars = musicLibraryDraft.sumOf { track ->
+              if (track.enabled) track.id.length + track.title.length + track.tagsCsv.trim().length + 8 else 0
+          }
+          val estimatedCatalogTokens = ((catalogChars + 3) / 4).coerceAtLeast(0)
+          '''.replace('\n          ', '\n')
+              reader = replace_once(reader, stats_anchor, stats_anchor + stats_extra, 'music token estimate')
+
+          old_summary = '                    "${musicLibraryDraft.size} bài • $enabledCount bật • $normalizedCount chuẩn hóa • $describedCount mô tả",\n'
+          new_summary = '''                    "Kho nhạc: ${musicLibraryDraft.size} bài\\n" +
+                          "Bài đang bật: $enabledCount bài\\n" +
+                          "Đã chuẩn hóa: $normalizedCount bài\\n" +
+                          "Đã có mô tả: $describedCount bài\\n" +
+                          "Ước tính khi gửi danh mục AI: khoảng $estimatedCatalogTokens token",
+          '''.replace('\n          ', '\n')
+          if 'Ước tính khi gửi danh mục AI: khoảng $estimatedCatalogTokens token' not in reader:
+              reader = replace_once(reader, old_summary, new_summary, 'music stats summary')
+
+          old_editor = '''                text = { Column {
+                      OutlinedTextField(title, { title = it.take(120) }, placeholder = { Text("Tên bài") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                      Text("Mô tả cho AI", modifier = Modifier.padding(top = 8.dp))
+                      OutlinedTextField(
+                          description,
+                          { description = it.take(301) },
+                          placeholder = { Text("Mô tả ngắn") },
+                          minLines = 4,
+                          maxLines = 7,
+                          modifier = Modifier.fillMaxWidth(),
+                      )
+                  } },
+          '''.replace('\n          ', '\n')
+          new_editor = '''                text = { Column {
+                      Text("Tên bài gửi cho AI")
+                      OutlinedTextField(title, { title = it.take(120) }, placeholder = { Text("Tên bài") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                      Text("Mô tả tham khảo cho AI, không bắt buộc AI làm theo", modifier = Modifier.padding(top = 8.dp))
+                      OutlinedTextField(
+                          description,
+                          { description = it.take(301) },
+                          placeholder = { Text("Tông/diễn biến: ...; Dùng: ...; Tránh: ...") },
+                          minLines = 4,
+                          maxLines = 7,
+                          modifier = Modifier.fillMaxWidth(),
+                      )
+                      Text("Tối đa 300 ký tự. Chỉ ghi thông tin thực sự giúp AI phân biệt và chọn bài.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
+                  } },
+          '''.replace('\n          ', '\n')
+          if 'Tên bài gửi cho AI' not in reader:
+              reader = replace_once(reader, old_editor, new_editor, 'music AI metadata editor')
+          reader_path.write_text(reader)
+
+          story_path = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/StoryReferenceAdvancedDialogs.kt')
+          story = story_path.read_text()
+          short_guidance = 'AI xử lý phân vai và ba thông số phần trăm trong cùng một lượt. Chỉ lời thoại trực tiếp được đổi giọng và thông số; lời kể cùng nội tâm giữ giọng Người kể chuyện ở thông số gốc.'
+          exact_guidance = 'AI xử lý phân vai và ba thông số phần trăm trong cùng một lượt. Không dùng nhãn buồn, vui hay tức giận. Chỉ lời thoại trực tiếp được đổi giọng và thông số; lời kể cùng nội tâm luôn giữ giọng Người kể chuyện ở thông số gốc. Mức AI trả về được áp trực tiếp trong giới hạn bên dưới. Âm lượng chỉ có thể tăng khi mức gốc còn dưới 100%.'
+          if exact_guidance not in story:
+              story = replace_once(story, short_guidance, exact_guidance, 'voice-cast expressive guidance')
+          story_path.write_text(story)
+
+          final_gate = [
+              '#!/usr/bin/env python3',
+              'from pathlib import Path',
+              '',
+              'reader = Path("app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt").read_text()',
+              'story = Path("app/src/main/java/vn/nghetruyen/app/ui/screens/StoryReferenceAdvancedDialogs.kt").read_text()',
+              '',
+              'required_reader = [',
+              '    "if (!ttsLoading && state.ttsEngines.isEmpty())",',
+              '    "Kho nhạc: ${musicLibraryDraft.size} bài",',
+              '    "Ước tính khi gửi danh mục AI: khoảng $estimatedCatalogTokens token",',
+              '    "Tên bài gửi cho AI",',
+              '    "Mô tả tham khảo cho AI, không bắt buộc AI làm theo",',
+              '    "Tối đa 300 ký tự. Chỉ ghi thông tin thực sự giúp AI phân biệt và chọn bài.",',
+              ']',
+              'for marker in required_reader:',
+              '    if marker not in reader:',
+              '        raise SystemExit("XPK_FINAL_UI Reader marker missing: " + marker)',
+              '',
+              'exact_guidance = "AI xử lý phân vai và ba thông số phần trăm trong cùng một lượt. Không dùng nhãn buồn, vui hay tức giận. Chỉ lời thoại trực tiếp được đổi giọng và thông số; lời kể cùng nội tâm luôn giữ giọng Người kể chuyện ở thông số gốc. Mức AI trả về được áp trực tiếp trong giới hạn bên dưới. Âm lượng chỉ có thể tăng khi mức gốc còn dưới 100%."',
+              'if exact_guidance not in story:',
+              '    raise SystemExit("XPK_FINAL_UI exact voice guidance missing")',
+              '',
+              'menu_start = reader.find("    if (showReaderOptions) {")',
+              'menu_end = reader.find("    if (showReaderModeDialog) {", menu_start)',
+              'if menu_start < 0 or menu_end < 0:',
+              '    raise SystemExit("XPK_FINAL_UI standard Reader menu missing")',
+              'menu = reader[menu_start:menu_end]',
+              'for extra in ["MỞ RỘNG", "ĐÁNH DẤU ĐOẠN", "ÁP DỤNG VIETPHRASE", "CẢI THIỆN VIETPHRASE", "LẬP NHẠC CẢNH", "PHÂN VAI + NHẠC", "XEM NHẬT KÝ CHẨN ĐOÁN"]:',
+              '    if extra in menu:',
+              '        raise SystemExit("XPK_FINAL_UI Kotlin-only Reader menu action remains: " + extra)',
+              '',
+              'print("XPK_FINAL_UI_PARITY=PASS")',
+              '',
+          ]
+          Path('scripts/check_xpk_final_ui_parity.py').write_text('\n'.join(final_gate))
+
+          m0_path = Path('scripts/m0_gate.sh')
+          m0 = m0_path.read_text()
+          if 'scripts/check_xpk_final_ui_parity.py' not in m0:
+              anchor = '  scripts/check_music_normalization_flow_parity.py\n'
+              if anchor not in m0:
+                  raise SystemExit('missing marker: m0 final parity anchor')
+              m0 = m0.replace(anchor, anchor + '  scripts/check_xpk_final_ui_parity.py\n', 1)
+              m0_path.write_text(m0)
+          PY
+      - name: Run parity gates
+        run: |
+          python3 scripts/check_ui_control_parity.py
+          python3 scripts/check_reference_workflow_parity.py
+          python3 scripts/check_music_runtime_parity.py
+          python3 scripts/check_music_playback_parity.py
+          python3 scripts/check_music_normalization_flow_parity.py
+          python3 scripts/check_xpk_final_ui_parity.py
+          python3 scripts/check_xpk_parity_v290.py
+      - name: Compile Kotlin
+        run: ./gradlew :app:compileDebugKotlin --no-daemon
+      - name: Commit final XPK UI parity fixes
+        shell: bash
+        run: |
+          rm -f .github/workflows/agent-run-xpk-final-polish.yml
+          git config user.name "openai-agent"
+          git config user.email "openai-agent@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "fix: finish XPK reader and music UI parity"
+          git push origin HEAD:agent/settings-a11y-labels

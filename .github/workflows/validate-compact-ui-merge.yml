@@ -11,7 +11,7 @@ jobs:
   validate:
     if: >-
       github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.head.ref == 'agent/compact-merge-runner-v3'
+      github.event.pull_request.head.ref == 'agent/compact-merge-runner-v4'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -21,7 +21,7 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Merge compact UI onto main
+      - name: Merge compact UI history while preserving current validated UI
         shell: bash
         run: |
           set -euo pipefail
@@ -36,9 +36,11 @@ jobs:
             exit 1
           fi
           git checkout origin/main -- \
+            app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt \
             app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt \
             app/src/main/java/vn/nghetruyen/app/ui/components/GlobalVoiceRoleEditorDialog.kt
-          git add app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt \
+          git add app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt \
+                  app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt \
                   app/src/main/java/vn/nghetruyen/app/ui/components/GlobalVoiceRoleEditorDialog.kt
           git commit --amend --no-edit
 

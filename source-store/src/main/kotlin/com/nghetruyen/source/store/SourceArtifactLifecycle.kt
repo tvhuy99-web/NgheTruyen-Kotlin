@@ -116,6 +116,20 @@ object SourceArtifactLifecycle {
         )
     }
 
+    fun enable(disabled: SourceArtifactDescriptor, activatedAtEpochMs: Long): SourceArtifactTransition {
+        require(disabled.state == SourceArtifactState.DISABLED) { "SOURCE_ENABLE_DISABLED_REQUIRED" }
+        require(activatedAtEpochMs >= disabled.installedAtEpochMs) { "SOURCE_ENABLE_TIME_INVALID" }
+        return SourceArtifactTransition(
+            identity = disabled.identity,
+            beforeActive = null,
+            afterActive = disabled.copy(
+                state = SourceArtifactState.ACTIVE,
+                activatedAtEpochMs = activatedAtEpochMs,
+            ),
+            previousKnownGood = null,
+        )
+    }
+
     fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
         .digest(bytes)
         .joinToString("") { "%02x".format(it.toInt() and 0xff) }
@@ -150,6 +164,13 @@ class SourceArtifactActivator(private val registry: SourceArtifactRegistry) {
         val active = registry.active(identity) ?: error("SOURCE_ROLLBACK_ACTIVE_MISSING")
         val previous = registry.previousKnownGood(identity) ?: error("SOURCE_ROLLBACK_PREVIOUS_MISSING")
         val transition = SourceArtifactLifecycle.rollback(active, previous, nowEpochMs)
+        registry.commit(transition)
+        return requireNotNull(transition.afterActive)
+    }
+
+    fun disable(identity: SourceArtifactIdentity): SourceArtifactDescriptor {
+        val active = registry.active(identity) ?: error("SOURCE_DISABLE_ACTIVE_MISSING")
+        val transition = SourceArtifactLifecycle.disable(active)
         registry.commit(transition)
         return requireNotNull(transition.afterActive)
     }

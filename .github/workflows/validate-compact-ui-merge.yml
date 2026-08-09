@@ -2,7 +2,7 @@ name: Validate compact UI merge
 
 on:
   pull_request:
-    types: [edited]
+    types: [opened, reopened, synchronize, edited]
 
 permissions:
   contents: read
@@ -10,9 +10,8 @@ permissions:
 jobs:
   validate:
     if: >-
-      github.event.pull_request.number == 11 &&
       github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.head.ref == 'agent/compact-ui-parity'
+      github.event.pull_request.head.ref == 'agent/compact-merge-runner'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:

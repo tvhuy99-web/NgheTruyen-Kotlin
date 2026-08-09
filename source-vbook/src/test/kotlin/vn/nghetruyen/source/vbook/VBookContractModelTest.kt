@@ -41,10 +41,13 @@ class VBookContractModelTest {
     }
 
     @Test
-    fun comicRequiresEitherPageOrChap() {
-        val manifest = VBookManifestParser.parse(CURRENT.replace("\"novel\"", "\"comic\"").replace(",\n    \"chap\": \"chap.js\"", ""))
+    fun comicMayOmitPageAndChapAndUseRawChapterUrlFallback() {
+        val manifest = VBookManifestParser.parse(
+            CURRENT.replace("\"novel\"", "\"comic\"")
+                .replace(",\n    \"chap\": \"chap.js\"", ""),
+        )
         val missing = VBookRequiredScripts.missing(manifest, VBookContractProfile.CURRENT_JS)
-        assertTrue("page|chap" in missing)
+        assertTrue(missing.isEmpty())
     }
 
     companion object {

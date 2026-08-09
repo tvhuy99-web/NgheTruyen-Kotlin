@@ -7,5 +7,6 @@ dependencies {
     implementation(project(":source-diagnostics"))
     implementation(project(":source-js-sandbox"))
     implementation("org.jsoup:jsoup:1.23.1")
+    testImplementation(project(":source-compat-testkit"))
     testImplementation("junit:junit:4.13.2")
 }

@@ -25,7 +25,27 @@ jobs:
           distribution: temurin
           java-version: '17'
       - name: Apply reference workflow patch
-        run: python3 scripts/agent_apply_xpk_phase1.py
+        shell: bash
+        run: |
+          set +e
+          output="$(python3 scripts/agent_apply_xpk_phase1.py 2>&1)"
+          rc=$?
+          set -e
+          printf '%s\n' "$output"
+          if [[ $rc -ne 0 && "$output" != *"missing marker: m0 gate"* ]]; then
+            exit "$rc"
+          fi
+          if ! grep -q 'check_reference_workflow_parity.py' scripts/m0_gate.sh; then
+            python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/m0_gate.sh')
+          s = p.read_text()
+          marker = '  scripts/check_ui_control_parity.py\n'
+          if marker not in s:
+              raise SystemExit('could not insert workflow parity gate')
+          p.write_text(s.replace(marker, marker + '  scripts/check_reference_workflow_parity.py\n', 1))
+          PY
+          fi
       - name: Run parity gates
         run: |
           python3 scripts/check_ui_control_parity.py

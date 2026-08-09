@@ -19,7 +19,8 @@ import vn.nghetruyen.source.packagekit.SourceManifestWriter
 import java.net.URI
 import java.util.Locale
 
-data class VBookMetadata(
+/** Historical conversion model retained only for legacy SourcePack migration/import compatibility. */
+data class LegacyVBookMetadata(
     val name: String,
     val id: String,
     val author: String,
@@ -32,7 +33,7 @@ data class VBookMetadata(
 )
 
 data class VBookPlugin(
-    val metadata: VBookMetadata,
+    val metadata: LegacyVBookMetadata,
     val scripts: Map<String, String>,
     val files: Map<String, ByteArray>,
     val config: Map<String, String> = emptyMap(),
@@ -44,6 +45,7 @@ data class VBookImportResult(
     val warnings: List<String>,
 )
 
+/** Legacy converter. New vBook installations must use VBookPackageReader/VBookSourcePlatform. */
 object VBookPluginImporter {
     private val DIRECT_ACTIONS = linkedMapOf(
         "search" to SourceActionName.SEARCH,
@@ -57,13 +59,12 @@ object VBookPluginImporter {
         "login" to SourceActionName.LOGIN,
     )
 
-
     fun parse(pluginJson: ByteArray, files: Map<String, ByteArray>): VBookPlugin {
         require(pluginJson.size in 1..1024 * 1024) { "VBOOK_PLUGIN_MANIFEST_TOO_LARGE" }
         val root = JsonCodec.parse(pluginJson.toString(Charsets.UTF_8)) as? JsonValue.Obj ?: error("VBOOK_PLUGIN_NOT_OBJECT")
         val metadata = root.obj("metadata") ?: error("VBOOK_METADATA_REQUIRED")
         val scripts = root.obj("script") ?: error("VBOOK_SCRIPT_MAP_REQUIRED")
-        val parsed = VBookMetadata(
+        val parsed = LegacyVBookMetadata(
             name = metadata.string("name")?.takeIf(String::isNotBlank) ?: error("VBOOK_NAME_REQUIRED"),
             id = metadata.string("id")?.takeIf(String::isNotBlank) ?: error("VBOOK_ID_REQUIRED"),
             author = metadata.string("author").orEmpty(),
@@ -107,8 +108,6 @@ object VBookPluginImporter {
             val script = scriptName?.let(plugin.scripts::get) ?: return
             actions[action] = SourceActionSpec(normalizeScriptPath(script), maxOutputBytes = 2 * 1024 * 1024)
         }
-        // Content scripts produce the story lists expected by the native app. The menu scripts remain
-        // available as resources loaded by the compatibility runtime, but must not shadow content scripts.
         install(SourceActionName.HOME, if (plugin.scripts.containsKey("homecontent")) "homecontent" else "home")
         install(SourceActionName.GENRE, if (plugin.scripts.containsKey("genrecontent")) "genrecontent" else "genre")
         DIRECT_ACTIONS.forEach { (name, action) -> install(action, name) }
@@ -118,7 +117,7 @@ object VBookPluginImporter {
         val warnings = buildList {
             if (plugin.scripts.containsKey("homecontent")) add("homecontent được định tuyến qua HOME bằng input script.")
             if (plugin.scripts.containsKey("genrecontent")) add("genrecontent được định tuyến qua GENRE bằng input script.")
-            add("WebView dùng profile tuần tự và được đánh dấu degraded isolation trên Android WebView chuẩn.")
+            add("Đây là đường migration SourcePack cũ; cài vBook mới dùng raw artifact subsystem.")
         }
         val version = normalizeVersion(plugin.metadata.version)
         val manifest = SourceManifest(
@@ -168,7 +167,7 @@ object VBookPluginImporter {
             privacy = SourcePrivacyDisclosure(
                 sendsContentToThirdParty = true,
                 thirdParties = listOf("Nhà cung cấp AI do người dùng cấu hình"),
-                note = "Extension có thể gọi Qt.translate; nội dung chỉ được gửi khi người dùng đã cấu hình AI.",
+                note = "Extension migration cũ có thể gọi Qt.translate; raw vBook runtime áp dụng broker riêng.",
             ),
             fixtures = emptyList(),
         ).also(SourceManifest::validate)

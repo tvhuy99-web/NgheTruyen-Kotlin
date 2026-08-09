@@ -132,6 +132,48 @@ class VBookRawNetworkBrokerTest {
         assertFalse(seenHeaders.keys.any { it.startsWith(VBookRawNetworkBroker.INTERNAL_PREFIX, ignoreCase = true) })
     }
 
+    @Test
+    fun delayIsBetweenRealRequestsAndNeverAppliedToCachedRepresentations() {
+        var now = 1_000L
+        val sleeps = mutableListOf<Long>()
+        var upstreamCalls = 0
+        val delegate = SourceNetworkBroker { _, request ->
+            upstreamCalls++
+            SourcePlatformResult.Success(response(request, "ok".toByteArray()))
+        }
+        val broker = VBookRawNetworkBroker(
+            delegate = delegate,
+            clockMs = { now },
+            sleeper = { millis -> sleeps += millis; now += millis },
+        )
+        val headers = mapOf(
+            VBookRawNetworkBroker.INTERNAL_REQUEST_KEY to "r1",
+            VBookRawNetworkBroker.INTERNAL_DELAY_MS to "250",
+        )
+        broker.execute(manifest(), SourceNetworkRequest("fixture", "https://x.example/1", headers = headers))
+        assertTrue(sleeps.isEmpty())
+
+        val cacheHeaders = headers + mapOf(VBookRawNetworkBroker.INTERNAL_OPERATION to VBookRawNetworkBroker.OP_BASE64)
+        broker.execute(manifest(), SourceNetworkRequest("fixture", "https://x.example/1", headers = cacheHeaders))
+        assertTrue(sleeps.isEmpty())
+        assertEquals(1, upstreamCalls)
+
+        now += 50L
+        broker.execute(
+            manifest(),
+            SourceNetworkRequest(
+                "fixture",
+                "https://x.example/2",
+                headers = mapOf(
+                    VBookRawNetworkBroker.INTERNAL_REQUEST_KEY to "r2",
+                    VBookRawNetworkBroker.INTERNAL_DELAY_MS to "250",
+                ),
+            ),
+        )
+        assertEquals(listOf(200L), sleeps)
+        assertEquals(2, upstreamCalls)
+    }
+
     private fun response(
         request: SourceNetworkRequest,
         body: ByteArray,

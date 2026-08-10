@@ -122,6 +122,7 @@ class XpkEndToEndParityTest {
         assertEquals("", parsed.musicSceneError)
 
         val persistedVoice = JSONObject()
+            .put("timeline_fingerprint_version", XpkPlaybackRuntime.TIMELINE_FINGERPRINT_VERSION)
             .put("timeline_fingerprint", fingerprint)
             .put(
                 "assignments",
@@ -140,6 +141,7 @@ class XpkEndToEndParityTest {
             )
             .toString()
         val persistedMusic = JSONObject()
+            .put("timeline_fingerprint_version", XpkPlaybackRuntime.TIMELINE_FINGERPRINT_VERSION)
             .put("timeline_fingerprint", fingerprint)
             .put(
                 "music_scenes",
@@ -196,6 +198,7 @@ class XpkEndToEndParityTest {
         )
         val validId = PlaybackQueueStore.state.value.speechChunks.last().unitId
         val json = JSONObject()
+            .put("timeline_fingerprint_version", XpkPlaybackRuntime.TIMELINE_FINGERPRINT_VERSION)
             .put("timeline_fingerprint", differentFingerprint)
             .put(
                 "assignments",

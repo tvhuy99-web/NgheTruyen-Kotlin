@@ -1,6 +1,7 @@
 package vn.nghetruyen.app.ai
 
 import java.util.ArrayDeque
+import kotlin.math.floor
 import vn.nghetruyen.app.data.local.VoiceRoleEntity
 
 /** Prompt formatter matching the XPK VoiceCast transcript and unified narration contract. */
@@ -14,6 +15,14 @@ object XpkVoiceCastPrompt {
         val sceneTrackIds: List<String> = emptyList(),
     )
 
+    /** Exact method-specific settings that XPK profilesForPrompt() exposes to AI. */
+    data class PromptProfileSettings(
+        val processingMethod: String = "system",
+        val speed: Float = 1f,
+        val pitch: Float = 1f,
+        val volume: Float = 1f,
+    )
+
     fun build(
         title: String,
         body: String,
@@ -24,16 +33,17 @@ object XpkVoiceCastPrompt {
         pitchLimitPct: Int,
         volumeLimitPct: Int,
         expressionPrompt: String,
-        customGuidance: String = "",
         includeVoiceCast: Boolean = true,
         includeSceneMusic: Boolean = false,
         tracks: List<SceneMusicTrackOption> = emptyList(),
         context: NarrationPlanContext = NarrationPlanContext(),
+        profileSettingsById: Map<String, PromptProfileSettings> = emptyMap(),
     ): Bundle {
+        require(profiles.size <= 10) { "Tối đa 10 giọng" }
         val units = XpkVoiceCastSplitter.buildUnits(title, body)
         val dialogueIds = if (includeVoiceCast) units.filter(XpkVoiceCastSplitter.Unit::isDialogue).map { it.id } else emptyList()
         val unitIds = units.map { it.id }
-        val promptProfiles = profiles.take(40)
+        val promptProfiles = profiles
         val voiceIds = promptProfiles.map(::promptVoiceId).distinct()
         val note = storyNote.trim().ifBlank { "Không có ghi chú bổ sung." }
         val transcript = if (includeSceneMusic) unitsForScenePrompt(units) else unitsForPrompt(units)
@@ -61,34 +71,31 @@ object XpkVoiceCastPrompt {
             21. Vẫn phải trả đủ ba trường phần trăm trong JSON để giữ đúng cấu trúc.
             """.trimIndent()
         }
-        val custom = customGuidance.trim().takeIf(String::isNotBlank)?.let {
-            "\nHƯỚNG DẪN BỔ SUNG DO NGƯỜI DÙNG ĐẶT:\n$it\nHướng dẫn bổ sung không được thay đổi ID, mã giọng, giới hạn phần trăm hoặc cấu trúc JSON.\n"
-        }.orEmpty()
         val sceneBlock = if (includeSceneMusic && unitIds.isNotEmpty() && tracks.isNotEmpty()) {
             XpkSceneMusicParity.promptBlock(title, firstUnitId, lastUnitId, tracks, context)
         } else null
         val sceneTask = sceneBlock?.instructions.orEmpty()
         val sceneOutputRules = sceneBlock?.outputRules.orEmpty()
-        val outputTopLevel = if (sceneBlock != null) {
-            "- Đối tượng JSON phải có đúng hai mảng cấp cao: assignments và music_scenes."
-        } else {
-            "- Đối tượng JSON chỉ có mảng assignments."
-        }
+        fun exampleValue(limit: Int, preferred: Int): Int = if (limit <= 0) 0 else maxOf(1, minOf(limit, preferred))
         val assignmentExample = if (dialogueIds.isEmpty()) {
             "  \"assignments\": []"
         } else {
-            val firstVoice = voiceIds.firstOrNull { it != XpkVoiceCastSplitter.NARRATOR_ID }.orEmpty().ifBlank { "MÃ_GIỌNG_HỢP_LỆ" }
-            """
-              "assignments": [
+            """  "assignments": [
                 {
-                  "id": "${dialogueIds.first()}",
-                  "voice": "$firstVoice",
+                  "id": "ID_THỰC_TẾ_1",
+                  "voice": "MÃ_GIỌNG_HỢP_LỆ",
                   "speed_adjust_pct": 0,
                   "pitch_adjust_pct": 0,
                   "volume_adjust_pct": 0
+                },
+                {
+                  "id": "ID_THỰC_TẾ_2",
+                  "voice": "MÃ_GIỌNG_HỢP_LỆ",
+                  "speed_adjust_pct": ${exampleValue(speedLimit, 6)},
+                  "pitch_adjust_pct": ${exampleValue(pitchLimit, 3)},
+                  "volume_adjust_pct": ${exampleValue(volumeLimit, 5)}
                 }
-              ]
-            """.trimIndent()
+              ]"""
         }
         val sceneExample = sceneBlock?.tracks?.firstOrNull()?.let { track ->
             """,
@@ -148,17 +155,15 @@ object XpkVoiceCastPrompt {
 
             DANH SÁCH GIỌNG ĐƯỢC PHÉP SỬ DỤNG:
 
-            ${if (includeVoiceCast) profilesForPrompt(promptProfiles) else "Không dùng phân vai trong lượt này."}
+            ${if (includeVoiceCast) profilesForPrompt(promptProfiles, profileSettingsById) else "Không dùng phân vai trong lượt này."}
 
             GHI CHÚ RIÊNG CHO TRUYỆN:
 
             $note
-            $custom
+
             BẢN CHÉP ${if (sceneBlock != null) "HỢP NHẤT DÙNG CHO PHÂN VAI VÀ NHẠC THEO CẢNH" else "GỌN DÙNG ĐỂ PHÂN VAI"}:
 
-            $transcript
-
-            $sceneTask
+            $transcript$sceneTask
 
             $voiceRules
 
@@ -169,7 +174,6 @@ object XpkVoiceCastPrompt {
             - Không thêm giải thích trước hoặc sau JSON.
             - Không thêm trường ngoài cấu trúc được yêu cầu.
             - Mảng assignments phải giữ đúng thứ tự ID trong đầu vào.
-            $outputTopLevel
             $sceneOutputRules
 
             Mỗi phần tử trong assignments bắt buộc có ĐÚNG NĂM trường sau:
@@ -192,14 +196,24 @@ object XpkVoiceCastPrompt {
         )
     }
 
-    fun profilesForPrompt(profiles: List<VoiceRoleEntity>): String = profiles.joinToString("\n") { row ->
-        val method = if (row.volume > 1f || row.sonicSpeed != 1f || row.sonicPitch != 1f) "sonic" else "system"
+    fun profilesForPrompt(
+        profiles: List<VoiceRoleEntity>,
+        profileSettingsById: Map<String, PromptProfileSettings> = emptyMap(),
+    ): String = profiles.joinToString("\n") { row ->
+        val settings = profileSettingsById[row.id] ?: PromptProfileSettings(
+            processingMethod = "system",
+            speed = row.rate,
+            pitch = row.pitch,
+            volume = row.volume,
+        )
+        val method = if (settings.processingMethod == "sonic") "sonic" else "system"
         val volumeLimit = if (method == "sonic") 2f else 1f
+        val roundedVolumePct = floor(settings.volume.coerceIn(0f, volumeLimit) * 100f + 0.5f).toInt()
         buildString {
             appendLine("- ID: ${promptVoiceId(row)}")
             appendLine("  Tên: ${row.roleName}")
             appendLine("  Mô tả: ${row.description.ifBlank { row.aliasesCsv }}")
-            append("  Thiết lập gốc: tốc độ ${"%.2f".format(row.rate)}x; cao độ ${"%.2f".format(row.pitch)}; âm lượng ${(row.volume.coerceIn(0f, volumeLimit) * 100).toInt()}%; xử lý ${if (method == "sonic") "Sonic" else "Android"}; tối đa ${(volumeLimit * 100).toInt()}%")
+            append("  Thiết lập gốc: tốc độ ${"%.2f".format(settings.speed)}x; cao độ ${"%.2f".format(settings.pitch)}; âm lượng $roundedVolumePct%; xử lý ${if (method == "sonic") "Sonic" else "Android"}; tối đa ${(volumeLimit * 100).toInt()}%")
         }
     }
 

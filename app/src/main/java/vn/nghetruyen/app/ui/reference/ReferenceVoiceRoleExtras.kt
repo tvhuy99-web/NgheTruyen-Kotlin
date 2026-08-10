@@ -11,6 +11,30 @@ data class ReferenceVoiceRoleExtra(
 
 object ReferenceVoiceRoleExtras {
     private const val PREFS = "reference_voice_role_extras"
+    private const val STAGED_VOLUME_TTL_MILLIS = 5_000L
+
+    private data class StagedVolumes(
+        val processingMethod: String,
+        val sonicAccurate: Boolean,
+        val systemVolume: Float,
+        val sonicVolume: Float,
+        val createdAt: Long,
+    )
+
+    @Volatile
+    private var stagedVolumes: StagedVolumes? = null
+
+    fun stageVolumesForNextSave(value: ReferenceVoiceRoleExtra) {
+        val systemVolume = value.systemVolume ?: return
+        val sonicVolume = value.sonicVolume ?: return
+        stagedVolumes = StagedVolumes(
+            processingMethod = if (value.processingMethod == "sonic") "sonic" else "system",
+            sonicAccurate = value.sonicAccurate,
+            systemVolume = systemVolume.coerceIn(0f, 1f),
+            sonicVolume = sonicVolume.coerceIn(0f, 2f),
+            createdAt = System.currentTimeMillis(),
+        )
+    }
 
     fun load(context: Context, roleId: String?): ReferenceVoiceRoleExtra {
         if (roleId.isNullOrBlank()) return ReferenceVoiceRoleExtra()
@@ -26,12 +50,24 @@ object ReferenceVoiceRoleExtras {
     }
 
     fun save(context: Context, roleId: String, value: ReferenceVoiceRoleExtra) {
+        val normalizedMethod = if (value.processingMethod == "sonic") "sonic" else "system"
+        val now = System.currentTimeMillis()
+        val staged = stagedVolumes?.takeIf {
+            now - it.createdAt <= STAGED_VOLUME_TTL_MILLIS &&
+                it.processingMethod == normalizedMethod &&
+                it.sonicAccurate == value.sonicAccurate
+        }
+        stagedVolumes = null
         val editor = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
-            .putString("$roleId:method", if (value.processingMethod == "sonic") "sonic" else "system")
+            .putString("$roleId:method", normalizedMethod)
             .putBoolean("$roleId:accurate", value.sonicAccurate)
-        value.systemVolume?.let { editor.putFloat("$roleId:system_volume", it.coerceIn(0f, 1f)) }
-        value.sonicVolume?.let { editor.putFloat("$roleId:sonic_volume", it.coerceIn(0f, 2f)) }
+        (value.systemVolume ?: staged?.systemVolume)?.let {
+            editor.putFloat("$roleId:system_volume", it.coerceIn(0f, 1f))
+        }
+        (value.sonicVolume ?: staged?.sonicVolume)?.let {
+            editor.putFloat("$roleId:sonic_volume", it.coerceIn(0f, 2f))
+        }
         editor.apply()
     }
 

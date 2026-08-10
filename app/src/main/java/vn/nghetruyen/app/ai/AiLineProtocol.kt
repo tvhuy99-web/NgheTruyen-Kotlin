@@ -91,6 +91,7 @@ object AiLineProtocol {
             ?: error("Danh sách giọng hợp lệ đang trống")
         val hasCharacterVoice = voices.any { it != XpkVoiceCastSplitter.NARRATOR_ID }
         val assignmentMap = linkedMapOf<String, ParagraphVoiceAssignment>()
+        val explicitCharacterVoiceById = linkedMapOf<String, String>()
         var duplicateCount = 0
         var unexpectedCount = 0
         var invalidVoiceCount = 0
@@ -105,6 +106,9 @@ object AiLineProtocol {
             if (assignmentMap.containsKey(id)) {
                 duplicateCount += 1
                 return@forEach
+            }
+            if (requestedVoice in voiceSet && requestedVoice != XpkVoiceCastSplitter.NARRATOR_ID) {
+                explicitCharacterVoiceById[id] = requestedVoice
             }
             val validDialogueVoice = requestedVoice in voiceSet &&
                 (requestedVoice != XpkVoiceCastSplitter.NARRATOR_ID || !hasCharacterVoice)
@@ -123,17 +127,14 @@ object AiLineProtocol {
         }
         if (validIds.isNotEmpty() && assignmentMap.isEmpty()) error("Không có ID hợp lệ nào trong phản hồi AI")
 
-        // Mirror VoiceCast:applyAssignments(): the first explicitly assigned valid character voice in
-        // a dialogue_group_id becomes authoritative for every fragment in that same long turn.
+        // Mirror VoiceCast:applyAssignments() exactly: groupVoice learns only from a valid explicit
+        // non-narrator AI assignment. A narrator/invalid row does not block a later valid group voice.
         val groupVoice = linkedMapOf<String, String>()
         validIds.forEach { id ->
             val group = options.dialogueGroupByUnitId[id]?.trim().orEmpty()
-            val assignment = assignmentMap[id]
-            val voice = assignment?.voiceId.orEmpty()
-            if (group.isNotBlank() && group !in groupVoice && voice.isNotBlank() &&
-                voice != XpkVoiceCastSplitter.NARRATOR_ID && voice in voiceSet
-            ) {
-                groupVoice[group] = voice
+            val explicitVoice = explicitCharacterVoiceById[id].orEmpty()
+            if (group.isNotBlank() && group !in groupVoice && explicitVoice.isNotBlank()) {
+                groupVoice[group] = explicitVoice
             }
         }
 

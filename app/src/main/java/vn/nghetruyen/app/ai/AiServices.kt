@@ -31,25 +31,40 @@ data class VoiceRole(
     val expression: String = "NEUTRAL",
 )
 
+/**
+ * AI-facing narration assignment.
+ *
+ * [unitId] and [voiceId] are the canonical XPK contract. The legacy paragraph/character fields are
+ * retained only as a compatibility bridge until the playback/database migration in milestone 5.
+ */
 data class ParagraphVoiceAssignment(
-    val paragraphIndex: Int,
-    val character: String,
-    val confidence: Float,
+    val paragraphIndex: Int = -1,
+    val character: String = "",
+    val confidence: Float = 1f,
     val speedAdjustPct: Float = 0f,
     val pitchAdjustPct: Float = 0f,
     val volumeAdjustPct: Float = 0f,
+    val unitId: String = "",
+    val voiceId: String = "",
 )
 
 data class VoiceCastPlan(
     val roles: List<VoiceRole>,
     val assignments: List<ParagraphVoiceAssignment>,
+    val warnings: List<String> = emptyList(),
 )
 
+/**
+ * Scene interval returned by the XPK JSON contract.
+ * start/end unit ids are canonical; startParagraph remains a temporary runtime bridge.
+ */
 data class SceneMusicCue(
     val startParagraph: Int,
     val trackId: String,
-    val volume: Float,
+    val volume: Float = 0.25f,
     val mood: String = "",
+    val startUnitId: String = "",
+    val endUnitId: String = "",
 )
 
 data class SceneMusicTrackOption(
@@ -69,6 +84,7 @@ data class NarrationPlanRequest(
     val storyId: String,
     val chapterId: String,
     val rawText: String,
+    val chapterTitle: String = "",
     val includeVoiceCast: Boolean = true,
     val includeSceneMusic: Boolean = true,
     val tracks: List<SceneMusicTrackOption> = emptyList(),
@@ -89,7 +105,12 @@ interface VietPhraseImprovementEngine {
 }
 
 interface VoiceCastEngine {
-    suspend fun planVoiceCast(storyId: String, chapterId: String, rawText: String): AppResult<VoiceCastPlan>
+    suspend fun planVoiceCast(
+        storyId: String,
+        chapterId: String,
+        rawText: String,
+        chapterTitle: String = "",
+    ): AppResult<VoiceCastPlan>
 }
 
 interface SceneMusicPlanner {
@@ -113,7 +134,7 @@ class DisabledAiServices : TranslationEngine, VietPhraseImprovementEngine, Voice
 
     override suspend fun translate(request: TranslationRequest) = disabled<String>()
     override suspend fun improveVietPhrase(request: VietPhraseImprovementRequest) = disabled<List<VietPhraseReplacementSuggestion>>()
-    override suspend fun planVoiceCast(storyId: String, chapterId: String, rawText: String) = disabled<VoiceCastPlan>()
+    override suspend fun planVoiceCast(storyId: String, chapterId: String, rawText: String, chapterTitle: String) = disabled<VoiceCastPlan>()
     override suspend fun planMusic(
         storyId: String,
         chapterId: String,

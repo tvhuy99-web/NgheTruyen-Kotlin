@@ -8,6 +8,7 @@ import vn.nghetruyen.app.ai.EncryptedAiCredentialStore
 import vn.nghetruyen.app.ai.AiRequestGovernor
 import vn.nghetruyen.app.ai.OnlineAiServices
 import vn.nghetruyen.app.ai.NarrationPlanCoordinator
+import vn.nghetruyen.app.ai.XpkNarrationAiServices
 import vn.nghetruyen.app.ai.vietphrase.VietPhraseOnlineUpdater
 import vn.nghetruyen.app.audio.AudioExportScheduler
 import vn.nghetruyen.app.data.local.AppDatabase
@@ -131,8 +132,11 @@ class AppContainer(context: Context) {
     val aiCredentialStore: EncryptedAiCredentialStore by lazy { EncryptedAiCredentialStore(appContext) }
     val aiRequestGovernor: AiRequestGovernor by lazy { AiRequestGovernor(database, settingsRepository) }
     val aiServices: OnlineAiServices by lazy { OnlineAiServices(settingsRepository, aiCredentialStore, aiRequestGovernor, libraryRepository) }
+    val xpkNarrationAiServices: XpkNarrationAiServices by lazy {
+        XpkNarrationAiServices(settingsRepository, aiCredentialStore, aiRequestGovernor, libraryRepository)
+    }
     val narrationPlanCoordinator: NarrationPlanCoordinator by lazy {
-        NarrationPlanCoordinator(libraryRepository, settingsRepository, aiServices, ttsVoiceCatalog)
+        NarrationPlanCoordinator(libraryRepository, settingsRepository, xpkNarrationAiServices)
     }
     val audioExportScheduler: AudioExportScheduler by lazy { AudioExportScheduler(appContext) }
     val vietPhraseTransferManager: VietPhraseTransferManager by lazy {

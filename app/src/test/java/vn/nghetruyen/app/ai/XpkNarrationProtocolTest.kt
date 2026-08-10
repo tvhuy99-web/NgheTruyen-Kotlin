@@ -95,15 +95,32 @@ class XpkNarrationProtocolTest {
     }
 
     @Test
-    fun repairRejectsNarratorForDialogueWhenCharacterVoiceExists() {
+    fun repairRejectsNarratorForDialogueAndUsesCharacterFallback() {
         val plan = AiLineProtocol.repairXpkAssignments(
             listOf(AiLineProtocol.XpkRawAssignment("P0001-U01", XpkVoiceCastSplitter.NARRATOR_ID, 8f, 8f, 8f)),
             options(ids = listOf("P0001-U01")),
         )
         val assignment = plan.assignments.single()
         assertEquals("voice-male", assignment.voiceId)
-        assertEquals(0f, assignment.speedAdjustPct)
+        assertEquals(8f, assignment.speedAdjustPct)
         assertTrue(plan.warnings.any { "mã giọng sai" in it })
+    }
+
+    @Test
+    fun narratorFallbackZerosAdjustmentsWhenNoCharacterVoiceExists() {
+        val options = AiLineProtocol.XpkParseOptions(
+            validDialogueIds = listOf("P0001-U01"),
+            validUnitIds = listOf("P0001-U01"),
+            validVoiceIds = listOf(XpkVoiceCastSplitter.NARRATOR_ID),
+        )
+        val assignment = AiLineProtocol.repairXpkAssignments(
+            listOf(AiLineProtocol.XpkRawAssignment("P0001-U01", XpkVoiceCastSplitter.NARRATOR_ID, 8f, -7f, 6f)),
+            options,
+        ).assignments.single()
+        assertEquals(XpkVoiceCastSplitter.NARRATOR_ID, assignment.voiceId)
+        assertEquals(0f, assignment.speedAdjustPct)
+        assertEquals(0f, assignment.pitchAdjustPct)
+        assertEquals(0f, assignment.volumeAdjustPct)
     }
 
     @Test

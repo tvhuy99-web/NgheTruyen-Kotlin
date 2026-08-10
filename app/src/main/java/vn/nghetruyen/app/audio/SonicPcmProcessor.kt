@@ -29,6 +29,7 @@ object SonicPcmProcessor {
         speed: Float,
         pitch: Float,
         accurate: Boolean = ReferenceSonicRuntime.accurateMode,
+        gain: Float = ReferenceSonicRuntime.outputGain,
     ): WaveSegment {
         val wave = WaveFileAssembler.inspect(source)
         if (
@@ -47,11 +48,11 @@ object SonicPcmProcessor {
         val normalizedPitch = pitch.coerceIn(0.5f, 2f)
         // Keep the existing reference-volume behavior intentionally: the converter
         // applies the first gain stage and upstream Sonic applies this second stage.
-        val gain = ReferenceSonicRuntime.outputGain.coerceIn(0f, 2f)
+        val normalizedGain = gain.coerceIn(0f, 2f)
         if (
             abs(normalizedSpeed - 1f) < 0.005f &&
             abs(normalizedPitch - 1f) < 0.005f &&
-            abs(gain - 1f) < 0.005f
+            abs(normalizedGain - 1f) < 0.005f
         ) {
             source.copyTo(destination, overwrite = true)
             return WaveFileAssembler.inspect(destination)
@@ -64,7 +65,7 @@ object SonicPcmProcessor {
             setSpeed(normalizedSpeed)
             setPitch(normalizedPitch)
             setRate(1f)
-            setVolume(gain)
+            setVolume(normalizedGain)
             setQuality(if (accurate) 1 else 0)
         }
 

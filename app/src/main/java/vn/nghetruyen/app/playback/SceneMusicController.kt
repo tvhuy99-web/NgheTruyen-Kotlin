@@ -12,9 +12,8 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 /**
- * Owns two MediaPlayer instances so scene changes can crossfade without a gap.
- * It also models the reference tool's attack/release duck envelope and can hand
- * non-looping playlist completion back to the playback service.
+ * Owns MediaPlayer instances for background music. Canonical XPK scene plans use the reference
+ * tool's sequential fade-out/fade-in transition; ordinary playlists retain the Kotlin crossfade.
  * All public calls are expected on the main thread.
  */
 class SceneMusicController(
@@ -32,6 +31,7 @@ class SceneMusicController(
 
     private var active: Slot? = null
     private var outgoing: Slot? = null
+    private var pendingSequential: Slot? = null
     private var transitionJob: Job? = null
     private var duckJob: Job? = null
     private var speaking = false
@@ -69,7 +69,11 @@ class SceneMusicController(
         val nextPlayer = createPlayer(trackId, uri, looping, onCompletion) ?: return
         nextPlayer.setOnPreparedListener { prepared ->
             val next = Slot(trackId, uri, prepared, normalizedVolume)
-            startTransition(next, crossfadeMillis.coerceIn(0, 8_000))
+            if (XpkPlaybackRuntime.isCanonicalScenePlanActive()) {
+                startXpkSequentialTransition(next, XPK_SCENE_SWITCH_MILLIS)
+            } else {
+                startCrossfadeTransition(next, crossfadeMillis.coerceIn(0, 8_000))
+            }
         }
         runCatching { nextPlayer.prepareAsync() }.onFailure {
             nextPlayer.release()
@@ -94,6 +98,7 @@ class SceneMusicController(
     fun pause() {
         active?.player?.runCatching { if (isPlaying) pause() }
         outgoing?.player?.runCatching { if (isPlaying) pause() }
+        pendingSequential?.player?.runCatching { if (isPlaying) pause() }
     }
 
     fun resume() {
@@ -113,6 +118,8 @@ class SceneMusicController(
         duckJob = null
         release(outgoing)
         outgoing = null
+        release(pendingSequential)
+        pendingSequential = null
         if (clearTrack) {
             release(active)
             active = null
@@ -150,7 +157,9 @@ class SceneMusicController(
             }
             setOnErrorListener { failed, _, _ ->
                 val wasActive = active?.player === failed
+                val wasPending = pendingSequential?.player === failed
                 if (wasActive) active = null
+                if (wasPending) pendingSequential = null
                 runCatching { failed.release() }
                 onError("Không phát được nhạc nền '$trackId'.")
                 if (wasActive) onCompletion?.invoke()
@@ -162,8 +171,11 @@ class SceneMusicController(
         null
     }
 
-    private fun startTransition(next: Slot, durationMillis: Int) {
+    /** Ordinary Kotlin playlist transition: old and new overlap. */
+    private fun startCrossfadeTransition(next: Slot, durationMillis: Int) {
         transitionJob?.cancel()
+        release(pendingSequential)
+        pendingSequential = null
         outgoing?.let(::release)
         outgoing = active
         active = next
@@ -197,6 +209,68 @@ class SceneMusicController(
             if (outgoing === old) outgoing = null
             next.fadeMultiplier = 1f
             applyLevel(next)
+        }
+    }
+
+    /**
+     * XPK switchBackgroundMusicTrackForScene(track, 2200): when a player exists, fade the current
+     * player to zero for the first half, release it, then start the requested track at zero and fade
+     * it in for the second half. When no player exists, XPK fades the new track in over all 2200 ms.
+     * There is deliberately no overlap between two tracks.
+     */
+    private fun startXpkSequentialTransition(next: Slot, durationMillis: Int) {
+        transitionJob?.cancel()
+        release(pendingSequential)
+        pendingSequential = next
+        outgoing?.let(::release)
+        outgoing = null
+        val old = active
+        val duration = durationMillis.coerceIn(1_200, 4_000)
+        val fadeOutMillis = if (old == null) 0 else duration / 2
+        val fadeInMillis = if (old == null) duration else duration - fadeOutMillis
+
+        transitionJob = scope.launch(Dispatchers.Main.immediate) {
+            if (old != null) {
+                outgoing = old
+                animateSlotFade(old, old.fadeMultiplier, 0f, fadeOutMillis)
+                if (active === old) active = null
+                if (outgoing === old) outgoing = null
+                release(old)
+            }
+
+            if (pendingSequential !== next) {
+                release(next)
+                return@launch
+            }
+            pendingSequential = null
+            next.fadeMultiplier = 0f
+            active = next
+            val started = runCatching { next.player.start() }.isSuccess
+            if (!started) {
+                if (active === next) active = null
+                release(next)
+                onError("Không khởi động được nhạc nền đã chọn.")
+                return@launch
+            }
+            applyLevel(next)
+            animateSlotFade(next, 0f, 1f, fadeInMillis)
+            next.fadeMultiplier = 1f
+            applyLevel(next)
+        }
+    }
+
+    private suspend fun animateSlotFade(slot: Slot, from: Float, to: Float, durationMillis: Int) {
+        if (durationMillis <= 0) {
+            slot.fadeMultiplier = to
+            applyLevel(slot)
+            return
+        }
+        val steps = (durationMillis / 40f).roundToInt().coerceIn(4, 100)
+        repeat(steps + 1) { index ->
+            val fraction = index.toFloat() / steps.toFloat()
+            slot.fadeMultiplier = from + (to - from) * fraction
+            applyLevel(slot)
+            if (index < steps) delay(durationMillis.toLong() / steps)
         }
     }
 
@@ -238,5 +312,9 @@ class SceneMusicController(
         slot ?: return
         runCatching { slot.player.stop() }
         runCatching { slot.player.release() }
+    }
+
+    companion object {
+        private const val XPK_SCENE_SWITCH_MILLIS = 2_200
     }
 }

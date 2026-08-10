@@ -31,38 +31,52 @@ data class VoiceRole(
     val expression: String = "NEUTRAL",
 )
 
+/**
+ * Canonical XPK narration assignment. [unitId] and [voiceId] are authoritative; paragraph/character
+ * fields remain serialized compatibility metadata for older stored data only.
+ */
 data class ParagraphVoiceAssignment(
-    val paragraphIndex: Int,
-    val character: String,
-    val confidence: Float,
+    val paragraphIndex: Int = -1,
+    val character: String = "",
+    val confidence: Float = 1f,
     val speedAdjustPct: Float = 0f,
     val pitchAdjustPct: Float = 0f,
     val volumeAdjustPct: Float = 0f,
+    val unitId: String = "",
+    val voiceId: String = "",
 )
 
 data class VoiceCastPlan(
     val roles: List<VoiceRole>,
     val assignments: List<ParagraphVoiceAssignment>,
+    val warnings: List<String> = emptyList(),
 )
 
+/** Inclusive XPK scene interval. Unit ids are authoritative; paragraph indexes are legacy metadata. */
 data class SceneMusicCue(
     val startParagraph: Int,
     val trackId: String,
-    val volume: Float,
+    val volume: Float = 1f,
     val mood: String = "",
+    val startUnitId: String = "",
+    val endUnitId: String = "",
+    val endParagraph: Int = startParagraph,
 )
 
 data class SceneMusicTrackOption(
     val id: String,
     val title: String,
     val tags: List<String>,
+    val description: String = tags.joinToString(" "),
 )
 
 data class NarrationPlanContext(
+    /** Serialized [PREVIOUS_UNIT ...] tail. It is context only and never a target timeline. */
     val previousChapterEnding: String = "",
     val activeTrackId: String? = null,
     val activeTrackTitle: String? = null,
     val previousMood: String = "",
+    val incomingSource: String = "",
 )
 
 data class NarrationPlanRequest(
@@ -73,11 +87,13 @@ data class NarrationPlanRequest(
     val includeSceneMusic: Boolean = true,
     val tracks: List<SceneMusicTrackOption> = emptyList(),
     val context: NarrationPlanContext = NarrationPlanContext(),
+    val chapterTitle: String = "",
 )
 
 data class NarrationPlan(
     val voiceCast: VoiceCastPlan = VoiceCastPlan(emptyList(), emptyList()),
     val musicCues: List<SceneMusicCue> = emptyList(),
+    val musicSceneError: String = "",
 )
 
 interface TranslationEngine {
@@ -88,10 +104,14 @@ interface VietPhraseImprovementEngine {
     suspend fun improveVietPhrase(request: VietPhraseImprovementRequest): AppResult<List<VietPhraseReplacementSuggestion>>
 }
 
+/** Legacy paragraph-era surface. Production narration is XpkNarrationAiServices only. */
+@Deprecated("Use XpkNarrationAiServices; paragraph voice-cast protocol is retired from production wiring")
 interface VoiceCastEngine {
     suspend fun planVoiceCast(storyId: String, chapterId: String, rawText: String): AppResult<VoiceCastPlan>
 }
 
+/** Legacy paragraph-era surface. Production scene planning is XpkNarrationAiServices only. */
+@Deprecated("Use XpkNarrationAiServices; paragraph scene-cue protocol is retired from production wiring")
 interface SceneMusicPlanner {
     suspend fun planMusic(
         storyId: String,
@@ -101,10 +121,13 @@ interface SceneMusicPlanner {
     ): AppResult<List<SceneMusicCue>>
 }
 
+/** Legacy interface retained for binary/source compatibility. Production uses the concrete XPK service. */
+@Deprecated("Use XpkNarrationAiServices; legacy narration planner is retired from production wiring")
 interface NarrationPlanner {
     suspend fun planNarration(request: NarrationPlanRequest): AppResult<NarrationPlan>
 }
 
+@Suppress("DEPRECATION")
 class DisabledAiServices : TranslationEngine, VietPhraseImprovementEngine, VoiceCastEngine, SceneMusicPlanner, NarrationPlanner {
     private fun <T> disabled(): AppResult<T> = AppResult.Failure(
         code = "AI_NOT_CONFIGURED",

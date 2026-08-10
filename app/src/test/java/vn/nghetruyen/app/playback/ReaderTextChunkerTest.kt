@@ -7,14 +7,14 @@ import org.junit.Test
 
 class ReaderTextChunkerTest {
     @Test
-    fun removesBlankParagraphsAndNormalizesWhitespaceWithoutChangingVisibleParagraphs() {
+    fun preservesInternalWhitespaceAndUsesNonEmptyLinesAsXpkScaffolding() {
         val result = ReaderTextChunker.normalizeParagraphs(listOf("  Xin   chào  ", "   ", "Dòng\n mới"))
 
-        assertEquals(listOf("Xin chào", "Dòng mới"), result)
+        assertEquals(listOf("Xin   chào", "Dòng", "mới"), result)
     }
 
     @Test
-    fun oversizedParagraphIsSplitOnlyInSpeechLayer() {
+    fun legacyChunkHelperRemainsAvailableForNonXpkCallers() {
         val longParagraph = "a".repeat(7_200)
         val paragraphs = ReaderTextChunker.normalizeParagraphs(listOf(longParagraph))
         val chunks = ReaderTextChunker.chunkParagraphs(paragraphs)
@@ -27,7 +27,7 @@ class ReaderTextChunkerTest {
     }
 
     @Test
-    fun queueKeepsStableReaderIndexWhileAdvancingLongSpeechFragments() {
+    fun productionQueueAdvancesThroughTitleAndXpkSizedUnits() {
         val longParagraph = "a".repeat(7_200)
         PlaybackQueueStore.load(
             sourceId = "source",
@@ -38,14 +38,20 @@ class ReaderTextChunkerTest {
             paragraphs = listOf(longParagraph, "Đoạn thứ hai"),
         )
 
-        assertEquals(0, PlaybackQueueStore.state.value.paragraphIndex)
-        assertEquals(longParagraph, PlaybackQueueStore.state.value.currentParagraph)
-        assertTrue(PlaybackQueueStore.state.value.currentSpeechText!!.length <= ReaderTextChunker.SAFE_TTS_CHARS)
+        val initial = PlaybackQueueStore.state.value
+        assertEquals(0, initial.paragraphIndex)
+        assertEquals(longParagraph, initial.currentParagraph)
+        assertEquals("TITLE-U01", initial.currentUnitId)
+        assertEquals("Bạn đang nghe: Chương 1", initial.currentSpeechText)
 
-        assertTrue(PlaybackQueueStore.advanceSpeechChunk())
-        assertEquals(0, PlaybackQueueStore.state.value.paragraphIndex)
-        assertTrue(PlaybackQueueStore.advanceSpeechChunk())
-        assertEquals(0, PlaybackQueueStore.state.value.paragraphIndex)
+        val firstParagraphChunks = initial.speechChunks.filter { it.paragraphIndex == 0 }
+        assertEquals(7, firstParagraphChunks.size) // TITLE + six 1200-byte narration units.
+        assertTrue(firstParagraphChunks.drop(1).all { it.text.toByteArray(Charsets.UTF_8).size <= 1_200 })
+
+        repeat(6) {
+            assertTrue(PlaybackQueueStore.advanceSpeechChunk())
+            assertEquals(0, PlaybackQueueStore.state.value.paragraphIndex)
+        }
         assertFalse(PlaybackQueueStore.advanceSpeechChunk())
 
         assertTrue(PlaybackQueueStore.moveBy(1))
@@ -54,7 +60,7 @@ class ReaderTextChunkerTest {
     }
 
     @Test
-    fun queueStartIndexUsesCanonicalReaderParagraphs() {
+    fun queueStartIndexUsesCanonicalXpkLines() {
         PlaybackQueueStore.load(
             sourceId = "source",
             storyId = "story",

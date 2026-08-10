@@ -106,8 +106,14 @@ def main() -> None:
     )
     require(
         "app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt",
-        "ensureVoicePlan", "ensureMusicPlan", "Math.floorMod", "replaceVoiceAssignments",
+        "ensureVoicePlan", "ensureMusicPlan", "replaceVoiceAssignments",
         "replaceSceneMusicCues", "SceneMusicTrackOption",
+    )
+    # Scene-catalog randomization moved out of the coordinator when canonical XPK scene planning was
+    # introduced. Verify the behavior in its current owner rather than pinning the historical class.
+    require(
+        "app/src/main/java/vn/nghetruyen/app/ai/XpkSceneMusicParity.kt",
+        "shuffleTracks", "Math.floorMod", "TRACK_CATALOG",
     )
     require(
         "app/src/main/java/vn/nghetruyen/app/ai/OnlineAiServices.kt",

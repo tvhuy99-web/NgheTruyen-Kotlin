@@ -18,6 +18,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import vn.nghetruyen.app.audio.AudioExportRequest
+import vn.nghetruyen.app.core.model.ReaderLayoutMode
+import vn.nghetruyen.app.core.model.ReaderMode
 import vn.nghetruyen.app.ui.screens.ExploreScreen
 import vn.nghetruyen.app.ui.screens.LibraryScreen
 import vn.nghetruyen.app.ui.screens.PersonalScreen
@@ -259,7 +261,7 @@ fun NgheTruyenApp(
                     onSourceUiAction = { sourceId, actionId -> viewModel.runSourceUiAction(sourceId, actionId, SourceUiSurface.STORY) },
                 )
                 Destination.Reader -> ReaderScreen(
-                    state = state,
+                    state = continuousReaderPresentationState(state),
                     onBack = viewModel::back,
                     onBackToChapters = viewModel::backToChapterList,
                     onPreviousChapter = viewModel::previousChapter,
@@ -323,6 +325,19 @@ fun NgheTruyenApp(
             }
         }
     }
+}
+
+private fun continuousReaderPresentationState(state: MainUiState): MainUiState {
+    if (state.readerMode != ReaderMode.TEXT) return state
+    val content = state.chapterContent ?: return state
+    val fullText = content.paragraphs.joinToString("\n\n")
+    return state.copy(
+        chapterContent = content.copy(paragraphs = listOf(fullText)),
+        readerDisplay = state.readerDisplay.copy(
+            layoutMode = ReaderLayoutMode.SCROLL,
+            paragraphSpacingDp = 0,
+        ),
+    )
 }
 
 @Composable

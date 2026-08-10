@@ -17,6 +17,20 @@ data class ExpressiveSpeech(
 
 object VoiceExpressionProcessor {
     fun resolve(text: String, role: VoiceRoleEntity?): ExpressiveSpeech {
+        // XPK applyAssignments() uses only the base profile multiplied by AI percentages. Do not add
+        // a second local emotion/prosody layer or rewrite pauses while a canonical XPK unit is playing.
+        if (XpkPlaybackRuntime.shouldBypassLocalExpression(text)) {
+            return ExpressiveSpeech(
+                text = text,
+                expression = VoiceExpression.NEUTRAL,
+                rateMultiplier = 1f,
+                pitchMultiplier = 1f,
+                volumeMultiplier = 1f,
+                sonicSpeedMultiplier = 1f,
+                sonicPitchMultiplier = 1f,
+            )
+        }
+
         val strength = role?.expressionStrength?.coerceIn(0f, 1f) ?: 0.35f
         val configured = runCatching {
             VoiceExpression.valueOf(role?.expression.orEmpty().ifBlank { VoiceExpression.NEUTRAL.name })

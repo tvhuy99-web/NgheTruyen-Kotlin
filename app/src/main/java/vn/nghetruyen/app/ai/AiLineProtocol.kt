@@ -1,8 +1,187 @@
 package vn.nghetruyen.app.ai
 
+import org.json.JSONObject
 import java.util.Locale
 
 object AiLineProtocol {
+    data class XpkParseOptions(
+        val validDialogueIds: List<String>,
+        val validUnitIds: List<String>,
+        val validVoiceIds: List<String>,
+        val validTrackIds: List<String> = emptyList(),
+        val includeVoiceCast: Boolean = true,
+        val includeSceneMusic: Boolean = false,
+        val speedLimitPct: Float = 10f,
+        val pitchLimitPct: Float = 10f,
+        val volumeLimitPct: Float = 10f,
+        val expressiveAdjustment: Boolean = true,
+        val incomingTrackId: String? = null,
+        val dialogueGroupByUnitId: Map<String, String> = emptyMap(),
+    )
+
+    data class XpkRawAssignment(
+        val id: String,
+        val voice: String,
+        val speedAdjustPct: Float = 0f,
+        val pitchAdjustPct: Float = 0f,
+        val volumeAdjustPct: Float = 0f,
+    )
+
+    fun parseXpkNarration(raw: String, options: XpkParseOptions): NarrationPlan {
+        val root = JSONObject(extractJsonObject(raw))
+        val voicePlan = if (options.includeVoiceCast) parseXpkVoiceCast(root, options) else VoiceCastPlan(emptyList(), emptyList())
+        var musicSceneError = ""
+        val scenes = if (options.includeSceneMusic) {
+            runCatching { parseXpkMusicScenes(root, options) }.getOrElse { error ->
+                val fallback = XpkSceneMusicParity.fallbackScene(
+                    validUnitIds = options.validUnitIds,
+                    validTrackIds = options.validTrackIds,
+                    incomingTrackId = options.incomingTrackId,
+                )
+                if (fallback.isNotEmpty()) {
+                    musicSceneError = (error.message ?: "Kết quả nhạc không hợp lệ") + "; đã phục hồi bằng một cảnh liên tục"
+                    fallback
+                } else {
+                    musicSceneError = error.message ?: "Kết quả nhạc không hợp lệ"
+                    emptyList()
+                }
+            }
+        } else emptyList()
+        return NarrationPlan(voiceCast = voicePlan, musicCues = scenes, musicSceneError = musicSceneError)
+    }
+
+    private fun parseXpkVoiceCast(root: JSONObject, options: XpkParseOptions): VoiceCastPlan {
+        val source = root.optJSONArray("assignments") ?: error("AI không trả đúng JSON assignments")
+        val rows = buildList {
+            for (index in 0 until source.length()) {
+                val row = source.optJSONObject(index) ?: continue
+                add(
+                    XpkRawAssignment(
+                        id = row.optString("id").trim(),
+                        voice = row.optString("voice").trim(),
+                        speedAdjustPct = adjustment(
+                            row,
+                            "speed_adjust_pct",
+                            listOf("speed_pct", "speed_delta_pct", "speedAdjustPct", "speed_adjustment_pct", "rate_adjust_pct", "rate_pct", "speed", "rate"),
+                        ),
+                        pitchAdjustPct = adjustment(
+                            row,
+                            "pitch_adjust_pct",
+                            listOf("pitch_pct", "pitch_delta_pct", "pitchAdjustPct", "pitch_adjustment_pct", "pitch"),
+                        ),
+                        volumeAdjustPct = adjustment(
+                            row,
+                            "volume_adjust_pct",
+                            listOf("volume_pct", "volume_delta_pct", "volumeAdjustPct", "volume_adjustment_pct", "gain_adjust_pct", "gain_pct", "volume", "gain"),
+                        ),
+                    ),
+                )
+            }
+        }
+        return repairXpkAssignments(rows, options)
+    }
+
+    fun repairXpkAssignments(rows: List<XpkRawAssignment>, options: XpkParseOptions): VoiceCastPlan {
+        val validIds = options.validDialogueIds.map(String::trim).filter(String::isNotBlank)
+        val idSet = validIds.toHashSet()
+        val voices = options.validVoiceIds.map(String::trim).filter(String::isNotBlank).distinct()
+        val voiceSet = voices.toHashSet()
+        val fallbackVoice = voices.firstOrNull { it != XpkVoiceCastSplitter.NARRATOR_ID }
+            ?: voices.firstOrNull()
+            ?: error("Danh sách giọng hợp lệ đang trống")
+        val hasCharacterVoice = voices.any { it != XpkVoiceCastSplitter.NARRATOR_ID }
+        val assignmentMap = linkedMapOf<String, ParagraphVoiceAssignment>()
+        val explicitCharacterVoiceById = linkedMapOf<String, String>()
+        var duplicateCount = 0
+        var unexpectedCount = 0
+        var invalidVoiceCount = 0
+
+        rows.forEach { row ->
+            val id = row.id.trim()
+            val requestedVoice = row.voice.trim()
+            if (id !in idSet) {
+                if (id.isNotBlank()) unexpectedCount += 1
+                return@forEach
+            }
+            if (assignmentMap.containsKey(id)) {
+                duplicateCount += 1
+                return@forEach
+            }
+            if (requestedVoice in voiceSet && requestedVoice != XpkVoiceCastSplitter.NARRATOR_ID) {
+                explicitCharacterVoiceById[id] = requestedVoice
+            }
+            val validDialogueVoice = requestedVoice in voiceSet &&
+                (requestedVoice != XpkVoiceCastSplitter.NARRATOR_ID || !hasCharacterVoice)
+            val selectedVoice = if (validDialogueVoice) requestedVoice else fallbackVoice
+            if (!validDialogueVoice) invalidVoiceCount += 1
+            val adjustmentsEnabled = options.expressiveAdjustment && selectedVoice != XpkVoiceCastSplitter.NARRATOR_ID
+            assignmentMap[id] = ParagraphVoiceAssignment(
+                paragraphIndex = paragraphIndexFromUnitId(id),
+                confidence = 1f,
+                speedAdjustPct = if (adjustmentsEnabled) clamp(row.speedAdjustPct, options.speedLimitPct) else 0f,
+                pitchAdjustPct = if (adjustmentsEnabled) clamp(row.pitchAdjustPct, options.pitchLimitPct) else 0f,
+                volumeAdjustPct = if (adjustmentsEnabled) clamp(row.volumeAdjustPct, options.volumeLimitPct) else 0f,
+                unitId = id,
+                voiceId = selectedVoice,
+            )
+        }
+        if (validIds.isNotEmpty() && assignmentMap.isEmpty()) error("Không có ID hợp lệ nào trong phản hồi AI")
+
+        // Mirror VoiceCast:applyAssignments() exactly: groupVoice learns only from a valid explicit
+        // non-narrator AI assignment. A narrator/invalid row does not block a later valid group voice.
+        val groupVoice = linkedMapOf<String, String>()
+        validIds.forEach { id ->
+            val group = options.dialogueGroupByUnitId[id]?.trim().orEmpty()
+            val explicitVoice = explicitCharacterVoiceById[id].orEmpty()
+            if (group.isNotBlank() && group !in groupVoice && explicitVoice.isNotBlank()) {
+                groupVoice[group] = explicitVoice
+            }
+        }
+
+        var missingCount = 0
+        val assignments = validIds.map { id ->
+            val base = assignmentMap[id] ?: ParagraphVoiceAssignment(
+                paragraphIndex = paragraphIndexFromUnitId(id),
+                confidence = 1f,
+                unitId = id,
+                voiceId = fallbackVoice,
+            ).also { missingCount += 1 }
+            val group = options.dialogueGroupByUnitId[id]?.trim().orEmpty()
+            val forcedVoice = groupVoice[group]
+            if (forcedVoice != null && base.voiceId != forcedVoice) base.copy(voiceId = forcedVoice) else base
+        }
+        val warnings = buildList {
+            if (missingCount > 0) add("$missingCount ID thiếu được dùng $fallbackVoice")
+            if (duplicateCount > 0) add("$duplicateCount ID lặp đã bị bỏ")
+            if (unexpectedCount > 0) add("$unexpectedCount ID lạ đã bị bỏ")
+            if (invalidVoiceCount > 0) add("$invalidVoiceCount mã giọng sai được dùng $fallbackVoice")
+        }
+        return VoiceCastPlan(emptyList(), assignments, warnings)
+    }
+
+    private fun parseXpkMusicScenes(root: JSONObject, options: XpkParseOptions): List<SceneMusicCue> {
+        val source = root.optJSONArray("music_scenes") ?: error("Kết quả không có music_scenes")
+        if (source.length() == 0) error("Kết quả không có music_scenes")
+        val rows = buildList {
+            for (index in 0 until source.length()) {
+                val row = source.optJSONObject(index) ?: error("Cảnh nhạc thứ ${index + 1} không phải đối tượng")
+                add(
+                    XpkSceneMusicParity.RawScene(
+                        startId = row.optString("start_id").ifBlank { row.optString("start_unit_id") }.trim(),
+                        endId = row.optString("end_id").ifBlank { row.optString("end_unit_id") }.trim(),
+                        trackId = row.optString("track_id")
+                            .ifBlank { row.optString("selected_track_id") }
+                            .ifBlank { row.optString("music_track_id") }
+                            .trim(),
+                    ),
+                )
+            }
+        }
+        return XpkSceneMusicParity.validateScenes(rows, options.validUnitIds, options.validTrackIds)
+    }
+
+    /** Legacy parser kept only for the deprecated OnlineAiServices narration interfaces. */
+    @Deprecated("Use parseXpkNarration; paragraph ROLE/ASSIGN protocol is not used by XPK narration runtime")
     fun parseVoiceCast(raw: String): VoiceCastPlan {
         val roles = LinkedHashMap<String, VoiceRole>()
         val assignments = mutableListOf<ParagraphVoiceAssignment>()
@@ -47,6 +226,7 @@ object AiLineProtocol {
         return VoiceCastPlan(roles.values.toList(), assignments.distinctBy { it.paragraphIndex })
     }
 
+    @Deprecated("Use parseXpkNarration; paragraph CUE protocol is not used by XPK narration runtime")
     fun parseSceneCues(raw: String): List<SceneMusicCue> = raw.lineSequence()
         .map(String::trim)
         .filter { it.startsWith("CUE|", ignoreCase = true) }
@@ -54,10 +234,51 @@ object AiLineProtocol {
             val parts = line.split('|').map(String::trim)
             val index = parts.getOrNull(1)?.toIntOrNull() ?: return@mapNotNull null
             val track = parts.getOrNull(2)?.takeIf(String::isNotBlank)?.take(120) ?: return@mapNotNull null
-            SceneMusicCue(index.coerceAtLeast(0), track, parts.getOrNull(3)?.toFloatOrNull()?.coerceIn(0f, 1f) ?: 0.25f, parts.getOrElse(4) { "" }.take(160))
+            SceneMusicCue(
+                startParagraph = index.coerceAtLeast(0),
+                trackId = track,
+                volume = parts.getOrNull(3)?.toFloatOrNull()?.coerceIn(0f, 1f) ?: 0.25f,
+                mood = parts.getOrElse(4) { "" }.take(160),
+            )
         }
         .distinctBy { it.startParagraph }
         .sortedBy { it.startParagraph }
         .take(12)
         .toList()
+
+    fun paragraphIndexFromUnitId(unitId: String): Int {
+        if (unitId == "TITLE-U01") return 0
+        val paragraph = Regex("^P(\\d{4})-U\\d{2}$").matchEntire(unitId)?.groupValues?.getOrNull(1)?.toIntOrNull()
+            ?: return -1
+        return (paragraph - 1).coerceAtLeast(0)
+    }
+
+    private fun adjustment(row: JSONObject, primary: String, aliases: List<String>): Float {
+        val keys = listOf(primary) + aliases
+        fun value(container: JSONObject): Any? {
+            keys.forEach { key -> if (container.has(key)) return container.opt(key) }
+            return null
+        }
+        val raw = value(row)
+            ?: row.optJSONObject("adjustments")?.let(::value)
+            ?: row.optJSONObject("prosody")?.let(::value)
+            ?: return 0f
+        return when (raw) {
+            is Number -> raw.toFloat()
+            else -> Regex("[-+]?\\d+(?:[.,]\\d+)?").find(raw.toString())?.value?.replace(',', '.')?.toFloatOrNull()
+        } ?: 0f
+    }
+
+    private fun clamp(value: Float, limit: Float): Float {
+        val safe = limit.coerceAtLeast(0f)
+        return value.coerceIn(-safe, safe)
+    }
+
+    private fun extractJsonObject(raw: String): String {
+        val clean = raw.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+        val start = clean.indexOf('{')
+        val end = clean.lastIndexOf('}')
+        require(start >= 0 && end >= start) { "AI không trả JSON hợp lệ." }
+        return clean.substring(start, end + 1)
+    }
 }

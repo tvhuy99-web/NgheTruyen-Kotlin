@@ -18,6 +18,7 @@ data class PlaybackSpeechChunk(
     val unitId: String = "",
     val unitKind: String = "legacy",
     val fixedVoiceId: String? = null,
+    val dialogueGroupId: String? = null,
 )
 
 enum class PlaybackPreparationState {
@@ -101,9 +102,10 @@ object PlaybackQueueStore {
         preparationState: PlaybackPreparationState = PlaybackPreparationState.READY,
         preparationMessage: String? = null,
     ) {
-        // XPK must see the same body text used by AI planning. Reader normalization is presentation/progress only.
-        val chunks = XpkPlaybackRuntime.buildSpeechTimeline(chapterTitle, paragraphs)
-        val normalized = ReaderTextChunker.normalizeParagraphs(paragraphs)
+        XpkPlaybackRuntime.resetCanonicalPlans()
+        // Match VoiceCast:buildUnits(): one non-empty original line is one hidden parser paragraph.
+        val normalized = XpkPlaybackRuntime.canonicalLines(paragraphs)
+        val chunks = XpkPlaybackRuntime.buildSpeechTimeline(chapterTitle, normalized)
         val startParagraph = if (normalized.isEmpty()) 0 else startIndex.coerceIn(0, normalized.lastIndex)
         mutable.value = PlaybackSnapshot(
             sourceId = sourceId,
@@ -285,12 +287,8 @@ object ReaderTextChunker {
     // Legacy helper retained for non-XPK callers/tests. XPK playback units are <= 1200 UTF-8 bytes.
     const val SAFE_TTS_CHARS = 3_000
 
-    /** Produces canonical reader paragraphs without changing their persisted indexes. */
-    fun normalizeParagraphs(paragraphs: List<String>): List<String> = paragraphs
-        .asSequence()
-        .map { it.replace(Regex("\\s+"), " ").trim() }
-        .filter(String::isNotBlank)
-        .toList()
+    /** Produces the same non-empty line scaffold that XPK VoiceCast uses internally. */
+    fun normalizeParagraphs(paragraphs: List<String>): List<String> = XpkPlaybackRuntime.canonicalLines(paragraphs)
 
     /** Compatibility alias retained for callers that only need reader text. */
     fun normalize(paragraphs: List<String>): List<String> = normalizeParagraphs(paragraphs)

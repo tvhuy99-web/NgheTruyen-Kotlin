@@ -1,0 +1,80 @@
+name: Finalize Lua-style extensions UI
+
+on:
+  pull_request:
+    types: [synchronize]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.event.pull_request.head.ref == 'agent/diagnostics-blackbox-vbook-url'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Apply Lua-style UI patch
+        run: python3 scripts/apply_lua_ui_patch.py
+
+      - name: Preserve Kotlin escaped newlines
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt')
+          text = path.read_text()
+          text = text.replace('append("\n").append(pack.version)', 'append("\\n").append(pack.version)')
+          text = text.replace('append("\n").append(repository.packageCount)', 'append("\\n").append(repository.packageCount)')
+          path.write_text(text)
+          PY
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Test and build APK
+        run: >-
+          ./gradlew
+          :source-diagnostics:test
+          :source-vbook:test
+          :app:testDebugUnitTest
+          :app:compileDebugKotlin
+          :app:assembleDebug
+          --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NgheTruyen-lua-ui-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Commit final source and remove temporary tooling
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout origin/main -- .github/workflows/source-platform-vbook.yml
+          git rm -f --ignore-unmatch \
+            .github/workflows/apply-lua-extensions-ui.yml \
+            .github/workflows/simplify-extension-ui-runner.yml \
+            .github/workflows/simplify-extension-ui.yml \
+            .github/workflows/finalize-lua-ui.yml \
+            scripts/apply_lua_ui_patch.py \
+            .github/simplify-extension-ui.trigger \
+            .github/finalize-lua-ui.trigger
+          git add app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt .github/workflows/source-platform-vbook.yml
+          git commit -m "feat: simplify extension screens like Lua version"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}

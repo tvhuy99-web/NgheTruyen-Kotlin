@@ -12,7 +12,6 @@ import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
 import vn.nghetruyen.app.data.local.VoiceRoleEntity
 import vn.nghetruyen.app.data.repository.LibraryRepository
 import vn.nghetruyen.app.data.settings.SettingsRepository
-import java.util.Locale
 import java.util.UUID
 
 /** Creates and caches a coordinated XPK-compatible voice-cast and scene-music plan. */
@@ -73,10 +72,12 @@ class NarrationPlanCoordinator(
                 is AppResult.Success -> {
                     val warnings = mutableListOf<String>()
                     warnings += outcome.value.voiceCast.warnings
+                    outcome.value.musicSceneError.takeIf(String::isNotBlank)?.let(warnings::add)
                     val voiceCreated = runCatching { persistVoicePlan(content, outcome.value.voiceCast) }
                         .fold({ true }, { warnings += it.message ?: "Không lưu được kế hoạch giọng."; false })
-                    val musicCreated = runCatching { persistMusicPlan(content, tracks, outcome.value.musicCues) }
-                        .fold({ true }, { warnings += it.message ?: "Không lưu được kế hoạch nhạc."; false })
+                    val musicCreated = runCatching {
+                        persistMusicPlan(content, tracks, outcome.value.musicCues, outcome.value.musicSceneError)
+                    }.fold({ true }, { warnings += it.message ?: "Không lưu được kế hoạch nhạc."; false })
                     Result(voiceCreated, musicCreated, warnings.distinct(), usedUnifiedRequest = true)
                 }
             }
@@ -134,7 +135,9 @@ class NarrationPlanCoordinator(
         if (tracks.isEmpty()) return true
         val sourceHash = musicSourceHash(content, tracks)
         val cached = library.getChapterTransform(content.chapter.id, ChapterAiWorkflow.KIND_SCENE_MUSIC)
-        return cached?.sourceSha256 != sourceHash || library.listSceneMusicCues(content.chapter.id).isEmpty()
+        if (cached?.sourceSha256 != sourceHash) return true
+        if (!cached.transformedText.contains("\"engine\":\"$MUSIC_TRANSFORM_ENGINE\"")) return true
+        return library.listSceneMusicCues(content.chapter.id).isEmpty()
     }
 
     private suspend fun ensureVoicePlan(content: ChapterContent, force: Boolean): AppResult<Boolean> {
@@ -183,11 +186,12 @@ class NarrationPlanCoordinator(
             )
         ) {
             is AppResult.Failure -> result
-            is AppResult.Success -> runCatching { persistMusicPlan(content, tracks, result.value.musicCues) }
-                .fold(
-                    { AppResult.Success(true) },
-                    { AppResult.Failure("MUSIC_PLAN_SAVE_FAILED", it.message ?: "Không lưu được kế hoạch nhạc.", it) },
-                )
+            is AppResult.Success -> runCatching {
+                persistMusicPlan(content, tracks, result.value.musicCues, result.value.musicSceneError)
+            }.fold(
+                { AppResult.Success(true) },
+                { AppResult.Failure("MUSIC_PLAN_SAVE_FAILED", it.message ?: "Không lưu được kế hoạch nhạc.", it) },
+            )
         }
     }
 
@@ -266,6 +270,7 @@ class NarrationPlanCoordinator(
         content: ChapterContent,
         tracks: List<SceneMusicTrackEntity>,
         plannedCues: List<SceneMusicCue>,
+        musicSceneError: String,
     ) {
         val allowed = tracks.associateBy { it.id }
         val cues = plannedCues
@@ -278,8 +283,8 @@ class NarrationPlanCoordinator(
                     chapterId = content.chapter.id,
                     startParagraph = cue.startParagraph,
                     trackId = cue.trackId,
-                    volume = cue.volume.coerceIn(0f, 1f),
-                    mood = cue.mood.take(160),
+                    volume = 1f,
+                    mood = "",
                     updatedAt = System.currentTimeMillis(),
                 )
             }
@@ -288,7 +293,7 @@ class NarrationPlanCoordinator(
         val (provider, model) = effectiveAiMetadata(content.chapter.storyId, appSettings.aiOnline.provider.name, appSettings.aiOnline.model)
         val unitScenes = JSONArray().also { array ->
             plannedCues.forEach { cue ->
-                if (cue.startUnitId.isNotBlank() && cue.endUnitId.isNotBlank()) {
+                if (cue.startUnitId.isNotBlank() && cue.endUnitId.isNotBlank() && allowed.containsKey(cue.trackId)) {
                     array.put(
                         JSONObject()
                             .put("start_id", cue.startUnitId)
@@ -309,7 +314,9 @@ class NarrationPlanCoordinator(
                 sourceSha256 = musicSourceHash(content, tracks),
                 transformedText = JSONObject()
                     .put("engine", MUSIC_TRANSFORM_ENGINE)
+                    .put("mode", XpkSceneMusicParity.MODE)
                     .put("music_scenes", unitScenes)
+                    .put("music_scene_error", musicSceneError)
                     .toString(),
                 updatedAt = System.currentTimeMillis(),
             ),
@@ -321,35 +328,64 @@ class NarrationPlanCoordinator(
         activeTrackId: String?,
         tracks: List<SceneMusicTrackEntity>,
     ): NarrationPlanContext {
+        val validTracks = tracks.associateBy(SceneMusicTrackEntity::id)
         val previous = library.loadPreviousCachedChapter(content.chapter.storyId, content.chapter.index)
-        val previousEnding = previous?.paragraphs
-            ?.takeLast(6)
-            ?.joinToString("\n")
-            ?.takeLast(4_000)
-            .orEmpty()
+        val previousTail = previous?.let {
+            XpkSceneMusicParity.continuityTailForPrompt(
+                title = it.chapter.title,
+                body = chapterBody(it),
+                maxUnits = 5,
+            )
+        }.orEmpty()
+        val previousTransform = previous?.chapter?.id?.let { chapterId ->
+            library.getChapterTransform(chapterId, ChapterAiWorkflow.KIND_SCENE_MUSIC)
+        }
+        val plannedFinalTrack = previousTransform?.takeIf {
+            it.transformedText.contains("\"engine\":\"$MUSIC_TRANSFORM_ENGINE\"")
+        }?.let { transform ->
+            runCatching {
+                val scenes = JSONObject(transform.transformedText).optJSONArray("music_scenes") ?: return@runCatching null
+                scenes.optJSONObject(scenes.length() - 1)?.optString("track_id")?.trim()?.takeIf(String::isNotBlank)
+            }.getOrNull()
+        }
         val previousCue = previous?.chapter?.id
             ?.let { library.listSceneMusicCues(it).maxByOrNull(SceneMusicCueEntity::startParagraph) }
-        val continuityTrackId = activeTrackId?.takeIf(String::isNotBlank) ?: previousCue?.trackId
-        val track = tracks.firstOrNull { it.id == continuityTrackId }
+        val plannedCandidate = (plannedFinalTrack ?: previousCue?.trackId)?.takeIf(validTracks::containsKey)
+        val currentCandidate = activeTrackId?.trim()?.takeIf { it.isNotBlank() && validTracks.containsKey(it) }
+        val continuityTrackId = plannedCandidate ?: currentCandidate
+        val continuitySource = when {
+            plannedCandidate != null -> "final_scene"
+            currentCandidate != null -> "current_track"
+            else -> "none"
+        }
+        val track = continuityTrackId?.let(validTracks::get)
         return NarrationPlanContext(
-            previousChapterEnding = previousEnding,
+            previousChapterEnding = previousTail,
             activeTrackId = continuityTrackId,
             activeTrackTitle = track?.title,
             previousMood = previousCue?.mood.orEmpty(),
+            incomingSource = continuitySource,
         )
     }
 
     private fun chapterBody(content: ChapterContent): String = content.paragraphs.joinToString("\n")
 
     private fun musicSourceHash(content: ChapterContent, tracks: List<SceneMusicTrackEntity>): String =
-        ChapterAiWorkflow.sha256(content.paragraphs + tracks.flatMap { listOf(it.id, it.tagsCsv, it.title) })
+        ChapterAiWorkflow.sha256(
+            content.paragraphs +
+                tracks.flatMap { listOf(it.id, it.tagsCsv, it.title) } +
+                listOf("\u0001scene_music_engine=$MUSIC_TRANSFORM_ENGINE"),
+        )
 
-    private fun SceneMusicTrackEntity.toOption(): SceneMusicTrackOption = SceneMusicTrackOption(
-        id = id,
-        title = title,
-        // Legacy column name. XPK treats this as one freeform AI description.
-        tags = tagsCsv.trim().takeIf(String::isNotBlank)?.let(::listOf).orEmpty(),
-    )
+    private fun SceneMusicTrackEntity.toOption(): SceneMusicTrackOption {
+        val description = tagsCsv.trim()
+        return SceneMusicTrackOption(
+            id = id,
+            title = title,
+            tags = description.takeIf(String::isNotBlank)?.let(::listOf).orEmpty(),
+            description = description,
+        )
+    }
 
     private suspend fun effectiveAiMetadata(storyId: String, globalProvider: String, globalModel: String): Pair<String, String> {
         val profile = library.getStoryAiProfile(storyId)
@@ -364,6 +400,6 @@ class NarrationPlanCoordinator(
     companion object {
         private const val NARRATOR = "Người kể chuyện"
         private const val VOICE_TRANSFORM_ENGINE = "xpk-unit-v8"
-        private const val MUSIC_TRANSFORM_ENGINE = "xpk-unit-scene-v1"
+        private const val MUSIC_TRANSFORM_ENGINE = "xpk-ai-full-authority-v1"
     }
 }

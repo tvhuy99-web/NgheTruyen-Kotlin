@@ -57,11 +57,11 @@ object SourceManifestParser {
     private fun parseRuntime(value: JsonValue.Obj): SourceRuntimePolicy {
         value.requireOnly(RUNTIME_KEYS, "runtime")
         return SourceRuntimePolicy(
-        mode = enumValue(value.requiredString("mode"), "runtime.mode"),
-        entry = value.string("entry"),
-        instructionBudget = value.int("instructionBudget") ?: 200_000,
-        memoryBudgetBytes = value.int("memoryBudgetBytes") ?: 16 * 1024 * 1024,
-        actionTimeoutMs = value.long("actionTimeoutMs") ?: 30_000,
+            mode = enumValue(value.requiredString("mode"), "runtime.mode"),
+            entry = value.string("entry"),
+            instructionBudget = value.int("instructionBudget") ?: 200_000,
+            memoryBudgetBytes = value.int("memoryBudgetBytes") ?: 16 * 1024 * 1024,
+            actionTimeoutMs = value.long("actionTimeoutMs") ?: 30_000,
         )
     }
 
@@ -75,6 +75,8 @@ object SourceManifestParser {
                 maxRequestBytes = item.int("maxRequestBytes") ?: 0,
                 requestsPerMinute = item.int("requestsPerMinute") ?: 60,
                 maxConcurrent = item.int("maxConcurrent") ?: 2,
+                publicInternet = item.bool("publicInternet") ?: false,
+                allowCleartext = item.bool("allowCleartext") ?: false,
             )
         }
         val browser = value.obj("browser")?.let { item ->
@@ -139,9 +141,9 @@ object SourceManifestParser {
     private fun parsePrivacy(value: JsonValue.Obj?): SourcePrivacyDisclosure {
         value?.requireOnly(PRIVACY_KEYS, "privacy")
         return SourcePrivacyDisclosure(
-        sendsContentToThirdParty = value?.bool("sendsContentToThirdParty") ?: false,
-        thirdParties = value?.stringList("thirdParties").orEmpty(),
-        note = value?.string("note").orEmpty(),
+            sendsContentToThirdParty = value?.bool("sendsContentToThirdParty") ?: false,
+            thirdParties = value?.stringList("thirdParties").orEmpty(),
+            note = value?.string("note").orEmpty(),
         )
     }
 
@@ -182,7 +184,10 @@ object SourceManifestParser {
     )
     private val RUNTIME_KEYS = setOf("mode", "entry", "instructionBudget", "memoryBudgetBytes", "actionTimeoutMs")
     private val CAPABILITY_KEYS = setOf("network", "cookies", "browser", "storageBytes", "crypto", "websocket")
-    private val NETWORK_KEYS = setOf("methods", "maxResponseBytes", "maxRequestBytes", "requestsPerMinute", "maxConcurrent")
+    private val NETWORK_KEYS = setOf(
+        "methods", "maxResponseBytes", "maxRequestBytes", "requestsPerMinute", "maxConcurrent",
+        "publicInternet", "allowCleartext",
+    )
     private val BROWSER_KEYS = setOf("navigate", "domSnapshot", "click", "input", "requestMetadata", "serviceWorkerCapture", "pageJavaScript")
     private val WEBSOCKET_KEYS = setOf("enabled", "maxMessageBytes", "maxLifetimeMs")
     private val ACTION_KEYS = setOf("entry", "timeoutMs", "maxOutputBytes")

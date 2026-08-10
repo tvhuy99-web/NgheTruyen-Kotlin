@@ -1,0 +1,20 @@
+{
+  "metadata": {
+    "name": "NgheTruyen Comic ABI Fixture",
+    "author": "NgheTruyen",
+    "version": 1,
+    "source": "https://example.invalid",
+    "description": "Deterministic comic differential fixture",
+    "locale": "vi",
+    "regexp": "example\\.invalid",
+    "type": "comic",
+    "nsfw": false
+  },
+  "script": {
+    "search": "search.js",
+    "detail": "detail.js",
+    "toc": "toc.js",
+    "page": "page.js"
+  },
+  "config": {}
+}

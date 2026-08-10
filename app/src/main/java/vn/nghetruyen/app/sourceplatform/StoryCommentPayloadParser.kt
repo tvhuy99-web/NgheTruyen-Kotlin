@@ -54,7 +54,8 @@ internal object StoryCommentPayloadParser {
             ).ifBlank { "Người đọc" },
             time = clean(
                 obj.string("time") ?: obj.string("date") ?: obj.string("createdAt")
-                    ?: obj.string("created_at") ?: obj.string("publishedAt") ?: obj.string("published_at").orEmpty(),
+                    ?: obj.string("created_at") ?: obj.string("publishedAt") ?: obj.string("published_at")
+                    ?: obj.string("description").orEmpty(),
                 MAX_COMMENT_META,
             ),
             text = text,

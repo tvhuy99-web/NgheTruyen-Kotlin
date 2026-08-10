@@ -22,9 +22,28 @@ class SourceRegistry(
         it.descriptor.health == SourceHealth.READY || it.descriptor.health == SourceHealth.DEGRADED
     }
 
+    /**
+     * Compatibility refresh used by the legacy SourcePack manager.
+     *
+     * Older UI code only passes SourcePack candidates here. Preserve already registered vBook
+     * sources so that opening/refreshing the legacy source-management screen cannot silently make
+     * an ACTIVE vBook artifact disappear until process restart. The AppContainer full refresh may
+     * still replace a vBook candidate by passing the same stable id with a newer implementation.
+     */
     @Synchronized
     fun refreshSourcePacks(sourcePackSources: List<StorySource>) {
-        byId = merge(sourcePackSources)
+        val incomingIds = sourcePackSources.mapTo(linkedSetOf()) { it.descriptor.id }
+        val preservedVBook = byId.values.filter { source ->
+            source.descriptor.implementationKind == SourceImplementationKind.VBOOK &&
+                source.descriptor.id !in incomingIds
+        }
+        byId = merge(sourcePackSources + preservedVBook)
+    }
+
+    /** Full external-runtime refresh. Callers supply every active external ecosystem. */
+    @Synchronized
+    fun replaceExternalSources(externalSources: List<StorySource>) {
+        byId = merge(externalSources)
     }
 
     private fun merge(sourcePackSources: List<StorySource>): Map<String, StorySource> {
@@ -36,7 +55,7 @@ class SourceRegistry(
         // same stable legacy id. This gives the pack full website fidelity without
         // letting an arbitrary package redirect to a different built-in source.
         legacySources.forEach { selected[it.descriptor.id] = it }
-        sourcePackSources.forEach { rawCandidate ->
+        sourcePackSources.distinctBy { it.descriptor.id }.forEach { rawCandidate ->
             val candidate = if (rawCandidate is BuiltInSourcePackBridge) {
                 val delegateId = rawCandidate.builtInDelegateId
                 val delegate = delegateId?.let(builtInsById::get)

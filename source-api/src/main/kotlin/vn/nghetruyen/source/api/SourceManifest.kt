@@ -43,6 +43,10 @@ data class SourceNetworkCapability(
     val maxRequestBytes: Int = 0,
     val requestsPerMinute: Int = 60,
     val maxConcurrent: Int = 2,
+    /** Allow arbitrary public Internet hosts instead of only declared origins. Restricted to VBOOK_JS_COMPAT. */
+    val publicInternet: Boolean = false,
+    /** Allow public cleartext HTTP as a legacy compatibility escape hatch. Restricted to VBOOK_JS_COMPAT. */
+    val allowCleartext: Boolean = false,
 )
 
 data class SourceBrowserCapability(
@@ -121,7 +125,10 @@ data class SourceManifest(
         require(description.length <= 1000 && author.length <= 120) { "SOURCE_METADATA_TOO_LONG" }
         require(LOCALE_PATTERN.matches(locale)) { "SOURCE_LOCALE_INVALID" }
         require(origins.isNotEmpty() && origins.size <= 32) { "SOURCE_ORIGINS_INVALID" }
-        (origins + redirectOrigins).forEach(::validateOrigin)
+        val network = capabilities.network
+        val vbookPublicInternet = runtime.mode == SourceRuntimeMode.VBOOK_JS_COMPAT && network?.publicInternet == true
+        val vbookCleartext = vbookPublicInternet && network?.allowCleartext == true
+        (origins + redirectOrigins).forEach { validateOrigin(it, allowCleartext = vbookCleartext) }
         require(actions.keys.containsAll(REQUIRED_ACTIONS)) { "SOURCE_REQUIRED_ACTION_MISSING" }
         actions.values.forEach { action ->
             requireSafeRelativePath(action.entry)
@@ -143,12 +150,16 @@ data class SourceManifest(
         require(runtime.memoryBudgetBytes in 1024 * 1024..64 * 1024 * 1024) { "SOURCE_MEMORY_BUDGET_INVALID" }
         require(runtime.actionTimeoutMs in 1_000..120_000) { "SOURCE_TIMEOUT_INVALID" }
         require(capabilities.storageBytes in 0..16 * 1024 * 1024) { "SOURCE_STORAGE_LIMIT_INVALID" }
-        capabilities.network?.let { network ->
-            require(network.methods.isNotEmpty() && network.methods.all { it in ALLOWED_METHODS }) { "SOURCE_METHOD_INVALID" }
-            require(network.maxResponseBytes in 1024..16 * 1024 * 1024) { "SOURCE_RESPONSE_LIMIT_INVALID" }
-            require(network.maxRequestBytes in 0..4 * 1024 * 1024) { "SOURCE_REQUEST_LIMIT_INVALID" }
-            require(network.requestsPerMinute in 1..600) { "SOURCE_RATE_INVALID" }
-            require(network.maxConcurrent in 1..8) { "SOURCE_CONCURRENCY_INVALID" }
+        network?.let { capability ->
+            require(capability.methods.isNotEmpty() && capability.methods.all { it in ALLOWED_METHODS }) { "SOURCE_METHOD_INVALID" }
+            require(capability.maxResponseBytes in 1024..16 * 1024 * 1024) { "SOURCE_RESPONSE_LIMIT_INVALID" }
+            require(capability.maxRequestBytes in 0..4 * 1024 * 1024) { "SOURCE_REQUEST_LIMIT_INVALID" }
+            require(capability.requestsPerMinute in 1..600) { "SOURCE_RATE_INVALID" }
+            require(capability.maxConcurrent in 1..8) { "SOURCE_CONCURRENCY_INVALID" }
+            if (capability.publicInternet || capability.allowCleartext) {
+                require(runtime.mode == SourceRuntimeMode.VBOOK_JS_COMPAT) { "SOURCE_PUBLIC_INTERNET_MODE_DENIED" }
+            }
+            require(!capability.allowCleartext || capability.publicInternet) { "SOURCE_CLEARTEXT_PUBLIC_INTERNET_REQUIRED" }
         }
         require(urlPatterns.size <= 32 && urlPatterns.all { it.length <= 500 }) { "SOURCE_URL_PATTERN_INVALID" }
         fixtures.forEach { fixture ->
@@ -172,12 +183,19 @@ data class SourceManifest(
             require(parts.none { it.isBlank() || it == "." || it == ".." }) { "SOURCE_PATH_TRAVERSAL" }
         }
 
-        private fun validateOrigin(origin: String) {
+        private fun validateOrigin(origin: String, allowCleartext: Boolean) {
             require(origin.length <= 300) { "SOURCE_ORIGIN_TOO_LONG" }
-            val wildcard = origin.startsWith("https://*.")
-            val normalized = if (wildcard) origin.replaceFirst("https://*.", "https://") else origin
+            val wildcardHttps = origin.startsWith("https://*.")
+            val wildcardHttp = allowCleartext && origin.startsWith("http://*.")
+            val wildcard = wildcardHttps || wildcardHttp
+            val normalized = when {
+                wildcardHttps -> origin.replaceFirst("https://*.", "https://")
+                wildcardHttp -> origin.replaceFirst("http://*.", "http://")
+                else -> origin
+            }
             val uri = runCatching { URI(normalized) }.getOrNull() ?: error("SOURCE_ORIGIN_INVALID")
-            require(uri.scheme == "https" && !uri.host.isNullOrBlank() && uri.userInfo == null && uri.path.orEmpty().isEmpty()) {
+            val schemeAllowed = uri.scheme == "https" || (allowCleartext && uri.scheme == "http")
+            require(schemeAllowed && !uri.host.isNullOrBlank() && uri.userInfo == null && uri.path.orEmpty().isEmpty()) {
                 "SOURCE_ORIGIN_INVALID"
             }
             require(uri.query == null && uri.fragment == null) { "SOURCE_ORIGIN_INVALID" }

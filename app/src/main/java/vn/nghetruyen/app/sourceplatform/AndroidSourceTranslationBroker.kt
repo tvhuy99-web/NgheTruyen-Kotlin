@@ -11,12 +11,27 @@ import vn.nghetruyen.source.api.SourcePlatformResult
 import vn.nghetruyen.source.api.SourceTranslationBroker
 import vn.nghetruyen.source.api.SourceTranslationRequest
 import vn.nghetruyen.source.api.SourceTranslationResponse
+import vn.nghetruyen.source.vbook.VBookTranslationBrokerRouter
 
-/** Uses the user's configured AI provider and never embeds an extension-owned credential. */
+/**
+ * Generic source translation uses the configured AI provider. vBook Quick Translator targets
+ * (`vp`/`hv`) are intercepted before the disclosure/AI path and stay offline.
+ */
 class AndroidSourceTranslationBroker(
     private val engine: TranslationEngine,
+    private val quickTranslation: SourceTranslationBroker = AndroidVBookQuickTranslationRegistry,
 ) : SourceTranslationBroker {
     override fun translate(
+        manifest: SourceManifest,
+        request: SourceTranslationRequest,
+    ): SourcePlatformResult<SourceTranslationResponse> {
+        if (request.targetLanguage.trim().lowercase() in VBookTranslationBrokerRouter.QUICK_TARGETS) {
+            return quickTranslation.translate(manifest, request)
+        }
+        return translateOnline(manifest, request)
+    }
+
+    private fun translateOnline(
         manifest: SourceManifest,
         request: SourceTranslationRequest,
     ): SourcePlatformResult<SourceTranslationResponse> = runCatching {

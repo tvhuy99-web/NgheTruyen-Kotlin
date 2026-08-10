@@ -172,6 +172,9 @@ fun PersonalScreen(
     onUpdateSourcePack: (String) -> Unit,
     onExportSourcePack: (String, String) -> Unit,
     onRemoveSourcePack: (String) -> Unit,
+    onCheckSourcePack: (String) -> Unit,
+    onSaveSourceConfig: (String, Map<String, String>) -> Unit,
+    onResetSourceConfig: (String) -> Unit,
     onEnrollSourceTrustKey: (String, String, String, String) -> Unit,
     onRevokeSourceTrustKey: (String) -> Unit,
     onInspectSourceSelector: (String, String, String) -> Unit,
@@ -447,6 +450,10 @@ fun PersonalScreen(
                 onUpdate = onUpdateSourcePack,
                 onExport = onExportSourcePack,
                 onRemove = onRemoveSourcePack,
+                onCheck = onCheckSourcePack,
+                onSaveConfig = onSaveSourceConfig,
+                onResetConfig = onResetSourceConfig,
+                onLogin = onOpenSourceLogin,
             )
         }
         "extensions_repositories" -> PersonalSubPage("KHO TIỆN ÍCH") {
@@ -875,13 +882,30 @@ private fun InstalledSourcesSection(
     onUpdate: (String) -> Unit,
     onExport: (String, String) -> Unit,
     onRemove: (String) -> Unit,
+    onCheck: (String) -> Unit,
+    onSaveConfig: (String, Map<String, String>) -> Unit,
+    onResetConfig: (String) -> Unit,
+    onLogin: (String) -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
+    var ecosystemFilter by remember { mutableStateOf("ALL") }
     var showSearch by remember { mutableStateOf(false) }
     var selectedPackId by remember { mutableStateOf<String?>(null) }
+    var configurePackId by remember { mutableStateOf<String?>(null) }
+    var diagnosticPackId by remember { mutableStateOf<String?>(null) }
     var removePackId by remember { mutableStateOf<String?>(null) }
     val filtered = state.sourcePacks.filter { pack ->
-        query.isBlank() || pack.name.contains(query, ignoreCase = true) || pack.id.contains(query, ignoreCase = true)
+        (ecosystemFilter == "ALL" || pack.ecosystem == ecosystemFilter) &&
+            (query.isBlank() || pack.name.contains(query, ignoreCase = true) || pack.id.contains(query, ignoreCase = true))
+    }
+
+    Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp)) {
+        listOf("ALL" to "TẤT CẢ", "VBOOK" to "VBOOK", "LEGADO" to "LEGADO", "NATIVE" to "NATIVE").forEach { (value, label) ->
+            TextButton(
+                onClick = { ecosystemFilter = value },
+                modifier = Modifier.weight(1f),
+            ) { Text(if (ecosystemFilter == value) "$label ✓" else label) }
+        }
     }
 
     ReferenceActionButton(
@@ -908,7 +932,7 @@ private fun InstalledSourcesSection(
             ReferenceActionButton(
                 text = buildString {
                     append(pack.name)
-                    append("\n").append(pack.version)
+                    append("\n").append(pack.ecosystem).append(" • ").append(pack.contentType).append(" • ").append(pack.version)
                     if (!pack.enabled) append(" • Đã tắt")
                 },
                 onClick = { selectedPackId = pack.id },
@@ -945,6 +969,7 @@ private fun InstalledSourcesSection(
                 text = {
                     Column {
                         Text("${pack.id} • ${pack.version}", style = MaterialTheme.typography.bodySmall)
+                        Text("${pack.ecosystem} • ${pack.contentType}", style = MaterialTheme.typography.bodySmall)
                         ReferenceActionButton(
                             text = if (pack.enabled) "TẮT" else "BẬT",
                             onClick = {
@@ -953,9 +978,37 @@ private fun InstalledSourcesSection(
                             },
                             modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                         )
+                        ReferenceActionButton(
+                            text = "KIỂM TRA",
+                            onClick = {
+                                onCheck(pack.id)
+                                selectedPackId = null
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        )
+                        if (pack.configFields.isNotEmpty()) {
+                            ReferenceActionButton(
+                                text = "CẤU HÌNH",
+                                onClick = {
+                                    configurePackId = pack.id
+                                    selectedPackId = null
+                                },
+                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                            )
+                        }
+                        if (pack.loginAvailable) {
+                            ReferenceActionButton(
+                                text = "ĐĂNG NHẬP",
+                                onClick = {
+                                    onLogin(pack.id)
+                                    selectedPackId = null
+                                },
+                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                            )
+                        }
                         if (pack.canRollback) {
                             ReferenceActionButton(
-                                text = "ROLLBACK PHIÊN BẢN NGUỒN",
+                                text = "KHÔI PHỤC PHIÊN BẢN TRƯỚC",
                                 onClick = {
                                     onRollback(pack.id)
                                     selectedPackId = null
@@ -967,6 +1020,14 @@ private fun InstalledSourcesSection(
                             text = "CẬP NHẬT",
                             onClick = {
                                 onUpdate(pack.id)
+                                selectedPackId = null
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        )
+                        ReferenceActionButton(
+                            text = "NHẬT KÝ",
+                            onClick = {
+                                diagnosticPackId = pack.id
                                 selectedPackId = null
                             },
                             modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
@@ -995,6 +1056,48 @@ private fun InstalledSourcesSection(
                 confirmButton = { TextButton(onClick = { selectedPackId = null }) { Text("ĐÓNG") } },
             )
         }
+    }
+
+    configurePackId?.let { packId ->
+        state.sourcePacks.firstOrNull { it.id == packId }?.let { pack ->
+            SourcePackConfigDialog(
+                pack = pack,
+                onSave = { changes -> onSaveConfig(pack.id, changes) },
+                onReset = { onResetConfig(pack.id) },
+                onDismiss = { configurePackId = null },
+            )
+        }
+    }
+
+    diagnosticPackId?.let { sourceId ->
+        val pack = state.sourcePacks.firstOrNull { it.id == sourceId }
+        val events = state.sourceDiagnostics.filter { it.sourceId == sourceId }.take(50)
+        AlertDialog(
+            onDismissRequest = { diagnosticPackId = null },
+            title = { Text("NHẬT KÝ · ${pack?.name ?: sourceId}") },
+            text = {
+                Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                    if (events.isEmpty()) {
+                        Text("Chưa có sự kiện chẩn đoán cho tiện ích này.")
+                    } else {
+                        events.forEach { event ->
+                            val duration = event.durationMs?.let { " • ${it} ms" }.orEmpty()
+                            Text(
+                                "${event.severity} ${event.category}/${event.name}$duration",
+                                fontWeight = if (event.severity == "ERROR") FontWeight.SemiBold else FontWeight.Normal,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            Text(
+                                "trace ${event.traceId.take(12)}${event.detail.takeIf(String::isNotBlank)?.let { " • $it" }.orEmpty()}",
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.padding(bottom = 6.dp),
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { diagnosticPackId = null }) { Text("ĐÓNG") } },
+        )
     }
 
     removePackId?.let { packId ->
@@ -1191,7 +1294,9 @@ private fun SourceAddLinkSection(
                 enabled = trustKeyId.isNotBlank() && trustPublicKey.isNotBlank() && trustFingerprint.isNotBlank(),
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
             ) { Text("THÊM KHÓA") }
-            Button(onClick = onImportRotation, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) { Text("NHẬP XOAY KHÓA") }
+            Button(onClick = onImportRotation, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                Text("NHẬP TỆP XOAY KHÓA ĐÃ KÝ")
+            }
         }
     }
 }
@@ -2849,7 +2954,7 @@ private fun SourceManagementCard(
             Button(
                 onClick = onImportSourceTrustRotation,
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-            ) { Text("NHẬP XOAY KHÓA") }
+            ) { Text("NHẬP TỆP XOAY KHÓA ĐÃ KÝ") }
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             Button(onInstallSourcePack, Modifier.fillMaxWidth()) { Text("CÀI .NTSOURCE / VBOOK / LUA API 2") }
             state.pendingSourceInstall?.let { preview ->

@@ -1,0 +1,18 @@
+{
+  "metadata": {
+    "name": "NgheTruyen TTS ABI Fixture",
+    "author": "NgheTruyen",
+    "version": 1,
+    "source": "https://example.invalid",
+    "description": "Deterministic TTS differential fixture",
+    "locale": "vi",
+    "regexp": "example\\.invalid",
+    "type": "tts",
+    "nsfw": false
+  },
+  "script": {
+    "voice": "voice.js",
+    "tts": "tts.js"
+  },
+  "config": {}
+}

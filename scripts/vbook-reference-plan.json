@@ -1,0 +1,93 @@
+{
+  "schema": 1,
+  "server": "http://127.0.0.1:8080",
+  "cases": [
+    {
+      "id": "current-search-core-abi",
+      "artifactId": "current-abi-fixture",
+      "extension": "../source-vbook/src/test/resources/reference-fixtures/current-abi",
+      "profile": "CURRENT_JS",
+      "script": "search.js",
+      "args": ["fixture-query", "opaque://cursor?x=1"],
+      "features": [
+        "CONTRACT_CURRENT",
+        "CONFIG_DESCRIPTOR",
+        "CONFIG_CONNECTION_SETTINGS",
+        "RESPONSE_HELPER",
+        "LOAD_CRYPTO_BUILTIN",
+        "HTML_DOM",
+        "HTML_COLLECTION_CALLBACKS",
+        "HTML_MUTATION",
+        "HTML_ATTRIBUTES",
+        "CRYPTO"
+      ]
+    },
+    {
+      "id": "current-explore-dynamic-action",
+      "artifactId": "current-abi-fixture",
+      "extension": "../source-vbook/src/test/resources/reference-fixtures/current-abi",
+      "profile": "CURRENT_JS",
+      "script": "explore.js",
+      "args": [],
+      "features": [
+        "DYNAMIC_SCRIPT_REFERENCE",
+        "DYNAMIC_DATA_ARGUMENT"
+      ]
+    },
+    {
+      "id": "current-dynamic-initial-data",
+      "artifactId": "current-abi-fixture",
+      "extension": "../source-vbook/src/test/resources/reference-fixtures/current-abi",
+      "profile": "CURRENT_JS",
+      "script": "list.js",
+      "args": ["/latest", "server-a"],
+      "features": [
+        "DYNAMIC_DATA_ARGUMENT"
+      ]
+    },
+    {
+      "id": "current-dynamic-opaque-data2",
+      "artifactId": "current-abi-fixture",
+      "extension": "../source-vbook/src/test/resources/reference-fixtures/current-abi",
+      "profile": "CURRENT_JS",
+      "script": "list.js",
+      "args": ["/latest", "opaque://next?token=a%2Bb"],
+      "features": [
+        "DYNAMIC_DATA_ARGUMENT"
+      ]
+    },
+    {
+      "id": "current-detail-dynamic-fields",
+      "artifactId": "current-abi-fixture",
+      "extension": "../source-vbook/src/test/resources/reference-fixtures/current-abi",
+      "profile": "CURRENT_JS",
+      "script": "detail.js",
+      "args": ["https://example.invalid/story/1"],
+      "features": [
+        "DYNAMIC_SCRIPT_REFERENCE"
+      ]
+    },
+    {
+      "id": "current-toc-shape",
+      "artifactId": "current-abi-fixture",
+      "extension": "../source-vbook/src/test/resources/reference-fixtures/current-abi",
+      "profile": "CURRENT_JS",
+      "script": "toc.js",
+      "args": ["https://example.invalid/story/1"],
+      "features": [
+        "CONTENT_NOVEL"
+      ]
+    },
+    {
+      "id": "current-chap-html-title",
+      "artifactId": "current-abi-fixture",
+      "extension": "../source-vbook/src/test/resources/reference-fixtures/current-abi",
+      "profile": "CURRENT_JS",
+      "script": "chap.js",
+      "args": ["https://example.invalid/story/1/chapter-1"],
+      "features": [
+        "CONTENT_NOVEL"
+      ]
+    }
+  ]
+}

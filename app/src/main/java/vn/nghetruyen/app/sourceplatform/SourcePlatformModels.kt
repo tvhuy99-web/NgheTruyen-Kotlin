@@ -14,6 +14,25 @@ data class SourcePackUiInfo(
     val commentCapability: String,
     val commentFixtureCount: Int,
     val removable: Boolean = true,
+    val ecosystem: String = "NATIVE",
+    val contentType: String = "NOVEL",
+    val compatibilityProfile: String = "",
+    val configFields: List<SourceConfigFieldUi> = emptyList(),
+    val loginAvailable: Boolean = false,
+)
+
+data class SourceConfigFieldUi(
+    val key: String,
+    val title: String,
+    val subtitle: String,
+    /** Sensitive values are always blank in UI snapshots. */
+    val value: String,
+    val defaultValue: String,
+    val options: List<String>,
+    val mode: String,
+    val format: String,
+    val sensitive: Boolean,
+    val configured: Boolean,
 )
 
 data class SourceInstallPreview(

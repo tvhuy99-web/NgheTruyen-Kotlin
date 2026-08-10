@@ -1,6 +1,9 @@
 package vn.nghetruyen.app
 
 import android.content.Context
+import com.nghetruyen.source.platform.SourceArtifactDescriptor
+import com.nghetruyen.source.platform.SourceTrustState
+import com.nghetruyen.source.repository.VBookUpdateResult
 import vn.nghetruyen.app.ai.EncryptedAiCredentialStore
 import vn.nghetruyen.app.ai.AiRequestGovernor
 import vn.nghetruyen.app.ai.OnlineAiServices
@@ -15,7 +18,11 @@ import vn.nghetruyen.app.importers.BookImporter
 import vn.nghetruyen.app.following.FollowingUpdateScheduler
 import vn.nghetruyen.app.playback.TtsVoiceCatalog
 import vn.nghetruyen.app.sources.EncryptedSourceSessionStore
+import vn.nghetruyen.app.sourceplatform.AndroidVBookQuickTranslationRegistry
 import vn.nghetruyen.app.sourceplatform.SourcePlatformManager
+import vn.nghetruyen.app.sourceplatform.UnifiedSourcePlatformManager
+import vn.nghetruyen.app.sourceplatform.VBookRepositoryClient
+import vn.nghetruyen.app.sourceplatform.VBookSourcePlatform
 import vn.nghetruyen.app.sources.SourceHealthChecker
 import vn.nghetruyen.app.sources.SourceRegistry
 import vn.nghetruyen.app.transfer.BackupTransferManager
@@ -29,13 +36,76 @@ class AppContainer(context: Context) {
     val settingsRepository: SettingsRepository by lazy { SettingsRepository(appContext) }
     val libraryRepository: LibraryRepository by lazy { LibraryRepository(database) }
     val sourceSessionStore: EncryptedSourceSessionStore by lazy { EncryptedSourceSessionStore(appContext) }
-    val sourcePlatformManager: SourcePlatformManager by lazy { SourcePlatformManager(appContext, sourceSessionStore, aiServices) }
+
+    private val vBookQuickTranslationInstalled: Unit by lazy {
+        AndroidVBookQuickTranslationRegistry.install(libraryRepository)
+    }
+
+    val vBookSourcePlatform: VBookSourcePlatform by lazy {
+        vBookQuickTranslationInstalled
+        VBookSourcePlatform(appContext, sourceSessionStore, aiServices)
+    }
+
+    val vBookRepositoryClient: VBookRepositoryClient by lazy { VBookRepositoryClient() }
+
+    private val legacySourcePlatformManager: SourcePlatformManager by lazy {
+        vBookQuickTranslationInstalled
+        SourcePlatformManager(
+            context = appContext,
+            sourceSessionStore = sourceSessionStore,
+            translationEngine = aiServices,
+            vBookSourcePlatform = vBookSourcePlatform,
+            onVBookChanged = { refreshSourceRegistry() },
+        )
+    }
+
+    val sourcePlatformManager: UnifiedSourcePlatformManager by lazy {
+        UnifiedSourcePlatformManager(
+            legacy = legacySourcePlatformManager,
+            vBook = vBookSourcePlatform,
+            vBookRepositories = vBookRepositoryClient,
+            onExternalSourcesChanged = { refreshSourceRegistry() },
+        )
+    }
+
     val sourceRegistry: SourceRegistry by lazy {
         SourceRegistry(
             sessionStore = sourceSessionStore,
-            sourcePackSources = sourcePlatformManager.activeStorySources(),
+            sourcePackSources = currentExternalStorySources(),
         )
     }
+
+    /** One authoritative refresh point after native or vBook install/update/rollback. */
+    fun refreshSourceRegistry() {
+        sourceRegistry.replaceExternalSources(currentExternalStorySources())
+    }
+
+    fun installOrUpdateVBook(
+        repositoryId: String,
+        remoteIdentity: String,
+        version: String?,
+        packageBytes: ByteArray,
+        trust: SourceTrustState = SourceTrustState.REPOSITORY_TRUSTED,
+    ): VBookUpdateResult {
+        val result = vBookSourcePlatform.installOrUpdate(
+            repositoryId = repositoryId,
+            remoteIdentity = remoteIdentity,
+            version = version,
+            packageBytes = packageBytes,
+            trust = trust,
+        )
+        refreshSourceRegistry()
+        return result
+    }
+
+    fun rollbackVBook(repositoryId: String, remoteIdentity: String): SourceArtifactDescriptor {
+        val restored = vBookSourcePlatform.rollback(repositoryId, remoteIdentity)
+        refreshSourceRegistry()
+        return restored
+    }
+
+    private fun currentExternalStorySources() = sourcePlatformManager.activeStorySources()
+
     val sourceHealthChecker: SourceHealthChecker by lazy { SourceHealthChecker(sourceRegistry) }
     val bookImporter: BookImporter by lazy { BookImporter(appContext.contentResolver) }
     val downloadScheduler: DownloadScheduler by lazy { DownloadScheduler(appContext) }

@@ -1,6 +1,7 @@
 package vn.nghetruyen.source.network
 
 import vn.nghetruyen.source.api.SourceManifest
+import vn.nghetruyen.source.api.SourceRuntimeMode
 import java.net.Inet4Address
 import java.net.Inet6Address
 import java.net.InetAddress
@@ -9,42 +10,76 @@ import java.util.Locale
 
 object SourceOriginPolicy {
     fun requireInitialUrl(manifest: SourceManifest, rawUrl: String): URI = requireAllowed(
+        manifest = manifest,
         rawUrl = rawUrl,
         allowedOrigins = manifest.origins,
         error = "SOURCE_NETWORK_ORIGIN_DENIED",
     )
 
     fun requireRedirectUrl(manifest: SourceManifest, rawUrl: String): URI = requireAllowed(
+        manifest = manifest,
         rawUrl = rawUrl,
         allowedOrigins = manifest.origins + manifest.redirectOrigins,
         error = "SOURCE_NETWORK_REDIRECT_ORIGIN_DENIED",
     )
 
     fun originOf(uri: URI): String = buildString {
-        append("https://").append(uri.host.lowercase(Locale.ROOT))
-        if (uri.port != -1 && uri.port != 443) append(':').append(uri.port)
+        val scheme = uri.scheme.lowercase(Locale.ROOT)
+        append(scheme).append("://").append(uri.host.lowercase(Locale.ROOT))
+        val defaultPort = defaultPort(scheme)
+        if (uri.port != -1 && uri.port != defaultPort) append(':').append(uri.port)
     }
 
     fun matchesOrigin(uri: URI, declared: String): Boolean {
-        val wildcard = declared.startsWith("https://*.")
-        val normalized = if (wildcard) declared.replaceFirst("https://*.", "https://") else declared
-        val allowed = URI(normalized)
-        val requestPort = if (uri.port == -1) 443 else uri.port
-        val allowedPort = if (allowed.port == -1) 443 else allowed.port
+        val declaredUri = parseDeclaredOrigin(declared) ?: return false
+        val requestScheme = uri.scheme?.lowercase(Locale.ROOT) ?: return false
+        if (requestScheme != declaredUri.uri.scheme.lowercase(Locale.ROOT)) return false
+        val requestPort = if (uri.port == -1) defaultPort(requestScheme) else uri.port
+        val allowedPort = if (declaredUri.uri.port == -1) defaultPort(requestScheme) else declaredUri.uri.port
         if (requestPort != allowedPort) return false
-        val requestHost = uri.host.lowercase(Locale.ROOT)
-        val allowedHost = allowed.host.lowercase(Locale.ROOT)
-        return if (wildcard) requestHost.endsWith(".$allowedHost") && requestHost != allowedHost else requestHost == allowedHost
+        val requestHost = uri.host?.lowercase(Locale.ROOT) ?: return false
+        val allowedHost = declaredUri.uri.host.lowercase(Locale.ROOT)
+        return if (declaredUri.wildcard) requestHost.endsWith(".$allowedHost") && requestHost != allowedHost
+        else requestHost == allowedHost
     }
 
-    private fun requireAllowed(rawUrl: String, allowedOrigins: Set<String>, error: String): URI {
+    private fun requireAllowed(
+        manifest: SourceManifest,
+        rawUrl: String,
+        allowedOrigins: Set<String>,
+        error: String,
+    ): URI {
         require(rawUrl.length in 1..4096) { "SOURCE_NETWORK_URL_INVALID" }
         val uri = runCatching { URI(rawUrl) }.getOrNull() ?: error("SOURCE_NETWORK_URL_INVALID")
-        require(uri.scheme.equals("https", ignoreCase = true)) { "SOURCE_NETWORK_HTTPS_REQUIRED" }
+        val network = manifest.capabilities.network
+        val vbookPublicInternet = manifest.runtime.mode == SourceRuntimeMode.VBOOK_JS_COMPAT && network?.publicInternet == true
+        val vbookCleartext = vbookPublicInternet && network.allowCleartext
+        val scheme = uri.scheme?.lowercase(Locale.ROOT)
+        require(scheme == "https" || (vbookCleartext && scheme == "http")) {
+            if (scheme == "http") "SOURCE_NETWORK_CLEARTEXT_DENIED" else "SOURCE_NETWORK_HTTPS_REQUIRED"
+        }
         require(!uri.host.isNullOrBlank() && uri.userInfo == null && uri.fragment == null) { "SOURCE_NETWORK_URL_INVALID" }
         require(uri.port == -1 || uri.port in 1..65535) { "SOURCE_NETWORK_URL_INVALID" }
-        require(allowedOrigins.any { matchesOrigin(uri, it) }) { error }
+        if (!vbookPublicInternet) {
+            require(allowedOrigins.any { matchesOrigin(uri, it) }) { error }
+        }
         return uri
+    }
+
+    private data class DeclaredOrigin(val uri: URI, val wildcard: Boolean)
+
+    private fun parseDeclaredOrigin(raw: String): DeclaredOrigin? {
+        val wildcard = raw.startsWith("https://*.", true) || raw.startsWith("http://*.", true)
+        val normalized = if (wildcard) raw.replaceFirst("://*.", "://", ignoreCase = true) else raw
+        val uri = runCatching { URI(normalized) }.getOrNull() ?: return null
+        if (uri.scheme !in setOf("http", "https") || uri.host.isNullOrBlank()) return null
+        return DeclaredOrigin(uri, wildcard)
+    }
+
+    private fun defaultPort(scheme: String): Int = when (scheme.lowercase(Locale.ROOT)) {
+        "http" -> 80
+        "https" -> 443
+        else -> -1
     }
 }
 

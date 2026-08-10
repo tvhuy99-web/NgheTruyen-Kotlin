@@ -1,0 +1,182 @@
+package vn.nghetruyen.source.vbook
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import vn.nghetruyen.source.api.JsonCodec
+import vn.nghetruyen.source.api.JsonValue
+
+class VBookAbiTest {
+    @Test
+    fun currentSearchPassesOpaqueContinuationVerbatim() {
+        val invocation = VBookInvocationPlanner.current(
+            role = VBookScriptRole.SEARCH,
+            scriptPath = "search.js",
+            input = "kiem tien",
+            continuation = VBookContinuation("https://api.example/list?cursor=a%2Bb"),
+        )
+        assertEquals(listOf("kiem tien", "https://api.example/list?cursor=a%2Bb"), invocation.args)
+    }
+
+    @Test
+    fun commentsAndSuggestionsUseInputPlusOpaqueContinuation() {
+        listOf(VBookScriptRole.COMMENT, VBookScriptRole.SUGGEST).forEach { role ->
+            val invocation = VBookInvocationPlanner.current(
+                role = role,
+                scriptPath = role.manifestKey + ".js",
+                input = "story-or-query",
+                continuation = VBookContinuation("cursor+2"),
+            )
+            assertEquals(listOf("story-or-query", "cursor+2"), invocation.args)
+        }
+    }
+
+    @Test
+    fun homeExploreGenreReceiveNoArgumentsInCurrentContract() {
+        listOf(VBookScriptRole.HOME, VBookScriptRole.EXPLORE, VBookScriptRole.GENRE).forEach { role ->
+            assertTrue(VBookInvocationPlanner.current(role, role.manifestKey + ".js").args.isEmpty())
+        }
+    }
+
+    @Test
+    fun currentResponseRejectsNumericData2InsteadOfInventingMeaning() {
+        val raw = JsonCodec.parse("""{"code":0,"data":[],"data2":30}""")
+        val failure = runCatching { VBookResponseEnvelopeParser.parse(raw, VBookContractProfile.CURRENT_JS) }.exceptionOrNull()
+        assertTrue(failure is VBookResponseException)
+        assertTrue(failure?.message.orEmpty().contains("DATA2_STRING_REQUIRED"))
+    }
+
+    @Test
+    fun legacyAndCurrentResponseCodesStaySeparated() {
+        val legacy = VBookResponseEnvelopeParser.parse(
+            JsonCodec.parse("""{"code":200,"data":[1],"data2":2}"""),
+            VBookContractProfile.LEGACY_JS,
+        )
+        assertEquals("2", legacy.continuation.token)
+        val currentFailure = runCatching {
+            VBookResponseEnvelopeParser.parse(
+                JsonCodec.parse("""{"code":200,"data":[]}"""),
+                VBookContractProfile.CURRENT_JS,
+            )
+        }.exceptionOrNull()
+        assertTrue(currentFailure is VBookResponseException)
+    }
+
+    @Test
+    fun configPreludeEscapesValuesAndSkipsBuiltInConnectionKeys() {
+        val prelude = VBookConfigPrelude.build(
+            VBookContractProfile.CURRENT_JS,
+            VBookConfigValues(mapOf(
+                "DOMAIN" to "https://x.example/\"quoted\"",
+                "ENABLED" to "true",
+                "thread_num" to "9",
+                "timeout" to "15000",
+                "delay" to "500",
+                "ignore" to "false",
+            )),
+        )
+        assertTrue(prelude.contains("const DOMAIN = \"https://x.example/\\\"quoted\\\"\";"))
+        assertTrue(prelude.contains("const ENABLED = \"true\";"))
+        assertFalse(prelude.contains("thread_num"))
+        assertFalse(prelude.contains("const timeout"))
+        assertFalse(prelude.contains("const delay"))
+        assertFalse(prelude.contains("const ignore"))
+    }
+
+    @Test
+    fun connectionSettingsHaveVBookDefaultsAndAllowHostOverrides() {
+        val manifest = VBookManifestParser.parse("""
+            {
+              "metadata":{"name":"x","author":"a","version":1,"source":"https://x.example","description":"","locale":"vi","regexp":"x","type":"novel","nsfw":false},
+              "script":{"search":"search.js","detail":"detail.js","toc":"toc.js","chap":"chap.js"},
+              "config":{"DOMAIN":{"title":"Domain","default":"https://x.example","mode":"input","format":"text"}}
+            }
+        """.trimIndent())
+        val defaults = VBookConfigValues.resolve(manifest)
+        assertEquals(3, defaults.connectionSettings().threadNum)
+        assertEquals(30_000L, defaults.connectionSettings().timeoutMs)
+        assertEquals(0L, defaults.connectionSettings().delayMs)
+        assertEquals("30000", defaults["timeout"])
+
+        val overridden = VBookConfigValues.resolve(
+            manifest,
+            persisted = mapOf("thread_num" to "6", "timeout" to "14000"),
+            runtimeOverrides = mapOf("delay" to "250", "timeout" to "9000"),
+        ).connectionSettings()
+        assertEquals(6, overridden.threadNum)
+        assertEquals(9_000L, overridden.timeoutMs)
+        assertEquals(250L, overridden.delayMs)
+    }
+
+    @Test
+    fun cryptoLoadResolvesToBundledLibrary() {
+        val target = VBookLoadPolicy.resolve("crypto.js")
+        assertEquals(VBookLoadKind.BUNDLED_CRYPTO, target.kind)
+        assertEquals(null, target.path)
+    }
+
+    @Test
+    fun fetchPlannerPreservesExistingQueryAndEncodesNewQueries() {
+        val plan = VBookFetchPlanner.create(
+            url = "https://x.example/search?lang=vi#frag",
+            queries = linkedMapOf("q" to "a b", "page" to "1"),
+        )
+        assertEquals("https://x.example/search?lang=vi&q=a%20b&page=1#frag", plan.url)
+    }
+
+    @Test
+    fun rawResponseSupportsCharsetBase64BlobHeaderAndRequestInfo() {
+        val bytes = "xin chào".toByteArray(Charsets.UTF_8)
+        val response = VBookRawHttpResponse(
+            status = 200,
+            statusText = "OK",
+            url = "https://x.example/final",
+            headers = mapOf("Content-Type" to listOf("text/plain; charset=UTF-8"), "X-Test" to listOf("a")),
+            bytes = bytes,
+            request = VBookRequestInfo("https://x.example/start", mapOf("Referer" to "https://x.example")),
+        )
+        assertTrue(response.ok)
+        assertEquals("xin chào", response.text())
+        assertEquals("a", response.header("x-test"))
+        assertEquals(bytes.size, response.blob().size)
+        assertTrue(response.base64().isNotBlank())
+        assertEquals("https://x.example/start", response.request.url)
+    }
+
+    @Test
+    fun dynamicActionsPreserveInitialDataArgumentAndThenUseOpaqueContinuation() {
+        val simple = VBookDynamicActionParser.parse(
+            JsonValue.Obj(linkedMapOf(
+                "title" to JsonValue.Str("Hot"),
+                "input" to JsonValue.Str("/hot"),
+                "script" to JsonValue.Str("hot.js"),
+            )),
+        )!!
+        assertEquals("src/hot.js", simple.scriptPath)
+        assertEquals(listOf("/hot"), simple.invocation().args)
+        assertEquals(listOf("/hot", "cursor-z"), simple.invocation(VBookContinuation("cursor-z")).args)
+
+        val explore = VBookDynamicActionParser.parse(
+            JsonValue.Obj(linkedMapOf(
+                "type" to JsonValue.Str("list"),
+                "input" to JsonValue.Str("/latest"),
+                "data" to JsonValue.Str("server-a"),
+                "script" to JsonValue.Str("list.js"),
+            )),
+        )!!
+        assertTrue(explore.hasDataArgument)
+        assertEquals(listOf("/latest", "server-a"), explore.invocation().args)
+        assertEquals(listOf("/latest", "opaque-next"), explore.invocation(VBookContinuation("opaque-next")).args)
+
+        val explicitEmptyData = VBookDynamicActionParser.parse(
+            JsonValue.Obj(linkedMapOf(
+                "input" to JsonValue.Str("/all"),
+                "data" to JsonValue.Str(""),
+                "script" to JsonValue.Str("all.js"),
+            )),
+        )!!
+        assertTrue(explicitEmptyData.hasDataArgument)
+        assertEquals(listOf("/all", ""), explicitEmptyData.invocation().args)
+    }
+}

@@ -47,8 +47,6 @@ data class SourceBrowserRequestMetadata(
     val timestampEpochMs: Long,
 )
 
-
-
 data class SourceBrowserDialog(
     val id: Long,
     val type: String,
@@ -107,9 +105,18 @@ interface SourceStorageBroker {
             private fun failure(request: SourceStorageRequest) = SourcePlatformResult.Failure(
                 SourcePlatformFailure(SourceErrorCode.STORAGE_UNAVAILABLE, "SOURCE_STORAGE_BROKER_UNAVAILABLE", request.traceId),
             )
+
             override fun get(manifest: SourceManifest, request: SourceStorageRequest) = failure(request)
             override fun put(manifest: SourceManifest, request: SourceStorageRequest) = failure(request)
             override fun delete(manifest: SourceManifest, request: SourceStorageRequest) = failure(request)
+
+            override fun keys(
+                manifest: SourceManifest,
+                sourceId: String,
+                prefix: String,
+                traceId: String,
+            ): SourcePlatformResult<List<String>> = SourcePlatformResult.Success(emptyList())
+
             override fun clear(sourceId: String) = SourcePlatformResult.Failure(
                 SourcePlatformFailure(SourceErrorCode.STORAGE_UNAVAILABLE, "SOURCE_STORAGE_BROKER_UNAVAILABLE"),
             )
@@ -152,11 +159,23 @@ data class SourceWebSocketRequest(
     val traceId: String = UUID.randomUUID().toString(),
 )
 
+data class SourceWebSocketFrame(
+    val type: String,
+    /** Text payload for text frames; base64 payload for binary frames. */
+    val data: String,
+) {
+    init {
+        require(type in setOf("text", "binary")) { "SOURCE_WEBSOCKET_FRAME_TYPE_INVALID" }
+    }
+}
+
 data class SourceWebSocketResponse(
     val messages: List<String>,
     val closeCode: Int?,
     val closeReason: String?,
     val traceId: String,
+    /** Rich frame representation for vBook-compatible hosts. Empty means legacy text-only broker. */
+    val frames: List<SourceWebSocketFrame> = emptyList(),
 )
 
 fun interface SourceWebSocketBroker {
@@ -173,8 +192,6 @@ fun interface SourceWebSocketBroker {
     }
 }
 
-
-
 data class SourceTranslationRequest(
     val sourceId: String,
     val text: String,
@@ -185,6 +202,16 @@ data class SourceTranslationRequest(
     val instruction: String = "",
     val maxOutputBytes: Int = 2 * 1024 * 1024,
     val traceId: String = UUID.randomUUID().toString(),
+    /** Ecosystem-specific, string-only options. Generic translators may safely ignore them. */
+    val options: Map<String, String> = emptyMap(),
+)
+
+data class SourceTranslationSegment(
+    val srcStart: Int,
+    val srcLen: Int,
+    val transStart: Int,
+    val transLen: Int,
+    val type: Int,
 )
 
 data class SourceTranslationResponse(
@@ -192,6 +219,8 @@ data class SourceTranslationResponse(
     val segments: List<String> = emptyList(),
     val provider: String? = null,
     val traceId: String,
+    /** Offset metadata used by vBook Quick Translator; empty means unavailable. */
+    val segmentMetadata: List<SourceTranslationSegment> = emptyList(),
 )
 
 fun interface SourceTranslationBroker {
@@ -236,8 +265,6 @@ fun interface SourceNativeHookBroker {
     }
 }
 
-
-
 data class SourceGraphicsImage(
     val base64: String,
 )
@@ -281,6 +308,9 @@ data class SourceCapabilityBrokers(
     val websocket: SourceWebSocketBroker = SourceWebSocketBroker.DENY_ALL,
     val nativeHooks: SourceNativeHookBroker = SourceNativeHookBroker.DENY_ALL,
     val graphics: SourceGraphicsBroker = SourceGraphicsBroker.DENY_ALL,
+    /** Generic translation extension/provider path. */
     val translation: SourceTranslationBroker = SourceTranslationBroker.DENY_ALL,
     val cookies: SourceCookiePartition = SourceCookiePartition.NONE,
+    /** vBook Qt.translate vp/hv path. Kept separate from generic AI/translate extensions. */
+    val quickTranslation: SourceTranslationBroker = SourceTranslationBroker.DENY_ALL,
 )

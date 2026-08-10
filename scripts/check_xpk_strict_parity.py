@@ -46,6 +46,13 @@ forbid(
 )
 
 require(
+    "app/src/main/java/vn/nghetruyen/app/ai/AiServices.kt",
+    "paragraph voice-cast protocol is retired from production wiring",
+    "paragraph scene-cue protocol is retired from production wiring",
+    "legacy narration planner is retired from production wiring",
+)
+
+require(
     "app/src/main/java/vn/nghetruyen/app/ai/XpkNarrationAiServices.kt",
     "MAX_VOICE_PROFILES = 10",
     "VOICE_PROFILES_TOO_MANY",
@@ -122,6 +129,13 @@ require(
     "XPK_SCENE_SWITCH_MILLIS = 2_200",
     "val fadeOutMillis = if (old == null) 0 else duration / 2",
     "val fadeInMillis = if (old == null) duration else duration - fadeOutMillis",
+)
+
+require(
+    "app/src/main/java/vn/nghetruyen/app/ui/reference/ReferenceVoiceRolePersistence.kt",
+    'val activeVolume = if (method == "sonic")',
+    "draft.sonicVolume.coerceIn(0f, 2f)",
+    "volume = activeVolume",
 )
 
 print("XPK_STRICT_PARITY=PASS")

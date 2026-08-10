@@ -134,6 +134,7 @@ fun GlobalVoiceRoleEditorDialog(
         ?: draft.voiceName
         ?: "Giọng mặc định"
     val dialogTitle = title ?: "HỒ SƠ GIỌNG TTS"
+    val sonicSelected = draft.processingMethod == "sonic"
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -254,7 +255,7 @@ fun GlobalVoiceRoleEditorDialog(
                 Text("Phương pháp xử lý", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
                 Box(Modifier.fillMaxWidth()) {
                     Button(onClick = { processingExpanded = true }, modifier = Modifier.fillMaxWidth()) {
-                        Text(if (draft.processingMethod == "sonic") "Sonic, tối đa 200%" else "Android, tối đa 100%")
+                        Text(if (sonicSelected) "Sonic, tối đa 200%" else "Android, tối đa 100%")
                     }
                     DropdownMenu(expanded = processingExpanded, onDismissRequest = { processingExpanded = false }) {
                         DropdownMenuItem(text = { Text("Android, tối đa 100%") }, onClick = {
@@ -268,7 +269,7 @@ fun GlobalVoiceRoleEditorDialog(
                     }
                 }
 
-                if (draft.processingMethod == "sonic") {
+                if (sonicSelected) {
                     Text("Chế độ Sonic", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 7.dp))
                     Box(Modifier.fillMaxWidth()) {
                         Button(onClick = { sonicQualityExpanded = true }, modifier = Modifier.fillMaxWidth()) { Text(if (draft.sonicAccurate) "Chính xác" else "Nhanh") }
@@ -279,17 +280,27 @@ fun GlobalVoiceRoleEditorDialog(
                     }
                 }
 
-                CompactVoiceValueRow("Tốc độ đọc", draft.rate, 0.25f, 3f) {
-                    onDraftChange(draft.copy(rate = it))
+                CompactVoiceValueRow(
+                    "Tốc độ đọc",
+                    if (sonicSelected) draft.sonicSpeed else draft.rate,
+                    0.25f,
+                    3f,
+                ) { value ->
+                    onDraftChange(if (sonicSelected) draft.copy(sonicSpeed = value) else draft.copy(rate = value))
                 }
-                CompactVoiceValueRow("Cao độ", draft.pitch, 0.5f, 2f) {
-                    onDraftChange(draft.copy(pitch = it))
+                CompactVoiceValueRow(
+                    "Cao độ",
+                    if (sonicSelected) draft.sonicPitch else draft.pitch,
+                    0.5f,
+                    2f,
+                ) { value ->
+                    onDraftChange(if (sonicSelected) draft.copy(sonicPitch = value) else draft.copy(pitch = value))
                 }
                 CompactVoiceValueRow(
                     label = "Âm lượng",
                     value = draft.volume,
                     minimum = 0f,
-                    maximum = if (draft.processingMethod == "sonic") 2f else 1f,
+                    maximum = if (sonicSelected) 2f else 1f,
                     percent = true,
                 ) {
                     onDraftChange(draft.copy(volume = it))

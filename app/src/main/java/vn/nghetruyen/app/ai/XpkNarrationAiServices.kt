@@ -19,8 +19,8 @@ import java.util.concurrent.TimeUnit
 import kotlin.math.min
 
 /**
- * Narration-only AI path that mirrors the XPK voice-cast contract without disturbing translation or
- * VietPhrase traffic handled by [OnlineAiServices].
+ * Narration-only AI path that mirrors the XPK voice-cast + scene-music contract without disturbing
+ * translation or VietPhrase traffic handled by [OnlineAiServices].
  */
 class XpkNarrationAiServices(
     private val settingsRepository: SettingsRepository,
@@ -99,7 +99,11 @@ class XpkNarrationAiServices(
             includeVoiceCast = request.includeVoiceCast,
             includeSceneMusic = request.includeSceneMusic,
             tracks = request.tracks,
+            context = request.context,
         )
+        if (request.includeSceneMusic && bundle.sceneTrackIds.isEmpty()) {
+            return failure("AI_TRACKS_EMPTY", "Không có bài nhạc cảnh hợp lệ để gửi AI.")
+        }
         if (request.includeVoiceCast && bundle.dialogueIds.isEmpty() && !request.includeSceneMusic) {
             return AppResult.Success(
                 NarrationPlan(
@@ -119,13 +123,14 @@ class XpkNarrationAiServices(
                         validDialogueIds = bundle.dialogueIds,
                         validUnitIds = bundle.unitIds,
                         validVoiceIds = bundle.voiceIds,
-                        validTrackIds = request.tracks.map(SceneMusicTrackOption::id),
+                        validTrackIds = bundle.sceneTrackIds,
                         includeVoiceCast = request.includeVoiceCast,
                         includeSceneMusic = request.includeSceneMusic,
                         speedLimitPct = config.expressionSpeedLimitPct.toFloat(),
                         pitchLimitPct = config.expressionPitchLimitPct.toFloat(),
                         volumeLimitPct = config.expressionVolumeLimitPct.toFloat(),
                         expressiveAdjustment = config.expressiveAdjustment,
+                        incomingTrackId = request.context.activeTrackId,
                     ),
                 )
                 val roleByPromptId = profiles.associateBy(XpkVoiceCastPrompt::promptVoiceId)
@@ -347,25 +352,23 @@ class XpkNarrationAiServices(
         return out
     }
 
-    private fun extractContent(provider: AiProvider, raw: String): String {
-        return when (provider) {
-            AiProvider.GEMINI -> {
-                val root = JSONObject(raw)
-                root.optJSONObject("error")?.optString("message")?.takeIf(String::isNotBlank)?.let { error(it) }
-                val candidate = root.optJSONArray("candidates")?.optJSONObject(0)
-                    ?: error(root.optJSONObject("promptFeedback")?.optString("blockReason").orEmpty().ifBlank { "Gemini không trả candidate." })
-                val parts = candidate.optJSONObject("content")?.optJSONArray("parts") ?: error("Gemini không trả nội dung.")
-                buildString {
-                    for (index in 0 until parts.length()) {
-                        parts.optJSONObject(index)?.optString("text")?.takeIf(String::isNotBlank)?.let {
-                            if (isNotEmpty()) append('\n')
-                            append(it)
-                        }
+    private fun extractContent(provider: AiProvider, raw: String): String = when (provider) {
+        AiProvider.GEMINI -> {
+            val root = JSONObject(raw)
+            root.optJSONObject("error")?.optString("message")?.takeIf(String::isNotBlank)?.let { error(it) }
+            val candidate = root.optJSONArray("candidates")?.optJSONObject(0)
+                ?: error(root.optJSONObject("promptFeedback")?.optString("blockReason").orEmpty().ifBlank { "Gemini không trả candidate." })
+            val parts = candidate.optJSONObject("content")?.optJSONArray("parts") ?: error("Gemini không trả nội dung.")
+            buildString {
+                for (index in 0 until parts.length()) {
+                    parts.optJSONObject(index)?.optString("text")?.takeIf(String::isNotBlank)?.let {
+                        if (isNotEmpty()) append('\n')
+                        append(it)
                     }
                 }
             }
-            AiProvider.OPENAI_COMPATIBLE -> extractOpenAiContent(raw)
         }
+        AiProvider.OPENAI_COMPATIBLE -> extractOpenAiContent(raw)
     }
 
     private fun extractOpenAiContent(raw: String): String {

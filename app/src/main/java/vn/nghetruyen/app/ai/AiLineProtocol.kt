@@ -15,6 +15,7 @@ object AiLineProtocol {
         val pitchLimitPct: Float = 10f,
         val volumeLimitPct: Float = 10f,
         val expressiveAdjustment: Boolean = true,
+        val incomingTrackId: String? = null,
     )
 
     data class XpkRawAssignment(
@@ -28,8 +29,24 @@ object AiLineProtocol {
     fun parseXpkNarration(raw: String, options: XpkParseOptions): NarrationPlan {
         val root = JSONObject(extractJsonObject(raw))
         val voicePlan = if (options.includeVoiceCast) parseXpkVoiceCast(root, options) else VoiceCastPlan(emptyList(), emptyList())
-        val scenes = if (options.includeSceneMusic) parseXpkMusicScenes(root, options) else emptyList()
-        return NarrationPlan(voiceCast = voicePlan, musicCues = scenes)
+        var musicSceneError = ""
+        val scenes = if (options.includeSceneMusic) {
+            runCatching { parseXpkMusicScenes(root, options) }.getOrElse { error ->
+                val fallback = XpkSceneMusicParity.fallbackScene(
+                    validUnitIds = options.validUnitIds,
+                    validTrackIds = options.validTrackIds,
+                    incomingTrackId = options.incomingTrackId,
+                )
+                if (fallback.isNotEmpty()) {
+                    musicSceneError = (error.message ?: "Kết quả nhạc không hợp lệ") + "; đã phục hồi bằng một cảnh liên tục"
+                    fallback
+                } else {
+                    musicSceneError = error.message ?: "Kết quả nhạc không hợp lệ"
+                    emptyList()
+                }
+            }
+        } else emptyList()
+        return NarrationPlan(voiceCast = voicePlan, musicCues = scenes, musicSceneError = musicSceneError)
     }
 
     private fun parseXpkVoiceCast(root: JSONObject, options: XpkParseOptions): VoiceCastPlan {
@@ -126,31 +143,22 @@ object AiLineProtocol {
     private fun parseXpkMusicScenes(root: JSONObject, options: XpkParseOptions): List<SceneMusicCue> {
         val source = root.optJSONArray("music_scenes") ?: error("Kết quả không có music_scenes")
         if (source.length() == 0) error("Kết quả không có music_scenes")
-        val order = options.validUnitIds.withIndex().associate { it.value to it.index }
-        if (order.isEmpty()) error("Danh sách UNIT hợp lệ đang trống")
-        val trackSet = options.validTrackIds.toHashSet()
-        if (trackSet.isEmpty()) error("Danh sách bài nhạc hợp lệ đang trống")
-        return buildList {
+        val rows = buildList {
             for (index in 0 until source.length()) {
-                val row = source.optJSONObject(index) ?: continue
-                val startId = row.optString("start_id").trim()
-                val endId = row.optString("end_id").trim()
-                val trackId = row.optString("track_id").trim()
-                val startOrder = order[startId] ?: continue
-                val endOrder = order[endId] ?: continue
-                if (endOrder < startOrder || trackId !in trackSet) continue
+                val row = source.optJSONObject(index) ?: error("Cảnh nhạc thứ ${index + 1} không phải đối tượng")
                 add(
-                    SceneMusicCue(
-                        startParagraph = paragraphIndexFromUnitId(startId).coerceAtLeast(0),
-                        trackId = trackId,
-                        volume = 0.25f,
-                        mood = "",
-                        startUnitId = startId,
-                        endUnitId = endId,
+                    XpkSceneMusicParity.RawScene(
+                        startId = row.optString("start_id").ifBlank { row.optString("start_unit_id") }.trim(),
+                        endId = row.optString("end_id").ifBlank { row.optString("end_unit_id") }.trim(),
+                        trackId = row.optString("track_id")
+                            .ifBlank { row.optString("selected_track_id") }
+                            .ifBlank { row.optString("music_track_id") }
+                            .trim(),
                     ),
                 )
             }
         }
+        return XpkSceneMusicParity.validateScenes(rows, options.validUnitIds, options.validTrackIds)
     }
 
     /** Legacy parser kept until the milestone-5 database/runtime migration removes paragraph contracts. */
@@ -205,7 +213,12 @@ object AiLineProtocol {
             val parts = line.split('|').map(String::trim)
             val index = parts.getOrNull(1)?.toIntOrNull() ?: return@mapNotNull null
             val track = parts.getOrNull(2)?.takeIf(String::isNotBlank)?.take(120) ?: return@mapNotNull null
-            SceneMusicCue(index.coerceAtLeast(0), track, parts.getOrNull(3)?.toFloatOrNull()?.coerceIn(0f, 1f) ?: 0.25f, parts.getOrElse(4) { "" }.take(160))
+            SceneMusicCue(
+                startParagraph = index.coerceAtLeast(0),
+                trackId = track,
+                volume = parts.getOrNull(3)?.toFloatOrNull()?.coerceIn(0f, 1f) ?: 0.25f,
+                mood = parts.getOrElse(4) { "" }.take(160),
+            )
         }
         .distinctBy { it.startParagraph }
         .sortedBy { it.startParagraph }

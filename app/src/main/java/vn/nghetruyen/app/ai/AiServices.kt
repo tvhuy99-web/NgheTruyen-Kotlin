@@ -84,11 +84,11 @@ data class NarrationPlanRequest(
     val storyId: String,
     val chapterId: String,
     val rawText: String,
-    val chapterTitle: String = "",
     val includeVoiceCast: Boolean = true,
     val includeSceneMusic: Boolean = true,
     val tracks: List<SceneMusicTrackOption> = emptyList(),
     val context: NarrationPlanContext = NarrationPlanContext(),
+    val chapterTitle: String = "",
 )
 
 data class NarrationPlan(

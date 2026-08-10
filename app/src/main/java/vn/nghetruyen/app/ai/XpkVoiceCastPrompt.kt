@@ -1,5 +1,6 @@
 package vn.nghetruyen.app.ai
 
+import java.util.ArrayDeque
 import vn.nghetruyen.app.data.local.VoiceRoleEntity
 
 /** Prompt formatter matching the XPK VoiceCast transcript and assignment contract. */

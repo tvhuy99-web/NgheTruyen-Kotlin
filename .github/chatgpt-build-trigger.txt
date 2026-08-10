@@ -1,0 +1,1 @@
+Build trigger for ChatGPT APK request on 2026-08-10. No application source changes.

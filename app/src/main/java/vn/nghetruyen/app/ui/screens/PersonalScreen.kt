@@ -19,7 +19,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -32,8 +31,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -172,6 +169,9 @@ fun PersonalScreen(
     onUpdateSourcePack: (String) -> Unit,
     onExportSourcePack: (String, String) -> Unit,
     onRemoveSourcePack: (String) -> Unit,
+    onCheckSourcePack: (String) -> Unit,
+    onSaveSourceConfig: (String, Map<String, String>) -> Unit,
+    onResetSourceConfig: (String) -> Unit,
     onEnrollSourceTrustKey: (String, String, String, String) -> Unit,
     onRevokeSourceTrustKey: (String) -> Unit,
     onInspectSourceSelector: (String, String, String) -> Unit,
@@ -447,6 +447,10 @@ fun PersonalScreen(
                 onUpdate = onUpdateSourcePack,
                 onExport = onExportSourcePack,
                 onRemove = onRemoveSourcePack,
+                onCheck = onCheckSourcePack,
+                onSaveConfig = onSaveSourceConfig,
+                onResetConfig = onResetSourceConfig,
+                onLogin = onOpenSourceLogin,
             )
         }
         "extensions_repositories" -> PersonalSubPage("KHO TIỆN ÍCH") {
@@ -875,13 +879,30 @@ private fun InstalledSourcesSection(
     onUpdate: (String) -> Unit,
     onExport: (String, String) -> Unit,
     onRemove: (String) -> Unit,
+    onCheck: (String) -> Unit,
+    onSaveConfig: (String, Map<String, String>) -> Unit,
+    onResetConfig: (String) -> Unit,
+    onLogin: (String) -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
+    var ecosystemFilter by remember { mutableStateOf("ALL") }
     var showSearch by remember { mutableStateOf(false) }
     var selectedPackId by remember { mutableStateOf<String?>(null) }
+    var configurePackId by remember { mutableStateOf<String?>(null) }
+    var diagnosticPackId by remember { mutableStateOf<String?>(null) }
     var removePackId by remember { mutableStateOf<String?>(null) }
     val filtered = state.sourcePacks.filter { pack ->
-        query.isBlank() || pack.name.contains(query, ignoreCase = true) || pack.id.contains(query, ignoreCase = true)
+        (ecosystemFilter == "ALL" || pack.ecosystem == ecosystemFilter) &&
+            (query.isBlank() || pack.name.contains(query, ignoreCase = true) || pack.id.contains(query, ignoreCase = true))
+    }
+
+    Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp)) {
+        listOf("ALL" to "TẤT CẢ", "VBOOK" to "VBOOK", "LEGADO" to "LEGADO", "NATIVE" to "NATIVE").forEach { (value, label) ->
+            TextButton(
+                onClick = { ecosystemFilter = value },
+                modifier = Modifier.weight(1f),
+            ) { Text(if (ecosystemFilter == value) "$label ✓" else label) }
+        }
     }
 
     ReferenceActionButton(
@@ -908,7 +929,7 @@ private fun InstalledSourcesSection(
             ReferenceActionButton(
                 text = buildString {
                     append(pack.name)
-                    append("\n").append(pack.version)
+                    append("\n").append(pack.ecosystem).append(" • ").append(pack.contentType).append(" • ").append(pack.version)
                     if (!pack.enabled) append(" • Đã tắt")
                 },
                 onClick = { selectedPackId = pack.id },
@@ -945,6 +966,7 @@ private fun InstalledSourcesSection(
                 text = {
                     Column {
                         Text("${pack.id} • ${pack.version}", style = MaterialTheme.typography.bodySmall)
+                        Text("${pack.ecosystem} • ${pack.contentType}", style = MaterialTheme.typography.bodySmall)
                         ReferenceActionButton(
                             text = if (pack.enabled) "TẮT" else "BẬT",
                             onClick = {
@@ -953,9 +975,37 @@ private fun InstalledSourcesSection(
                             },
                             modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                         )
+                        ReferenceActionButton(
+                            text = "KIỂM TRA",
+                            onClick = {
+                                onCheck(pack.id)
+                                selectedPackId = null
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        )
+                        if (pack.configFields.isNotEmpty()) {
+                            ReferenceActionButton(
+                                text = "CẤU HÌNH",
+                                onClick = {
+                                    configurePackId = pack.id
+                                    selectedPackId = null
+                                },
+                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                            )
+                        }
+                        if (pack.loginAvailable) {
+                            ReferenceActionButton(
+                                text = "ĐĂNG NHẬP",
+                                onClick = {
+                                    onLogin(pack.id)
+                                    selectedPackId = null
+                                },
+                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                            )
+                        }
                         if (pack.canRollback) {
                             ReferenceActionButton(
-                                text = "ROLLBACK PHIÊN BẢN NGUỒN",
+                                text = "KHÔI PHỤC PHIÊN BẢN TRƯỚC",
                                 onClick = {
                                     onRollback(pack.id)
                                     selectedPackId = null
@@ -967,6 +1017,14 @@ private fun InstalledSourcesSection(
                             text = "CẬP NHẬT",
                             onClick = {
                                 onUpdate(pack.id)
+                                selectedPackId = null
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        )
+                        ReferenceActionButton(
+                            text = "NHẬT KÝ",
+                            onClick = {
+                                diagnosticPackId = pack.id
                                 selectedPackId = null
                             },
                             modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
@@ -995,6 +1053,48 @@ private fun InstalledSourcesSection(
                 confirmButton = { TextButton(onClick = { selectedPackId = null }) { Text("ĐÓNG") } },
             )
         }
+    }
+
+    configurePackId?.let { packId ->
+        state.sourcePacks.firstOrNull { it.id == packId }?.let { pack ->
+            SourcePackConfigDialog(
+                pack = pack,
+                onSave = { changes -> onSaveConfig(pack.id, changes) },
+                onReset = { onResetConfig(pack.id) },
+                onDismiss = { configurePackId = null },
+            )
+        }
+    }
+
+    diagnosticPackId?.let { sourceId ->
+        val pack = state.sourcePacks.firstOrNull { it.id == sourceId }
+        val events = state.sourceDiagnostics.filter { it.sourceId == sourceId }.take(50)
+        AlertDialog(
+            onDismissRequest = { diagnosticPackId = null },
+            title = { Text("NHẬT KÝ · ${pack?.name ?: sourceId}") },
+            text = {
+                Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                    if (events.isEmpty()) {
+                        Text("Chưa có sự kiện chẩn đoán cho tiện ích này.")
+                    } else {
+                        events.forEach { event ->
+                            val duration = event.durationMs?.let { " • ${it} ms" }.orEmpty()
+                            Text(
+                                "${event.severity} ${event.category}/${event.name}$duration",
+                                fontWeight = if (event.severity == "ERROR") FontWeight.SemiBold else FontWeight.Normal,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            Text(
+                                "trace ${event.traceId.take(12)}${event.detail.takeIf(String::isNotBlank)?.let { " • $it" }.orEmpty()}",
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.padding(bottom = 6.dp),
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { diagnosticPackId = null }) { Text("ĐÓNG") } },
+        )
     }
 
     removePackId?.let { packId ->
@@ -1191,7 +1291,9 @@ private fun SourceAddLinkSection(
                 enabled = trustKeyId.isNotBlank() && trustPublicKey.isNotBlank() && trustFingerprint.isNotBlank(),
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
             ) { Text("THÊM KHÓA") }
-            Button(onClick = onImportRotation, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) { Text("NHẬP XOAY KHÓA") }
+            Button(onClick = onImportRotation, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                Text("NHẬP TỆP XOAY KHÓA ĐÃ KÝ")
+            }
         }
     }
 }
@@ -1337,14 +1439,9 @@ private fun ReferenceVoiceCastSettingsCard(
     Card(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 5.dp)) {
         Column(Modifier.padding(12.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Bật mặc định cho truyện dùng cấu hình chung", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                Text("Bật mặc định", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
                 Switch(checked = state.autoVoiceCastEnabled, onCheckedChange = onAutoVoiceCastChange)
             }
-            Text(
-                "Bộ hồ sơ này là tiêu chuẩn dùng chung. Chỉ các hồ sơ đang bật, có ngôn ngữ và đã chọn giọng hợp lệ mới được gửi cho AI; có thể dùng giọng mặc định của bộ đọc.",
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(bottom = 8.dp),
-            )
             roles.forEach { role ->
                 ReferenceActionButton(
                     text = (if (role.enabled) "" else "TẮT • ") +
@@ -1445,8 +1542,6 @@ private fun PlaybackAutomationCard(
     onNormalizeTtsVolumeChange: (Boolean) -> Unit,
     onTtsTargetLufsChange: (Float) -> Unit,
 ) {
-    var sceneModeExpanded by remember { mutableStateOf(false) }
-    var ttsCacheExpanded by remember { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 5.dp)) {
         Column(Modifier.padding(16.dp)) {
             Text("Tai nghe & tự động", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -1461,151 +1556,69 @@ private fun PlaybackAutomationCard(
             SettingSwitch("Tự phân vai AI", state.autoVoiceCastEnabled, onAutoVoiceCastChange)
             SettingSwitch("Tự lập nhạc cảnh", state.autoSceneMusicEnabled, onAutoSceneMusicChange)
             SettingSwitch("Chuẩn bị AI trước", state.prefetchNarrationPlansEnabled, onPrefetchNarrationPlansChange)
-            ReferenceIntSettingsSlider(
-                label = "Chuẩn bị trước",
-                value = state.narrationPrefetchWindowChapters,
-                minimum = 1,
-                maximum = 5,
-                suffix = " chương",
-                onChange = onNarrationPrefetchWindowChange,
-            )
+            Text("Chuẩn bị trước: ${state.narrationPrefetchWindowChapters} chương", modifier = Modifier.padding(top = 6.dp))
+            Row(Modifier.fillMaxWidth()) {
+                Button({ onNarrationPrefetchWindowChange(state.narrationPrefetchWindowChapters - 1) }, Modifier.weight(1f).padding(2.dp)) { Text("ÍT HƠN") }
+                Button({ onNarrationPrefetchWindowChange(state.narrationPrefetchWindowChapters + 1) }, Modifier.weight(1f).padding(2.dp)) { Text("NHIỀU HƠN") }
+            }
             SettingSwitch("Dùng Sonic", state.sonicProcessingEnabled, onSonicProcessingEnabledChange)
-            ReferenceFloatSettingsSlider(
-                label = "Tốc độ Sonic mặc định",
-                value = state.sonicDefaultSpeed,
-                minimum = 0.25f,
-                maximum = 3f,
-                steps = 274,
-                shown = { "%.2f×".format(it) },
-                onChange = onSonicDefaultSpeedChange,
-            )
-            ReferenceFloatSettingsSlider(
-                label = "Cao độ Sonic mặc định",
-                value = state.sonicDefaultPitch,
-                minimum = 0.5f,
-                maximum = 2f,
-                steps = 149,
-                shown = { "%.2f×".format(it) },
-                onChange = onSonicDefaultPitchChange,
-            )
+            Text("Sonic mặc định: tốc độ ${"%.2f".format(state.sonicDefaultSpeed)}× • cao độ ${"%.2f".format(state.sonicDefaultPitch)}×")
+            Row(Modifier.fillMaxWidth()) {
+                Button({ onSonicDefaultSpeedChange(state.sonicDefaultSpeed - 0.05f) }, Modifier.weight(1f).padding(2.dp)) { Text("TỐC ĐỘ -") }
+                Button({ onSonicDefaultSpeedChange(state.sonicDefaultSpeed + 0.05f) }, Modifier.weight(1f).padding(2.dp)) { Text("TỐC ĐỘ +") }
+            }
+            Row(Modifier.fillMaxWidth()) {
+                Button({ onSonicDefaultPitchChange(state.sonicDefaultPitch - 0.05f) }, Modifier.weight(1f).padding(2.dp)) { Text("CAO ĐỘ -") }
+                Button({ onSonicDefaultPitchChange(state.sonicDefaultPitch + 0.05f) }, Modifier.weight(1f).padding(2.dp)) { Text("CAO ĐỘ +") }
+            }
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             SettingSwitch("Cache TTS/Sonic", state.ttsCacheEnabled, onTtsCacheEnabledChange)
-            Text("Giới hạn cache TTS", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 7.dp))
-            Box(Modifier.fillMaxWidth()) {
-                Button(onClick = { ttsCacheExpanded = true }, modifier = Modifier.fillMaxWidth()) { Text("${state.ttsCacheLimitMiB} MiB") }
-                DropdownMenu(expanded = ttsCacheExpanded, onDismissRequest = { ttsCacheExpanded = false }) {
-                    listOf(16, 32, 64, 128, 256, 512).forEach { value ->
-                        DropdownMenuItem(text = { Text("$value MiB") }, onClick = { ttsCacheExpanded = false; onTtsCacheLimitChange(value) })
-                    }
-                }
+            Text("Giới hạn cache TTS: ${state.ttsCacheLimitMiB} MiB")
+            Row(Modifier.fillMaxWidth()) {
+                Button({ onTtsCacheLimitChange(state.ttsCacheLimitMiB / 2) }, Modifier.weight(1f).padding(2.dp)) { Text("CACHE -") }
+                Button({ onTtsCacheLimitChange(state.ttsCacheLimitMiB * 2) }, Modifier.weight(1f).padding(2.dp)) { Text("CACHE +") }
             }
             SettingSwitch("Chuẩn hóa âm lượng", state.normalizeTtsVolumeEnabled, onNormalizeTtsVolumeChange)
-            ReferenceFloatSettingsSlider(
-                label = "Mức giọng mục tiêu",
-                value = state.ttsTargetLufs,
-                minimum = -36f,
-                maximum = -12f,
-                steps = 23,
-                shown = { "%.1f LUFS".format(it) },
-                onChange = onTtsTargetLufsChange,
-            )
+            Text("Mức giọng mục tiêu: ${"%.1f".format(state.ttsTargetLufs)} LUFS")
+            Row(Modifier.fillMaxWidth()) {
+                Button({ onTtsTargetLufsChange(state.ttsTargetLufs - 1f) }, Modifier.weight(1f).padding(2.dp)) { Text("GIỌNG NHỎ") }
+                Button({ onTtsTargetLufsChange(state.ttsTargetLufs + 1f) }, Modifier.weight(1f).padding(2.dp)) { Text("GIỌNG LỚN") }
+            }
             SettingSwitch("Giữ nhạc qua chương", state.sceneMusicContinueAcrossChapters, onSceneMusicContinueChange)
-            Text("Chế độ phát", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
-            Box(Modifier.fillMaxWidth()) {
-                val currentModeLabel = when (state.sceneMusicPlaybackMode) {
-                    SceneMusicPlaybackMode.SEQUENTIAL -> "Lần lượt"
-                    SceneMusicPlaybackMode.SHUFFLE -> "Ngẫu nhiên"
-                    SceneMusicPlaybackMode.SMART_AVOID_REPEAT -> "Tránh lặp"
-                }
-                Button(onClick = { sceneModeExpanded = true }, modifier = Modifier.fillMaxWidth()) { Text(currentModeLabel) }
-                DropdownMenu(expanded = sceneModeExpanded, onDismissRequest = { sceneModeExpanded = false }) {
-                    SceneMusicPlaybackMode.entries.forEach { mode ->
-                        val label = when (mode) {
-                            SceneMusicPlaybackMode.SEQUENTIAL -> "Lần lượt"
-                            SceneMusicPlaybackMode.SHUFFLE -> "Ngẫu nhiên"
-                            SceneMusicPlaybackMode.SMART_AVOID_REPEAT -> "Tránh lặp"
-                        }
-                        DropdownMenuItem(text = { Text(label) }, onClick = { sceneModeExpanded = false; onSceneMusicPlaybackModeChange(mode) })
+            Text("Chế độ nhạc cảnh", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+            SceneMusicPlaybackMode.entries.forEach { mode ->
+                Button({ onSceneMusicPlaybackModeChange(mode) }, Modifier.fillMaxWidth().padding(top = 2.dp)) {
+                    val label = when (mode) {
+                        SceneMusicPlaybackMode.SEQUENTIAL -> "TUẦN TỰ"
+                        SceneMusicPlaybackMode.SHUFFLE -> "NGẪU NHIÊN"
+                        SceneMusicPlaybackMode.SMART_AVOID_REPEAT -> "TRÁNH LẶP"
                     }
+                    Text((if (state.sceneMusicPlaybackMode == mode) "✓ " else "") + label)
                 }
             }
-            ReferenceFloatSettingsSlider(
-                label = "Mức chuẩn hóa nhạc",
-                value = state.sceneMusicTargetLufs,
-                minimum = -36f,
-                maximum = -18f,
-                steps = 17,
-                shown = { "%.1f LUFS".format(it) },
-                onChange = onSceneMusicTargetLufsChange,
-            )
-            ReferenceIntSettingsSlider(
-                label = "Tránh lặp",
-                value = state.sceneMusicAvoidRepeatWindow,
-                minimum = 0,
-                maximum = 20,
-                suffix = " bài",
-                onChange = onSceneMusicAvoidRepeatWindowChange,
-            )
-            ReferenceIntSettingsSlider(
-                label = "Crossfade",
-                value = state.sceneMusicCrossfadeMillis,
-                minimum = 0,
-                maximum = 8_000,
-                step = 400,
-                suffix = " ms",
-                onChange = onSceneMusicCrossfadeChange,
-            )
+            Text("Nhạc: ${"%.1f".format(state.sceneMusicTargetLufs)} LUFS")
+            Row(Modifier.fillMaxWidth()) {
+                Button({ onSceneMusicTargetLufsChange(state.sceneMusicTargetLufs - 1f) }, Modifier.weight(1f).padding(2.dp)) { Text("NHỎ HƠN") }
+                Button({ onSceneMusicTargetLufsChange(state.sceneMusicTargetLufs + 1f) }, Modifier.weight(1f).padding(2.dp)) { Text("LỚN HƠN") }
+            }
+            Text("Tránh lặp: ${state.sceneMusicAvoidRepeatWindow} bài")
+            Row(Modifier.fillMaxWidth()) {
+                Button({ onSceneMusicAvoidRepeatWindowChange(state.sceneMusicAvoidRepeatWindow - 1) }, Modifier.weight(1f).padding(2.dp)) { Text("GIẢM") }
+                Button({ onSceneMusicAvoidRepeatWindowChange(state.sceneMusicAvoidRepeatWindow + 1) }, Modifier.weight(1f).padding(2.dp)) { Text("TĂNG") }
+            }
+            Text("Crossfade: ${state.sceneMusicCrossfadeMillis} ms", modifier = Modifier.padding(top = 8.dp))
+            Row(Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = { onSceneMusicCrossfadeChange((state.sceneMusicCrossfadeMillis - 400).coerceAtLeast(0)) },
+                    modifier = Modifier.weight(1f).padding(end = 2.dp),
+                ) { Text("-400 ms") }
+                Button(
+                    onClick = { onSceneMusicCrossfadeChange((state.sceneMusicCrossfadeMillis + 400).coerceAtMost(8_000)) },
+                    modifier = Modifier.weight(1f).padding(start = 2.dp),
+                ) { Text("+400 ms") }
+            }
         }
     }
-}
-
-@Composable
-private fun ReferenceFloatSettingsSlider(
-    label: String,
-    value: Float,
-    minimum: Float,
-    maximum: Float,
-    steps: Int = 0,
-    shown: (Float) -> String,
-    onChange: (Float) -> Unit,
-) {
-    val safe = value.coerceIn(minimum, maximum)
-    val description = "$label: ${shown(safe)}"
-    Text(description, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 7.dp))
-    Slider(
-        value = safe,
-        onValueChange = { onChange(it.coerceIn(minimum, maximum)) },
-        valueRange = minimum..maximum,
-        steps = steps,
-        modifier = Modifier.fillMaxWidth().semantics { contentDescription = description },
-    )
-}
-
-@Composable
-private fun ReferenceIntSettingsSlider(
-    label: String,
-    value: Int,
-    minimum: Int,
-    maximum: Int,
-    step: Int = 1,
-    suffix: String = "",
-    onChange: (Int) -> Unit,
-) {
-    val safeStep = step.coerceAtLeast(1)
-    val safe = value.coerceIn(minimum, maximum)
-    val intervals = ((maximum - minimum) / safeStep).coerceAtLeast(1)
-    val description = "$label: $safe$suffix"
-    Text(description, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 7.dp))
-    Slider(
-        value = safe.toFloat(),
-        onValueChange = { raw ->
-            val snapped = minimum + (((raw - minimum.toFloat()) / safeStep.toFloat()).toInt() * safeStep)
-            onChange(snapped.coerceIn(minimum, maximum))
-        },
-        valueRange = minimum.toFloat()..maximum.toFloat(),
-        steps = (intervals - 1).coerceAtLeast(0),
-        modifier = Modifier.fillMaxWidth().semantics { contentDescription = description },
-    )
 }
 
 @Composable
@@ -1628,40 +1641,28 @@ private fun VoiceSettingsCard(
     onPreviewVoice: () -> Unit, onOpenTtsSettings: () -> Unit,
     onInterruptionModeChange: (AudioInterruptionMode) -> Unit,
 ) {
-    var engineExpanded by remember { mutableStateOf(false) }
-    var voiceExpanded by remember { mutableStateOf(false) }
-    val selectedEngineLabel = engines.firstOrNull { it.packageName == selectedEnginePackage }?.label ?: "Mặc định hệ thống"
-    val selectedVoiceLabel = voices.firstOrNull { it.name == selectedVoiceName }?.displayName ?: "Giọng mặc định"
+    var showAllVoices by remember { mutableStateOf(false) }
+    var showAllEngines by remember { mutableStateOf(false) }
+    val visibleVoices = if (showAllVoices) voices else voices.take(MAX_VISIBLE_VOICES)
+    val visibleEngines = if (showAllEngines) engines else engines.take(6)
     Card(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 5.dp)) {
         Column(Modifier.padding(16.dp)) {
             Text("TTS & giọng đọc", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            ReferenceFloatSettingsSlider(
-                label = "Tốc độ đọc",
-                value = rate,
-                minimum = 0.25f,
-                maximum = 3f,
-                steps = 274,
-                shown = { "%.2f×".format(it) },
-                onChange = onRateChange,
-            )
-            ReferenceFloatSettingsSlider(
-                label = "Cao độ",
-                value = pitch,
-                minimum = 0.5f,
-                maximum = 2f,
-                steps = 149,
-                shown = { "%.2f×".format(it) },
-                onChange = onPitchChange,
-            )
-            ReferenceFloatSettingsSlider(
-                label = "Âm lượng",
-                value = volume,
-                minimum = 0f,
-                maximum = 1f,
-                steps = 99,
-                shown = { "%.0f%%".format(it * 100) },
-                onChange = onVolumeChange,
-            )
+            Text("Tốc độ ${"%.1f".format(rate)}×", modifier = Modifier.padding(top = 8.dp))
+            Row(Modifier.fillMaxWidth()) {
+                Button({ onRateChange(rate - 0.1f) }, Modifier.weight(1f).padding(2.dp)) { Text("CHẬM") }
+                Button({ onRateChange(rate + 0.1f) }, Modifier.weight(1f).padding(2.dp)) { Text("NHANH") }
+            }
+            Text("Cao độ ${"%.1f".format(pitch)}×", modifier = Modifier.padding(top = 8.dp))
+            Row(Modifier.fillMaxWidth()) {
+                Button({ onPitchChange(pitch - 0.1f) }, Modifier.weight(1f).padding(2.dp)) { Text("TRẦM") }
+                Button({ onPitchChange(pitch + 0.1f) }, Modifier.weight(1f).padding(2.dp)) { Text("CAO") }
+            }
+            Text("Âm lượng giọng ${"%.0f".format(volume * 100)}%", modifier = Modifier.padding(top = 8.dp))
+            Row(Modifier.fillMaxWidth()) {
+                Button({ onVolumeChange(volume - 0.1f) }, Modifier.weight(1f).padding(2.dp)) { Text("GIẢM") }
+                Button({ onVolumeChange(volume + 0.1f) }, Modifier.weight(1f).padding(2.dp)) { Text("TĂNG") }
+            }
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Tự đọc chương sau", Modifier.weight(1f))
                 Switch(autoNext, onAutoNextChange)
@@ -1677,26 +1678,30 @@ private fun VoiceSettingsCard(
                     Modifier.weight(1f).padding(2.dp),
                 ) { Text((if (interruptionMode == AudioInterruptionMode.CONTINUE_DUCKED) "✓ " else "") + "TIẾP TỤC") }
             }
-            Text("Bộ đọc TTS", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp))
-            Box(Modifier.fillMaxWidth().padding(top = 4.dp)) {
-                Button(onClick = { engineExpanded = true }, modifier = Modifier.fillMaxWidth()) { Text(selectedEngineLabel) }
-                DropdownMenu(expanded = engineExpanded, onDismissRequest = { engineExpanded = false }) {
-                    DropdownMenuItem(text = { Text("Mặc định hệ thống") }, onClick = { engineExpanded = false; onEngineSelected(null) })
-                    engines.forEach { engine ->
-                        DropdownMenuItem(text = { Text(engine.label) }, onClick = { engineExpanded = false; onEngineSelected(engine) })
-                    }
+            Text("Bộ máy TTS", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp))
+            Button({ onEngineSelected(null) }, Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                Text(if (selectedEnginePackage == null) "✓ MẶC ĐỊNH HỆ THỐNG" else "MẶC ĐỊNH HỆ THỐNG")
+            }
+            visibleEngines.forEach { engine ->
+                Button({ onEngineSelected(engine) }, Modifier.fillMaxWidth().padding(top = 3.dp)) {
+                    Text((if (engine.packageName == selectedEnginePackage) "✓ " else "") + engine.label)
                 }
             }
-            Text("Giọng đọc", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp))
-            Box(Modifier.fillMaxWidth().padding(top = 4.dp)) {
-                Button(onClick = { voiceExpanded = true }, enabled = !loadingVoices, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (loadingVoices) "ĐANG QUÉT…" else selectedVoiceLabel)
+            if (engines.size > 6) Button({ showAllEngines = !showAllEngines }, Modifier.fillMaxWidth().padding(top = 3.dp)) {
+                Text(if (showAllEngines) "THU GỌN BỘ MÁY" else "HIỂN THỊ TẤT CẢ ${engines.size} BỘ MÁY")
+            }
+            Text("Giọng TTS", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp))
+            Button({ onVoiceSelected(null) }, Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                Text(if (selectedVoiceName == null) "✓ GIỌNG MẶC ĐỊNH" else "GIỌNG MẶC ĐỊNH")
+            }
+            visibleVoices.forEach { voice ->
+                Button({ onVoiceSelected(voice) }, Modifier.fillMaxWidth().padding(top = 3.dp)) {
+                    Text((if (voice.name == selectedVoiceName) "✓ " else "") + voice.displayName)
                 }
-                DropdownMenu(expanded = voiceExpanded, onDismissRequest = { voiceExpanded = false }) {
-                    DropdownMenuItem(text = { Text("Giọng mặc định") }, onClick = { voiceExpanded = false; onVoiceSelected(null) })
-                    voices.forEach { voice ->
-                        DropdownMenuItem(text = { Text(voice.displayName) }, onClick = { voiceExpanded = false; onVoiceSelected(voice) })
-                    }
+            }
+            if (voices.size > MAX_VISIBLE_VOICES) {
+                Button({ showAllVoices = !showAllVoices }, Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                    Text(if (showAllVoices) "THU GỌN GIỌNG" else "HIỂN THỊ TẤT CẢ ${voices.size} GIỌNG")
                 }
             }
             Button(onPreviewVoice, Modifier.fillMaxWidth().padding(top = 6.dp)) { Text("NGHE THỬ GIỌNG ĐANG CHỌN") }
@@ -1723,24 +1728,16 @@ private fun BackgroundMusicCard(
                 Text("Bật nhạc nền", Modifier.weight(1f))
                 Switch(enabled, onEnabledChange)
             }
-            ReferenceFloatSettingsSlider(
-                label = "Âm lượng nền",
-                value = volume,
-                minimum = 0f,
-                maximum = 1f,
-                steps = 99,
-                shown = { "%.0f%%".format(it * 100) },
-                onChange = onVolumeChange,
-            )
-            ReferenceFloatSettingsSlider(
-                label = "Mức còn lại khi TTS đọc",
-                value = duckFactor,
-                minimum = 0f,
-                maximum = 1f,
-                steps = 99,
-                shown = { "%.0f%%".format(it * 100) },
-                onChange = onDuckChange,
-            )
+            Text("Âm lượng nền ${"%.0f".format(volume * 100)}%")
+            Row(Modifier.fillMaxWidth()) {
+                Button({ onVolumeChange(volume - 0.05f) }, Modifier.weight(1f).padding(2.dp)) { Text("NHỎ") }
+                Button({ onVolumeChange(volume + 0.05f) }, Modifier.weight(1f).padding(2.dp)) { Text("LỚN") }
+            }
+            Text("Mức còn lại khi TTS đọc ${"%.0f".format(duckFactor * 100)}%", modifier = Modifier.padding(top = 4.dp))
+            Row(Modifier.fillMaxWidth()) {
+                Button({ onDuckChange(duckFactor - 0.05f) }, Modifier.weight(1f).padding(2.dp)) { Text("HẠ THÊM") }
+                Button({ onDuckChange(duckFactor + 0.05f) }, Modifier.weight(1f).padding(2.dp)) { Text("HẠ ÍT") }
+            }
             Row(Modifier.fillMaxWidth().padding(top = 5.dp)) {
                 Button(onSelect, Modifier.weight(1f).padding(2.dp)) { Text("CHỌN TỆP NHẠC") }
                 Button(onClear, Modifier.weight(1f).padding(2.dp), enabled = !uri.isNullOrBlank()) { Text("BỎ TỆP") }
@@ -2849,7 +2846,7 @@ private fun SourceManagementCard(
             Button(
                 onClick = onImportSourceTrustRotation,
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-            ) { Text("NHẬP XOAY KHÓA") }
+            ) { Text("NHẬP TỆP XOAY KHÓA ĐÃ KÝ") }
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             Button(onInstallSourcePack, Modifier.fillMaxWidth()) { Text("CÀI .NTSOURCE / VBOOK / LUA API 2") }
             state.pendingSourceInstall?.let { preview ->

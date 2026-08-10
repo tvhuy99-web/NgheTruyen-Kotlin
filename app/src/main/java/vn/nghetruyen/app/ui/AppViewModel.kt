@@ -193,7 +193,7 @@ data class MainUiState(
     val backgroundMusicUri: String? = null,
     val backgroundMusicEnabled: Boolean = false,
     val backgroundMusicVolume: Float = 0.18f,
-    val backgroundMusicDuckFactor: Float = 0.63095734f,
+    val backgroundMusicDuckFactor: Float = 0.25f,
     val headsetMultiClickEnabled: Boolean = true,
     val headsetSingleClickAction: String = "TOGGLE",
     val headsetDoubleClickAction: String = "NEXT",
@@ -207,8 +207,8 @@ data class MainUiState(
     val narrationPrefetchWindowChapters: Int = 2,
     val sceneMusicCrossfadeMillis: Int = 1_600,
     val sceneMusicContinueAcrossChapters: Boolean = true,
-    val sceneMusicPlaybackMode: SceneMusicPlaybackMode = SceneMusicPlaybackMode.SEQUENTIAL,
-    val sceneMusicTargetLufs: Float = -24f,
+    val sceneMusicPlaybackMode: SceneMusicPlaybackMode = SceneMusicPlaybackMode.SMART_AVOID_REPEAT,
+    val sceneMusicTargetLufs: Float = -18f,
     val sceneMusicAvoidRepeatWindow: Int = 4,
     val sonicProcessingEnabled: Boolean = true,
     val sonicDefaultSpeed: Float = 1f,
@@ -677,12 +677,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
 
     fun setReaderMode(mode: ReaderMode) {
-        ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_PAUSE)
-        mutableState.update { it.copy(readerMode = mode) }
-        viewModelScope.launch {
-            container.settingsRepository.setReaderMode(mode)
-            if (mode == ReaderMode.TTS) ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
+        if (mode == ReaderMode.TEXT) {
+            ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_PAUSE)
         }
+        mutableState.update { it.copy(readerMode = mode) }
+        viewModelScope.launch { container.settingsRepository.setReaderMode(mode) }
         showMessage(if (mode == ReaderMode.TTS) "Đã chuyển sang chế độ TTS." else "Đã chuyển sang chế độ Văn bản.")
     }
 
@@ -1164,6 +1163,41 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun checkSourcePack(sourceId: String) {
+        val pack = state.value.sourcePacks.firstOrNull { it.id == sourceId }
+        if (pack?.ecosystem != "VBOOK") {
+            checkSource(sourceId)
+            return
+        }
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { container.sourcePlatformManager.checkInstalledPack(sourceId) }
+                .onSuccess(::showMessage)
+                .onFailure { showMessage(it.message ?: "Không kiểm tra được tiện ích vBook.") }
+        }
+    }
+
+    fun saveSourceConfig(sourceId: String, changes: Map<String, String>) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { container.sourcePlatformManager.saveConfiguration(sourceId, changes) }
+                .onSuccess {
+                    refreshSourcePlatformState()
+                    showMessage("Đã lưu cấu hình vBook. Thông tin nhạy cảm được mã hóa riêng.")
+                }
+                .onFailure { showMessage(it.message ?: "Không lưu được cấu hình vBook.") }
+        }
+    }
+
+    fun resetSourceConfig(sourceId: String) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { container.sourcePlatformManager.resetConfiguration(sourceId) }
+                .onSuccess {
+                    refreshSourcePlatformState()
+                    showMessage("Đã khôi phục cấu hình vBook mặc định và xóa thông tin bí mật đã lưu.")
+                }
+                .onFailure { showMessage(it.message ?: "Không khôi phục được cấu hình vBook.") }
+        }
+    }
+
     fun updateSourcePack(sourceId: String) {
         val update = state.value.sourceRepositoryPackages.firstOrNull {
             it.sourceId == sourceId && it.status == "UPDATE_AVAILABLE" && it.canInstall
@@ -1280,15 +1314,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun openSourceLogin(sourceId: String) {
         val descriptor = container.sourceRegistry.get(sourceId)?.descriptor
-        val loginUrl = descriptor?.loginUrl
-        if (descriptor == null || loginUrl.isNullOrBlank() || descriptor.allowedHosts.isEmpty()) {
+        val vBookLogin = container.sourcePlatformManager.vBookLoginInfo(sourceId)
+        val loginUrl = descriptor?.loginUrl ?: vBookLogin?.loginUrl
+        val allowedHosts = descriptor?.allowedHosts?.takeIf { it.isNotEmpty() } ?: vBookLogin?.allowedHosts.orEmpty()
+        val resolvedSourceId = descriptor?.id ?: vBookLogin?.sourceId
+        if (resolvedSourceId == null || loginUrl.isNullOrBlank() || allowedHosts.isEmpty()) {
             showMessage("Nguồn này không có luồng đăng nhập riêng.")
             return
         }
         val intent = Intent(getApplication(), SourceLoginActivity::class.java)
-            .putExtra(SourceLoginActivity.EXTRA_SOURCE_ID, descriptor.id)
+            .putExtra(SourceLoginActivity.EXTRA_SOURCE_ID, resolvedSourceId)
             .putExtra(SourceLoginActivity.EXTRA_LOGIN_URL, loginUrl)
-            .putExtra(SourceLoginActivity.EXTRA_ALLOWED_HOSTS, descriptor.allowedHosts.toTypedArray())
+            .putExtra(SourceLoginActivity.EXTRA_ALLOWED_HOSTS, allowedHosts.toTypedArray())
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         getApplication<Application>().startActivity(intent)
     }
@@ -1343,7 +1380,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun openStoryVoiceCastOptions() = openStoryAdvancedOptions("voice")
 
     private fun openStoryAdvancedOptions(mode: String) {
-        mutableState.update { it.copy(storyAdvancedOptionsRequested = true, storyAdvancedOptionsMode = mode, loading = false) }
+        ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_PAUSE)
+        mutableState.update {
+            it.copy(
+                destination = Destination.Story,
+                storyAdvancedOptionsRequested = true,
+                storyAdvancedOptionsMode = mode,
+                loading = false,
+            )
+        }
     }
 
     fun backToChapterList() {
@@ -2999,20 +3044,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             container.libraryRepository.clearReadingHistory()
             showMessage("Đã xóa lịch sử đọc.")
-        }
-    }
-
-    fun removeFromReading(storyId: String) {
-        viewModelScope.launch {
-            container.libraryRepository.removeFromReading(storyId)
-            showMessage("Đã xóa truyện khỏi danh sách Đang đọc. Truyện đã tải, dấu trang và lịch sử vẫn được giữ.")
-        }
-    }
-
-    fun unfollowStory(storyId: String) {
-        viewModelScope.launch {
-            container.libraryRepository.unfollow(storyId)
-            showMessage("Đã bỏ theo dõi truyện.")
         }
     }
 

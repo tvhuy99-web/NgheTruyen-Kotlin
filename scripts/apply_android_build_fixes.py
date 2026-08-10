@@ -4,12 +4,17 @@ import hashlib
 import subprocess
 
 
+def canonical_source(value: str) -> str:
+    """Normalize formatting-only Kotlin differences for idempotency checks."""
+    return "".join(value.replace(";", "").split())
+
+
 def replace_exact(path: str, old: str, new: str, expected: int = 1) -> None:
     file = Path(path)
     text = file.read_text(encoding="utf-8")
     count = text.count(old)
     if new:
-        if new in text:
+        if new in text or canonical_source(new) in canonical_source(text):
             return
     elif count == 0:
         return

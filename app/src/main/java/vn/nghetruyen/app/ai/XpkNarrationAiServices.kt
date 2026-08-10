@@ -311,7 +311,6 @@ class XpkNarrationAiServices(
                         .put("model", config.model)
                         .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", prompt)))
                         .put("temperature", config.temperature.toDouble())
-                        .put("response_format", JSONObject().put("type", "json_object"))
                         .toString()
                 }
                 AiRequest(url, headers, body)
@@ -348,56 +347,60 @@ class XpkNarrationAiServices(
         return out
     }
 
-    private fun extractContent(provider: AiProvider, raw: String): String = when (provider) {
-        AiProvider.GEMINI -> {
-            val root = JSONObject(raw)
-            root.optJSONObject("error")?.optString("message")?.takeIf(String::isNotBlank)?.let { error(it) }
-            val candidate = root.optJSONArray("candidates")?.optJSONObject(0)
-                ?: error(root.optJSONObject("promptFeedback")?.optString("blockReason").orEmpty().ifBlank { "Gemini không trả candidate." })
-            val parts = candidate.optJSONObject("content")?.optJSONArray("parts") ?: error("Gemini không trả nội dung.")
-            buildString {
-                for (index in 0 until parts.length()) {
-                    parts.optJSONObject(index)?.optString("text")?.takeIf(String::isNotBlank)?.let {
-                        if (isNotEmpty()) append('\n')
-                        append(it)
-                    }
-                }
-            }
-        }
-        AiProvider.OPENAI_COMPATIBLE -> {
-            val root = JSONObject(raw)
-            root.optJSONObject("error")?.optString("message")?.takeIf(String::isNotBlank)?.let { error(it) }
-            root.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.opt("content")?.let { content ->
-                when (content) {
-                    is String -> if (content.isNotBlank()) return content
-                    is JSONArray -> {
-                        val text = buildString {
-                            for (index in 0 until content.length()) {
-                                content.optJSONObject(index)?.optString("text")?.takeIf(String::isNotBlank)?.let {
-                                    if (isNotEmpty()) append('\n')
-                                    append(it)
-                                }
-                            }
-                        }
-                        if (text.isNotBlank()) return text
-                    }
-                }
-            }
-            root.optString("output_text").takeIf(String::isNotBlank)?.let { return it }
-            val output = root.optJSONArray("output") ?: JSONArray()
-            val text = buildString {
-                for (outputIndex in 0 until output.length()) {
-                    val parts = output.optJSONObject(outputIndex)?.optJSONArray("content") ?: continue
-                    for (partIndex in 0 until parts.length()) {
-                        parts.optJSONObject(partIndex)?.optString("text")?.takeIf(String::isNotBlank)?.let {
+    private fun extractContent(provider: AiProvider, raw: String): String {
+        return when (provider) {
+            AiProvider.GEMINI -> {
+                val root = JSONObject(raw)
+                root.optJSONObject("error")?.optString("message")?.takeIf(String::isNotBlank)?.let { error(it) }
+                val candidate = root.optJSONArray("candidates")?.optJSONObject(0)
+                    ?: error(root.optJSONObject("promptFeedback")?.optString("blockReason").orEmpty().ifBlank { "Gemini không trả candidate." })
+                val parts = candidate.optJSONObject("content")?.optJSONArray("parts") ?: error("Gemini không trả nội dung.")
+                buildString {
+                    for (index in 0 until parts.length()) {
+                        parts.optJSONObject(index)?.optString("text")?.takeIf(String::isNotBlank)?.let {
                             if (isNotEmpty()) append('\n')
                             append(it)
                         }
                     }
                 }
             }
-            text.takeIf(String::isNotBlank) ?: error("OpenAI-compatible API không trả nội dung")
+            AiProvider.OPENAI_COMPATIBLE -> extractOpenAiContent(raw)
         }
+    }
+
+    private fun extractOpenAiContent(raw: String): String {
+        val root = JSONObject(raw)
+        root.optJSONObject("error")?.optString("message")?.takeIf(String::isNotBlank)?.let { error(it) }
+        root.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.opt("content")?.let { content ->
+            when (content) {
+                is String -> if (content.isNotBlank()) return content
+                is JSONArray -> {
+                    val text = buildString {
+                        for (index in 0 until content.length()) {
+                            content.optJSONObject(index)?.optString("text")?.takeIf(String::isNotBlank)?.let {
+                                if (isNotEmpty()) append('\n')
+                                append(it)
+                            }
+                        }
+                    }
+                    if (text.isNotBlank()) return text
+                }
+            }
+        }
+        root.optString("output_text").takeIf(String::isNotBlank)?.let { return it }
+        val output = root.optJSONArray("output") ?: JSONArray()
+        val text = buildString {
+            for (outputIndex in 0 until output.length()) {
+                val parts = output.optJSONObject(outputIndex)?.optJSONArray("content") ?: continue
+                for (partIndex in 0 until parts.length()) {
+                    parts.optJSONObject(partIndex)?.optString("text")?.takeIf(String::isNotBlank)?.let {
+                        if (isNotEmpty()) append('\n')
+                        append(it)
+                    }
+                }
+            }
+        }
+        return text.takeIf(String::isNotBlank) ?: error("OpenAI-compatible API không trả nội dung")
     }
 
     private fun extractError(raw: String): String? = runCatching {

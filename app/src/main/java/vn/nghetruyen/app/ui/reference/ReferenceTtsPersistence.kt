@@ -17,7 +17,10 @@ data class ReferenceTtsDraft(
     val sonicAccurate: Boolean = false,
     val speed: Float = 1f,
     val pitch: Float = 1f,
+    /** Android/system TTS volume. */
     val volume: Float = 1f,
+    /** Sonic gain controlled by the same visible volume slider when Sonic is selected. */
+    val sonicVolume: Float = 1f,
 )
 
 object ReferenceTtsPersistence {
@@ -26,6 +29,8 @@ object ReferenceTtsPersistence {
     private const val DEFAULT_QUALITY = "default_quality"
     private const val DEFAULT_SPEED = "default_sonic_speed"
     private const val DEFAULT_PITCH = "default_sonic_pitch"
+    private const val DEFAULT_SYSTEM_VOLUME = "default_system_volume"
+    private const val DEFAULT_SONIC_VOLUME = "default_sonic_volume"
 
     suspend fun load(context: Context, storyId: String, hasStoryProfile: Boolean): ReferenceTtsDraft {
         val app = context.applicationContext as NgheTruyenApplication
@@ -59,6 +64,28 @@ object ReferenceTtsPersistence {
             sonic -> prefs.getFloat(DEFAULT_PITCH, settings.sonicDefaultPitch).coerceIn(0.5f, 2f)
             else -> settings.ttsPitch.coerceIn(0.5f, 2f)
         }
+        val systemVolume = if (profile != null) {
+            prefs.getFloat(
+                systemVolumeKey(storyId),
+                if (!sonic) profile.volume else prefs.getFloat(DEFAULT_SYSTEM_VOLUME, settings.ttsVolume.coerceAtMost(1f)),
+            )
+        } else {
+            prefs.getFloat(
+                DEFAULT_SYSTEM_VOLUME,
+                if (!sonic) settings.ttsVolume else 1f,
+            )
+        }.coerceIn(0f, 1f)
+        val sonicVolume = if (profile != null) {
+            prefs.getFloat(
+                sonicVolumeKey(storyId),
+                if (sonic) profile.volume else prefs.getFloat(DEFAULT_SONIC_VOLUME, 1f),
+            )
+        } else {
+            prefs.getFloat(
+                DEFAULT_SONIC_VOLUME,
+                if (sonic) settings.ttsVolume else 1f,
+            )
+        }.coerceIn(0f, 2f)
         return ReferenceTtsDraft(
             enginePackage = profile?.enginePackage ?: settings.ttsEnginePackage,
             voiceName = profile?.voiceName ?: settings.ttsVoiceName,
@@ -67,7 +94,8 @@ object ReferenceTtsPersistence {
             sonicAccurate = quality == 1,
             speed = speed,
             pitch = pitch,
-            volume = (profile?.volume ?: settings.ttsVolume).coerceIn(0f, 2f),
+            volume = systemVolume,
+            sonicVolume = sonicVolume,
         )
     }
 
@@ -82,6 +110,7 @@ object ReferenceTtsPersistence {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val normalized = normalize(draft)
         val sonic = normalized.processingMethod == "sonic"
+        val activeVolume = activeVolume(normalized)
         if (useStoryProfile && storyId.isNotBlank()) {
             val beforeOverride = settings.snapshot()
             preserveGlobalSonicDefaults(
@@ -95,17 +124,18 @@ object ReferenceTtsPersistence {
                     enginePackage = normalized.enginePackage,
                     voiceName = normalized.voiceName,
                     languageTag = normalized.languageTag,
-                    // When Sonic is selected, Android TTS stays neutral. The same visible
-                    // speed/pitch controls are persisted as Sonic values in the reference extras.
+                    // Android TTS remains neutral while the visible controls feed Sonic.
                     rate = if (sonic) 1f else normalized.speed,
                     pitch = if (sonic) 1f else normalized.pitch,
-                    volume = normalized.volume,
+                    volume = activeVolume,
                     updatedAt = System.currentTimeMillis(),
                 ),
             )
             val storyEditor = prefs.edit()
                 .putString(methodKey(storyId), normalized.processingMethod)
                 .putInt(qualityKey(storyId), if (normalized.sonicAccurate) 1 else 0)
+                .putFloat(systemVolumeKey(storyId), normalized.volume)
+                .putFloat(sonicVolumeKey(storyId), normalized.sonicVolume)
             if (sonic) {
                 storyEditor
                     .putFloat(speedKey(storyId), normalized.speed)
@@ -130,6 +160,8 @@ object ReferenceTtsPersistence {
                     .remove(qualityKey(storyId))
                     .remove(speedKey(storyId))
                     .remove(pitchKey(storyId))
+                    .remove(systemVolumeKey(storyId))
+                    .remove(sonicVolumeKey(storyId))
                     .apply()
             }
             val beforeGlobalSave = settings.snapshot()
@@ -142,7 +174,7 @@ object ReferenceTtsPersistence {
             settings.setTtsVoice(normalized.voiceName, normalized.languageTag)
             settings.setTtsRate(if (sonic) 1f else normalized.speed)
             settings.setTtsPitch(if (sonic) 1f else normalized.pitch)
-            settings.setTtsVolume(normalized.volume)
+            settings.setTtsVolume(activeVolume)
             settings.setSonicProcessingEnabled(sonic)
             settings.setSonicAccurateMode(normalized.sonicAccurate)
             if (sonic) {
@@ -152,6 +184,8 @@ object ReferenceTtsPersistence {
             val editor = prefs.edit()
                 .putString(DEFAULT_METHOD, normalized.processingMethod)
                 .putInt(DEFAULT_QUALITY, if (normalized.sonicAccurate) 1 else 0)
+                .putFloat(DEFAULT_SYSTEM_VOLUME, normalized.volume)
+                .putFloat(DEFAULT_SONIC_VOLUME, normalized.sonicVolume)
             if (sonic) {
                 editor
                     .putFloat(DEFAULT_SPEED, normalized.speed)
@@ -181,21 +215,42 @@ object ReferenceTtsPersistence {
             val profile = app.container.database.storyTtsProfileDao().get(storyId)
             if (profile != null) {
                 if (sonic) {
-                    // Migrate older reference profiles that stored the Sonic values in the
-                    // Android TTS rate/pitch columns. Keep those values, then neutralize TTS.
+                    // Migrate older reference profiles that stored Sonic speed/pitch in
+                    // Android rate/pitch, then keep Android TTS neutral.
                     val speed = prefs.getFloat(speedKey(storyId), profile.rate).coerceIn(0.25f, 3f)
                     val pitch = prefs.getFloat(pitchKey(storyId), profile.pitch).coerceIn(0.5f, 2f)
-                    prefs.edit().putFloat(speedKey(storyId), speed).putFloat(pitchKey(storyId), pitch).apply()
+                    val sonicVolume = prefs.getFloat(sonicVolumeKey(storyId), profile.volume).coerceIn(0f, 2f)
+                    val systemVolume = prefs.getFloat(
+                        systemVolumeKey(storyId),
+                        prefs.getFloat(DEFAULT_SYSTEM_VOLUME, beforeOverride.ttsVolume.coerceAtMost(1f)),
+                    ).coerceIn(0f, 1f)
+                    prefs.edit()
+                        .putFloat(speedKey(storyId), speed)
+                        .putFloat(pitchKey(storyId), pitch)
+                        .putFloat(sonicVolumeKey(storyId), sonicVolume)
+                        .putFloat(systemVolumeKey(storyId), systemVolume)
+                        .apply()
                     settings.setSonicDefaultSpeed(speed)
                     settings.setSonicDefaultPitch(pitch)
                     if (abs(profile.rate - 1f) >= 0.005f || abs(profile.pitch - 1f) >= 0.005f) {
                         app.container.database.storyTtsProfileDao().upsert(
-                            profile.copy(rate = 1f, pitch = 1f, updatedAt = System.currentTimeMillis()),
+                            profile.copy(rate = 1f, pitch = 1f, volume = sonicVolume, updatedAt = System.currentTimeMillis()),
                         )
                     }
+                    ReferenceSonicRuntime.outputGain = sonicVolume
+                } else {
+                    val systemVolume = prefs.getFloat(systemVolumeKey(storyId), profile.volume).coerceIn(0f, 1f)
+                    val sonicVolume = prefs.getFloat(
+                        sonicVolumeKey(storyId),
+                        prefs.getFloat(DEFAULT_SONIC_VOLUME, 1f),
+                    ).coerceIn(0f, 2f)
+                    prefs.edit()
+                        .putFloat(systemVolumeKey(storyId), systemVolume)
+                        .putFloat(sonicVolumeKey(storyId), sonicVolume)
+                        .apply()
+                    ReferenceSonicRuntime.outputGain = 1f
                 }
                 ReferenceSonicRuntime.accurateMode = quality
-                ReferenceSonicRuntime.outputGain = if (sonic) profile.volume.coerceIn(0f, 2f) else 1f
             }
         } else {
             restoreGlobal(context)
@@ -211,8 +266,17 @@ object ReferenceTtsPersistence {
             ?: if (snapshot.sonicProcessingEnabled) "sonic" else "system"
         val quality = prefs.getInt(DEFAULT_QUALITY, if (snapshot.sonicAccurateMode) 1 else 0) == 1
         val sonic = method == "sonic"
+        val systemVolume = prefs.getFloat(
+            DEFAULT_SYSTEM_VOLUME,
+            if (!sonic) snapshot.ttsVolume else 1f,
+        ).coerceIn(0f, 1f)
+        val sonicVolume = prefs.getFloat(
+            DEFAULT_SONIC_VOLUME,
+            if (sonic) snapshot.ttsVolume else 1f,
+        ).coerceIn(0f, 2f)
         settings.setSonicProcessingEnabled(sonic)
         settings.setSonicAccurateMode(quality)
+        settings.setTtsVolume(if (sonic) sonicVolume else systemVolume)
         if (prefs.contains(DEFAULT_SPEED)) {
             settings.setSonicDefaultSpeed(
                 prefs.getFloat(DEFAULT_SPEED, 1f).coerceIn(0.25f, 3f),
@@ -224,14 +288,15 @@ object ReferenceTtsPersistence {
             )
         }
         ReferenceSonicRuntime.accurateMode = quality
-        ReferenceSonicRuntime.outputGain = if (sonic) snapshot.ttsVolume.coerceIn(0f, 2f) else 1f
+        ReferenceSonicRuntime.outputGain = if (sonic) sonicVolume else 1f
     }
 
     fun previewDraft(draft: ReferenceTtsDraft): VoiceRoleDraft {
         val normalized = normalize(draft)
         val sonic = normalized.processingMethod == "sonic"
+        val activeVolume = activeVolume(normalized)
         ReferenceSonicRuntime.accurateMode = normalized.sonicAccurate
-        ReferenceSonicRuntime.outputGain = if (sonic) normalized.volume else 1f
+        ReferenceSonicRuntime.outputGain = if (sonic) normalized.sonicVolume else 1f
         return VoiceRoleDraft(
             roleName = "Người kể chuyện",
             isNarrator = true,
@@ -240,7 +305,8 @@ object ReferenceTtsPersistence {
             languageTag = normalized.languageTag,
             rate = if (sonic) 1f else normalized.speed,
             pitch = if (sonic) 1f else normalized.pitch,
-            volume = normalized.volume.coerceAtMost(1f),
+            volume = if (sonic) activeVolume.coerceAtMost(1f) else activeVolume,
+            sonicVolume = normalized.sonicVolume,
             sonicSpeed = if (sonic) normalized.speed else 1f,
             sonicPitch = if (sonic) normalized.pitch else 1f,
             processingMethod = normalized.processingMethod,
@@ -250,18 +316,22 @@ object ReferenceTtsPersistence {
 
     private fun applyRuntime(draft: ReferenceTtsDraft) {
         ReferenceSonicRuntime.accurateMode = draft.sonicAccurate
-        ReferenceSonicRuntime.outputGain = if (draft.processingMethod == "sonic") draft.volume.coerceIn(0f, 2f) else 1f
+        ReferenceSonicRuntime.outputGain = if (draft.processingMethod == "sonic") draft.sonicVolume.coerceIn(0f, 2f) else 1f
     }
+
+    private fun activeVolume(value: ReferenceTtsDraft): Float =
+        if (value.processingMethod == "sonic") value.sonicVolume.coerceIn(0f, 2f)
+        else value.volume.coerceIn(0f, 1f)
 
     private fun normalize(value: ReferenceTtsDraft): ReferenceTtsDraft {
         val method = if (value.processingMethod == "sonic") "sonic" else "system"
-        val maxVolume = if (method == "sonic") 2f else 1f
         return value.copy(
             languageTag = value.languageTag.ifBlank { "vi-VN" },
             processingMethod = method,
             speed = value.speed.coerceIn(0.25f, 3f),
             pitch = value.pitch.coerceIn(0.5f, 2f),
-            volume = value.volume.coerceIn(0f, maxVolume),
+            volume = value.volume.coerceIn(0f, 1f),
+            sonicVolume = value.sonicVolume.coerceIn(0f, 2f),
         )
     }
 
@@ -283,4 +353,6 @@ object ReferenceTtsPersistence {
     private fun qualityKey(storyId: String) = "story:$storyId:quality"
     private fun speedKey(storyId: String) = "story:$storyId:sonic_speed"
     private fun pitchKey(storyId: String) = "story:$storyId:sonic_pitch"
+    private fun systemVolumeKey(storyId: String) = "story:$storyId:system_volume"
+    private fun sonicVolumeKey(storyId: String) = "story:$storyId:sonic_volume"
 }

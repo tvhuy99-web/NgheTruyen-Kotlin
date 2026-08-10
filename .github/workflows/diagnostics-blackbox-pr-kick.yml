@@ -66,6 +66,11 @@ jobs:
           exec(compile(script, 'diagnostics-blackbox-implement.py', 'exec'))
           browser = Path('app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidSourceBrowserBroker.kt')
           browser.write_text(browser.read_text().replace('joinToString("\n")', 'joinToString("\\n")'))
+          story = Path('app/src/main/java/vn/nghetruyen/app/sourceplatform/VBookStorySource.kt')
+          story_text = story.read_text()
+          if 'import vn.nghetruyen.source.api.JsonCodec\n' not in story_text:
+              story_text = story_text.replace('import vn.nghetruyen.source.api.JsonValue\n', 'import vn.nghetruyen.source.api.JsonValue\nimport vn.nghetruyen.source.api.JsonCodec\n')
+          story.write_text(story_text)
           Path('.github/workflows/diagnostics-blackbox-pr-kick.yml').unlink(missing_ok=True)
           PY
       - name: Validate source modules and app

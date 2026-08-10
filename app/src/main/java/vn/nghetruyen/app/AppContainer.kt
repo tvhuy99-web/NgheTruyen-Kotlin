@@ -6,7 +6,7 @@ import com.nghetruyen.source.platform.SourceTrustState
 import com.nghetruyen.source.repository.VBookUpdateResult
 import vn.nghetruyen.app.ai.EncryptedAiCredentialStore
 import vn.nghetruyen.app.ai.AiRequestGovernor
-import vn.nghetruyen.app.ai.OnlineAiServices
+import vn.nghetruyen.app.ai.OnlineTextAiServices
 import vn.nghetruyen.app.ai.NarrationPlanCoordinator
 import vn.nghetruyen.app.ai.XpkNarrationAiServices
 import vn.nghetruyen.app.ai.vietphrase.VietPhraseOnlineUpdater
@@ -131,7 +131,9 @@ class AppContainer(context: Context) {
     val ttsVoiceCatalog: TtsVoiceCatalog by lazy { TtsVoiceCatalog(appContext) }
     val aiCredentialStore: EncryptedAiCredentialStore by lazy { EncryptedAiCredentialStore(appContext) }
     val aiRequestGovernor: AiRequestGovernor by lazy { AiRequestGovernor(database, settingsRepository) }
-    val aiServices: OnlineAiServices by lazy { OnlineAiServices(settingsRepository, aiCredentialStore, aiRequestGovernor, libraryRepository) }
+    val aiServices: OnlineTextAiServices by lazy {
+        OnlineTextAiServices(settingsRepository, aiCredentialStore, aiRequestGovernor, libraryRepository)
+    }
     val xpkNarrationAiServices: XpkNarrationAiServices by lazy {
         XpkNarrationAiServices(appContext, settingsRepository, aiCredentialStore, aiRequestGovernor, libraryRepository)
     }

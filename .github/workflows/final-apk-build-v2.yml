@@ -2,6 +2,11 @@ name: Build NgheTruyen APK
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/final-apk-build-v2.yml"
   push:
     branches:
       - main

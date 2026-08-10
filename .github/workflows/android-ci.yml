@@ -36,7 +36,19 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
       - name: Compile app and instrumentation APKs
-        run: ./gradlew --no-daemon --stacktrace clean :app:assembleDebug :app:assembleDebugAndroidTest
+        shell: bash
+        run: |
+          set +e
+          ./gradlew --no-daemon --stacktrace clean :app:assembleDebug :app:assembleDebugAndroidTest 2>&1 | tee legacy-xpk-compile.log
+          status=${PIPESTATUS[0]}
+          exit "$status"
+      - name: Upload compile diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: legacy-xpk-compile-log-${{ github.run_number }}
+          if-no-files-found: warn
+          path: legacy-xpk-compile.log
       - name: Verify stable debug APK signature
         shell: bash
         run: |
@@ -47,6 +59,7 @@ jobs:
           ACTUAL_CERT_SHA256="$("${APKSIGNER}" verify --print-certs "${APK}" | awk -F': ' '/certificate SHA-256 digest:/ {print tolower($NF); exit}')"
           test "${ACTUAL_CERT_SHA256}" = "${EXPECTED_DEBUG_CERT_SHA256}"
       - name: Upload APKs
+        if: success()
         uses: actions/upload-artifact@v7
         with:
           name: nghe-truyen-legacy-xpk-test-build-${{ github.run_number }}

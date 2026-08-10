@@ -177,7 +177,7 @@ class VBookCorpusAnalyzerTest {
         assertFalse("suggests" in audit.unknownScriptRoles)
 
         val validation = VBookCandidateValidator().validate(VBookCandidate("optional-roles", plugin, scripts))
-        assertEquals(vn.nghetruyen.source.api.SourceCompatibilityState.UNSUPPORTED, validation.state)
+        assertEquals(com.nghetruyen.source.platform.SourceCompatibilityState.UNSUPPORTED, validation.state)
         assertTrue(VBookFeature.CONFIG_UNSUPPORTED_DESCRIPTOR in validation.blockingFeatures)
     }
 

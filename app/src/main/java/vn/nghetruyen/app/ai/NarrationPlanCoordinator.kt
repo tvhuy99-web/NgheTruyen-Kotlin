@@ -122,8 +122,9 @@ class NarrationPlanCoordinator(
         val sourceHash = ChapterAiWorkflow.sha256(content.paragraphs)
         val cached = library.getChapterTransform(content.chapter.id, ChapterAiWorkflow.KIND_VOICE_CAST)
         if (cached?.sourceSha256 != sourceHash) return true
-        if (cached.transformedText.contains("\"engine\":\"$VOICE_TRANSFORM_ENGINE\"")) return false
-        return library.listVoiceAssignments(content.chapter.id).isEmpty()
+        val isM5Transform = cached.transformedText.contains("\"engine\":\"$VOICE_TRANSFORM_ENGINE\"") &&
+            cached.transformedText.contains("\"timeline_fingerprint\"")
+        return !isM5Transform
     }
 
     private suspend fun needsMusicPlan(
@@ -136,7 +137,9 @@ class NarrationPlanCoordinator(
         val sourceHash = musicSourceHash(content, tracks)
         val cached = library.getChapterTransform(content.chapter.id, ChapterAiWorkflow.KIND_SCENE_MUSIC)
         if (cached?.sourceSha256 != sourceHash) return true
-        return !cached.transformedText.contains("\"engine\":\"$MUSIC_TRANSFORM_ENGINE\"")
+        val isM5Transform = cached.transformedText.contains("\"engine\":\"$MUSIC_TRANSFORM_ENGINE\"") &&
+            cached.transformedText.contains("\"timeline_fingerprint\"")
+        return !isM5Transform
     }
 
     private suspend fun ensureVoicePlan(content: ChapterContent, force: Boolean): AppResult<Boolean> {
@@ -203,7 +206,7 @@ class NarrationPlanCoordinator(
 
         // New XPK plans never depend on the lossy one-row-per-paragraph bridge.
         library.replaceVoiceAssignments(content.chapter.storyId, content.chapter.id, emptyList())
-        val timelineFingerprint = XpkPlaybackRuntime.timelineFingerprint(content.chapter.title, content.paragraphs)
+        val timelineFingerprint = XpkPlaybackRuntime.timelineFingerprint(content.chapter.title, canonicalParagraphs(content))
         val payload = JSONObject()
             .put("engine", VOICE_TRANSFORM_ENGINE)
             .put("splitter_version", XpkVoiceCastSplitter.ENGINE_VERSION)
@@ -280,7 +283,7 @@ class NarrationPlanCoordinator(
                 transformedText = JSONObject()
                     .put("engine", MUSIC_TRANSFORM_ENGINE)
                     .put("mode", XpkSceneMusicParity.MODE)
-                    .put("timeline_fingerprint", XpkPlaybackRuntime.timelineFingerprint(content.chapter.title, content.paragraphs))
+                    .put("timeline_fingerprint", XpkPlaybackRuntime.timelineFingerprint(content.chapter.title, canonicalParagraphs(content)))
                     .put("music_scenes", unitScenes)
                     .put("music_scene_error", musicSceneError)
                     .toString(),
@@ -334,7 +337,13 @@ class NarrationPlanCoordinator(
         )
     }
 
-    private fun chapterBody(content: ChapterContent): String = content.paragraphs.joinToString("\n")
+    private fun canonicalParagraphs(content: ChapterContent): List<String> = content.paragraphs
+        .asSequence()
+        .map { it.replace(Regex("\\s+"), " ").trim() }
+        .filter(String::isNotBlank)
+        .toList()
+
+    private fun chapterBody(content: ChapterContent): String = canonicalParagraphs(content).joinToString("\n")
 
     // Keep this formula identical to ReaderPlaybackService so saved XPK scene plans are loadable now.
     // Engine/version invalidation is checked separately in needsMusicPlan via transformedText.

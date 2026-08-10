@@ -101,8 +101,9 @@ object PlaybackQueueStore {
         preparationState: PlaybackPreparationState = PlaybackPreparationState.READY,
         preparationMessage: String? = null,
     ) {
+        // XPK must see the same body text used by AI planning. Reader normalization is presentation/progress only.
+        val chunks = XpkPlaybackRuntime.buildSpeechTimeline(chapterTitle, paragraphs)
         val normalized = ReaderTextChunker.normalizeParagraphs(paragraphs)
-        val chunks = XpkPlaybackRuntime.buildSpeechTimeline(chapterTitle, normalized)
         val startParagraph = if (normalized.isEmpty()) 0 else startIndex.coerceIn(0, normalized.lastIndex)
         mutable.value = PlaybackSnapshot(
             sourceId = sourceId,

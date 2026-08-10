@@ -1,8 +1,10 @@
 package vn.nghetruyen.app
 
 import android.Manifest
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
@@ -16,9 +18,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import vn.nghetruyen.app.audio.AudioExportPackaging
 import vn.nghetruyen.app.audio.AudioExportRequest
 import vn.nghetruyen.app.audio.ReferenceAudioExportRuntime
+import vn.nghetruyen.app.core.common.AppResult
 import vn.nghetruyen.app.core.model.AudioExportFormat
 import vn.nghetruyen.app.core.model.ReaderMode
 import vn.nghetruyen.app.following.FollowingUpdateWorker
@@ -81,7 +86,7 @@ class MainActivity : ComponentActivity() {
                     runCatching {
                         contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     }
-                    viewModel.restoreBackup(uri)
+                    handleBackupRestoreSelection(uri)
                 }
             }
             val sourceDiagnosticsExportLauncher = rememberLauncherForActivityResult(
@@ -289,6 +294,61 @@ class MainActivity : ComponentActivity() {
                     onTogglePlayback = launchPlayback,
                     onFollowingUpdatesChange = changeFollowingUpdates,
                 )
+            }
+        }
+    }
+
+    private fun handleBackupRestoreSelection(uri: Uri) {
+        val container = (application as NgheTruyenApplication).container
+        lifecycleScope.launch {
+            when (val inspection = container.legacyXpkBackupImporter.inspect(uri)) {
+                is AppResult.Failure -> viewModel.readerActionMessage(inspection.message)
+                is AppResult.Success -> {
+                    val preview = inspection.value.preview
+                    if (!inspection.value.isLegacyXpk || preview == null) {
+                        // Current Kotlin backups keep the existing behavior and get no additional prompt.
+                        viewModel.restoreBackup(uri)
+                    } else {
+                        AlertDialog.Builder(this@MainActivity)
+                            .setTitle("PHÁT HIỆN BẢN SAO LƯU XPK CŨ")
+                            .setMessage(preview.confirmationMessage())
+                            .setPositiveButton("CHUYỂN ĐỔI & KHÔI PHỤC") { _, _ ->
+                                restoreLegacyXpkBackup(uri)
+                            }
+                            .setNegativeButton("HỦY", null)
+                            .show()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun restoreLegacyXpkBackup(uri: Uri) {
+        val container = (application as NgheTruyenApplication).container
+        lifecycleScope.launch {
+            val selected = viewModel.state.value.backupComponents
+            viewModel.readerActionMessage("Đang chuyển đổi bản sao lưu XPK…")
+            when (val result = container.legacyXpkBackupImporter.restoreFrom(uri, selected)) {
+                is AppResult.Success -> {
+                    val message = result.value.userMessage()
+                    container.backupHistoryStore.record(
+                        operation = "RESTORE_XPK",
+                        success = true,
+                        summary = message,
+                        components = selected.map { it.name },
+                    )
+                    viewModel.readerActionMessage(message)
+                }
+                is AppResult.Failure -> {
+                    container.backupHistoryStore.record(
+                        operation = "RESTORE_XPK",
+                        success = false,
+                        summary = result.message,
+                        errorCode = result.code,
+                        components = selected.map { it.name },
+                    )
+                    viewModel.readerActionMessage(result.message)
+                }
             }
         }
     }

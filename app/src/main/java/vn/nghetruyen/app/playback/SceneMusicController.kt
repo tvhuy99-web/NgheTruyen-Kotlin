@@ -213,9 +213,10 @@ class SceneMusicController(
     }
 
     /**
-     * XPK switchBackgroundMusicTrackForScene(track, 2200): fade the current player to zero for the
-     * first half, release it, then start the requested track at zero and fade it in for the second
-     * half. There is deliberately no overlap between tracks.
+     * XPK switchBackgroundMusicTrackForScene(track, 2200): when a player exists, fade the current
+     * player to zero for the first half, release it, then start the requested track at zero and fade
+     * it in for the second half. When no player exists, XPK fades the new track in over all 2200 ms.
+     * There is deliberately no overlap between two tracks.
      */
     private fun startXpkSequentialTransition(next: Slot, durationMillis: Int) {
         transitionJob?.cancel()
@@ -225,8 +226,8 @@ class SceneMusicController(
         outgoing = null
         val old = active
         val duration = durationMillis.coerceIn(1_200, 4_000)
-        val fadeOutMillis = duration / 2
-        val fadeInMillis = duration - fadeOutMillis
+        val fadeOutMillis = if (old == null) 0 else duration / 2
+        val fadeInMillis = if (old == null) duration else duration - fadeOutMillis
 
         transitionJob = scope.launch(Dispatchers.Main.immediate) {
             if (old != null) {

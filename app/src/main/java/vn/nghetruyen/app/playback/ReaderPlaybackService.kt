@@ -1513,12 +1513,12 @@ class ReaderPlaybackService : Service() {
             container.libraryRepository.getChapterTransform(chapterId, ChapterAiWorkflow.KIND_VOICE_CAST)
         } else null
         val validRuntimeUnitIds = playbackSnapshot.speechChunks.mapNotNull { it.unitId.takeIf(String::isNotBlank) }
-        xpkVoiceAssignments = if (voicePlan?.sourceSha256 == originalHash) {
+        xpkVoiceAssignments = if (voicePlan != null && voicePlan.sourceSha256 == originalHash) {
             runCatching {
                 XpkPlaybackRuntime.parseVoiceAssignments(voicePlan.transformedText, validRuntimeUnitIds)
             }.getOrDefault(emptyMap())
         } else emptyMap()
-        voiceAssignments = if (voicePlan?.sourceSha256 == originalHash) {
+        voiceAssignments = if (voicePlan != null && voicePlan.sourceSha256 == originalHash) {
             container.libraryRepository.listVoiceAssignments(chapterId).associateBy { it.paragraphIndex }
         } else emptyMap()
 

@@ -1,16 +1,13 @@
 name: Build APK
-# Package the current main branch as an installable debug APK.
 
 on:
-  workflow_dispatch:
-  push:
+  pull_request:
     branches:
       - main
-    paths:
-      - ".github/workflows/build-apk.yml"
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: build-apk-${{ github.ref }}
@@ -27,25 +24,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Record build start
-        shell: bash
-        run: |
-          {
-            echo "STATUS=running"
-            echo "COMMIT_SHA=${GITHUB_SHA}"
-            echo "RUN_ID=${GITHUB_RUN_ID}"
-            echo "RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT}"
-            echo "ARTIFACT_ID="
-            echo "ARTIFACT_NAME=NgheTruyen-v2.9.0-xpk-parity-debug-apk"
-          } > BUILD_APK_RESULT.txt
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add BUILD_APK_RESULT.txt
-          if ! git diff --cached --quiet; then
-            git commit -m "build: record APK build start"
-            git push origin HEAD:main
-          fi
-
       - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
@@ -57,8 +35,6 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          packages: platform-tools
 
       - name: Install required Android SDK packages
         shell: bash
@@ -76,62 +52,34 @@ jobs:
       - name: Bootstrap verified Gradle Wrapper
         shell: bash
         run: |
-          chmod +x gradlew scripts/bootstrap-wrapper.sh
+          chmod +x gradlew scripts/bootstrap-wrapper.sh scripts/m0_gate.sh
           ./scripts/bootstrap-wrapper.sh
 
-      - name: Validate source
-        id: validate
-        run: python3 scripts/validate_release.py
+      - name: Run release gate
+        run: bash scripts/m0_gate.sh
 
-      - name: Build installable debug APK
-        id: build
-        run: ./gradlew --no-daemon --stacktrace :app:assembleDebug
-
-      - name: Record checksum
-        id: checksum
+      - name: Package APK and checksum
         shell: bash
-        run: sha256sum app/build/outputs/apk/debug/app-debug.apk | tee app-debug.apk.sha256
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk dist/NgheTruyen-debug.apk
+          sha256sum dist/NgheTruyen-debug.apk | tee dist/NgheTruyen-debug.apk.sha256
 
       - name: Upload APK
-        id: upload_apk
         uses: actions/upload-artifact@v4
         with:
-          name: NgheTruyen-v2.9.0-xpk-parity-debug-apk
+          name: NgheTruyen-debug-apk
           if-no-files-found: error
           retention-days: 30
           path: |
-            app/build/outputs/apk/debug/app-debug.apk
-            app-debug.apk.sha256
+            dist/NgheTruyen-debug.apk
+            dist/NgheTruyen-debug.apk.sha256
 
-      - name: Record build result
+      - name: Upload gate evidence
         if: always()
-        shell: bash
-        run: |
-          CHECKSUM_LINE=""
-          if [[ -f app-debug.apk.sha256 ]]; then
-            CHECKSUM_LINE="$(cat app-debug.apk.sha256)"
-          fi
-          git reset --hard HEAD
-          git clean -fd
-          git fetch origin main
-          git rebase origin/main
-          {
-            echo "STATUS=${{ job.status }}"
-            echo "COMMIT_SHA=${GITHUB_SHA}"
-            echo "RUN_ID=${GITHUB_RUN_ID}"
-            echo "RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT}"
-            echo "VALIDATE_OUTCOME=${{ steps.validate.outcome }}"
-            echo "BUILD_OUTCOME=${{ steps.build.outcome }}"
-            echo "UPLOAD_OUTCOME=${{ steps.upload_apk.outcome }}"
-            echo "ARTIFACT_ID=${{ steps.upload_apk.outputs.artifact-id }}"
-            echo "ARTIFACT_NAME=NgheTruyen-v2.9.0-xpk-parity-debug-apk"
-            if [[ -n "${CHECKSUM_LINE}" ]]; then
-              echo "${CHECKSUM_LINE}"
-            fi
-          } > BUILD_APK_RESULT.txt
-          git add BUILD_APK_RESULT.txt
-          if git diff --cached --quiet; then
-            exit 0
-          fi
-          git commit -m "build: record APK build result"
-          git push origin HEAD:main
+        uses: actions/upload-artifact@v4
+        with:
+          name: m0-gate-evidence
+          if-no-files-found: warn
+          retention-days: 30
+          path: build/reports/m0

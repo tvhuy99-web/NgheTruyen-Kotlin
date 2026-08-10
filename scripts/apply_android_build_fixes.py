@@ -18,6 +18,9 @@ def replace_exact(path: str, old: str, new: str, expected: int = 1) -> None:
             return
     elif count == 0:
         return
+    if count == 0:
+        print(f"PATCH_TARGET_STALE_SKIP={path}")
+        return
     if count != expected:
         raise SystemExit(f"{path}: expected {expected} occurrence(s), found {count}: {old!r}")
     file.write_text(text.replace(old, new), encoding="utf-8")

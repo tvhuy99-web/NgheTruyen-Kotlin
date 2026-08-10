@@ -39,6 +39,29 @@ def main() -> None:
         print("M1_READER_CORE_STATIC_OK; EXECUTABLE_CHECK_SKIPPED: Kotlin CLI unavailable")
         return
 
+    # This gate intentionally isolates reader queue/index mechanics from the XPK splitter/parser.
+    # XPK behavior has its own executable/static gates. The adapter below supplies only the three
+    # runtime hooks PlaybackQueueStore needs so this small kotlinc harness stays dependency-light.
+    xpk_runtime_stub = r'''
+package vn.nghetruyen.app.playback
+
+object XpkPlaybackRuntime {
+    fun resetCanonicalPlans() = Unit
+
+    fun canonicalLines(paragraphs: List<String>): List<String> = paragraphs
+        .asSequence()
+        .flatMap { value ->
+            value.replace("\r\n", "\n").replace('\r', '\n').split('\n').asSequence()
+        }
+        .map(String::trim)
+        .filter(String::isNotBlank)
+        .toList()
+
+    fun buildSpeechTimeline(title: String, paragraphs: List<String>): List<PlaybackSpeechChunk> =
+        ReaderTextChunker.chunkParagraphs(canonicalLines(paragraphs))
+}
+'''
+
     harness = r'''
 import vn.nghetruyen.app.core.model.ChapterSummary
 import vn.nghetruyen.app.playback.PlaybackQueueStore
@@ -102,8 +125,10 @@ fun main() {
     with tempfile.TemporaryDirectory(prefix="nghe_m1_reader_") as td:
         temp = Path(td)
         harness_file = temp / "Harness.kt"
+        stub_file = temp / "XpkPlaybackRuntimeStub.kt"
         output = temp / "reader-core.jar"
         harness_file.write_text(harness, encoding="utf-8")
+        stub_file.write_text(xpk_runtime_stub, encoding="utf-8")
         coroutines = Path(KOTLINC).resolve().parents[1] / "lib" / "kotlinx-coroutines-core-jvm.jar"
         command = [
             KOTLINC,
@@ -112,6 +137,7 @@ fun main() {
             str(ROOT / "app/src/main/java/vn/nghetruyen/app/playback/ReaderChapterNavigation.kt"),
             str(ROOT / "app/src/main/java/vn/nghetruyen/app/playback/ReaderPositionResolver.kt"),
             str(ROOT / "app/src/main/java/vn/nghetruyen/app/playback/ReaderVolumeKeyPolicy.kt"),
+            str(stub_file),
             str(harness_file),
         ]
         if coroutines.is_file():

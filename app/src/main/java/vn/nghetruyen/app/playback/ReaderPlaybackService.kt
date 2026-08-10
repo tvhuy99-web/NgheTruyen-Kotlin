@@ -668,17 +668,22 @@ class ReaderPlaybackService : Service() {
         val aiRateMultiplier = (1f + (voiceAssignment?.speedAdjustPct ?: 0f) / 100f).coerceIn(0.5f, 1.5f)
         val aiPitchMultiplier = (1f + (voiceAssignment?.pitchAdjustPct ?: 0f) / 100f).coerceIn(0.5f, 1.5f)
         val aiVolumeMultiplier = (1f + (voiceAssignment?.volumeAdjustPct ?: 0f) / 100f).coerceIn(0.2f, 2f)
+        val hasExplicitRole = resolved.role != null
         val config = roleConfig.copy(
-            rate = (roleConfig.rate * expression.rateMultiplier * aiRateMultiplier).coerceIn(0.25f, 3f),
-            pitch = (roleConfig.pitch * expression.pitchMultiplier * aiPitchMultiplier).coerceIn(0.5f, 2f),
+            rate = if (roleConfig.sonicEnabled) 1f
+            else (roleConfig.rate * expression.rateMultiplier * aiRateMultiplier).coerceIn(0.25f, 3f),
+            pitch = if (roleConfig.sonicEnabled) 1f
+            else (roleConfig.pitch * expression.pitchMultiplier * aiPitchMultiplier).coerceIn(0.5f, 2f),
             volume = (roleConfig.volume * expression.volumeMultiplier * aiVolumeMultiplier)
                 .coerceIn(0f, if (roleConfig.sonicEnabled) 2f else 1f),
-            sonicSpeed = if (roleConfig.sonicEnabled)
-                (roleConfig.sonicSpeed * expression.sonicSpeedMultiplier * sonicDefaultSpeed).coerceIn(0.25f, 3f)
-            else 1f,
-            sonicPitch = if (roleConfig.sonicEnabled)
-                (roleConfig.sonicPitch * expression.sonicPitchMultiplier * sonicDefaultPitch).coerceIn(0.5f, 2f)
-            else 1f,
+            sonicSpeed = if (roleConfig.sonicEnabled) {
+                val selectedSpeed = if (hasExplicitRole) roleConfig.sonicSpeed else sonicDefaultSpeed
+                (selectedSpeed * expression.sonicSpeedMultiplier * aiRateMultiplier).coerceIn(0.25f, 3f)
+            } else 1f,
+            sonicPitch = if (roleConfig.sonicEnabled) {
+                val selectedPitch = if (hasExplicitRole) roleConfig.sonicPitch else sonicDefaultPitch
+                (selectedPitch * expression.sonicPitchMultiplier * aiPitchMultiplier).coerceIn(0.5f, 2f)
+            } else 1f,
         )
         val desiredEngine = config.enginePackage?.takeUnless(failedEnginePackages::contains)
             ?: activeBaseVoice.enginePackage?.takeUnless(failedEnginePackages::contains)
@@ -748,6 +753,21 @@ class ReaderPlaybackService : Service() {
     }
 
     private fun recoverActiveSpeech(code: String) {
+        if (previewUtteranceId != null && previewUtteranceId == activeUtteranceId) {
+            cancelSpeechWatchdog()
+            completionGuard.cancel()
+            clearSonicPlayback(deleteFiles = true)
+            activeSpeechAttempt = null
+            activeUtteranceId = null
+            previewUtteranceId = null
+            transitionMessage = "Không xử lý được Sonic cho đoạn nghe thử ($code)."
+            releaseWakeLock()
+            abandonAudioFocus()
+            updateNotification()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return
+        }
         val attempt = activeSpeechAttempt ?: run {
             failPlaybackSafely(code)
             return
@@ -889,7 +909,6 @@ class ReaderPlaybackService : Service() {
         }
     }
 
-
     private fun normalizeRenderedSpeech(output: File): File {
         if (!normalizeTtsVolumeEnabled) return output
         val measured = PcmLoudnessEstimator.estimateLufs(output)
@@ -913,7 +932,6 @@ class ReaderPlaybackService : Service() {
                         .build(),
                 )
                 setDataSource(this@ReaderPlaybackService, Uri.fromFile(file))
-                // The rendered WAV is already normalized before it reaches the player.
                 setVolume(1f, 1f)
                 setOnCompletionListener {
                     clearSonicPlayback(deleteFiles = true)
@@ -959,16 +977,17 @@ class ReaderPlaybackService : Service() {
 
     private fun prepareRolePreview(intent: Intent) {
         val rawText = intent.getStringExtra(EXTRA_PREVIEW_TEXT).orEmpty()
+        val sonicEnabled = intent.getBooleanExtra(EXTRA_PREVIEW_SONIC_ENABLED, false)
         val baseConfig = RuntimeVoiceConfig(
             enginePackage = intent.getStringExtra(EXTRA_PREVIEW_ENGINE)?.takeIf(String::isNotBlank),
             voiceName = intent.getStringExtra(EXTRA_PREVIEW_VOICE)?.takeIf(String::isNotBlank),
             languageTag = intent.getStringExtra(EXTRA_PREVIEW_LANGUAGE).orEmpty().ifBlank { "vi-VN" },
-            rate = intent.getFloatExtra(EXTRA_PREVIEW_RATE, 1f).coerceIn(0.25f, 3f),
-            pitch = intent.getFloatExtra(EXTRA_PREVIEW_PITCH, 1f).coerceIn(0.5f, 2f),
+            rate = if (sonicEnabled) 1f else intent.getFloatExtra(EXTRA_PREVIEW_RATE, 1f).coerceIn(0.25f, 3f),
+            pitch = if (sonicEnabled) 1f else intent.getFloatExtra(EXTRA_PREVIEW_PITCH, 1f).coerceIn(0.5f, 2f),
             volume = intent.getFloatExtra(EXTRA_PREVIEW_VOLUME, 1f).coerceIn(0f, 2f),
             sonicSpeed = intent.getFloatExtra(EXTRA_PREVIEW_SONIC_SPEED, 1f).coerceIn(0.25f, 3f),
             sonicPitch = intent.getFloatExtra(EXTRA_PREVIEW_SONIC_PITCH, 1f).coerceIn(0.5f, 2f),
-            sonicEnabled = intent.getBooleanExtra(EXTRA_PREVIEW_SONIC_ENABLED, false),
+            sonicEnabled = sonicEnabled,
             sonicAccurate = intent.getBooleanExtra(EXTRA_PREVIEW_SONIC_ACCURATE, false),
         )
         val previewRole = VoiceRoleEntity(
@@ -994,8 +1013,10 @@ class ReaderPlaybackService : Service() {
         preparePreview(
             expressive.text,
             baseConfig.copy(
-                rate = (baseConfig.rate * expressive.rateMultiplier).coerceIn(0.25f, 3f),
-                pitch = (baseConfig.pitch * expressive.pitchMultiplier).coerceIn(0.5f, 2f),
+                rate = if (baseConfig.sonicEnabled) 1f
+                else (baseConfig.rate * expressive.rateMultiplier).coerceIn(0.25f, 3f),
+                pitch = if (baseConfig.sonicEnabled) 1f
+                else (baseConfig.pitch * expressive.pitchMultiplier).coerceIn(0.5f, 2f),
                 volume = (baseConfig.volume * expressive.volumeMultiplier).coerceIn(0f, if (baseConfig.sonicEnabled) 2f else 1f),
                 sonicSpeed = if (baseConfig.sonicEnabled) (baseConfig.sonicSpeed * expressive.sonicSpeedMultiplier).coerceIn(0.25f, 3f) else 1f,
                 sonicPitch = if (baseConfig.sonicEnabled) (baseConfig.sonicPitch * expressive.sonicPitchMultiplier).coerceIn(0.5f, 2f) else 1f,
@@ -1063,9 +1084,17 @@ class ReaderPlaybackService : Service() {
         val utteranceId = "preview:${System.nanoTime()}"
         previewUtteranceId = utteranceId
         transitionMessage = "Đang nghe thử giọng…"
-        val previewParams = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, config.volume) }
-        val result = tts.speak(spoken, TextToSpeech.QUEUE_FLUSH, previewParams, utteranceId)
+        val result = if (config.sonicEnabled) {
+            activeUtteranceId = utteranceId
+            activeSpeechAttempt = ActiveSpeechAttempt(spoken, config, usedSonic = true)
+            synthesizeAndPlaySonic(spoken, config, utteranceId)
+        } else {
+            val previewParams = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, config.volume) }
+            tts.speak(spoken, TextToSpeech.QUEUE_FLUSH, previewParams, utteranceId)
+        }
         if (result == TextToSpeech.ERROR) {
+            activeUtteranceId = null
+            activeSpeechAttempt = null
             previewUtteranceId = null
             transitionMessage = "Bộ máy TTS từ chối đoạn nghe thử."
             releaseWakeLock()
@@ -1119,6 +1148,8 @@ class ReaderPlaybackService : Service() {
         if (utteranceId != null && utteranceId == previewUtteranceId) {
             mainHandler.post {
                 previewUtteranceId = null
+                activeUtteranceId = null
+                activeSpeechAttempt = null
                 transitionMessage = if (success) "Đã phát mẫu giọng." else "Không phát được mẫu giọng."
                 releaseWakeLock()
                 abandonAudioFocus()
@@ -1427,14 +1458,15 @@ class ReaderPlaybackService : Service() {
         interruptionMode = settings.audioInterruptionMode
         if (hasAudioFocus || audioFocusRequest != null) abandonAudioFocus()
         audioFocusRequest = null
+        val sonicEnabled = settings.sonicProcessingEnabled
         val config = RuntimeVoiceConfig(
             enginePackage = desiredEngine,
             voiceName = profile?.voiceName?.takeIf(String::isNotBlank) ?: settings.ttsVoiceName,
             languageTag = profile?.languageTag?.ifBlank { null } ?: settings.ttsLanguageTag,
-            rate = profile?.rate ?: settings.ttsRate,
-            pitch = profile?.pitch ?: settings.ttsPitch,
+            rate = if (sonicEnabled) 1f else profile?.rate ?: settings.ttsRate,
+            pitch = if (sonicEnabled) 1f else profile?.pitch ?: settings.ttsPitch,
             volume = profile?.volume ?: settings.ttsVolume,
-            sonicEnabled = settings.sonicProcessingEnabled,
+            sonicEnabled = sonicEnabled,
             sonicAccurate = settings.sonicAccurateMode,
         )
         activeBaseVoice = config
@@ -1576,8 +1608,8 @@ class ReaderPlaybackService : Service() {
             enginePackage = enginePackage,
             voiceName = voiceName,
             languageTag = languageTag,
-            rate = rate,
-            pitch = pitch,
+            rate = if (sonic) 1f else rate,
+            pitch = if (sonic) 1f else pitch,
             volume = volume.coerceIn(0f, if (sonic) 2f else 1f),
             sonicSpeed = if (sonic) sonicSpeed.coerceIn(0.25f, 3f) else 1f,
             sonicPitch = if (sonic) sonicPitch.coerceIn(0.5f, 2f) else 1f,

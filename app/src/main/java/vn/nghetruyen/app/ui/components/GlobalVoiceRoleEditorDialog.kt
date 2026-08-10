@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import vn.nghetruyen.app.core.model.TtsEngineOption
 import vn.nghetruyen.app.core.model.TtsVoiceOption
 import vn.nghetruyen.app.core.model.VoiceRoleDraft
+import vn.nghetruyen.app.ui.reference.ReferenceVoiceRoleExtra
 import vn.nghetruyen.app.ui.reference.ReferenceVoiceRoleExtras
 
 @Composable
@@ -149,15 +150,12 @@ fun GlobalVoiceRoleEditorDialog(
 
     fun activeProcessorDraft(value: VoiceRoleDraft): VoiceRoleDraft =
         if (value.processingMethod == "sonic") {
-            value.copy(rate = 1f, pitch = 1f)
+            value.copy(rate = 1f, pitch = 1f, volume = value.sonicVolume)
         } else {
             value.copy(sonicSpeed = 1f, sonicPitch = 1f)
         }
 
-    fun previewProcessorDraft(value: VoiceRoleDraft): VoiceRoleDraft {
-        val active = activeProcessorDraft(value)
-        return active.copy(volume = if (active.processingMethod == "sonic") active.sonicVolume else active.volume)
-    }
+    fun previewProcessorDraft(value: VoiceRoleDraft): VoiceRoleDraft = activeProcessorDraft(value)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -331,6 +329,14 @@ fun GlobalVoiceRoleEditorDialog(
             TextButton(
                 enabled = draft.roleName.isNotBlank() && draft.description.isNotBlank(),
                 onClick = {
+                    ReferenceVoiceRoleExtras.stageVolumesForNextSave(
+                        ReferenceVoiceRoleExtra(
+                            processingMethod = draft.processingMethod,
+                            sonicAccurate = draft.sonicAccurate,
+                            systemVolume = draft.volume,
+                            sonicVolume = draft.sonicVolume,
+                        ),
+                    )
                     onSave(
                         activeProcessorDraft(
                             draft.copy(enabled = if (draft.isNarrator) true else draft.enabled),

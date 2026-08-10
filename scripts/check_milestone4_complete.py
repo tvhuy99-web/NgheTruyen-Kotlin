@@ -27,6 +27,15 @@ def compile_smoke() -> None:
  data class VoiceRoleEntity(val id:String="",val storyId:String="",val roleName:String="",val aliasesCsv:String="",val enginePackage:String?=null,val voiceName:String?=null,val languageTag:String="vi-VN",val rate:Float=1f,val pitch:Float=1f,val volume:Float=1f,val expression:String="NEUTRAL",val expressionStrength:Float=.5f,val sonicSpeed:Float=1f,val sonicPitch:Float=1f,val isNarrator:Boolean=false,val enabled:Boolean=true,val updatedAt:Long=0)
  data class SceneMusicTrackEntity(val id:String="",val title:String="",val uri:String="",val tagsCsv:String="",val volume:Float=1f,val enabled:Boolean=true,val loudnessLufsEstimate:Float=-18f,val playCount:Int=0,val lastPlayedAt:Long=0,val orderIndex:Int=0,val updatedAt:Long=0)
 ''', encoding="utf-8")
+        # VoiceExpressionProcessor now consults canonical XPK runtime state. This historical smoke test
+        # validates the non-XPK/local expression path only, so provide the smallest adapter and keep
+        # canonical XPK bypass behavior covered by the dedicated XPK parity tests/gates.
+        xpk_runtime = root / "XpkPlaybackRuntimeStub.kt"
+        xpk_runtime.write_text('''package vn.nghetruyen.app.playback
+object XpkPlaybackRuntime {
+    fun shouldBypassLocalExpression(text: String): Boolean = false
+}
+''', encoding="utf-8")
         smoke = root / "Smoke.kt"
         smoke.write_text('''import vn.nghetruyen.app.audio.*
 import vn.nghetruyen.app.core.model.*
@@ -61,6 +70,7 @@ fun main(){
         sources = [
             ROOT / "app/src/main/java/vn/nghetruyen/app/core/model/Models.kt",
             entities,
+            xpk_runtime,
             ROOT / "app/src/main/java/vn/nghetruyen/app/audio/WaveFileAssembler.kt",
             ROOT / "app/src/main/java/vn/nghetruyen/app/audio/PcmLoudnessEstimator.kt",
             ROOT / "app/src/main/java/vn/nghetruyen/app/audio/ReferenceSonicRuntime.kt",

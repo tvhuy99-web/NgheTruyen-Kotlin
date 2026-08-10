@@ -6,12 +6,12 @@ import vn.nghetruyen.app.core.common.AppResult
 import vn.nghetruyen.app.core.model.ChapterContent
 import vn.nghetruyen.app.core.model.GLOBAL_VOICE_PROFILE_STORY_ID
 import vn.nghetruyen.app.data.local.ChapterTransformEntity
-import vn.nghetruyen.app.data.local.ChapterVoiceAssignmentEntity
 import vn.nghetruyen.app.data.local.SceneMusicCueEntity
 import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
 import vn.nghetruyen.app.data.local.VoiceRoleEntity
 import vn.nghetruyen.app.data.repository.LibraryRepository
 import vn.nghetruyen.app.data.settings.SettingsRepository
+import vn.nghetruyen.app.playback.XpkPlaybackRuntime
 import java.util.UUID
 
 /** Creates and caches a coordinated XPK-compatible voice-cast and scene-music plan. */
@@ -136,8 +136,7 @@ class NarrationPlanCoordinator(
         val sourceHash = musicSourceHash(content, tracks)
         val cached = library.getChapterTransform(content.chapter.id, ChapterAiWorkflow.KIND_SCENE_MUSIC)
         if (cached?.sourceSha256 != sourceHash) return true
-        if (!cached.transformedText.contains("\"engine\":\"$MUSIC_TRANSFORM_ENGINE\"")) return true
-        return library.listSceneMusicCues(content.chapter.id).isEmpty()
+        return !cached.transformedText.contains("\"engine\":\"$MUSIC_TRANSFORM_ENGINE\"")
     }
 
     private suspend fun ensureVoicePlan(content: ChapterContent, force: Boolean): AppResult<Boolean> {
@@ -195,40 +194,20 @@ class NarrationPlanCoordinator(
         }
     }
 
-    /**
-     * Saves the lossless unit-ID assignment set in chapter_transforms. The old paragraph table remains
-     * a temporary playback bridge until milestone 5 migrates the runtime/database to unit positions.
-     */
+    /** Canonical XPK assignments live in chapter_transforms; paragraph rows are legacy-only. */
     private suspend fun persistVoicePlan(content: ChapterContent, plan: VoiceCastPlan) {
         val appSettings = settings.snapshot()
-        val roles = effectiveRoles(content.chapter.storyId)
-        val roleByPromptId = roles.associateBy(XpkVoiceCastPrompt::promptVoiceId)
         val canonicalAssignments = plan.assignments
             .filter { it.unitId.isNotBlank() && it.voiceId.isNotBlank() }
             .distinctBy { it.unitId }
-        val legacyAssignments = canonicalAssignments
-            .filter { it.paragraphIndex in content.paragraphs.indices }
-            .distinctBy { it.paragraphIndex }
-            .map { assignment ->
-                val roleName = roleByPromptId[assignment.voiceId]?.roleName ?: assignment.character.ifBlank { NARRATOR }
-                ChapterVoiceAssignmentEntity(
-                    id = stableId(content.chapter.id, assignment.paragraphIndex.toString()),
-                    storyId = content.chapter.storyId,
-                    chapterId = content.chapter.id,
-                    paragraphIndex = assignment.paragraphIndex,
-                    roleName = roleName,
-                    confidence = assignment.confidence.coerceIn(0f, 1f),
-                    speedAdjustPct = assignment.speedAdjustPct,
-                    pitchAdjustPct = assignment.pitchAdjustPct,
-                    volumeAdjustPct = assignment.volumeAdjustPct,
-                    updatedAt = System.currentTimeMillis(),
-                )
-            }
-        library.replaceVoiceAssignments(content.chapter.storyId, content.chapter.id, legacyAssignments)
 
+        // New XPK plans never depend on the lossy one-row-per-paragraph bridge.
+        library.replaceVoiceAssignments(content.chapter.storyId, content.chapter.id, emptyList())
+        val timelineFingerprint = XpkPlaybackRuntime.timelineFingerprint(content.chapter.title, content.paragraphs)
         val payload = JSONObject()
             .put("engine", VOICE_TRANSFORM_ENGINE)
             .put("splitter_version", XpkVoiceCastSplitter.ENGINE_VERSION)
+            .put("timeline_fingerprint", timelineFingerprint)
             .put(
                 "assignments",
                 JSONArray().also { array ->
@@ -273,22 +252,8 @@ class NarrationPlanCoordinator(
         musicSceneError: String,
     ) {
         val allowed = tracks.associateBy { it.id }
-        val cues = plannedCues
-            .filter { it.startParagraph in content.paragraphs.indices && allowed.containsKey(it.trackId) }
-            .distinctBy { it.startParagraph }
-            .map { cue ->
-                SceneMusicCueEntity(
-                    id = stableId(content.chapter.id, cue.startParagraph.toString()),
-                    storyId = content.chapter.storyId,
-                    chapterId = content.chapter.id,
-                    startParagraph = cue.startParagraph,
-                    trackId = cue.trackId,
-                    volume = 1f,
-                    mood = "",
-                    updatedAt = System.currentTimeMillis(),
-                )
-            }
-        library.replaceSceneMusicCues(content.chapter.storyId, content.chapter.id, cues)
+        // New XPK scene plans are inclusive unit-id intervals in chapter_transforms, not paragraph cues.
+        library.replaceSceneMusicCues(content.chapter.storyId, content.chapter.id, emptyList())
         val appSettings = settings.snapshot()
         val (provider, model) = effectiveAiMetadata(content.chapter.storyId, appSettings.aiOnline.provider.name, appSettings.aiOnline.model)
         val unitScenes = JSONArray().also { array ->
@@ -315,6 +280,7 @@ class NarrationPlanCoordinator(
                 transformedText = JSONObject()
                     .put("engine", MUSIC_TRANSFORM_ENGINE)
                     .put("mode", XpkSceneMusicParity.MODE)
+                    .put("timeline_fingerprint", XpkPlaybackRuntime.timelineFingerprint(content.chapter.title, content.paragraphs))
                     .put("music_scenes", unitScenes)
                     .put("music_scene_error", musicSceneError)
                     .toString(),

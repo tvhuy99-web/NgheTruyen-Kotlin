@@ -146,11 +146,11 @@ def main() -> None:
     require(
         source_ui,
         "unified source UI",
-        '${pack.version} • ${pack.ecosystem}',
+        '"VBOOK" to "VBOOK"',
         'text = "KIỂM TRA"',
         'text = "CẤU HÌNH"',
         'text = "ĐĂNG NHẬP"',
-        "onRollback(pack.id)",
+        'text = "KHÔI PHỤC PHIÊN BẢN TRƯỚC"',
         'text = "NHẬT KÝ"',
     )
     require(

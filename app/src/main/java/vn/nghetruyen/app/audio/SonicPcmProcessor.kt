@@ -15,7 +15,7 @@ import sonic.Sonic
 /**
  * PCM16 WAV adapter around Bill Cox's upstream Sonic Java implementation.
  *
- * The DSP algorithm itself lives in the vendored, unmodified `sonic.Sonic` source.
+ * The DSP algorithm lives in the vendored `sonic.Sonic` upstream implementation.
  * This class only validates WAV input, streams little-endian PCM into Sonic, and
  * writes the processed samples back to a standard PCM16 WAV container.
  */

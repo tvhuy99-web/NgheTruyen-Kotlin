@@ -90,7 +90,19 @@ jobs:
           fetch-depth: 0
 
       - name: Apply Lua-style extensions UI
-        run: python3 scripts/apply_lua_ui_patch.py
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/apply_lua_ui_patch.py')
+          text = path.read_text()
+          old = 'text, count = re.subn(pattern, replacement, text, count=1, flags=re.S)'
+          new = 'text, count = re.subn(pattern, lambda _m, replacement=replacement: replacement, text, count=1, flags=re.S)'
+          if text.count(old) != 1:
+              raise SystemExit('patch-script hotfix anchor not found exactly once')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          python3 scripts/apply_lua_ui_patch.py
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5

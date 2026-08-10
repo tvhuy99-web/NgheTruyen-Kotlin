@@ -46,9 +46,9 @@ object XpkPlaybackRuntime {
                 chunk.text,
             ).forEach { value ->
                 digest.update(value.toByteArray(Charsets.UTF_8))
-                digest.update(0)
+                digest.update(0.toByte())
             }
-            digest.update(1)
+            digest.update(1.toByte())
         }
         return digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
     }

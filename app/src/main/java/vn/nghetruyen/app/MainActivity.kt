@@ -331,12 +331,18 @@ class MainActivity : ComponentActivity() {
             when (val result = container.legacyXpkBackupImporter.restoreFrom(uri, selected)) {
                 is AppResult.Success -> {
                     val message = result.value.userMessage()
+                    val complete = result.value.isComplete
                     container.backupHistoryStore.record(
-                        operation = "RESTORE_XPK",
-                        success = true,
-                        summary = message,
+                        operation = if (complete) "RESTORE_XPK" else "RESTORE_XPK_PARTIAL",
+                        success = complete,
+                        summary = result.value.diagnosticMessage(),
+                        errorCode = if (complete) null else "PARTIAL_MIGRATION",
                         components = selected.map { it.name },
                     )
+                    // Restore is launched from the existing Personal surface. Re-selecting the same
+                    // root tab keeps the UI unchanged while forcing source/runtime state to refresh.
+                    viewModel.setRootTab(viewModel.state.value.rootTab)
+                    viewModel.refreshSourceSessions()
                     viewModel.readerActionMessage(message)
                 }
                 is AppResult.Failure -> {

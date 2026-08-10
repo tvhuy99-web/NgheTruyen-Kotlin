@@ -1,6 +1,7 @@
 package vn.nghetruyen.app.ai
 
 import java.util.ArrayDeque
+import java.util.Locale
 import kotlin.math.floor
 import vn.nghetruyen.app.data.local.VoiceRoleEntity
 
@@ -74,13 +75,14 @@ object XpkVoiceCastPrompt {
         val sceneBlock = if (includeSceneMusic && unitIds.isNotEmpty() && tracks.isNotEmpty()) {
             XpkSceneMusicParity.promptBlock(title, firstUnitId, lastUnitId, tracks, context)
         } else null
-        val sceneTask = sceneBlock?.instructions.orEmpty()
+        val sceneTask = sceneBlock?.instructions?.let { "\n\n$it" }.orEmpty()
         val sceneOutputRules = sceneBlock?.outputRules.orEmpty()
         fun exampleValue(limit: Int, preferred: Int): Int = if (limit <= 0) 0 else maxOf(1, minOf(limit, preferred))
         val assignmentExample = if (dialogueIds.isEmpty()) {
             "  \"assignments\": []"
         } else {
-            """  "assignments": [
+            """
+              "assignments": [
                 {
                   "id": "ID_THỰC_TẾ_1",
                   "voice": "MÃ_GIỌNG_HỢP_LỆ",
@@ -95,7 +97,8 @@ object XpkVoiceCastPrompt {
                   "pitch_adjust_pct": ${exampleValue(pitchLimit, 3)},
                   "volume_adjust_pct": ${exampleValue(volumeLimit, 5)}
                 }
-              ]"""
+              ]
+            """.trimIndent()
         }
         val sceneExample = sceneBlock?.tracks?.firstOrNull()?.let { track ->
             """,
@@ -212,8 +215,8 @@ object XpkVoiceCastPrompt {
         buildString {
             appendLine("- ID: ${promptVoiceId(row)}")
             appendLine("  Tên: ${row.roleName}")
-            appendLine("  Mô tả: ${row.description.ifBlank { row.aliasesCsv }}")
-            append("  Thiết lập gốc: tốc độ ${"%.2f".format(settings.speed)}x; cao độ ${"%.2f".format(settings.pitch)}; âm lượng $roundedVolumePct%; xử lý ${if (method == "sonic") "Sonic" else "Android"}; tối đa ${(volumeLimit * 100).toInt()}%")
+            appendLine("  Mô tả: ${row.description}")
+            append("  Thiết lập gốc: tốc độ ${"%.2f".format(Locale.ROOT, settings.speed)}x; cao độ ${"%.2f".format(Locale.ROOT, settings.pitch)}; âm lượng $roundedVolumePct%; xử lý ${if (method == "sonic") "Sonic" else "Android"}; tối đa ${(volumeLimit * 100).toInt()}%")
         }
     }
 

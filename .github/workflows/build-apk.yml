@@ -32,27 +32,14 @@ jobs:
           from pathlib import Path
           path = Path('app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt')
           text = path.read_text(encoding='utf-8')
-          old = '''        xpkVoiceAssignments = if (voicePlan?.sourceSha256 == originalHash) {
-              runCatching {
-                  XpkPlaybackRuntime.parseVoiceAssignments(voicePlan.transformedText, validRuntimeUnitIds)
-              }.getOrDefault(emptyMap())
-          } else emptyMap()
-          voiceAssignments = if (voicePlan?.sourceSha256 == originalHash) {
-              container.libraryRepository.listVoiceAssignments(chapterId).associateBy { it.paragraphIndex }
-          } else emptyMap()
-          '''
-          new = '''        xpkVoiceAssignments = if (voicePlan != null && voicePlan.sourceSha256 == originalHash) {
-              runCatching {
-                  XpkPlaybackRuntime.parseVoiceAssignments(voicePlan.transformedText, validRuntimeUnitIds)
-              }.getOrDefault(emptyMap())
-          } else emptyMap()
-          voiceAssignments = if (voicePlan != null && voicePlan.sourceSha256 == originalHash) {
-              container.libraryRepository.listVoiceAssignments(chapterId).associateBy { it.paragraphIndex }
-          } else emptyMap()
-          '''
-          if old not in text:
-              raise SystemExit('expected nullable voice-plan block not found')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          old_xpk = 'xpkVoiceAssignments = if (voicePlan?.sourceSha256 == originalHash) {'
+          new_xpk = 'xpkVoiceAssignments = if (voicePlan != null && voicePlan.sourceSha256 == originalHash) {'
+          old_legacy = 'voiceAssignments = if (voicePlan?.sourceSha256 == originalHash) {'
+          new_legacy = 'voiceAssignments = if (voicePlan != null && voicePlan.sourceSha256 == originalHash) {'
+          if text.count(old_xpk) != 1 or text.count(old_legacy) != 1:
+              raise SystemExit(f'unexpected voice-plan conditions: xpk={text.count(old_xpk)} legacy={text.count(old_legacy)}')
+          text = text.replace(old_xpk, new_xpk, 1).replace(old_legacy, new_legacy, 1)
+          path.write_text(text, encoding='utf-8')
           PY
           git checkout HEAD^ -- .github/workflows/build-apk.yml
           git rm -f .github/workflows/one-time-fix-nullable.yml || true

@@ -50,7 +50,16 @@ class XpkEndToEndParityTest {
             ),
             context = NarrationPlanContext(activeTrackId = "track-a", incomingSource = "final_scene"),
         )
-        val runtime = XpkPlaybackRuntime.buildSpeechTimeline(title, paragraphs)
+        PlaybackQueueStore.load(
+            sourceId = "test",
+            storyId = "story",
+            chapterId = "chapter",
+            chapterIndex = 1,
+            chapterTitle = title,
+            paragraphs = paragraphs,
+        )
+        val runtime = PlaybackQueueStore.state.value.speechChunks
+        val fingerprint = XpkPlaybackRuntime.timelineFingerprint(runtime)
 
         val expectedIds = splitterUnits.map { it.id }
         assertEquals(expectedIds, bundle.unitIds)
@@ -113,6 +122,7 @@ class XpkEndToEndParityTest {
         assertEquals("", parsed.musicSceneError)
 
         val persistedVoice = JSONObject()
+            .put("timeline_fingerprint", fingerprint)
             .put(
                 "assignments",
                 JSONArray().also { rows ->
@@ -130,6 +140,7 @@ class XpkEndToEndParityTest {
             )
             .toString()
         val persistedMusic = JSONObject()
+            .put("timeline_fingerprint", fingerprint)
             .put(
                 "music_scenes",
                 JSONArray().also { rows ->
@@ -167,6 +178,38 @@ class XpkEndToEndParityTest {
             XpkPlaybackRuntime.timelineFingerprint(original),
             XpkPlaybackRuntime.timelineFingerprint(changed),
         )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun transformFingerprintRejectsSameIdsWithDifferentText() {
+        PlaybackQueueStore.load(
+            sourceId = "test",
+            storyId = "story",
+            chapterId = "chapter",
+            chapterIndex = 1,
+            chapterTitle = "Chương",
+            paragraphs = listOf("Nội dung đang phát."),
+        )
+        val differentFingerprint = XpkPlaybackRuntime.timelineFingerprint(
+            "Chương",
+            listOf("Nội dung khác nhưng vẫn cùng cấu trúc ID."),
+        )
+        val validId = PlaybackQueueStore.state.value.speechChunks.last().unitId
+        val json = JSONObject()
+            .put("timeline_fingerprint", differentFingerprint)
+            .put(
+                "assignments",
+                JSONArray().put(
+                    JSONObject()
+                        .put("id", validId)
+                        .put("voice", "voice-male")
+                        .put("speed_adjust_pct", 0)
+                        .put("pitch_adjust_pct", 0)
+                        .put("volume_adjust_pct", 0),
+                ),
+            )
+            .toString()
+        XpkPlaybackRuntime.parseVoiceAssignments(json, listOf(validId))
     }
 
     @Test

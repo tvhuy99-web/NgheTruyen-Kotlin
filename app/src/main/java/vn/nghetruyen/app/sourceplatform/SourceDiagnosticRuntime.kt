@@ -33,7 +33,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
     val evidence = BoundedDiagnosticEvidenceRecorder(
         maxBytes = 64L * 1024L * 1024L,
         maxItems = 2_048,
-        maxItemBytes = 8 * 1024 * 1024,
+        maxItemBytes = 16 * 1024 * 1024,
         mirror = crashStore,
     )
 

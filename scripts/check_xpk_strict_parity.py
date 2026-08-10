@@ -2,6 +2,7 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+MAIN = ROOT / "app/src/main/java"
 
 
 def text(path: str) -> str:
@@ -20,6 +21,27 @@ def forbid(path: str, *needles: str) -> None:
     present = [needle for needle in needles if needle in source]
     if present:
         raise SystemExit(f"XPK_STRICT_PARITY forbidden in {path}: {present}")
+
+
+def forbid_production_legacy_narration() -> None:
+    allowed_direct_service = {
+        Path("vn/nghetruyen/app/ai/OnlineAiServices.kt"),
+        Path("vn/nghetruyen/app/ai/OnlineTextAiServices.kt"),
+    }
+    violations: list[str] = []
+    for file in MAIN.rglob("*.kt"):
+        rel = file.relative_to(MAIN)
+        source = file.read_text(encoding="utf-8")
+        if "OnlineAiServices(" in source and rel not in allowed_direct_service:
+            violations.append(f"{rel}: direct OnlineAiServices construction")
+        if ".aiServices.planVoiceCast(" in source:
+            violations.append(f"{rel}: aiServices.planVoiceCast")
+        if ".aiServices.planMusic(" in source:
+            violations.append(f"{rel}: aiServices.planMusic")
+        if ".aiServices.planNarration(" in source:
+            violations.append(f"{rel}: aiServices.planNarration")
+    if violations:
+        raise SystemExit("XPK_STRICT_PARITY legacy narration wiring:\n" + "\n".join(violations))
 
 
 require(
@@ -138,4 +160,11 @@ require(
     "volume = activeVolume",
 )
 
+require(
+    "app/src/main/java/vn/nghetruyen/app/ui/components/GlobalVoiceRoleEditorDialog.kt",
+    "ReferenceVoiceRoleExtras.stageProcessorValuesForNextSave",
+    "value.copy(rate = 1f, pitch = 1f, volume = value.sonicVolume)",
+)
+
+forbid_production_legacy_narration()
 print("XPK_STRICT_PARITY=PASS")

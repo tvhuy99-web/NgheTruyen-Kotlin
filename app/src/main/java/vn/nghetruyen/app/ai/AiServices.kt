@@ -32,10 +32,8 @@ data class VoiceRole(
 )
 
 /**
- * AI-facing narration assignment.
- *
- * [unitId] and [voiceId] are the canonical XPK contract. The legacy paragraph/character fields are
- * retained only as a compatibility bridge until the playback/database migration in milestone 5.
+ * Canonical XPK narration assignment. [unitId] and [voiceId] are authoritative; paragraph/character
+ * fields remain serialized compatibility metadata for older stored data only.
  */
 data class ParagraphVoiceAssignment(
     val paragraphIndex: Int = -1,
@@ -54,10 +52,7 @@ data class VoiceCastPlan(
     val warnings: List<String> = emptyList(),
 )
 
-/**
- * Inclusive XPK scene interval. Unit ids are canonical; paragraph indexes are temporary runtime
- * bridges until milestone 5 moves playback onto the unit timeline itself.
- */
+/** Inclusive XPK scene interval. Unit ids are authoritative; paragraph indexes are legacy metadata. */
 data class SceneMusicCue(
     val startParagraph: Int,
     val trackId: String,
@@ -109,10 +104,14 @@ interface VietPhraseImprovementEngine {
     suspend fun improveVietPhrase(request: VietPhraseImprovementRequest): AppResult<List<VietPhraseReplacementSuggestion>>
 }
 
+/** Legacy paragraph-era surface. Production narration is XpkNarrationAiServices only. */
+@Deprecated("Use XpkNarrationAiServices; paragraph voice-cast protocol is retired from production wiring")
 interface VoiceCastEngine {
     suspend fun planVoiceCast(storyId: String, chapterId: String, rawText: String): AppResult<VoiceCastPlan>
 }
 
+/** Legacy paragraph-era surface. Production scene planning is XpkNarrationAiServices only. */
+@Deprecated("Use XpkNarrationAiServices; paragraph scene-cue protocol is retired from production wiring")
 interface SceneMusicPlanner {
     suspend fun planMusic(
         storyId: String,
@@ -122,10 +121,13 @@ interface SceneMusicPlanner {
     ): AppResult<List<SceneMusicCue>>
 }
 
+/** Legacy interface retained for binary/source compatibility. Production uses the concrete XPK service. */
+@Deprecated("Use XpkNarrationAiServices; legacy narration planner is retired from production wiring")
 interface NarrationPlanner {
     suspend fun planNarration(request: NarrationPlanRequest): AppResult<NarrationPlan>
 }
 
+@Suppress("DEPRECATION")
 class DisabledAiServices : TranslationEngine, VietPhraseImprovementEngine, VoiceCastEngine, SceneMusicPlanner, NarrationPlanner {
     private fun <T> disabled(): AppResult<T> = AppResult.Failure(
         code = "AI_NOT_CONFIGURED",

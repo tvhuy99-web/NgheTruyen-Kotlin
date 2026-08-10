@@ -38,4 +38,34 @@ class ReferenceTtsPersistenceTest {
         assertEquals("sonic", preview.processingMethod)
         assertEquals(true, preview.sonicAccurate)
     }
+
+    @Test
+    fun systemPreviewKeepsSonicVolumeIndependent() {
+        val preview = ReferenceTtsPersistence.previewDraft(
+            ReferenceTtsDraft(
+                processingMethod = "system",
+                volume = 0.42f,
+                sonicVolume = 1.75f,
+            ),
+        )
+
+        assertEquals(0.42f, preview.volume, 0.0001f)
+        assertEquals(1.75f, preview.sonicVolume, 0.0001f)
+    }
+
+    @Test
+    fun sonicPreviewUsesSonicVolumeWithoutOverwritingSystemSlot() {
+        val preview = ReferenceTtsPersistence.previewDraft(
+            ReferenceTtsDraft(
+                processingMethod = "sonic",
+                volume = 0.42f,
+                sonicVolume = 1.75f,
+            ),
+        )
+
+        // The first rendered stage intentionally remains capped at 100% for preview;
+        // Sonic's independent gain carries the selected 175% value into the Sonic stage.
+        assertEquals(1f, preview.volume, 0.0001f)
+        assertEquals(1.75f, preview.sonicVolume, 0.0001f)
+    }
 }

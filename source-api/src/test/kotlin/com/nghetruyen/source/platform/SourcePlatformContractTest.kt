@@ -23,17 +23,23 @@ class SourcePlatformContractTest {
         assertTrue(deadSite.retryable)
     }
 
-    @Test(expected = IllegalArgumentException::class)
+    @Test
     fun artifactRejectsInvalidHash() {
-        SourceArtifactDescriptor(
-            artifactId = "a",
-            identity = SourceArtifactIdentity(SourceEcosystem.VBOOK, "official", "a"),
-            version = "1",
-            sha256 = "bad",
-            compatibilityProfile = null,
-            state = SourceArtifactState.CANDIDATE,
-            trust = SourceTrustState.UNVERIFIED,
-            installedAtEpochMs = 1,
-        )
+        var rejected = false
+        try {
+            SourceArtifactDescriptor(
+                artifactId = "a",
+                identity = SourceArtifactIdentity(SourceEcosystem.VBOOK, "official", "a"),
+                version = "1",
+                sha256 = "bad",
+                compatibilityProfile = null,
+                state = SourceArtifactState.CANDIDATE,
+                trust = SourceTrustState.UNVERIFIED,
+                installedAtEpochMs = 1,
+            )
+        } catch (_: IllegalArgumentException) {
+            rejected = true
+        }
+        assertTrue(rejected)
     }
 }

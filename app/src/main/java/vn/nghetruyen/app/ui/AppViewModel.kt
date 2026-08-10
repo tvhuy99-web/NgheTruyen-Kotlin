@@ -281,6 +281,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             sourceDiagnosticCount = container.sourcePlatformManager.diagnosticsSnapshot().size,
             sourceDiagnostics = container.sourcePlatformManager.diagnosticSummaries(),
             sourceTraces = container.sourcePlatformManager.diagnosticTraces(),
+            diagnosticsMode = container.sourceDiagnostics.mode,
             backupHistory = container.backupHistoryStore.entries(),
             backupLogPath = container.backupHistoryStore.logPath(),
             backupLogText = container.backupHistoryStore.logText(),
@@ -307,6 +308,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         observeSettings()
+        observeDiagnostics()
         observeLibrary()
         observePlayback()
         refreshTtsVoices()
@@ -386,6 +388,23 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     trimReaderCache(settings.readerCacheLimitMiB, announce = false)
                 }
                 if (sourceChanged) search("")
+            }
+        }
+    }
+
+    private fun observeDiagnostics() {
+        viewModelScope.launch {
+            while (true) {
+                val events = container.sourcePlatformManager.diagnosticsSnapshot()
+                mutableState.update { current ->
+                    current.copy(
+                        diagnosticsMode = container.sourceDiagnostics.mode,
+                        sourceDiagnosticCount = events.size,
+                        sourceDiagnostics = container.sourcePlatformManager.diagnosticSummaries(),
+                        sourceTraces = container.sourcePlatformManager.diagnosticTraces(),
+                    )
+                }
+                delay(if (container.sourceDiagnostics.mode == "off") 2_000 else 750)
             }
         }
     }
@@ -985,7 +1004,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshSourceRepository(url: String) {
         val normalized = url.trim()
         if (normalized.isBlank()) {
-            showMessage("Hãy nhập URL HTTPS của repository nguồn.")
+            showMessage("Hãy nhập URL HTTPS của repository.json hoặc plugin.json vBook.")
             return
         }
         viewModelScope.launch {
@@ -1257,11 +1276,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun exportSourceDiagnostics(uri: Uri) {
         viewModelScope.launch {
             runCatching {
-                getApplication<Application>().contentResolver.openOutputStream(uri, "wt")?.use { output ->
-                    output.write(container.sourcePlatformManager.exportDiagnostics())
-                } ?: error("Không mở được tệp báo cáo chẩn đoán.")
-            }.onSuccess {
-                showMessage("Đã xuất báo cáo Source Platform đã che dữ liệu nhạy cảm.")
+                val payload = container.sourceDiagnostics.exportBundle(
+                events = container.sourcePlatformManager.diagnosticsSnapshot(),
+                installed = container.sourcePlatformManager.installedPacks(),
+                repositories = container.sourcePlatformManager.repositories(),
+            )
+            getApplication<Application>().contentResolver.openOutputStream(uri, "w")?.use { output ->
+                output.write(payload)
+            } ?: error("Không mở được tệp báo cáo chẩn đoán.")
+        }.onSuccess {
+            showMessage("Đã xuất hộp đen chẩn đoán ZIP với trace và bằng chứng chi tiết.")
+
             }.onFailure {
                 showMessage(it.message ?: "Không xuất được báo cáo chẩn đoán.")
             }
@@ -1270,8 +1295,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearSourceDiagnostics() {
         container.sourcePlatformManager.clearDiagnostics()
+        container.sourceDiagnostics.clearBlackBox()
         refreshSourcePlatformState()
-        showMessage("Đã xóa nhật ký Source Platform trong bộ đệm.")
+        showMessage("Đã xóa nhật ký, bằng chứng Advanced và hộp đen crash-safe.")
     }
 
     fun refreshSourceSessions() {
@@ -2290,8 +2316,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setDiagnosticsMode(mode: String) {
-        val normalized = mode.takeIf { it in setOf("off", "basic", "advanced") } ?: "off"
+        val normalized = container.sourceDiagnostics.setMode(mode)
         mutableState.update { it.copy(diagnosticsMode = normalized) }
+        showMessage(when (normalized) {
+            "advanced" -> "Đã bật gỡ lỗi nâng cao: ghi trace, HTML/DOM, runtime, network và hộp đen chống mất log khi crash."
+            "basic" -> "Đã bật gỡ lỗi cơ bản."
+            else -> "Đã tắt ghi nhật ký chẩn đoán."
+        })
     }
 
     fun moveParagraph(delta: Int) {

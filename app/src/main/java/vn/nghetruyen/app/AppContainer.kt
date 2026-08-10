@@ -20,6 +20,7 @@ import vn.nghetruyen.app.playback.TtsVoiceCatalog
 import vn.nghetruyen.app.sources.EncryptedSourceSessionStore
 import vn.nghetruyen.app.sourceplatform.AndroidVBookQuickTranslationRegistry
 import vn.nghetruyen.app.sourceplatform.SourcePlatformManager
+import vn.nghetruyen.app.sourceplatform.SourceDiagnosticRuntime
 import vn.nghetruyen.app.sourceplatform.UnifiedSourcePlatformManager
 import vn.nghetruyen.app.sourceplatform.VBookRepositoryClient
 import vn.nghetruyen.app.sourceplatform.VBookSourcePlatform
@@ -41,6 +42,7 @@ class AppContainer(context: Context) {
     val settingsRepository: SettingsRepository by lazy { SettingsRepository(appContext) }
     val libraryRepository: LibraryRepository by lazy { LibraryRepository(database) }
     val sourceSessionStore: EncryptedSourceSessionStore by lazy { EncryptedSourceSessionStore(appContext) }
+    val sourceDiagnostics: SourceDiagnosticRuntime = SourceDiagnosticRuntime(appContext)
 
     private val vBookQuickTranslationInstalled: Unit by lazy {
         AndroidVBookQuickTranslationRegistry.install(libraryRepository)
@@ -48,10 +50,18 @@ class AppContainer(context: Context) {
 
     val vBookSourcePlatform: VBookSourcePlatform by lazy {
         vBookQuickTranslationInstalled
-        VBookSourcePlatform(appContext, sourceSessionStore, aiServices)
+        VBookSourcePlatform(
+            appContext,
+            sourceSessionStore,
+            aiServices,
+            diagnostics = sourceDiagnostics.recorder,
+            evidence = sourceDiagnostics.evidence,
+        )
     }
 
-    val vBookRepositoryClient: VBookRepositoryClient by lazy { VBookRepositoryClient() }
+    val vBookRepositoryClient: VBookRepositoryClient by lazy {
+        VBookRepositoryClient(diagnostics = sourceDiagnostics.recorder, evidence = sourceDiagnostics.evidence)
+    }
 
     private val legacySourcePlatformManager: SourcePlatformManager by lazy {
         vBookQuickTranslationInstalled
@@ -61,6 +71,8 @@ class AppContainer(context: Context) {
             translationEngine = aiServices,
             vBookSourcePlatform = vBookSourcePlatform,
             onVBookChanged = { refreshSourceRegistry() },
+            diagnostics = sourceDiagnostics.recorder,
+            evidence = sourceDiagnostics.evidence,
         )
     }
 

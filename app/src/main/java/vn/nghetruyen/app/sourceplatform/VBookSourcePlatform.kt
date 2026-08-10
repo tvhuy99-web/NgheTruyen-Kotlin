@@ -20,6 +20,7 @@ import vn.nghetruyen.source.api.SourcePlatformResult
 import vn.nghetruyen.source.diagnostics.BoundedDiagnosticRecorder
 import vn.nghetruyen.source.diagnostics.DiagnosticLevel
 import vn.nghetruyen.source.diagnostics.DiagnosticEvent
+import vn.nghetruyen.source.diagnostics.DiagnosticEvidenceSink
 import vn.nghetruyen.source.network.OkHttpSourceNetworkBroker
 import vn.nghetruyen.source.network.OkHttpSourceWebSocketBroker
 import vn.nghetruyen.source.network.PartitionedSourceCookieJar
@@ -81,9 +82,10 @@ class VBookSourcePlatform(
     translationEngine: TranslationEngine,
     root: File = File(context.filesDir, "source-platform/vbook"),
     private val clockMs: () -> Long = System::currentTimeMillis,
+    private val diagnostics: BoundedDiagnosticRecorder = BoundedDiagnosticRecorder(maxEvents = 8_000, level = DiagnosticLevel.BASIC),
+    private val evidence: DiagnosticEvidenceSink = DiagnosticEvidenceSink.NONE,
 ) {
     private val appContext = context.applicationContext
-    private val diagnostics = BoundedDiagnosticRecorder(maxEvents = 8_000, level = DiagnosticLevel.BASIC)
     private val cookiePartition = VBookSessionCookiePartition(
         PartitionedSourceCookieJar(EncryptedSourceCookiePersistence(appContext)),
         sourceSessionStore,
@@ -95,7 +97,7 @@ class VBookSourcePlatform(
     private val configService = VBookConfigService(configStore, secretStore)
     private val brokers = SourceCapabilityBrokers(
         network = OkHttpSourceNetworkBroker(cookiePartition, diagnostics),
-        browser = AndroidSourceBrowserBroker(appContext, cookiePartition, diagnostics),
+        browser = AndroidSourceBrowserBroker(appContext, cookiePartition, diagnostics, evidence = evidence),
         storage = EncryptedSourceStorageBroker(File(root, "storage")),
         crypto = JcaSourceCryptoBroker(AndroidSourceSecretKeyProvider()),
         websocket = OkHttpSourceWebSocketBroker(cookiePartition, diagnostics),
@@ -240,7 +242,7 @@ class VBookSourcePlatform(
             if (plugin.metadata.type !in setOf(VBookContentType.NOVEL, VBookContentType.CHINESE_NOVEL)) {
                 return@runCatching null
             }
-            VBookStorySource(artifact, bytes, brokers, configReader, diagnostics)
+            VBookStorySource(artifact, bytes, brokers, configReader, diagnostics, evidence)
         }.getOrNull()
     }
 

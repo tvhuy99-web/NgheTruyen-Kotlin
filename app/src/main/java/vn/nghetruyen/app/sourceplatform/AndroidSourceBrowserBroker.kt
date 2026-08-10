@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.webkit.CookieManager
+import android.webkit.ConsoleMessage
 import android.webkit.JsPromptResult
 import android.webkit.JsResult
 import android.webkit.RenderProcessGoneDetail
@@ -35,6 +36,8 @@ import vn.nghetruyen.source.api.SourcePlatformResult
 import vn.nghetruyen.source.api.SourceCookiePartition
 import vn.nghetruyen.source.diagnostics.DiagnosticCategory
 import vn.nghetruyen.source.diagnostics.DiagnosticEvent
+import vn.nghetruyen.source.diagnostics.DiagnosticEvidence
+import vn.nghetruyen.source.diagnostics.DiagnosticEvidenceSink
 import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 import vn.nghetruyen.source.diagnostics.DiagnosticSink
 import vn.nghetruyen.source.network.SourceOriginPolicy
@@ -62,6 +65,7 @@ class AndroidSourceBrowserBroker(
     private val diagnostics: DiagnosticSink = DiagnosticSink.NONE,
     private val clockMs: () -> Long = System::currentTimeMillis,
     private val resolver: (String) -> List<InetAddress> = { host -> InetAddress.getAllByName(host).toList() },
+    private val evidence: DiagnosticEvidenceSink = DiagnosticEvidenceSink.NONE,
 ) : SourceBrowserBroker {
     private val appContext = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
@@ -101,6 +105,7 @@ class AndroidSourceBrowserBroker(
                 require(request.maxOutputBytes in 1024..4 * 1024 * 1024) { "SOURCE_BROWSER_OUTPUT_LIMIT_INVALID" }
                 requireCapability(manifest, request.action)
                 val session = ensureSession(manifest, request.url)
+                session.currentTraceId = request.traceId
                 diagnostics.emit(event(manifest, request, "BROWSER_ACTION_STARTED", attributes = mapOf("action" to request.action.name)))
                 val value = when (request.action) {
                     SourceBrowserAction.NAVIGATE -> navigate(session, manifest, request)
@@ -145,11 +150,13 @@ class AndroidSourceBrowserBroker(
             }.fold(
                 onSuccess = {
                     diagnostics.emit(event(manifest, request, "BROWSER_ACTION_COMPLETED", durationMs = clockMs() - started, attributes = mapOf(
-                        "action" to request.action.name,
-                        "requests" to it.requestMetadata.size.toString(),
-                        "degradedIsolation" to it.degradedIsolation.toString(),
-                    )))
-                    SourcePlatformResult.Success(it)
+                    "action" to request.action.name,
+                    "requests" to it.requestMetadata.size.toString(),
+                    "degradedIsolation" to it.degradedIsolation.toString(),
+                )))
+                active?.let { session -> captureBrowserEvidence(session, request, "completed-${request.action.name.lowercase()}") }
+                SourcePlatformResult.Success(it)
+
                 },
                 onFailure = { error ->
                     val code = when {
@@ -161,13 +168,56 @@ class AndroidSourceBrowserBroker(
                         else -> SourceErrorCode.BROWSER_UNAVAILABLE
                     }
                     diagnostics.emit(event(manifest, request, "BROWSER_ACTION_FAILED", DiagnosticSeverity.ERROR, clockMs() - started, mapOf(
-                        "action" to request.action.name,
-                        "code" to code.name,
-                        "error" to (error.message ?: error.javaClass.simpleName),
-                    )))
-                    SourcePlatformResult.Failure(SourcePlatformFailure(code, error.message ?: "SOURCE_BROWSER_FAILED", request.traceId, error))
+                    "action" to request.action.name,
+                    "code" to code.name,
+                    "error" to (error.message ?: error.javaClass.simpleName),
+                )))
+                active?.let { session -> captureBrowserEvidence(session, request, "failed-${request.action.name.lowercase()}") }
+                SourcePlatformResult.Failure(SourcePlatformFailure(code, error.message ?: "SOURCE_BROWSER_FAILED", request.traceId, error))
+
                 },
             )
+        }
+    }
+
+    private fun captureBrowserEvidence(session: Session, request: SourceBrowserRequest, reason: String) {
+        if (!evidence.enabled || request.action in setOf(SourceBrowserAction.CLOSE_SESSION, SourceBrowserAction.CLEAR_SESSION)) return
+        val trace = request.traceId.ifBlank { session.currentTraceId.ifBlank { "browser-session:${request.sourceId}" } }
+        val html = runCatching {
+            evaluate(
+                session,
+                "document.documentElement ? document.documentElement.outerHTML : ''",
+                request.timeoutMs.coerceIn(100L, 5_000L),
+            )
+        }.getOrNull()
+        if (html != null) {
+            evidence.capture(DiagnosticEvidence(
+                timestampEpochMs = clockMs(),
+                traceId = trace,
+                sourceId = request.sourceId,
+                category = DiagnosticCategory.BROWSER,
+                name = "browser-${reason}-${clockMs()}.html",
+                contentType = "text/html",
+                data = html.toByteArray(Charsets.UTF_8),
+                attributes = mapOf(
+                    "action" to request.action.name,
+                    "url" to (session.webView.url ?: request.url.orEmpty()),
+                    "title" to session.webView.title.orEmpty(),
+                    "requests" to session.metadata.size.toString(),
+                ),
+            ))
+        }
+        val metadata = session.metadata.joinToString("\n") { it.toString() }
+        if (metadata.isNotBlank()) {
+            evidence.capture(DiagnosticEvidence(
+                timestampEpochMs = clockMs(),
+                traceId = trace,
+                sourceId = request.sourceId,
+                category = DiagnosticCategory.NETWORK,
+                name = "browser-${reason}-requests-${clockMs()}.log",
+                contentType = "text/plain",
+                data = metadata.toByteArray(Charsets.UTF_8),
+            ))
         }
     }
 
@@ -226,6 +276,41 @@ class AndroidSourceBrowserBroker(
         }
         webView.webChromeClient = object : WebChromeClient() {
             override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message?): Boolean = false
+
+            override fun onConsoleMessage(consoleMessage: ConsoleMessage): Boolean {
+                val session = sessionRef.get() ?: return false
+                val severity = when (consoleMessage.messageLevel()) {
+                    ConsoleMessage.MessageLevel.ERROR -> DiagnosticSeverity.ERROR
+                    ConsoleMessage.MessageLevel.WARNING -> DiagnosticSeverity.WARN
+                    ConsoleMessage.MessageLevel.DEBUG -> DiagnosticSeverity.DEBUG
+                    else -> DiagnosticSeverity.INFO
+                }
+                val message = consoleMessage.message().orEmpty().take(16_000)
+                diagnostics.emit(DiagnosticEvent(
+                    timestampEpochMs = clockMs(),
+                    traceId = session.currentTraceId.ifBlank { "browser-session:${manifest.id}" },
+                    sourceId = manifest.id,
+                    sourceVersion = manifest.version.toString(),
+                    category = DiagnosticCategory.BROWSER,
+                    name = "BROWSER_CONSOLE",
+                    severity = severity,
+                    attributes = mapOf(
+                        "message" to message,
+                        "line" to consoleMessage.lineNumber().toString(),
+                        "source" to consoleMessage.sourceId().orEmpty(),
+                    ),
+                ))
+                evidence.capture(DiagnosticEvidence(
+                    timestampEpochMs = clockMs(),
+                    traceId = session.currentTraceId,
+                    sourceId = manifest.id,
+                    category = DiagnosticCategory.BROWSER,
+                    name = "browser-console-${clockMs()}.log",
+                    contentType = "text/plain",
+                    data = "${consoleMessage.sourceId()}:${consoleMessage.lineNumber()} $message".toByteArray(Charsets.UTF_8),
+                ))
+                return true
+            }
 
             override fun onJsAlert(view: WebView, url: String, message: String, result: JsResult): Boolean {
                 val decision = sessionRef.get()?.recordDialog("alert", message, null, url) ?: DialogDecision(false, null)
@@ -620,6 +705,7 @@ class AndroidSourceBrowserBroker(
     ) {
         val metadata = ArrayDeque<SourceBrowserRequestMetadata>()
         val dialogs = ArrayDeque<SourceBrowserDialog>()
+        @Volatile var currentTraceId: String = ""
         val pendingError = AtomicReference<String?>()
         private val dialogSequence = AtomicLong()
         @Volatile var pageLatch: CountDownLatch? = null

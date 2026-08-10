@@ -90,7 +90,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
             val sourceDiagnosticsExportLauncher = rememberLauncherForActivityResult(
-                contract = ActivityResultContracts.CreateDocument("application/json"),
+                contract = ActivityResultContracts.CreateDocument("application/zip"),
             ) { uri ->
                 if (uri != null) viewModel.exportSourceDiagnostics(uri)
             }
@@ -229,7 +229,7 @@ class MainActivity : ComponentActivity() {
             val launchSourceDiagnosticsExport = remember(sourceDiagnosticsExportLauncher) {
                 {
                     val stamp = SimpleDateFormat("yyyyMMdd-HHmm", Locale.ROOT).format(Date())
-                    sourceDiagnosticsExportLauncher.launch("source-platform-diagnostics-$stamp.json")
+                    sourceDiagnosticsExportLauncher.launch("nghetruyen-diagnostics-$stamp.zip")
                 }
             }
             val launchSourcePackInstall = remember(sourcePackInstallLauncher) {

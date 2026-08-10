@@ -28,6 +28,8 @@ import vn.nghetruyen.source.vbook.VBookPackageResourceProvider
 import vn.nghetruyen.source.diagnostics.BoundedDiagnosticRecorder
 import vn.nghetruyen.source.diagnostics.DiagnosticCategory
 import vn.nghetruyen.source.diagnostics.DiagnosticEvent
+import vn.nghetruyen.source.diagnostics.DiagnosticEvidence
+import vn.nghetruyen.source.diagnostics.DiagnosticEvidenceSink
 import vn.nghetruyen.source.diagnostics.DiagnosticJsonExporter
 import vn.nghetruyen.source.diagnostics.DiagnosticLevel
 import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
@@ -66,17 +68,18 @@ class SourcePlatformManager(
     translationEngine: TranslationEngine,
     private val vBookSourcePlatform: VBookSourcePlatform? = null,
     private val onVBookChanged: () -> Unit = {},
+    private val diagnostics: BoundedDiagnosticRecorder = BoundedDiagnosticRecorder(maxEvents = 8_000, level = DiagnosticLevel.BASIC),
+    private val evidence: DiagnosticEvidenceSink = DiagnosticEvidenceSink.NONE,
 ) {
     private val appContext = context.applicationContext
     private val platformRoot = appContext.filesDir.resolve("source-platform-v2")
     private val repositoryRoot = platformRoot.resolve("repositories").also(File::mkdirs)
-    private val diagnostics = BoundedDiagnosticRecorder(maxEvents = 8_000, level = DiagnosticLevel.BASIC)
     private val trustRegistry = SourceTrustRegistry(appContext)
     private val verifier = SourcePackArchiveVerifier(diagnostics = diagnostics)
     private val store = SourcePackStore(platformRoot, diagnostics)
     private val cookieJar = PartitionedSourceCookieJar(EncryptedSourceCookiePersistence(appContext))
     private val networkBroker = OkHttpSourceNetworkBroker(cookiePartition = cookieJar, diagnostics = diagnostics)
-    private val browserBroker = AndroidSourceBrowserBroker(appContext, cookieJar, diagnostics)
+    private val browserBroker = AndroidSourceBrowserBroker(appContext, cookieJar, diagnostics, evidence = evidence)
     private val storageBroker = FileSourceStorageBroker(platformRoot.resolve("storage"))
     private val cryptoBroker = JcaSourceCryptoBroker(AndroidSourceSecretKeyProvider())
     private val webSocketBroker = OkHttpSourceWebSocketBroker(cookieJar, diagnostics)
@@ -261,6 +264,16 @@ class SourcePlatformManager(
     fun prepareVBookImport(input: InputStream): Result<SourceInstallPreview> = runCatching {
         val platform = vBookSourcePlatform ?: error("VBOOK_SUBSYSTEM_UNAVAILABLE")
         val bytes = readBounded(input, VBookPackageLimits().maxZipBytes)
+        val importTrace = "vbook-import:${UUID.randomUUID()}"
+        evidence.capture(DiagnosticEvidence(
+            timestampEpochMs = System.currentTimeMillis(),
+            traceId = importTrace,
+            sourceId = "vbook-import",
+            category = DiagnosticCategory.PACKAGE,
+            name = "manual-vbook-package.zip",
+            contentType = "application/zip",
+            data = bytes,
+        ))
         val pkg = VBookPackageReader.read(bytes)
         val plugin = VBookManifestParser.parse(pkg.pluginJson())
         val identity = manualVBookIdentity(plugin.metadata.author, plugin.metadata.name, plugin.metadata.type.name, plugin.metadata.locale)

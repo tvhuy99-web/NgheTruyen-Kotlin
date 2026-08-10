@@ -595,6 +595,7 @@ fun ReaderScreen(
         var sonicQualityExpanded by remember { mutableStateOf(false) }
         val languages = ttsVoices.map { it.languageTag }.filter(String::isNotBlank).distinct().sorted()
         val visibleVoices = ttsVoices.filter { ttsDraft.languageTag.isBlank() || it.languageTag == ttsDraft.languageTag }
+        val sonicSelected = ttsDraft.processingMethod == "sonic"
         AlertDialog(
             onDismissRequest = { showTtsDialog = false },
             title = { Text("CÀI ĐẶT TTS") },
@@ -639,14 +640,14 @@ fun ReaderScreen(
                 Text("Phương pháp xử lý", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
                 Box(Modifier.fillMaxWidth()) {
                     Button(onClick = { processingExpanded = true }, modifier = Modifier.fillMaxWidth()) {
-                        Text(if (ttsDraft.processingMethod == "sonic") "Sonic, tối đa 200%" else "Android, tối đa 100%")
+                        Text(if (sonicSelected) "Sonic, tối đa 200%" else "Android, tối đa 100%")
                     }
                     DropdownMenu(expanded = processingExpanded, onDismissRequest = { processingExpanded = false }) {
-                        DropdownMenuItem(text = { Text("Android, tối đa 100%") }, onClick = { processingExpanded = false; ttsDraft = ttsDraft.copy(processingMethod = "system", volume = ttsDraft.volume.coerceAtMost(1f)) })
+                        DropdownMenuItem(text = { Text("Android, tối đa 100%") }, onClick = { processingExpanded = false; ttsDraft = ttsDraft.copy(processingMethod = "system") })
                         DropdownMenuItem(text = { Text("Sonic, tối đa 200%") }, onClick = { processingExpanded = false; ttsDraft = ttsDraft.copy(processingMethod = "sonic") })
                     }
                 }
-                if (ttsDraft.processingMethod == "sonic") {
+                if (sonicSelected) {
                     Text("Chế độ Sonic", fontWeight = FontWeight.SemiBold)
                     Box(Modifier.fillMaxWidth()) {
                         Button(onClick = { sonicQualityExpanded = true }, modifier = Modifier.fillMaxWidth()) { Text(if (ttsDraft.sonicAccurate) "Chính xác" else "Nhanh") }
@@ -658,7 +659,9 @@ fun ReaderScreen(
                 }
                 TtsSlider("Tốc độ đọc", ttsDraft.speed, 0.25f, 3f) { ttsDraft = ttsDraft.copy(speed = it) }
                 TtsSlider("Cao độ", ttsDraft.pitch, 0.5f, 2f) { ttsDraft = ttsDraft.copy(pitch = it) }
-                TtsSlider("Âm lượng", ttsDraft.volume, 0f, if (ttsDraft.processingMethod == "sonic") 2f else 1f, percent = true) { ttsDraft = ttsDraft.copy(volume = it) }
+                TtsSlider("Âm lượng", if (sonicSelected) ttsDraft.sonicVolume else ttsDraft.volume, 0f, if (sonicSelected) 2f else 1f, percent = true) { value ->
+                    ttsDraft = if (sonicSelected) ttsDraft.copy(sonicVolume = value) else ttsDraft.copy(volume = value)
+                }
                 ReaderMenuButton("NGHE THỬ") {
                     ReaderPlaybackService.previewRole(context, "Đây là giọng đọc thử của Nghe Truyện.", ReferenceTtsPersistence.previewDraft(ttsDraft))
                 }

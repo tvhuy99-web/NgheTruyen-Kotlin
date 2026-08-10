@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import vn.nghetruyen.app.core.model.TtsEngineOption
 import vn.nghetruyen.app.core.model.TtsVoiceOption
 import vn.nghetruyen.app.core.model.VoiceRoleDraft
+import vn.nghetruyen.app.ui.reference.ReferenceVoiceRoleExtra
 import vn.nghetruyen.app.ui.reference.ReferenceVoiceRoleExtras
 
 @Composable
@@ -62,11 +63,38 @@ fun GlobalVoiceRoleEditorDialog(
     LaunchedEffect(draft.originalRoleId) {
         draft.originalRoleId?.let { roleId ->
             val extra = ReferenceVoiceRoleExtras.load(context, roleId)
-            if (draft.processingMethod != extra.processingMethod || draft.sonicAccurate != extra.sonicAccurate) {
+            val systemRate = extra.systemRate
+                ?: if (extra.processingMethod == "system") draft.rate.coerceIn(0.25f, 3f) else 1f
+            val systemPitch = extra.systemPitch
+                ?: if (extra.processingMethod == "system") draft.pitch.coerceIn(0.5f, 2f) else 1f
+            val systemVolume = extra.systemVolume
+                ?: if (extra.processingMethod == "system") draft.volume.coerceIn(0f, 1f) else 1f
+            val sonicSpeed = extra.sonicSpeed
+                ?: if (extra.processingMethod == "sonic") draft.sonicSpeed.coerceIn(0.25f, 3f) else 1f
+            val sonicPitch = extra.sonicPitch
+                ?: if (extra.processingMethod == "sonic") draft.sonicPitch.coerceIn(0.5f, 2f) else 1f
+            val sonicVolume = extra.sonicVolume
+                ?: if (extra.processingMethod == "sonic") draft.volume.coerceIn(0f, 2f) else 1f
+            if (
+                draft.processingMethod != extra.processingMethod ||
+                draft.sonicAccurate != extra.sonicAccurate ||
+                draft.rate != systemRate ||
+                draft.pitch != systemPitch ||
+                draft.volume != systemVolume ||
+                draft.sonicSpeed != sonicSpeed ||
+                draft.sonicPitch != sonicPitch ||
+                draft.sonicVolume != sonicVolume
+            ) {
                 onDraftChange(
                     draft.copy(
                         processingMethod = extra.processingMethod,
                         sonicAccurate = extra.sonicAccurate,
+                        rate = systemRate,
+                        pitch = systemPitch,
+                        volume = systemVolume,
+                        sonicSpeed = sonicSpeed,
+                        sonicPitch = sonicPitch,
+                        sonicVolume = sonicVolume,
                     ),
                 )
             }
@@ -134,6 +162,16 @@ fun GlobalVoiceRoleEditorDialog(
         ?: draft.voiceName
         ?: "Giọng mặc định"
     val dialogTitle = title ?: "HỒ SƠ GIỌNG TTS"
+    val sonicSelected = draft.processingMethod == "sonic"
+
+    fun activeProcessorDraft(value: VoiceRoleDraft): VoiceRoleDraft =
+        if (value.processingMethod == "sonic") {
+            value.copy(rate = 1f, pitch = 1f, volume = value.sonicVolume)
+        } else {
+            value.copy(sonicSpeed = 1f, sonicPitch = 1f)
+        }
+
+    fun previewProcessorDraft(value: VoiceRoleDraft): VoiceRoleDraft = activeProcessorDraft(value)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -254,12 +292,12 @@ fun GlobalVoiceRoleEditorDialog(
                 Text("Phương pháp xử lý", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
                 Box(Modifier.fillMaxWidth()) {
                     Button(onClick = { processingExpanded = true }, modifier = Modifier.fillMaxWidth()) {
-                        Text(if (draft.processingMethod == "sonic") "Sonic, tối đa 200%" else "Android, tối đa 100%")
+                        Text(if (sonicSelected) "Sonic, tối đa 200%" else "Android, tối đa 100%")
                     }
                     DropdownMenu(expanded = processingExpanded, onDismissRequest = { processingExpanded = false }) {
                         DropdownMenuItem(text = { Text("Android, tối đa 100%") }, onClick = {
                             processingExpanded = false
-                            onDraftChange(draft.copy(processingMethod = "system", volume = draft.volume.coerceAtMost(1f)))
+                            onDraftChange(draft.copy(processingMethod = "system"))
                         })
                         DropdownMenuItem(text = { Text("Sonic, tối đa 200%") }, onClick = {
                             processingExpanded = false
@@ -268,7 +306,7 @@ fun GlobalVoiceRoleEditorDialog(
                     }
                 }
 
-                if (draft.processingMethod == "sonic") {
+                if (sonicSelected) {
                     Text("Chế độ Sonic", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 7.dp))
                     Box(Modifier.fillMaxWidth()) {
                         Button(onClick = { sonicQualityExpanded = true }, modifier = Modifier.fillMaxWidth()) { Text(if (draft.sonicAccurate) "Chính xác" else "Nhanh") }
@@ -279,24 +317,24 @@ fun GlobalVoiceRoleEditorDialog(
                     }
                 }
 
-                CompactVoiceValueRow("Tốc độ đọc", draft.rate, 0.25f, 3f) {
-                    onDraftChange(draft.copy(rate = it))
+                CompactVoiceValueRow("Tốc độ đọc", if (sonicSelected) draft.sonicSpeed else draft.rate, 0.25f, 3f) { value ->
+                    onDraftChange(if (sonicSelected) draft.copy(sonicSpeed = value) else draft.copy(rate = value))
                 }
-                CompactVoiceValueRow("Cao độ", draft.pitch, 0.5f, 2f) {
-                    onDraftChange(draft.copy(pitch = it))
+                CompactVoiceValueRow("Cao độ", if (sonicSelected) draft.sonicPitch else draft.pitch, 0.5f, 2f) { value ->
+                    onDraftChange(if (sonicSelected) draft.copy(sonicPitch = value) else draft.copy(pitch = value))
                 }
                 CompactVoiceValueRow(
                     label = "Âm lượng",
-                    value = draft.volume,
+                    value = if (sonicSelected) draft.sonicVolume else draft.volume,
                     minimum = 0f,
-                    maximum = if (draft.processingMethod == "sonic") 2f else 1f,
+                    maximum = if (sonicSelected) 2f else 1f,
                     percent = true,
-                ) {
-                    onDraftChange(draft.copy(volume = it))
+                ) { value ->
+                    onDraftChange(if (sonicSelected) draft.copy(sonicVolume = value) else draft.copy(volume = value))
                 }
 
                 Button(
-                    onClick = { onPreview(draft) },
+                    onClick = { onPreview(previewProcessorDraft(draft)) },
                     modifier = Modifier.fillMaxWidth().padding(top = 7.dp),
                 ) {
                     Text("NGHE THỬ")
@@ -306,7 +344,25 @@ fun GlobalVoiceRoleEditorDialog(
         confirmButton = {
             TextButton(
                 enabled = draft.roleName.isNotBlank() && draft.description.isNotBlank(),
-                onClick = { onSave(draft.copy(enabled = if (draft.isNarrator) true else draft.enabled)) },
+                onClick = {
+                    ReferenceVoiceRoleExtras.stageProcessorValuesForNextSave(
+                        ReferenceVoiceRoleExtra(
+                            processingMethod = draft.processingMethod,
+                            sonicAccurate = draft.sonicAccurate,
+                            systemRate = draft.rate,
+                            systemPitch = draft.pitch,
+                            systemVolume = draft.volume,
+                            sonicSpeed = draft.sonicSpeed,
+                            sonicPitch = draft.sonicPitch,
+                            sonicVolume = draft.sonicVolume,
+                        ),
+                    )
+                    onSave(
+                        activeProcessorDraft(
+                            draft.copy(enabled = if (draft.isNarrator) true else draft.enabled),
+                        ),
+                    )
+                },
             ) {
                 Text("LƯU HỒ SƠ")
             }

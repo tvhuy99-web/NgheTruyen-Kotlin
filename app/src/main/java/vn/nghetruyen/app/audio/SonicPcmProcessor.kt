@@ -8,232 +8,169 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.OutputStream
+import java.io.RandomAccessFile
 import kotlin.math.abs
-import kotlin.math.max
-import kotlin.math.min
-import kotlin.math.roundToInt
+import sonic.Sonic
 
 /**
- * Bounded time-domain speed and pitch processor for PCM16 speech segments.
- * It uses resampling plus synchronized overlap-add so pitch and duration can be
- * controlled independently without native code.
+ * PCM16 WAV adapter around Bill Cox's upstream Sonic Java implementation.
+ *
+ * The DSP algorithm lives in the vendored `sonic.Sonic` upstream implementation.
+ * This class only validates WAV input, streams little-endian PCM into Sonic, and
+ * writes the processed samples back to a standard PCM16 WAV container.
  */
 object SonicPcmProcessor {
     private const val MAX_PCM_BYTES = 64L * 1024L * 1024L
+    private const val BUFFER_BYTES = 64 * 1024
 
-    fun process(source: File, destination: File, speed: Float, pitch: Float, accurate: Boolean = ReferenceSonicRuntime.accurateMode): WaveSegment {
+    fun process(
+        source: File,
+        destination: File,
+        speed: Float,
+        pitch: Float,
+        accurate: Boolean = ReferenceSonicRuntime.accurateMode,
+        gain: Float = ReferenceSonicRuntime.outputGain,
+    ): WaveSegment {
         val wave = WaveFileAssembler.inspect(source)
-        if (wave.audioFormat != 1 || wave.bitsPerSample != 16 || wave.channelCount !in 1..2) {
+        if (
+            wave.audioFormat != 1 ||
+            wave.bitsPerSample != 16 ||
+            wave.channelCount !in 1..2 ||
+            wave.blockAlign != wave.channelCount * 2
+        ) {
             throw IOException("Sonic chỉ hỗ trợ WAV PCM16 mono hoặc stereo.")
         }
-        if (wave.dataLength > MAX_PCM_BYTES) throw IOException("Đoạn PCM quá lớn để xử lý Sonic an toàn.")
+        if (wave.dataLength > MAX_PCM_BYTES) {
+            throw IOException("Đoạn PCM quá lớn để xử lý Sonic an toàn.")
+        }
+
         val normalizedSpeed = speed.coerceIn(0.25f, 3f)
         val normalizedPitch = pitch.coerceIn(0.5f, 2f)
-        val gain = ReferenceSonicRuntime.outputGain.coerceIn(0f, 2f)
+        // Keep the existing reference-volume behavior intentionally: the converter
+        // applies the first gain stage and upstream Sonic applies this second stage.
+        val normalizedGain = gain.coerceIn(0f, 2f)
         if (
             abs(normalizedSpeed - 1f) < 0.005f &&
             abs(normalizedPitch - 1f) < 0.005f &&
-            abs(gain - 1f) < 0.005f
+            abs(normalizedGain - 1f) < 0.005f
         ) {
             source.copyTo(destination, overwrite = true)
             return WaveFileAssembler.inspect(destination)
         }
-        val samples = readPcm16(wave)
-        val pitched = resample(samples, wave.channelCount, normalizedPitch)
-        val stretchSpeed = (normalizedSpeed / normalizedPitch).coerceIn(0.125f, 6f)
-        val stretched = timeStretch(
-            pitched,
-            channels = wave.channelCount,
-            sampleRate = wave.sampleRate.toInt(),
-            speed = stretchSpeed,
-            accurate = accurate,
-        )
-        val originalFrames = samples.size / wave.channelCount
-        val targetFrames = max(1, (originalFrames / normalizedSpeed).roundToInt())
-        val exact = resizeFrames(stretched, wave.channelCount, targetFrames)
-        val gained = if (abs(gain - 1f) < 0.005f) exact else ShortArray(exact.size) { index ->
-            (exact[index].toFloat() * gain).roundToInt()
-                .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
-                .toShort()
+
+        val sampleRate = wave.sampleRate.toInt()
+        val channels = wave.channelCount
+        val frameBytes = channels * 2
+        val sonic = Sonic(sampleRate, channels).apply {
+            setSpeed(normalizedSpeed)
+            setPitch(normalizedPitch)
+            setRate(1f)
+            setVolume(normalizedGain)
+            setQuality(if (accurate) 1 else 0)
         }
-        writePcm16(destination, wave.channelCount, wave.sampleRate.toInt(), gained)
+
+        destination.parentFile?.mkdirs()
+        var outputDataBytes = 0L
+        BufferedOutputStream(FileOutputStream(destination)).use { output ->
+            writeHeader(output, channels, sampleRate, dataBytes = 0L)
+            BufferedInputStream(FileInputStream(source)).use { input ->
+                skipFully(input, wave.dataOffset)
+                val inputBuffer = ByteArray(BUFFER_BYTES - (BUFFER_BYTES % frameBytes))
+                val outputBuffer = ByteArray(BUFFER_BYTES - (BUFFER_BYTES % frameBytes))
+                var remaining = wave.dataLength
+                while (remaining > 0L) {
+                    val wanted = minOf(inputBuffer.size.toLong(), remaining).toInt()
+                    if (wanted % frameBytes != 0) {
+                        throw IOException("Frame PCM16 cuối bị cắt ngắn.")
+                    }
+                    readFully(input, inputBuffer, wanted)
+                    sonic.writeBytesToStream(inputBuffer, wanted)
+                    outputDataBytes += drain(sonic, output, outputBuffer)
+                    remaining -= wanted
+                }
+                sonic.flushStream()
+                outputDataBytes += drain(sonic, output, outputBuffer)
+            }
+        }
+
+        if (outputDataBytes > 0xffff_ffffL) {
+            destination.delete()
+            throw IOException("WAV Sonic đầu ra vượt giới hạn 4 GiB.")
+        }
+        patchHeaderSizes(destination, outputDataBytes)
         return WaveFileAssembler.inspect(destination)
     }
 
-    private fun resample(input: ShortArray, channels: Int, factor: Float): ShortArray {
-        val frames = input.size / channels
-        val outFrames = max(1, (frames / factor).roundToInt())
-        val output = ShortArray(outFrames * channels)
-        for (frame in 0 until outFrames) {
-            val sourcePosition = frame * factor
-            val left = sourcePosition.toInt().coerceIn(0, frames - 1)
-            val right = min(left + 1, frames - 1)
-            val fraction = sourcePosition - left
-            for (channel in 0 until channels) {
-                val a = input[left * channels + channel].toInt()
-                val b = input[right * channels + channel].toInt()
-                output[frame * channels + channel] = (a + (b - a) * fraction).roundToInt()
-                    .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
-            }
+    private fun drain(sonic: Sonic, output: OutputStream, buffer: ByteArray): Long {
+        var written = 0L
+        while (sonic.samplesAvailable() > 0) {
+            val count = sonic.readBytesFromStream(buffer, buffer.size)
+            if (count <= 0) break
+            output.write(buffer, 0, count)
+            written += count
         }
-        return output
+        return written
     }
 
-    private fun timeStretch(
-        input: ShortArray,
-        channels: Int,
-        sampleRate: Int,
-        speed: Float,
-        accurate: Boolean,
-    ): ShortArray {
-        if (abs(speed - 1f) < 0.005f) return input
-        val inputFrames = input.size / channels
-        if (inputFrames < 512) return resizeFrames(input, channels, max(1, (inputFrames / speed).roundToInt()))
-        val window = (sampleRate * (if (accurate) 50 else 36) / 1000)
-            .coerceIn(384, if (accurate) 3072 else 2048)
-            .coerceAtMost(inputFrames)
-        val overlap = (window / if (accurate) 3 else 4).coerceAtLeast(64)
-        val synthesisHop = window - overlap
-        val analysisHop = synthesisHop * speed
-        val search = (sampleRate * (if (accurate) 14 else 7) / 1000).coerceIn(32, overlap)
-        val estimatedFrames = max(window, (inputFrames / speed).roundToInt() + window)
-        val output = FloatArray(estimatedFrames * channels)
-        var outputFrames = window
-        for (frame in 0 until window) for (channel in 0 until channels) {
-            output[frame * channels + channel] = input[frame * channels + channel].toFloat()
-        }
-        var analysisPosition = analysisHop
-        while (outputFrames + synthesisHop < estimatedFrames) {
-            val expected = analysisPosition.roundToInt()
-            if (expected + window >= inputFrames) break
-            val candidate = findBestOffset(input, channels, expected, search, overlap, output, outputFrames, accurate)
-            val outStart = outputFrames - overlap
-            for (frame in 0 until overlap) {
-                val mix = frame.toFloat() / overlap.toFloat()
-                for (channel in 0 until channels) {
-                    val index = (outStart + frame) * channels + channel
-                    val incoming = input[(candidate + frame) * channels + channel].toFloat()
-                    output[index] = output[index] * (1f - mix) + incoming * mix
-                }
-            }
-            val copyFrames = min(synthesisHop, inputFrames - (candidate + overlap))
-            for (frame in 0 until copyFrames) for (channel in 0 until channels) {
-                output[(outputFrames + frame) * channels + channel] =
-                    input[(candidate + overlap + frame) * channels + channel].toFloat()
-            }
-            outputFrames += copyFrames
-            analysisPosition += analysisHop
-            if (copyFrames < synthesisHop) break
-        }
-        return ShortArray(outputFrames * channels) { index ->
-            output[index].roundToInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+    private fun writeHeader(output: OutputStream, channels: Int, sampleRate: Int, dataBytes: Long) {
+        output.write("RIFF".toByteArray(Charsets.US_ASCII))
+        output.writeU32(36L + dataBytes)
+        output.write("WAVEfmt ".toByteArray(Charsets.US_ASCII))
+        output.writeU32(16)
+        output.writeU16(1)
+        output.writeU16(channels)
+        output.writeU32(sampleRate.toLong())
+        output.writeU32(sampleRate.toLong() * channels * 2L)
+        output.writeU16(channels * 2)
+        output.writeU16(16)
+        output.write("data".toByteArray(Charsets.US_ASCII))
+        output.writeU32(dataBytes)
+    }
+
+    private fun patchHeaderSizes(file: File, dataBytes: Long) {
+        RandomAccessFile(file, "rw").use { raf ->
+            raf.seek(4)
+            raf.writeU32Le(36L + dataBytes)
+            raf.seek(40)
+            raf.writeU32Le(dataBytes)
         }
     }
 
-    private fun findBestOffset(
-        input: ShortArray,
-        channels: Int,
-        expected: Int,
-        search: Int,
-        overlap: Int,
-        output: FloatArray,
-        outputFrames: Int,
-        accurate: Boolean,
-    ): Int {
-        val inputFrames = input.size / channels
-        var best = expected.coerceIn(0, inputFrames - overlap - 1)
-        var bestScore = Double.NEGATIVE_INFINITY
-        val outStart = outputFrames - overlap
-        val low = max(0, expected - search)
-        val high = min(inputFrames - overlap - 1, expected + search)
-        val candidateStep = if (accurate) 1 else 2
-        val frameStep = if (accurate) 1 else 2
-        var candidate = low
-        while (candidate <= high) {
-            var dot = 0.0
-            var aa = 0.0
-            var bb = 0.0
-            var frame = 0
-            while (frame < overlap) {
-                var outMono = 0.0
-                var inMono = 0.0
-                for (channel in 0 until channels) {
-                    outMono += output[(outStart + frame) * channels + channel]
-                    inMono += input[(candidate + frame) * channels + channel]
-                }
-                dot += outMono * inMono
-                aa += outMono * outMono
-                bb += inMono * inMono
-                frame += frameStep
-            }
-            val score = if (aa > 1.0 && bb > 1.0) dot / kotlin.math.sqrt(aa * bb) else Double.NEGATIVE_INFINITY
-            if (score > bestScore) { bestScore = score; best = candidate }
-            candidate += candidateStep
-        }
-        return best
-    }
-
-    private fun resizeFrames(input: ShortArray, channels: Int, targetFrames: Int): ShortArray {
-        val sourceFrames = input.size / channels
-        if (sourceFrames == targetFrames) return input
-        if (sourceFrames <= 1) return ShortArray(targetFrames * channels) { input.getOrElse(it % channels) { 0 } }
-        val output = ShortArray(targetFrames * channels)
-        val scale = (sourceFrames - 1).toFloat() / max(1, targetFrames - 1)
-        for (frame in 0 until targetFrames) {
-            val position = frame * scale
-            val left = position.toInt().coerceIn(0, sourceFrames - 1)
-            val right = min(left + 1, sourceFrames - 1)
-            val fraction = position - left
-            for (channel in 0 until channels) {
-                val a = input[left * channels + channel].toInt()
-                val b = input[right * channels + channel].toInt()
-                output[frame * channels + channel] = (a + (b - a) * fraction).roundToInt()
-                    .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
-            }
-        }
-        return output
-    }
-
-    private fun readPcm16(wave: WaveSegment): ShortArray {
-        val bytes = ByteArray(wave.dataLength.toInt())
-        BufferedInputStream(FileInputStream(wave.file)).use { input ->
-            skipFully(input, wave.dataOffset)
-            var offset = 0
-            while (offset < bytes.size) {
-                val count = input.read(bytes, offset, bytes.size - offset)
-                if (count < 0) throw EOFException("PCM bị cắt ngắn.")
-                offset += count
-            }
-        }
-        return ShortArray(bytes.size / 2) { index ->
-            val offset = index * 2
-            ((bytes[offset].toInt() and 0xff) or (bytes[offset + 1].toInt() shl 8)).toShort()
-        }
-    }
-
-    private fun writePcm16(file: File, channels: Int, sampleRate: Int, samples: ShortArray) {
-        file.parentFile?.mkdirs()
-        val dataBytes = samples.size.toLong() * 2L
-        BufferedOutputStream(FileOutputStream(file)).use { output ->
-            output.write("RIFF".toByteArray(Charsets.US_ASCII)); output.writeU32(36L + dataBytes)
-            output.write("WAVEfmt ".toByteArray(Charsets.US_ASCII)); output.writeU32(16); output.writeU16(1)
-            output.writeU16(channels); output.writeU32(sampleRate.toLong()); output.writeU32(sampleRate.toLong() * channels * 2L)
-            output.writeU16(channels * 2); output.writeU16(16); output.write("data".toByteArray(Charsets.US_ASCII)); output.writeU32(dataBytes)
-            samples.forEach { sample -> output.write(sample.toInt() and 0xff); output.write((sample.toInt() ushr 8) and 0xff) }
+    private fun readFully(input: BufferedInputStream, buffer: ByteArray, length: Int) {
+        var offset = 0
+        while (offset < length) {
+            val count = input.read(buffer, offset, length - offset)
+            if (count < 0) throw EOFException("PCM bị cắt ngắn.")
+            offset += count
         }
     }
 
     private fun skipFully(input: BufferedInputStream, bytes: Long) {
         var remaining = bytes
-        while (remaining > 0) {
+        while (remaining > 0L) {
             val skipped = input.skip(remaining)
-            if (skipped > 0) remaining -= skipped else if (input.read() >= 0) remaining-- else throw EOFException()
+            if (skipped > 0L) remaining -= skipped
+            else if (input.read() >= 0) remaining--
+            else throw EOFException("Không tới được dữ liệu PCM.")
         }
     }
 
-    private fun OutputStream.writeU16(value: Int) { write(value and 0xff); write((value ushr 8) and 0xff) }
+    private fun OutputStream.writeU16(value: Int) {
+        write(value and 0xff)
+        write((value ushr 8) and 0xff)
+    }
+
     private fun OutputStream.writeU32(value: Long) {
-        write((value and 0xff).toInt()); write(((value ushr 8) and 0xff).toInt())
-        write(((value ushr 16) and 0xff).toInt()); write(((value ushr 24) and 0xff).toInt())
+        write((value and 0xff).toInt())
+        write(((value ushr 8) and 0xff).toInt())
+        write(((value ushr 16) and 0xff).toInt())
+        write(((value ushr 24) and 0xff).toInt())
+    }
+
+    private fun RandomAccessFile.writeU32Le(value: Long) {
+        write((value and 0xff).toInt())
+        write(((value ushr 8) and 0xff).toInt())
+        write(((value ushr 16) and 0xff).toInt())
+        write(((value ushr 24) and 0xff).toInt())
     }
 }

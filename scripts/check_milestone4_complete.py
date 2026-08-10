@@ -6,6 +6,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 KOTLINC = shutil.which("kotlinc")
+JAVAC = shutil.which("javac")
+JAR = shutil.which("jar")
 
 def require(path: str, *tokens: str) -> str:
     text = (ROOT / path).read_text(encoding="utf-8")
@@ -15,8 +17,8 @@ def require(path: str, *tokens: str) -> str:
     return text
 
 def compile_smoke() -> None:
-    if not KOTLINC:
-        print("MILESTONE4_COMPLETE_SMOKE_SKIPPED_NO_KOTLINC")
+    if not KOTLINC or not JAVAC or not JAR:
+        print("MILESTONE4_COMPLETE_SMOKE_SKIPPED_NO_JVM_COMPILER")
         return
     with tempfile.TemporaryDirectory(prefix="nghe_m4_complete_") as td:
         root = Path(td)
@@ -47,6 +49,14 @@ fun main(){
  dir.deleteRecursively(); println("MILESTONE4_COMPLETE_SMOKE_OK")
 }
 ''', encoding="utf-8")
+        java_classes = root / "java-classes"
+        java_classes.mkdir()
+        jc = subprocess.run(
+            [JAVAC, "-d", str(java_classes), str(ROOT / "app/src/main/java/sonic/Sonic.java")],
+            cwd=ROOT, text=True, capture_output=True, timeout=120,
+        )
+        if jc.returncode:
+            print(jc.stdout); print(jc.stderr); raise SystemExit(jc.returncode)
         jar = root / "smoke.jar"
         sources = [
             ROOT / "app/src/main/java/vn/nghetruyen/app/core/model/Models.kt",
@@ -59,9 +69,18 @@ fun main(){
             ROOT / "app/src/main/java/vn/nghetruyen/app/playback/SceneMusicSelector.kt",
             smoke,
         ]
-        cp = subprocess.run([KOTLINC, *map(str, sources), "-include-runtime", "-d", str(jar)], cwd=ROOT, text=True, capture_output=True, timeout=120)
+        cp = subprocess.run(
+            [KOTLINC, *map(str, sources), "-classpath", str(java_classes), "-include-runtime", "-d", str(jar)],
+            cwd=ROOT, text=True, capture_output=True, timeout=120,
+        )
         if cp.returncode:
             print(cp.stdout); print(cp.stderr); raise SystemExit(cp.returncode)
+        pack = subprocess.run(
+            [JAR, "uf", str(jar), "-C", str(java_classes), "."],
+            cwd=ROOT, text=True, capture_output=True, timeout=30,
+        )
+        if pack.returncode:
+            print(pack.stdout); print(pack.stderr); raise SystemExit(pack.returncode)
         run = subprocess.run(["java", "-jar", str(jar)], cwd=ROOT, text=True, capture_output=True, timeout=30)
         if run.returncode:
             print(run.stdout); print(run.stderr); raise SystemExit(run.returncode)

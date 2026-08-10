@@ -29,6 +29,7 @@ class TtsAudioCache(
     ) {
         fun stableId(): String = sha256(
             listOf(
+                CACHE_KEY_VERSION,
                 text,
                 enginePackage.orEmpty(),
                 voiceName.orEmpty(),
@@ -134,6 +135,7 @@ class TtsAudioCache(
     companion object {
         const val MIN_LIMIT_BYTES = 8L * 1024L * 1024L
         const val MAX_LIMIT_BYTES = 512L * 1024L * 1024L
+        private const val CACHE_KEY_VERSION = "tts-render-volume-v2"
         private const val AUDIO_EXTENSION = "wav"
         private const val CHECKSUM_EXTENSION = "sha256"
         private const val BUFFER_SIZE = 64 * 1024

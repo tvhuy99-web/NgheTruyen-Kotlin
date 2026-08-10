@@ -61,6 +61,7 @@ object XpkPlaybackRuntime {
         validUnitIds: Collection<String>,
     ): Map<String, VoiceAssignment> {
         val root = JSONObject(transformedText)
+        requireCurrentTimeline(root)
         val source = root.optJSONArray("assignments") ?: return emptyMap()
         val validIds = validUnitIds.toHashSet()
         val result = linkedMapOf<String, VoiceAssignment>()
@@ -91,6 +92,7 @@ object XpkPlaybackRuntime {
     ): Map<String, String> {
         if (validUnitIds.isEmpty() || validTrackIds.isEmpty()) return emptyMap()
         val root = JSONObject(transformedText)
+        requireCurrentTimeline(root)
         val source = root.optJSONArray("music_scenes") ?: return emptyMap()
         val rows = buildList {
             for (index in 0 until source.length()) {
@@ -125,6 +127,16 @@ object XpkPlaybackRuntime {
             ?.toIntOrNull()
             ?: return -1
         return (paragraph - 1).coerceAtLeast(0)
+    }
+
+    private fun requireCurrentTimeline(root: JSONObject) {
+        val expected = root.optString("timeline_fingerprint").trim()
+        if (expected.isBlank()) return
+        val current = PlaybackQueueStore.state.value.speechChunks
+        require(current.isNotEmpty()) { "Không có XPK timeline để xác minh transform" }
+        require(timelineFingerprint(current) == expected) {
+            "Transform AI thuộc timeline khác với nội dung đang phát"
+        }
     }
 
     private fun finiteFloat(value: Any?): Float {

@@ -12,6 +12,8 @@ import java.security.MessageDigest
  * boundaries use the stable XPK unit ids created from the same title/body pair used by AI planning.
  */
 object XpkPlaybackRuntime {
+    const val TIMELINE_FINGERPRINT_VERSION = 2
+
     data class VoiceAssignment(
         val unitId: String,
         val voiceId: String,
@@ -191,10 +193,14 @@ object XpkPlaybackRuntime {
         return (paragraph - 1).coerceAtLeast(0)
     }
 
-    /** Returns true only for milestone-5 canonical transforms that carry a verified timeline digest. */
+    /** Returns true only for current-version canonical transforms with a verified timeline digest. */
     private fun requireCurrentTimeline(root: JSONObject): Boolean {
         val expected = root.optString("timeline_fingerprint").trim()
         if (expected.isBlank()) return false
+        val version = root.optInt("timeline_fingerprint_version", 0)
+        require(version == TIMELINE_FINGERPRINT_VERSION) {
+            "Transform XPK dùng phiên bản timeline fingerprint cũ"
+        }
         val current = PlaybackQueueStore.state.value.speechChunks
         require(current.isNotEmpty()) { "Không có XPK timeline để xác minh transform" }
         require(timelineFingerprint(current) == expected) {

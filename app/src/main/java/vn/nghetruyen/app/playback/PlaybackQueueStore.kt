@@ -6,15 +6,18 @@ import kotlinx.coroutines.flow.asStateFlow
 import vn.nghetruyen.app.core.model.ChapterContent
 
 /**
- * A TTS-safe fragment that still points back to the stable reader paragraph.
+ * One canonical XPK UNIT/DIALOGUE passed to TTS.
  *
- * Reader progress, notes, bookmarks, voice assignments and scene cues always
- * use [paragraphIndex]. Long text is split only inside the speech layer so a
- * TTS engine limit can never shift user-visible paragraph indexes.
+ * [paragraphIndex] only links the unit back to reader progress. Voice casting and scene music use
+ * [unitId] so multiple narration/dialogue units inside one reader paragraph remain independently
+ * addressable.
  */
 data class PlaybackSpeechChunk(
     val paragraphIndex: Int,
     val text: String,
+    val unitId: String = "",
+    val unitKind: String = "legacy",
+    val fixedVoiceId: String? = null,
 )
 
 enum class PlaybackPreparationState {
@@ -44,16 +47,26 @@ data class PlaybackSnapshot(
     val preparationState: PlaybackPreparationState = PlaybackPreparationState.READY,
     val preparationMessage: String? = null,
 ) {
-    /** Full paragraph shown by the reader and referenced by persisted data. */
+    /** Full paragraph shown by the reader and referenced by persisted progress. */
     val currentParagraph: String?
         get() = paragraphs.getOrNull(paragraphIndex)
 
-    /** Bounded fragment passed to Android TTS/Sonic. */
-    val currentSpeechText: String?
+    val currentSpeechChunk: PlaybackSpeechChunk?
         get() = speechChunks.getOrNull(speechChunkIndex)
             ?.takeIf { it.paragraphIndex == paragraphIndex }
-            ?.text
-            ?: currentParagraph
+
+    /** Canonical XPK UNIT/DIALOGUE text passed to Android TTS/Sonic. */
+    val currentSpeechText: String?
+        get() = currentSpeechChunk?.text ?: currentParagraph
+
+    val currentUnitId: String?
+        get() = currentSpeechChunk?.unitId?.takeIf(String::isNotBlank)
+
+    val currentUnitKind: String?
+        get() = currentSpeechChunk?.unitKind?.takeIf(String::isNotBlank)
+
+    val currentFixedVoiceId: String?
+        get() = currentSpeechChunk?.fixedVoiceId?.takeIf(String::isNotBlank)
 
     val isFirstSpeechChunkOfParagraph: Boolean
         get() = speechChunks.getOrNull(speechChunkIndex - 1)?.paragraphIndex != paragraphIndex
@@ -89,7 +102,7 @@ object PlaybackQueueStore {
         preparationMessage: String? = null,
     ) {
         val normalized = ReaderTextChunker.normalizeParagraphs(paragraphs)
-        val chunks = ReaderTextChunker.chunkParagraphs(normalized)
+        val chunks = XpkPlaybackRuntime.buildSpeechTimeline(chapterTitle, normalized)
         val startParagraph = if (normalized.isEmpty()) 0 else startIndex.coerceIn(0, normalized.lastIndex)
         mutable.value = PlaybackSnapshot(
             sourceId = sourceId,
@@ -157,7 +170,7 @@ object PlaybackQueueStore {
         mutable.value = mutable.value.copy(isPlaying = value)
     }
 
-    /** Moves by a reader paragraph and resets speech to its first fragment. */
+    /** Moves by a reader paragraph and resets speech to its first XPK unit. */
     fun moveTo(index: Int): Boolean {
         val current = mutable.value
         if (current.paragraphs.isEmpty()) return false
@@ -171,7 +184,7 @@ object PlaybackQueueStore {
 
     fun moveBy(delta: Int): Boolean = moveTo(mutable.value.paragraphIndex + delta)
 
-    /** Restores a persisted speech fragment only when it still belongs to the same paragraph. */
+    /** Restores the exact deterministic XPK unit index when it still belongs to the same paragraph. */
     fun restoreSpeechPosition(paragraphIndex: Int, speechChunkIndex: Int) {
         val current = mutable.value
         if (current.paragraphs.isEmpty()) return
@@ -185,8 +198,8 @@ object PlaybackQueueStore {
     }
 
     /**
-     * Advances inside the current long paragraph without changing the stable
-     * paragraph index. Returns true when another fragment was selected.
+     * Advances to the next XPK UNIT/DIALOGUE inside the current reader paragraph. Returns false at
+     * the paragraph boundary so existing reader progress/navigation remains stable.
      */
     fun advanceSpeechChunk(): Boolean {
         val current = mutable.value
@@ -268,13 +281,10 @@ object ReaderDocumentNormalizer {
 }
 
 object ReaderTextChunker {
-    // Leave headroom for pronunciation replacements and engine-specific limits.
+    // Legacy helper retained for non-XPK callers/tests. XPK playback units are <= 1200 UTF-8 bytes.
     const val SAFE_TTS_CHARS = 3_000
 
-    /**
-     * Produces the canonical reader paragraphs. This operation is deterministic
-     * and never splits one visible paragraph into several persisted positions.
-     */
+    /** Produces canonical reader paragraphs without changing their persisted indexes. */
     fun normalizeParagraphs(paragraphs: List<String>): List<String> = paragraphs
         .asSequence()
         .map { it.replace(Regex("\\s+"), " ").trim() }

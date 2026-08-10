@@ -3,7 +3,7 @@ package vn.nghetruyen.app.ai
 import java.util.ArrayDeque
 import vn.nghetruyen.app.data.local.VoiceRoleEntity
 
-/** Prompt formatter matching the XPK VoiceCast transcript and assignment contract. */
+/** Prompt formatter matching the XPK VoiceCast transcript and unified narration contract. */
 object XpkVoiceCastPrompt {
     data class Bundle(
         val prompt: String,
@@ -11,6 +11,7 @@ object XpkVoiceCastPrompt {
         val dialogueIds: List<String>,
         val unitIds: List<String>,
         val voiceIds: List<String>,
+        val sceneTrackIds: List<String> = emptyList(),
     )
 
     fun build(
@@ -27,12 +28,13 @@ object XpkVoiceCastPrompt {
         includeVoiceCast: Boolean = true,
         includeSceneMusic: Boolean = false,
         tracks: List<SceneMusicTrackOption> = emptyList(),
+        context: NarrationPlanContext = NarrationPlanContext(),
     ): Bundle {
         val units = XpkVoiceCastSplitter.buildUnits(title, body)
-        val dialogueIds = if (includeVoiceCast) units.filterNot { it.fixedVoice != null }.map { it.id } else emptyList()
+        val dialogueIds = if (includeVoiceCast) units.filter(XpkVoiceCastSplitter.Unit::isDialogue).map { it.id } else emptyList()
         val unitIds = units.map { it.id }
         val promptProfiles = profiles.take(40)
-        val voiceIds = promptProfiles.map { promptVoiceId(it) }.distinct()
+        val voiceIds = promptProfiles.map(::promptVoiceId).distinct()
         val note = storyNote.trim().ifBlank { "Không có ghi chú bổ sung." }
         val transcript = if (includeSceneMusic) unitsForScenePrompt(units) else unitsForPrompt(units)
         val checklist = dialogueIds.joinToString(", ")
@@ -62,8 +64,12 @@ object XpkVoiceCastPrompt {
         val custom = customGuidance.trim().takeIf(String::isNotBlank)?.let {
             "\nHƯỚNG DẪN BỔ SUNG DO NGƯỜI DÙNG ĐẶT:\n$it\nHướng dẫn bổ sung không được thay đổi ID, mã giọng, giới hạn phần trăm hoặc cấu trúc JSON.\n"
         }.orEmpty()
-        val sceneTask = if (includeSceneMusic) sceneTask(firstUnitId, lastUnitId, tracks) else ""
-        val outputTopLevel = if (includeSceneMusic) {
+        val sceneBlock = if (includeSceneMusic && unitIds.isNotEmpty() && tracks.isNotEmpty()) {
+            XpkSceneMusicParity.promptBlock(title, firstUnitId, lastUnitId, tracks, context)
+        } else null
+        val sceneTask = sceneBlock?.instructions.orEmpty()
+        val sceneOutputRules = sceneBlock?.outputRules.orEmpty()
+        val outputTopLevel = if (sceneBlock != null) {
             "- Đối tượng JSON phải có đúng hai mảng cấp cao: assignments và music_scenes."
         } else {
             "- Đối tượng JSON chỉ có mảng assignments."
@@ -84,21 +90,22 @@ object XpkVoiceCastPrompt {
               ]
             """.trimIndent()
         }
-        val sceneExample = if (includeSceneMusic && tracks.isNotEmpty() && firstUnitId.isNotBlank() && lastUnitId.isNotBlank()) {
+        val sceneExample = sceneBlock?.tracks?.firstOrNull()?.let { track ->
             """,
               "music_scenes": [
                 {
                   "start_id": "$firstUnitId",
                   "end_id": "$lastUnitId",
-                  "track_id": "${tracks.first().id}"
+                  "track_id": "${track.id}"
                 }
               ]
             """.trimIndent()
-        } else ""
+        }.orEmpty()
         val taskIntro = when {
-            includeVoiceCast && includeSceneMusic -> "Nhiệm vụ của bạn là hoàn thành trong đúng MỘT phản hồi: chọn giọng và ba phần trăm điều chỉnh cho từng dòng DIALOGUE, đồng thời lập music_scenes cho toàn chương."
+            includeVoiceCast && sceneBlock != null -> "Nhiệm vụ của bạn là hoàn thành trong đúng MỘT phản hồi: chọn giọng và ba phần trăm điều chỉnh cho từng dòng DIALOGUE, đồng thời tự quyết định toàn bộ thời điểm giữ hoặc đổi nhạc cho toàn chương."
             includeVoiceCast -> "Nhiệm vụ của bạn là đọc kỹ bản chép có ngữ cảnh, chọn giọng cho từng dòng DIALOGUE và đồng thời chọn ba phần trăm điều chỉnh cho chính dòng đó."
-            else -> "Nhiệm vụ của bạn là lập music_scenes cho toàn bộ timeline. Không tạo assignment vì lượt này không yêu cầu phân vai."
+            sceneBlock != null -> "Nhiệm vụ của bạn là lập music_scenes cho toàn bộ timeline trong đúng MỘT phản hồi. Không tạo assignment vì lượt này không yêu cầu phân vai."
+            else -> "Không có nhiệm vụ hợp lệ."
         }
         val voiceRules = if (includeVoiceCast) {
             """
@@ -147,9 +154,10 @@ object XpkVoiceCastPrompt {
 
             $note
             $custom
-            BẢN CHÉP ${if (includeSceneMusic) "HỢP NHẤT DÙNG CHO PHÂN VAI VÀ NHẠC THEO CẢNH" else "GỌN DÙNG ĐỂ PHÂN VAI"}:
+            BẢN CHÉP ${if (sceneBlock != null) "HỢP NHẤT DÙNG CHO PHÂN VAI VÀ NHẠC THEO CẢNH" else "GỌN DÙNG ĐỂ PHÂN VAI"}:
 
             $transcript
+
             $sceneTask
 
             $voiceRules
@@ -162,6 +170,7 @@ object XpkVoiceCastPrompt {
             - Không thêm trường ngoài cấu trúc được yêu cầu.
             - Mảng assignments phải giữ đúng thứ tự ID trong đầu vào.
             $outputTopLevel
+            $sceneOutputRules
 
             Mỗi phần tử trong assignments bắt buộc có ĐÚNG NĂM trường sau:
             - id: ID thật từ danh sách đầu vào.
@@ -173,7 +182,14 @@ object XpkVoiceCastPrompt {
             $assignmentExample$sceneExample
             }
         """.trimIndent()
-        return Bundle(prompt, units, dialogueIds, unitIds, voiceIds)
+        return Bundle(
+            prompt = prompt,
+            units = units,
+            dialogueIds = dialogueIds,
+            unitIds = unitIds,
+            voiceIds = voiceIds,
+            sceneTrackIds = sceneBlock?.tracks?.map { it.id }.orEmpty(),
+        )
     }
 
     fun profilesForPrompt(profiles: List<VoiceRoleEntity>): String = profiles.joinToString("\n") { row ->
@@ -190,7 +206,7 @@ object XpkVoiceCastPrompt {
     fun unitsForPrompt(units: List<XpkVoiceCastSplitter.Unit>): String {
         val include = mutableSetOf<Int>()
         units.forEachIndexed { index, unit ->
-            if (unit.fixedVoice == null) {
+            if (unit.isDialogue) {
                 for (offset in -2..2) if (index + offset in units.indices) include += index + offset
             }
         }
@@ -201,7 +217,7 @@ object XpkVoiceCastPrompt {
             previousIndex?.let { previous ->
                 if (index > previous + 1) lines += "[CONTEXT_BREAK omitted_units=${index - previous - 1}]"
             }
-            if (unit.fixedVoice != null) {
+            if (!unit.isDialogue) {
                 lines += "[CONTEXT id=${unit.id} | kind=${unit.unitKind.ifBlank { "narration" }}] ${oneLine(unit.text)}"
             } else {
                 val attributes = mutableListOf("id=${unit.id}")
@@ -219,7 +235,7 @@ object XpkVoiceCastPrompt {
 
     fun unitsForScenePrompt(units: List<XpkVoiceCastSplitter.Unit>): String = units.joinToString("\n") { unit ->
         val compact = utf8Head(oneLine(unit.text), 720)
-        if (unit.fixedVoice != null) {
+        if (!unit.isDialogue) {
             "[UNIT id=${unit.id} | kind=${unit.unitKind.ifBlank { "narration" }}] $compact"
         } else {
             val attributes = mutableListOf("id=${unit.id}", "kind=${unit.unitKind.ifBlank { "dialogue" }}")
@@ -234,38 +250,24 @@ object XpkVoiceCastPrompt {
 
     fun promptVoiceId(role: VoiceRoleEntity): String = if (role.isNarrator) XpkVoiceCastSplitter.NARRATOR_ID else role.id
 
-    private fun sceneTask(firstUnitId: String, lastUnitId: String, tracks: List<SceneMusicTrackOption>): String {
-        val catalog = tracks.joinToString("\n") { track ->
-            listOf(track.id, track.title, track.tags.joinToString(" ")).filter(String::isNotBlank).joinToString(" | ")
-        }
-        return """
-
-            NHIỆM VỤ NHẠC THEO CẢNH TRONG CÙNG PHẢN HỒI:
-            - Đọc toàn bộ timeline trước khi đặt ranh giới.
-            - music_scenes phải phủ liên tục từ $firstUnitId đến $lastUnitId.
-            - Mỗi phần tử có đúng start_id, end_id, track_id; mọi ID và track_id phải có trong dữ liệu được cung cấp.
-            - Hai cảnh liền nhau không dùng cùng track_id.
-            - Không trả tên bài, URI, mood, volume, lý do hoặc trường phụ.
-            - Các quy tắc chọn bài và nối chương đầy đủ sẽ được áp ở lớp Scene Music parity; cấu trúc ID ở đây là bắt buộc.
-
-            TRACK_CATALOG:
-            $catalog
-        """.trimIndent()
-    }
-
-    private fun oneLine(value: String): String = value.replace(Regex("[\\p{Cntrl}\\r\\n]+"), " ").replace(Regex("\\s+"), " ").trim()
+    private fun oneLine(value: String): String = value
+        .replace(Regex("[\\p{Cntrl}\\r\\n]+"), " ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
 
     private fun utf8Head(value: String, maxBytes: Int): String {
         if (value.toByteArray(Charsets.UTF_8).size <= maxBytes) return value
         val out = StringBuilder()
+        var index = 0
         var bytes = 0
-        value.codePoints().forEachOrdered { codePoint ->
+        while (index < value.length) {
+            val codePoint = value.codePointAt(index)
             val piece = String(Character.toChars(codePoint))
             val size = piece.toByteArray(Charsets.UTF_8).size
-            if (bytes + size <= maxBytes) {
-                out.append(piece)
-                bytes += size
-            }
+            if (bytes + size > maxBytes) break
+            out.append(piece)
+            bytes += size
+            index += Character.charCount(codePoint)
         }
         return out.toString()
     }

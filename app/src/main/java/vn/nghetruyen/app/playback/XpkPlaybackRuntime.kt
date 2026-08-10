@@ -3,6 +3,7 @@ package vn.nghetruyen.app.playback
 import org.json.JSONObject
 import vn.nghetruyen.app.ai.XpkSceneMusicParity
 import vn.nghetruyen.app.ai.XpkVoiceCastSplitter
+import java.security.MessageDigest
 
 /**
  * Runtime bridge between the canonical XPK UNIT/DIALOGUE timeline and Android playback.
@@ -33,6 +34,27 @@ object XpkPlaybackRuntime {
             )
         }
     }
+
+    /** Stable digest of every AI/runtime-relevant field in timeline order. */
+    fun timelineFingerprint(chunks: List<PlaybackSpeechChunk>): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        chunks.forEach { chunk ->
+            listOf(
+                chunk.unitId,
+                chunk.unitKind,
+                chunk.fixedVoiceId.orEmpty(),
+                chunk.text,
+            ).forEach { value ->
+                digest.update(value.toByteArray(Charsets.UTF_8))
+                digest.update(0)
+            }
+            digest.update(1)
+        }
+        return digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
+    }
+
+    fun timelineFingerprint(title: String, paragraphs: List<String>): String =
+        timelineFingerprint(buildSpeechTimeline(title, paragraphs))
 
     fun parseVoiceAssignments(
         transformedText: String,
@@ -96,7 +118,7 @@ object XpkPlaybackRuntime {
 
     fun paragraphIndex(unitId: String): Int {
         if (unitId == "TITLE-U01") return 0
-        val paragraph = Regex("^P(\\d{4})-[UD]\\d{2}$")
+        val paragraph = Regex("^P(\\d{4})-U\\d{2}$")
             .matchEntire(unitId)
             ?.groupValues
             ?.getOrNull(1)

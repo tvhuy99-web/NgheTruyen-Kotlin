@@ -1,5 +1,6 @@
 package vn.nghetruyen.app.ai
 
+import java.util.ArrayDeque
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.abs
 
@@ -51,7 +52,7 @@ object XpkSceneMusicParity {
         val source = context.incomingSource.trim().ifBlank { if (incoming == "NONE") "none" else "provided" }
         val previousTail = context.previousChapterEnding.trim()
             .ifBlank { "Không có ngữ cảnh chương trước." }
-            .let { utf8Head(it, 3000) }
+            .let { utf8Tail(it, 3000) }
         val catalog = shuffled.joinToString("\n") { track ->
             buildString {
                 append(track.id).append(" | ").append(track.name)
@@ -275,5 +276,20 @@ object XpkSceneMusicParity {
             index += Character.charCount(codePoint)
         }
         return out.toString().trim()
+    }
+
+    private fun utf8Tail(value: String, maxBytes: Int): String {
+        if (value.toByteArray(Charsets.UTF_8).size <= maxBytes) return value
+        val points = value.codePoints().toArray()
+        val out = ArrayDeque<String>()
+        var bytes = 0
+        for (index in points.indices.reversed()) {
+            val piece = String(Character.toChars(points[index]))
+            val size = piece.toByteArray(Charsets.UTF_8).size
+            if (bytes + size > maxBytes) break
+            out.addFirst(piece)
+            bytes += size
+        }
+        return out.joinToString("").trim()
     }
 }

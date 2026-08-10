@@ -103,19 +103,19 @@ object ReferenceTtsPersistence {
                     updatedAt = System.currentTimeMillis(),
                 ),
             )
-            prefs.edit()
+            val storyEditor = prefs.edit()
                 .putString(methodKey(storyId), normalized.processingMethod)
                 .putInt(qualityKey(storyId), if (normalized.sonicAccurate) 1 else 0)
-                .apply {
-                    if (sonic) {
-                        putFloat(speedKey(storyId), normalized.speed)
-                        putFloat(pitchKey(storyId), normalized.pitch)
-                    } else {
-                        remove(speedKey(storyId))
-                        remove(pitchKey(storyId))
-                    }
-                }
-                .apply()
+            if (sonic) {
+                storyEditor
+                    .putFloat(speedKey(storyId), normalized.speed)
+                    .putFloat(pitchKey(storyId), normalized.pitch)
+            } else {
+                storyEditor
+                    .remove(speedKey(storyId))
+                    .remove(pitchKey(storyId))
+            }
+            storyEditor.apply()
             settings.setSonicProcessingEnabled(sonic)
             settings.setSonicAccurateMode(normalized.sonicAccurate)
             if (sonic) {
@@ -277,11 +277,6 @@ object ReferenceTtsPersistence {
             changed = true
         }
         if (changed) editor.apply()
-    }
-
-    private inline fun SharedPreferences.Editor.apply(block: SharedPreferences.Editor.() -> Unit): SharedPreferences.Editor {
-        block()
-        return this
     }
 
     private fun methodKey(storyId: String) = "story:$storyId:method"

@@ -287,20 +287,10 @@ fun GlobalVoiceRoleEditorDialog(
                     }
                 }
 
-                CompactVoiceValueRow(
-                    "Tốc độ đọc",
-                    if (sonicSelected) draft.sonicSpeed else draft.rate,
-                    0.25f,
-                    3f,
-                ) { value ->
+                CompactVoiceValueRow("Tốc độ đọc", if (sonicSelected) draft.sonicSpeed else draft.rate, 0.25f, 3f) { value ->
                     onDraftChange(if (sonicSelected) draft.copy(sonicSpeed = value) else draft.copy(rate = value))
                 }
-                CompactVoiceValueRow(
-                    "Cao độ",
-                    if (sonicSelected) draft.sonicPitch else draft.pitch,
-                    0.5f,
-                    2f,
-                ) { value ->
+                CompactVoiceValueRow("Cao độ", if (sonicSelected) draft.sonicPitch else draft.pitch, 0.5f, 2f) { value ->
                     onDraftChange(if (sonicSelected) draft.copy(sonicPitch = value) else draft.copy(pitch = value))
                 }
                 CompactVoiceValueRow(

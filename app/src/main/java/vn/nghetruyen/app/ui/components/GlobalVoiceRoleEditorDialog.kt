@@ -136,6 +136,13 @@ fun GlobalVoiceRoleEditorDialog(
     val dialogTitle = title ?: "HỒ SƠ GIỌNG TTS"
     val sonicSelected = draft.processingMethod == "sonic"
 
+    fun activeProcessorDraft(value: VoiceRoleDraft): VoiceRoleDraft =
+        if (value.processingMethod == "sonic") {
+            value.copy(rate = 1f, pitch = 1f)
+        } else {
+            value.copy(sonicSpeed = 1f, sonicPitch = 1f)
+        }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(dialogTitle) },
@@ -307,7 +314,7 @@ fun GlobalVoiceRoleEditorDialog(
                 }
 
                 Button(
-                    onClick = { onPreview(draft) },
+                    onClick = { onPreview(activeProcessorDraft(draft)) },
                     modifier = Modifier.fillMaxWidth().padding(top = 7.dp),
                 ) {
                     Text("NGHE THỬ")
@@ -317,7 +324,13 @@ fun GlobalVoiceRoleEditorDialog(
         confirmButton = {
             TextButton(
                 enabled = draft.roleName.isNotBlank() && draft.description.isNotBlank(),
-                onClick = { onSave(draft.copy(enabled = if (draft.isNarrator) true else draft.enabled)) },
+                onClick = {
+                    onSave(
+                        activeProcessorDraft(
+                            draft.copy(enabled = if (draft.isNarrator) true else draft.enabled),
+                        ),
+                    )
+                },
             ) {
                 Text("LƯU HỒ SƠ")
             }

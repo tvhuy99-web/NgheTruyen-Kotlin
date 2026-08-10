@@ -370,12 +370,10 @@ class NarrationPlanCoordinator(
 
     private fun chapterBody(content: ChapterContent): String = content.paragraphs.joinToString("\n")
 
+    // Keep this formula identical to ReaderPlaybackService so saved XPK scene plans are loadable now.
+    // Engine/version invalidation is checked separately in needsMusicPlan via transformedText.
     private fun musicSourceHash(content: ChapterContent, tracks: List<SceneMusicTrackEntity>): String =
-        ChapterAiWorkflow.sha256(
-            content.paragraphs +
-                tracks.flatMap { listOf(it.id, it.tagsCsv, it.title) } +
-                listOf("\u0001scene_music_engine=$MUSIC_TRANSFORM_ENGINE"),
-        )
+        ChapterAiWorkflow.sha256(content.paragraphs + tracks.flatMap { listOf(it.id, it.tagsCsv, it.title) })
 
     private fun SceneMusicTrackEntity.toOption(): SceneMusicTrackOption {
         val description = tagsCsv.trim()

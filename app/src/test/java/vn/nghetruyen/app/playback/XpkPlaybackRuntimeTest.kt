@@ -24,15 +24,15 @@ class XpkPlaybackRuntimeTest {
     }
 
     @Test
-    fun dialogueAndNarrationIdsMapBackToTheSameReaderParagraph() {
+    fun timelineUsesUnitIdsWhileDialogueGroupIdsStayMetadataOnly() {
         assertEquals(0, XpkPlaybackRuntime.paragraphIndex("TITLE-U01"))
         assertEquals(2, XpkPlaybackRuntime.paragraphIndex("P0003-U02"))
-        assertEquals(2, XpkPlaybackRuntime.paragraphIndex("P0003-D04"))
+        assertEquals(-1, XpkPlaybackRuntime.paragraphIndex("P0003-D04"))
         assertEquals(-1, XpkPlaybackRuntime.paragraphIndex("bad-id"))
     }
 
     @Test
-    fun checkpointSpeechIndexRestoresTheExactXpkUnit() {
+    fun checkpointSpeechIndexRestoresTheExactXpkDialogueUnit() {
         PlaybackQueueStore.load(
             sourceId = "test",
             storyId = "story",
@@ -42,9 +42,10 @@ class XpkPlaybackRuntimeTest {
             paragraphs = listOf("Nam nói: \"Một. Hai.\" Sau đó anh im lặng."),
         )
         val initial = PlaybackQueueStore.state.value
-        val targetIndex = initial.speechChunks.indexOfFirst { it.unitId.contains("-D") }
+        val targetIndex = initial.speechChunks.indexOfFirst { it.fixedVoiceId == null }
         assertTrue(targetIndex >= 0)
         val target = initial.speechChunks[targetIndex]
+        assertTrue(target.unitId.matches(Regex("P\\d{4}-U\\d{2}")))
 
         PlaybackQueueStore.restoreSpeechPosition(target.paragraphIndex, targetIndex)
 
@@ -58,52 +59,52 @@ class XpkPlaybackRuntimeTest {
             {
               "engine":"xpk-unit-v8",
               "assignments":[
-                {"id":"P0001-D01","voice":"voice-a","speed_adjust_pct":3,"pitch_adjust_pct":-2,"volume_adjust_pct":1},
-                {"id":"P0001-D02","voice":"voice-b","speed_adjust_pct":0,"pitch_adjust_pct":0,"volume_adjust_pct":0}
+                {"id":"P0001-U01","voice":"voice-a","speed_adjust_pct":3,"pitch_adjust_pct":-2,"volume_adjust_pct":1},
+                {"id":"P0001-U02","voice":"voice-b","speed_adjust_pct":0,"pitch_adjust_pct":0,"volume_adjust_pct":0}
               ]
             }
         """.trimIndent()
         val parsed = XpkPlaybackRuntime.parseVoiceAssignments(
             json,
-            listOf("TITLE-U01", "P0001-U01", "P0001-D01", "P0001-D02"),
+            listOf("TITLE-U01", "P0001-U01", "P0001-U02"),
         )
 
-        assertEquals("voice-a", parsed.getValue("P0001-D01").voiceId)
-        assertEquals(3f, parsed.getValue("P0001-D01").speedAdjustPct)
-        assertEquals("voice-b", parsed.getValue("P0001-D02").voiceId)
+        assertEquals("voice-a", parsed.getValue("P0001-U01").voiceId)
+        assertEquals(3f, parsed.getValue("P0001-U01").speedAdjustPct)
+        assertEquals("voice-b", parsed.getValue("P0001-U02").voiceId)
         assertEquals(2, parsed.size)
     }
 
     @Test
     fun sceneIntervalsSwitchAtTheExactUnitBoundary() {
-        val units = listOf("TITLE-U01", "P0001-U01", "P0001-D01", "P0001-U02", "P0002-U01")
+        val units = listOf("TITLE-U01", "P0001-U01", "P0001-U02", "P0001-U03", "P0002-U01")
         val json = """
             {
               "engine":"xpk-ai-full-authority-v1",
               "mode":"ai_full_authority",
               "music_scenes":[
-                {"start_id":"TITLE-U01","end_id":"P0001-D01","track_id":"a"},
-                {"start_id":"P0001-U02","end_id":"P0002-U01","track_id":"b"}
+                {"start_id":"TITLE-U01","end_id":"P0001-U02","track_id":"a"},
+                {"start_id":"P0001-U03","end_id":"P0002-U01","track_id":"b"}
               ]
             }
         """.trimIndent()
 
         val timeline = XpkPlaybackRuntime.parseSceneTimeline(json, units, listOf("a", "b"))
 
-        assertEquals("a", timeline["P0001-D01"])
-        assertEquals("b", timeline["P0001-U02"])
+        assertEquals("a", timeline["P0001-U02"])
+        assertEquals("b", timeline["P0001-U03"])
         assertEquals("b", timeline["P0002-U01"])
         assertEquals(units.size, timeline.size)
     }
 
     @Test(expected = IllegalArgumentException::class)
     fun sceneRuntimeRejectsGapsInsteadOfGuessing() {
-        val units = listOf("P0001-U01", "P0001-D01", "P0001-U02")
+        val units = listOf("P0001-U01", "P0001-U02", "P0001-U03")
         val json = """
             {
               "music_scenes":[
                 {"start_id":"P0001-U01","end_id":"P0001-U01","track_id":"a"},
-                {"start_id":"P0001-U02","end_id":"P0001-U02","track_id":"b"}
+                {"start_id":"P0001-U03","end_id":"P0001-U03","track_id":"b"}
               ]
             }
         """.trimIndent()

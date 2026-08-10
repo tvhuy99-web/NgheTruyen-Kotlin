@@ -1,9 +1,10 @@
 package vn.nghetruyen.app.ai
 
+import org.json.JSONArray
+import org.json.JSONObject
 import vn.nghetruyen.app.core.common.AppResult
 import vn.nghetruyen.app.core.model.ChapterContent
 import vn.nghetruyen.app.core.model.GLOBAL_VOICE_PROFILE_STORY_ID
-import vn.nghetruyen.app.core.model.TtsVoiceOption
 import vn.nghetruyen.app.data.local.ChapterTransformEntity
 import vn.nghetruyen.app.data.local.ChapterVoiceAssignmentEntity
 import vn.nghetruyen.app.data.local.SceneMusicCueEntity
@@ -11,16 +12,14 @@ import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
 import vn.nghetruyen.app.data.local.VoiceRoleEntity
 import vn.nghetruyen.app.data.repository.LibraryRepository
 import vn.nghetruyen.app.data.settings.SettingsRepository
-import vn.nghetruyen.app.playback.TtsVoiceCatalog
 import java.util.Locale
 import java.util.UUID
 
-/** Creates and caches a coordinated voice-cast and scene-music plan used by playback and export. */
+/** Creates and caches a coordinated XPK-compatible voice-cast and scene-music plan. */
 class NarrationPlanCoordinator(
     private val library: LibraryRepository,
     private val settings: SettingsRepository,
-    private val ai: OnlineAiServices,
-    private val voiceCatalog: TtsVoiceCatalog,
+    private val ai: XpkNarrationAiServices,
 ) {
     data class Result(
         val voicePlanCreated: Boolean,
@@ -55,22 +54,25 @@ class NarrationPlanCoordinator(
                     is AppResult.Failure -> Result(false, false, listOf(voiceOutcome.message, "Chưa có tệp nhạc cảnh đang bật.").distinct())
                 }
             }
-            val options = tracks.map { it.toOption() }
             val context = buildContinuityContext(content, activeTrackId, tracks)
-            return when (val outcome = ai.planNarration(
-                NarrationPlanRequest(
-                    storyId = content.chapter.storyId,
-                    chapterId = content.chapter.id,
-                    rawText = ChapterAiWorkflow.markedParagraphs(content.paragraphs),
-                    includeVoiceCast = true,
-                    includeSceneMusic = true,
-                    tracks = options,
-                    context = context,
-                ),
-            )) {
+            return when (
+                val outcome = ai.planNarration(
+                    NarrationPlanRequest(
+                        storyId = content.chapter.storyId,
+                        chapterId = content.chapter.id,
+                        chapterTitle = content.chapter.title,
+                        rawText = chapterBody(content),
+                        includeVoiceCast = true,
+                        includeSceneMusic = true,
+                        tracks = tracks.map { it.toOption() },
+                        context = context,
+                    ),
+                )
+            ) {
                 is AppResult.Failure -> Result(false, false, listOf(outcome.message), usedUnifiedRequest = true)
                 is AppResult.Success -> {
                     val warnings = mutableListOf<String>()
+                    warnings += outcome.value.voiceCast.warnings
                     val voiceCreated = runCatching { persistVoicePlan(content, outcome.value.voiceCast) }
                         .fold({ true }, { warnings += it.message ?: "Không lưu được kế hoạch giọng."; false })
                     val musicCreated = runCatching { persistMusicPlan(content, tracks, outcome.value.musicCues) }
@@ -102,15 +104,14 @@ class NarrationPlanCoordinator(
         library.getStoryAiProfile(storyId)?.let { StoryVoiceCastReferenceCodec.decode(it.voiceCastNote) }
             ?: StoryVoiceCastReferenceSettings()
 
-    private suspend fun effectiveRoles(storyId: String, appSettings: vn.nghetruyen.app.data.settings.AppSettings): List<VoiceRoleEntity> {
+    private suspend fun effectiveRoles(storyId: String): List<VoiceRoleEntity> {
+        val appSettings = settings.snapshot()
         return when (storyVoiceSettings(storyId).mode) {
             StoryVoiceCastMode.OFF -> emptyList()
             StoryVoiceCastMode.PRIVATE -> library.listVoiceRoles(storyId).filter(VoiceRoleEntity::enabled)
             StoryVoiceCastMode.GLOBAL -> if (appSettings.autoVoiceCastEnabled) {
                 library.listVoiceRoles(GLOBAL_VOICE_PROFILE_STORY_ID).filter(VoiceRoleEntity::enabled)
-            } else {
-                emptyList()
-            }
+            } else emptyList()
         }
     }
 
@@ -119,7 +120,9 @@ class NarrationPlanCoordinator(
         if (force) return true
         val sourceHash = ChapterAiWorkflow.sha256(content.paragraphs)
         val cached = library.getChapterTransform(content.chapter.id, ChapterAiWorkflow.KIND_VOICE_CAST)
-        return cached?.sourceSha256 != sourceHash || library.listVoiceAssignments(content.chapter.id).isEmpty()
+        if (cached?.sourceSha256 != sourceHash) return true
+        if (cached.transformedText.contains("\"engine\":\"$VOICE_TRANSFORM_ENGINE\"")) return false
+        return library.listVoiceAssignments(content.chapter.id).isEmpty()
     }
 
     private suspend fun needsMusicPlan(
@@ -139,14 +142,20 @@ class NarrationPlanCoordinator(
             return AppResult.Failure("VOICE_CAST_DISABLED", "Phân vai TTS đang tắt cho truyện này.")
         }
         if (!needsVoicePlan(content, force)) return AppResult.Success(false)
-        return when (val result = ai.planVoiceCast(
-            content.chapter.storyId,
-            content.chapter.id,
-            ChapterAiWorkflow.markedParagraphs(content.paragraphs),
-        )) {
+        return when (
+            val result = ai.planVoiceCast(
+                storyId = content.chapter.storyId,
+                chapterId = content.chapter.id,
+                chapterTitle = content.chapter.title,
+                rawText = chapterBody(content),
+            )
+        ) {
             is AppResult.Failure -> result
             is AppResult.Success -> runCatching { persistVoicePlan(content, result.value) }
-                .fold({ AppResult.Success(true) }, { AppResult.Failure("VOICE_PLAN_SAVE_FAILED", it.message ?: "Không lưu được kế hoạch giọng.", it) })
+                .fold(
+                    { AppResult.Success(true) },
+                    { AppResult.Failure("VOICE_PLAN_SAVE_FAILED", it.message ?: "Không lưu được kế hoạch giọng.", it) },
+                )
         }
     }
 
@@ -159,79 +168,45 @@ class NarrationPlanCoordinator(
         if (tracks.isEmpty()) return AppResult.Failure("AI_TRACKS_EMPTY", "Chưa có tệp nhạc cảnh đang bật.")
         if (!needsMusicPlan(content, tracks, force)) return AppResult.Success(false)
         val context = buildContinuityContext(content, activeTrackId, tracks)
-        return when (val result = ai.planNarration(
-            NarrationPlanRequest(
-                storyId = content.chapter.storyId,
-                chapterId = content.chapter.id,
-                rawText = ChapterAiWorkflow.markedParagraphs(content.paragraphs),
-                includeVoiceCast = false,
-                includeSceneMusic = true,
-                tracks = tracks.map { it.toOption() },
-                context = context,
-            ),
-        )) {
+        return when (
+            val result = ai.planNarration(
+                NarrationPlanRequest(
+                    storyId = content.chapter.storyId,
+                    chapterId = content.chapter.id,
+                    chapterTitle = content.chapter.title,
+                    rawText = chapterBody(content),
+                    includeVoiceCast = false,
+                    includeSceneMusic = true,
+                    tracks = tracks.map { it.toOption() },
+                    context = context,
+                ),
+            )
+        ) {
             is AppResult.Failure -> result
             is AppResult.Success -> runCatching { persistMusicPlan(content, tracks, result.value.musicCues) }
-                .fold({ AppResult.Success(true) }, { AppResult.Failure("MUSIC_PLAN_SAVE_FAILED", it.message ?: "Không lưu được kế hoạch nhạc.", it) })
+                .fold(
+                    { AppResult.Success(true) },
+                    { AppResult.Failure("MUSIC_PLAN_SAVE_FAILED", it.message ?: "Không lưu được kế hoạch nhạc.", it) },
+                )
         }
     }
 
+    /**
+     * Saves the lossless unit-ID assignment set in chapter_transforms. The old paragraph table remains
+     * a temporary playback bridge until milestone 5 migrates the runtime/database to unit positions.
+     */
     private suspend fun persistVoicePlan(content: ChapterContent, plan: VoiceCastPlan) {
         val appSettings = settings.snapshot()
-        val storyMode = storyVoiceSettings(content.chapter.storyId).mode
-        val existingRoles = effectiveRoles(content.chapter.storyId, appSettings)
-        val existing = existingRoles.associateBy { it.roleName.trim().lowercase(Locale.ROOT) }
-        val voices = when (val scan = voiceCatalog.load(appSettings.ttsEnginePackage)) {
-            is AppResult.Success -> scan.value
-            is AppResult.Failure -> emptyList()
-        }
-        if (storyMode == StoryVoiceCastMode.PRIVATE) {
-            plan.roles.forEach { role ->
-                val key = role.character.trim().lowercase(Locale.ROOT)
-                val current = existing[key]
-                val narrator = role.character.equals(NARRATOR, ignoreCase = true)
-                val allocated = current?.voiceName?.let { name -> voices.firstOrNull { it.name == name } }
-                    ?: allocateVoice(role.character, narrator, voices, appSettings.ttsVoiceName)
-                val variation = voiceVariation(role.character, narrator)
-                val aliases = (current?.aliasesCsv.orEmpty().split(',') + role.aliases)
-                    .map(String::trim)
-                    .filter(String::isNotBlank)
-                    .distinctBy { it.lowercase(Locale.ROOT) }
-                    .take(20)
-                    .joinToString(",")
-                library.saveVoiceRole(
-                    storyId = content.chapter.storyId,
-                    roleName = role.character,
-                    aliasesCsv = aliases,
-                    voiceName = allocated?.name ?: current?.voiceName ?: appSettings.ttsVoiceName,
-                    languageTag = allocated?.languageTag ?: current?.languageTag ?: appSettings.ttsLanguageTag,
-                    rate = current?.rate ?: (appSettings.ttsRate * variation.first).coerceIn(0.25f, 3f),
-                    pitch = current?.pitch ?: (appSettings.ttsPitch * variation.second).coerceIn(0.5f, 2f),
-                    volume = current?.volume ?: appSettings.ttsVolume,
-                    isNarrator = narrator,
-                    enginePackage = current?.enginePackage ?: appSettings.ttsEnginePackage,
-                    expression = current?.expression ?: role.expression,
-                    expressionStrength = current?.expressionStrength ?: if (narrator) 0.25f else 0.65f,
-                    sonicSpeed = current?.sonicSpeed ?: appSettings.sonicDefaultSpeed,
-                    sonicPitch = current?.sonicPitch ?: appSettings.sonicDefaultPitch,
-                    enabled = current?.enabled ?: true,
-                ).getOrThrow()
-            }
-        }
-        val allowedRoles = if (existingRoles.isNotEmpty()) {
-            existingRoles.map { it.roleName.lowercase(Locale.ROOT) }.toSet()
-        } else {
-            plan.roles.map { it.character.lowercase(Locale.ROOT) }.toSet()
-        }
-        val assignments = plan.assignments
+        val roles = effectiveRoles(content.chapter.storyId)
+        val roleByPromptId = roles.associateBy(XpkVoiceCastPrompt::promptVoiceId)
+        val canonicalAssignments = plan.assignments
+            .filter { it.unitId.isNotBlank() && it.voiceId.isNotBlank() }
+            .distinctBy { it.unitId }
+        val legacyAssignments = canonicalAssignments
             .filter { it.paragraphIndex in content.paragraphs.indices }
-            .filter { assignment -> storyMode == StoryVoiceCastMode.PRIVATE || assignment.character.lowercase(Locale.ROOT) in allowedRoles }
+            .distinctBy { it.paragraphIndex }
             .map { assignment ->
-                val roleName = if (storyMode == StoryVoiceCastMode.GLOBAL && assignment.character.lowercase(Locale.ROOT) !in allowedRoles) {
-                    NARRATOR
-                } else {
-                    assignment.character
-                }
+                val roleName = roleByPromptId[assignment.voiceId]?.roleName ?: assignment.character.ifBlank { NARRATOR }
                 ChapterVoiceAssignmentEntity(
                     id = stableId(content.chapter.id, assignment.paragraphIndex.toString()),
                     storyId = content.chapter.storyId,
@@ -245,8 +220,33 @@ class NarrationPlanCoordinator(
                     updatedAt = System.currentTimeMillis(),
                 )
             }
-        library.replaceVoiceAssignments(content.chapter.storyId, content.chapter.id, assignments)
-        val (provider, model) = effectiveAiMetadata(content.chapter.storyId, appSettings.aiOnline.provider.name, appSettings.aiOnline.model)
+        library.replaceVoiceAssignments(content.chapter.storyId, content.chapter.id, legacyAssignments)
+
+        val payload = JSONObject()
+            .put("engine", VOICE_TRANSFORM_ENGINE)
+            .put("splitter_version", XpkVoiceCastSplitter.ENGINE_VERSION)
+            .put(
+                "assignments",
+                JSONArray().also { array ->
+                    canonicalAssignments.forEach { assignment ->
+                        array.put(
+                            JSONObject()
+                                .put("id", assignment.unitId)
+                                .put("voice", assignment.voiceId)
+                                .put("speed_adjust_pct", assignment.speedAdjustPct.toDouble())
+                                .put("pitch_adjust_pct", assignment.pitchAdjustPct.toDouble())
+                                .put("volume_adjust_pct", assignment.volumeAdjustPct.toDouble()),
+                        )
+                    }
+                },
+            )
+            .put("warnings", JSONArray(plan.warnings))
+            .toString()
+        val (provider, model) = effectiveAiMetadata(
+            content.chapter.storyId,
+            appSettings.aiOnline.provider.name,
+            appSettings.aiOnline.model,
+        )
         library.saveChapterTransform(
             ChapterTransformEntity(
                 id = stableId(content.chapter.id, ChapterAiWorkflow.KIND_VOICE_CAST),
@@ -256,7 +256,7 @@ class NarrationPlanCoordinator(
                 provider = provider,
                 model = model,
                 sourceSha256 = ChapterAiWorkflow.sha256(content.paragraphs),
-                transformedText = "roles=${plan.roles.size};assignments=${assignments.size};mode=${storyMode.name}",
+                transformedText = payload,
                 updatedAt = System.currentTimeMillis(),
             ),
         )
@@ -270,6 +270,7 @@ class NarrationPlanCoordinator(
         val allowed = tracks.associateBy { it.id }
         val cues = plannedCues
             .filter { it.startParagraph in content.paragraphs.indices && allowed.containsKey(it.trackId) }
+            .distinctBy { it.startParagraph }
             .map { cue ->
                 SceneMusicCueEntity(
                     id = stableId(content.chapter.id, cue.startParagraph.toString()),
@@ -285,6 +286,18 @@ class NarrationPlanCoordinator(
         library.replaceSceneMusicCues(content.chapter.storyId, content.chapter.id, cues)
         val appSettings = settings.snapshot()
         val (provider, model) = effectiveAiMetadata(content.chapter.storyId, appSettings.aiOnline.provider.name, appSettings.aiOnline.model)
+        val unitScenes = JSONArray().also { array ->
+            plannedCues.forEach { cue ->
+                if (cue.startUnitId.isNotBlank() && cue.endUnitId.isNotBlank()) {
+                    array.put(
+                        JSONObject()
+                            .put("start_id", cue.startUnitId)
+                            .put("end_id", cue.endUnitId)
+                            .put("track_id", cue.trackId),
+                    )
+                }
+            }
+        }
         library.saveChapterTransform(
             ChapterTransformEntity(
                 id = stableId(content.chapter.id, ChapterAiWorkflow.KIND_SCENE_MUSIC),
@@ -294,7 +307,10 @@ class NarrationPlanCoordinator(
                 provider = provider,
                 model = model,
                 sourceSha256 = musicSourceHash(content, tracks),
-                transformedText = "cues=${cues.size};unified=1",
+                transformedText = JSONObject()
+                    .put("engine", MUSIC_TRANSFORM_ENGINE)
+                    .put("music_scenes", unitScenes)
+                    .toString(),
                 updatedAt = System.currentTimeMillis(),
             ),
         )
@@ -323,6 +339,8 @@ class NarrationPlanCoordinator(
         )
     }
 
+    private fun chapterBody(content: ChapterContent): String = content.paragraphs.joinToString("\n")
+
     private fun musicSourceHash(content: ChapterContent, tracks: List<SceneMusicTrackEntity>): String =
         ChapterAiWorkflow.sha256(content.paragraphs + tracks.flatMap { listOf(it.id, it.tagsCsv, it.title) })
 
@@ -340,33 +358,12 @@ class NarrationPlanCoordinator(
         return provider to model
     }
 
-    private fun allocateVoice(
-        roleName: String,
-        narrator: Boolean,
-        voices: List<TtsVoiceOption>,
-        preferredVoice: String?,
-    ): TtsVoiceOption? {
-        preferredVoice?.let { preferred ->
-            if (narrator) voices.firstOrNull { it.name == preferred }?.let { return it }
-        }
-        val suitable = voices.filter { it.languageTag.startsWith("vi", ignoreCase = true) }.ifEmpty { voices }
-        if (suitable.isEmpty()) return null
-        val hash = roleName.lowercase(Locale.ROOT).hashCode() + if (narrator) 0 else 1
-        return suitable[Math.floorMod(hash, suitable.size)]
-    }
-
-    private fun voiceVariation(roleName: String, narrator: Boolean): Pair<Float, Float> {
-        if (narrator) return 1f to 1f
-        val hash = roleName.lowercase(Locale.ROOT).hashCode()
-        val rate = 0.95f + Math.floorMod(hash, 11) / 100f
-        val pitch = 0.90f + Math.floorMod(hash / 11, 21) / 100f
-        return rate to pitch
-    }
-
     private fun stableId(first: String, second: String): String =
         UUID.nameUUIDFromBytes("$first\u0000$second".toByteArray()).toString()
 
     companion object {
         private const val NARRATOR = "Người kể chuyện"
+        private const val VOICE_TRANSFORM_ENGINE = "xpk-unit-v8"
+        private const val MUSIC_TRANSFORM_ENGINE = "xpk-unit-scene-v1"
     }
 }

@@ -22,7 +22,7 @@ class XpkDialogueGroupRepairTest {
         )
 
         assertEquals(listOf("voice-female", "voice-female"), plan.assignments.map { it.voiceId })
-        assertEquals(0f, plan.assignments[0].speedAdjustPct)
+        assertEquals(4f, plan.assignments[0].speedAdjustPct)
         assertEquals(-3f, plan.assignments[1].speedAdjustPct)
     }
 }

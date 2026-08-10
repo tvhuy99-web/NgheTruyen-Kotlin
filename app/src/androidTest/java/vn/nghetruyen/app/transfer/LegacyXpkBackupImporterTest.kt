@@ -150,35 +150,35 @@ class LegacyXpkBackupImporterTest {
             val chapterUrl = "https://truyenfull.vision/test-story/chuong-2/"
             db.execSQL(
                 "INSERT INTO stories(source,story_url,title,current_chapter,current_url,para,total_para,progress,last_read_at,bookmarked) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                arrayOf("truyenfull", storyUrl, "Truyện thử", "Chương 2", chapterUrl, 3, 10, 0.3, 1_700_000_000_000L, 1),
+                arrayOf<Any?>("truyenfull", storyUrl, "Truyện thử", "Chương 2", chapterUrl, 3, 10, 0.3, 1_700_000_000_000L, 1),
             )
             db.execSQL(
                 "INSERT INTO chapters(url,story_url,source,story_title,title,offline_path,order_index,is_read,read_at,content_size,downloaded_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                arrayOf(chapterUrl, storyUrl, "truyenfull", "Truyện thử", "Chương 2", "/legacy/chapter.txt", 2, 1, 1_700_000_000_100L, 1234, 1_700_000_000_100L),
+                arrayOf<Any?>(chapterUrl, storyUrl, "truyenfull", "Truyện thử", "Chương 2", "/legacy/chapter.txt", 2, 1, 1_700_000_000_100L, 1234, 1_700_000_000_100L),
             )
             db.execSQL(
                 "INSERT INTO reading_history(source,story_url,chapter_url,title,para,read_at) VALUES(?,?,?,?,?,?)",
-                arrayOf("truyenfull", storyUrl, chapterUrl, "Chương 2", 4, 1_700_000_000_200L),
+                arrayOf<Any?>("truyenfull", storyUrl, chapterUrl, "Chương 2", 4, 1_700_000_000_200L),
             )
             db.execSQL(
                 "INSERT INTO bookmarks(source,story_url,chapter_url,title,para,created_at) VALUES(?,?,?,?,?,?)",
-                arrayOf("truyenfull", storyUrl, chapterUrl, "Đoạn hay", 5, 1_700_000_000_300L),
+                arrayOf<Any?>("truyenfull", storyUrl, chapterUrl, "Đoạn hay", 5, 1_700_000_000_300L),
             )
             db.execSQL(
                 "INSERT INTO followed_stories(source,story_url,title,last_chapter_url,last_chapter_title,last_chapter_number,known_chapter_count,new_chapter_count,last_checked_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                arrayOf("truyenfull", storyUrl, "Truyện thử", "https://truyenfull.vision/test-story/chuong-4/", "Chương 4", 4, 4, 2, 1_700_000_000_400L, 1_700_000_000_400L),
+                arrayOf<Any?>("truyenfull", storyUrl, "Truyện thử", "https://truyenfull.vision/test-story/chuong-4/", "Chương 4", 4, 4, 2, 1_700_000_000_400L, 1_700_000_000_400L),
             )
             db.execSQL(
                 "INSERT INTO tts_pronunciations(original,replacement,enabled,created_at,updated_at) VALUES(?,?,?,?,?)",
-                arrayOf("AI", "ây ai", 1, 1_700_000_000_500L, 1_700_000_000_500L),
+                arrayOf<Any?>("AI", "ây ai", 1, 1_700_000_000_500L, 1_700_000_000_500L),
             )
             db.execSQL(
                 "INSERT INTO story_tts_profiles(source,story_url,engine,language,voice,processing_method,sonic_quality,speed,pitch,volume,enabled,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-                arrayOf("truyenfull", storyUrl, "engine.pkg", "vi-VN", "voice-1", "system", 0, 1.15, 0.9, 0.8, 1, 1_700_000_000_600L),
+                arrayOf<Any?>("truyenfull", storyUrl, "engine.pkg", "vi-VN", "voice-1", "system", 0, 1.15, 0.9, 0.8, 1, 1_700_000_000_600L),
             )
             db.execSQL(
                 "INSERT INTO story_ai_profiles(source,story_url,mode,use_custom_prompt,translate_prompt,improve_prompt,updated_at) VALUES(?,?,?,?,?,?,?)",
-                arrayOf("truyenfull", storyUrl, "translate", 1, "Dịch thử", "Cải thiện thử", 1_700_000_000_700L),
+                arrayOf<Any?>("truyenfull", storyUrl, "translate", 1, "Dịch thử", "Cải thiện thử", 1_700_000_000_700L),
             )
         }
     }

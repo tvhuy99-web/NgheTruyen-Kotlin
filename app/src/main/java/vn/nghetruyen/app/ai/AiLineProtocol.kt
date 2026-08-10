@@ -16,6 +16,7 @@ object AiLineProtocol {
         val volumeLimitPct: Float = 10f,
         val expressiveAdjustment: Boolean = true,
         val incomingTrackId: String? = null,
+        val dialogueGroupByUnitId: Map<String, String> = emptyMap(),
     )
 
     data class XpkRawAssignment(
@@ -122,14 +123,31 @@ object AiLineProtocol {
         }
         if (validIds.isNotEmpty() && assignmentMap.isEmpty()) error("Không có ID hợp lệ nào trong phản hồi AI")
 
+        // Mirror VoiceCast:applyAssignments(): the first explicitly assigned valid character voice in
+        // a dialogue_group_id becomes authoritative for every fragment in that same long turn.
+        val groupVoice = linkedMapOf<String, String>()
+        validIds.forEach { id ->
+            val group = options.dialogueGroupByUnitId[id]?.trim().orEmpty()
+            val assignment = assignmentMap[id]
+            val voice = assignment?.voiceId.orEmpty()
+            if (group.isNotBlank() && group !in groupVoice && voice.isNotBlank() &&
+                voice != XpkVoiceCastSplitter.NARRATOR_ID && voice in voiceSet
+            ) {
+                groupVoice[group] = voice
+            }
+        }
+
         var missingCount = 0
         val assignments = validIds.map { id ->
-            assignmentMap[id] ?: ParagraphVoiceAssignment(
+            val base = assignmentMap[id] ?: ParagraphVoiceAssignment(
                 paragraphIndex = paragraphIndexFromUnitId(id),
                 confidence = 1f,
                 unitId = id,
                 voiceId = fallbackVoice,
             ).also { missingCount += 1 }
+            val group = options.dialogueGroupByUnitId[id]?.trim().orEmpty()
+            val forcedVoice = groupVoice[group]
+            if (forcedVoice != null && base.voiceId != forcedVoice) base.copy(voiceId = forcedVoice) else base
         }
         val warnings = buildList {
             if (missingCount > 0) add("$missingCount ID thiếu được dùng $fallbackVoice")
@@ -161,7 +179,8 @@ object AiLineProtocol {
         return XpkSceneMusicParity.validateScenes(rows, options.validUnitIds, options.validTrackIds)
     }
 
-    /** Legacy parser kept until the milestone-5 database/runtime migration removes paragraph contracts. */
+    /** Legacy parser kept only for the deprecated OnlineAiServices narration interfaces. */
+    @Deprecated("Use parseXpkNarration; paragraph ROLE/ASSIGN protocol is not used by XPK narration runtime")
     fun parseVoiceCast(raw: String): VoiceCastPlan {
         val roles = LinkedHashMap<String, VoiceRole>()
         val assignments = mutableListOf<ParagraphVoiceAssignment>()
@@ -206,6 +225,7 @@ object AiLineProtocol {
         return VoiceCastPlan(roles.values.toList(), assignments.distinctBy { it.paragraphIndex })
     }
 
+    @Deprecated("Use parseXpkNarration; paragraph CUE protocol is not used by XPK narration runtime")
     fun parseSceneCues(raw: String): List<SceneMusicCue> = raw.lineSequence()
         .map(String::trim)
         .filter { it.startsWith("CUE|", ignoreCase = true) }

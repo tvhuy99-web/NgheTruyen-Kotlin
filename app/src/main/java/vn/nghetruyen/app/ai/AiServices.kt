@@ -105,12 +105,7 @@ interface VietPhraseImprovementEngine {
 }
 
 interface VoiceCastEngine {
-    suspend fun planVoiceCast(
-        storyId: String,
-        chapterId: String,
-        rawText: String,
-        chapterTitle: String = "",
-    ): AppResult<VoiceCastPlan>
+    suspend fun planVoiceCast(storyId: String, chapterId: String, rawText: String): AppResult<VoiceCastPlan>
 }
 
 interface SceneMusicPlanner {
@@ -134,7 +129,7 @@ class DisabledAiServices : TranslationEngine, VietPhraseImprovementEngine, Voice
 
     override suspend fun translate(request: TranslationRequest) = disabled<String>()
     override suspend fun improveVietPhrase(request: VietPhraseImprovementRequest) = disabled<List<VietPhraseReplacementSuggestion>>()
-    override suspend fun planVoiceCast(storyId: String, chapterId: String, rawText: String, chapterTitle: String) = disabled<VoiceCastPlan>()
+    override suspend fun planVoiceCast(storyId: String, chapterId: String, rawText: String) = disabled<VoiceCastPlan>()
     override suspend fun planMusic(
         storyId: String,
         chapterId: String,

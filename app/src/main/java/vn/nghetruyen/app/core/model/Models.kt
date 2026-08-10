@@ -90,6 +90,7 @@ data class VoiceRoleDraft(
     val rate: Float = 1f,
     val pitch: Float = 1f,
     val volume: Float = 1f,
+    val sonicVolume: Float = 1f,
     val expression: VoiceExpression = VoiceExpression.NEUTRAL,
     val expressionStrength: Float = 0.5f,
     val sonicSpeed: Float = 1f,

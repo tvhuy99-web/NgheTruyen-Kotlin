@@ -101,7 +101,10 @@ class XpkNarrationAiServices(
             tracks = request.tracks,
             context = request.context,
         )
-        if (request.includeSceneMusic && bundle.sceneTrackIds.isEmpty()) {
+        val validSceneTrackIds = if (request.includeSceneMusic) {
+            XpkSceneMusicParity.normalizeTracks(request.tracks).map(XpkSceneMusicParity.PromptTrack::id)
+        } else emptyList()
+        if (request.includeSceneMusic && validSceneTrackIds.isEmpty()) {
             return failure("AI_TRACKS_EMPTY", "Không có bài nhạc cảnh hợp lệ để gửi AI.")
         }
         if (request.includeVoiceCast && bundle.dialogueIds.isEmpty() && !request.includeSceneMusic) {
@@ -123,7 +126,7 @@ class XpkNarrationAiServices(
                         validDialogueIds = bundle.dialogueIds,
                         validUnitIds = bundle.unitIds,
                         validVoiceIds = bundle.voiceIds,
-                        validTrackIds = bundle.sceneTrackIds,
+                        validTrackIds = validSceneTrackIds,
                         includeVoiceCast = request.includeVoiceCast,
                         includeSceneMusic = request.includeSceneMusic,
                         speedLimitPct = config.expressionSpeedLimitPct.toFloat(),

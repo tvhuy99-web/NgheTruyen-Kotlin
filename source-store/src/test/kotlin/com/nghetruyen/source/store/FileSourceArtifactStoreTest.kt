@@ -5,9 +5,7 @@ import com.nghetruyen.source.platform.SourceArtifactState
 import com.nghetruyen.source.platform.SourceCompatibilityProfile
 import com.nghetruyen.source.platform.SourceEcosystem
 import com.nghetruyen.source.platform.SourceTrustState
-import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.file.Files
@@ -36,7 +34,7 @@ class FileSourceArtifactStoreTest {
         val reopened = FileSourceArtifactStore(root)
         assertEquals("v1", reopened.active(identity)?.artifactId)
         assertEquals(listOf("v1"), reopened.activeArtifacts(SourceEcosystem.VBOOK).map { it.artifactId })
-        assertArrayEquals(v1Bytes, reopened.originalBytes("v1"))
+        assertTrue(reopened.originalBytes("v1")?.contentEquals(v1Bytes) == true)
 
         val secondIdentity = SourceArtifactIdentity(SourceEcosystem.VBOOK, "community", "other/path")
         val otherBytes = "package-other".toByteArray()
@@ -76,9 +74,9 @@ class FileSourceArtifactStoreTest {
 
         val afterRollback = FileSourceArtifactStore(root)
         assertEquals("v1", afterRollback.active(identity)?.artifactId)
-        assertNull(afterRollback.previousKnownGood(identity))
+        assertTrue(afterRollback.previousKnownGood(identity) == null)
         assertEquals(setOf("v1", "other-v1"), afterRollback.activeArtifacts(SourceEcosystem.VBOOK).map { it.artifactId }.toSet())
-        assertArrayEquals(v2Bytes, afterRollback.originalBytes("v2"))
+        assertTrue(afterRollback.originalBytes("v2")?.contentEquals(v2Bytes) == true)
     }
 
     @Test
@@ -96,7 +94,7 @@ class FileSourceArtifactStoreTest {
         SourceArtifactActivator(first).disable(identity)
 
         val reopened = FileSourceArtifactStore(root)
-        assertNull(reopened.active(identity))
+        assertTrue(reopened.active(identity) == null)
         assertEquals(SourceArtifactState.DISABLED, reopened.disabled(identity)?.state)
         assertEquals(listOf("disabled-v1"), reopened.installedArtifacts(SourceEcosystem.VBOOK).map { it.artifactId })
         assertTrue(reopened.activeArtifacts(SourceEcosystem.VBOOK).isEmpty())
@@ -105,8 +103,8 @@ class FileSourceArtifactStoreTest {
         reopened.commit(SourceArtifactLifecycle.enable(disabled, 20))
         val enabledAgain = FileSourceArtifactStore(root)
         assertEquals(SourceArtifactState.ACTIVE, enabledAgain.active(identity)?.state)
-        assertNull(enabledAgain.disabled(identity))
-        assertArrayEquals(bytes, enabledAgain.originalBytes("disabled-v1"))
+        assertTrue(enabledAgain.disabled(identity) == null)
+        assertTrue(enabledAgain.originalBytes("disabled-v1")?.contentEquals(bytes) == true)
     }
 
     @Test
@@ -124,10 +122,10 @@ class FileSourceArtifactStoreTest {
 
         assertTrue(store.uninstall(identity))
         val reopened = FileSourceArtifactStore(root)
-        assertNull(reopened.active(identity))
+        assertTrue(reopened.active(identity) == null)
         assertTrue(reopened.installedArtifacts(SourceEcosystem.VBOOK).isEmpty())
         assertTrue(reopened.contains("remove-v1"))
-        assertArrayEquals(bytes, reopened.originalBytes("remove-v1"))
+        assertTrue(reopened.originalBytes("remove-v1")?.contentEquals(bytes) == true)
     }
 
     @Test
@@ -143,6 +141,6 @@ class FileSourceArtifactStoreTest {
         store.stage(descriptor, bytes)
         val failure = runCatching { store.stage(descriptor.copy(sha256 = SourceArtifactLifecycle.sha256("two".toByteArray())), "two".toByteArray()) }.exceptionOrNull()
         assertTrue(failure != null)
-        assertArrayEquals(bytes, store.originalBytes("artifact"))
+        assertTrue(store.originalBytes("artifact")?.contentEquals(bytes) == true)
     }
 }

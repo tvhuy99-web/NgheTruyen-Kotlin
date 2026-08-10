@@ -64,6 +64,8 @@ jobs:
               raise SystemExit('replace helper not found in implementation script')
           script = script.replace(strict, tolerant, 1)
           exec(compile(script, 'diagnostics-blackbox-implement.py', 'exec'))
+          browser = Path('app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidSourceBrowserBroker.kt')
+          browser.write_text(browser.read_text().replace('joinToString("\n")', 'joinToString("\\n")'))
           Path('.github/workflows/diagnostics-blackbox-pr-kick.yml').unlink(missing_ok=True)
           PY
       - name: Validate source modules and app

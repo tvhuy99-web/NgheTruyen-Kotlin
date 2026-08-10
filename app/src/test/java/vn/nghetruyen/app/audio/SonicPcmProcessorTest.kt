@@ -117,7 +117,7 @@ class SonicPcmProcessorTest {
     }
 
     private fun estimateFrequency(samples: ShortArray, sampleRate: Int): Double {
-        val start = (sampleRate * 0.25).coerceAtMost(samples.size / 4)
+        val start = (sampleRate / 4).coerceAtMost(samples.size / 4)
         val end = (samples.size - sampleRate / 4).coerceAtLeast(start + 2)
         var crossings = 0
         for (index in start + 1 until end) {

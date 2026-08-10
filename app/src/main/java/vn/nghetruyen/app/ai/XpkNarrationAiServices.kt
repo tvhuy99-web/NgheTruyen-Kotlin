@@ -1,5 +1,6 @@
 package vn.nghetruyen.app.ai
 
+import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -14,6 +15,7 @@ import vn.nghetruyen.app.data.repository.LibraryRepository
 import vn.nghetruyen.app.data.settings.AiOnlineSettings
 import vn.nghetruyen.app.data.settings.AiProvider
 import vn.nghetruyen.app.data.settings.SettingsRepository
+import vn.nghetruyen.app.ui.reference.ReferenceVoiceRoleExtras
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlin.math.min
@@ -23,6 +25,7 @@ import kotlin.math.min
  * translation or VietPhrase traffic handled by [OnlineAiServices].
  */
 class XpkNarrationAiServices(
+    context: Context,
     private val settingsRepository: SettingsRepository,
     private val credentialStore: AiCredentialStore,
     private val requestGovernor: AiRequestGovernor,
@@ -36,6 +39,8 @@ class XpkNarrationAiServices(
         .followSslRedirects(false)
         .build(),
 ) {
+    private val appContext = context.applicationContext
+
     suspend fun planVoiceCast(
         storyId: String,
         chapterId: String,
@@ -69,10 +74,13 @@ class XpkNarrationAiServices(
             libraryRepository.listEffectiveVoiceRoles(
                 request.storyId,
                 settingsRepository.snapshot().autoVoiceCastEnabled,
-            ).filter(VoiceRoleEntity::enabled).take(MAX_VOICE_PROFILES)
+            ).filter(VoiceRoleEntity::enabled)
         } else emptyList()
 
         if (request.includeVoiceCast) {
+            if (profiles.size > MAX_VOICE_PROFILES) {
+                return failure("VOICE_PROFILES_TOO_MANY", "Tối đa 10 giọng")
+            }
             if (profiles.none(VoiceRoleEntity::isNarrator)) {
                 return failure("VOICE_NARRATOR_MISSING", "Chưa có hồ sơ Người kể chuyện hợp lệ.")
             }
@@ -81,10 +89,20 @@ class XpkNarrationAiServices(
             }
         }
 
+        val profileSettingsById = if (request.includeVoiceCast) {
+            profiles.associate { role ->
+                val extra = ReferenceVoiceRoleExtras.load(appContext, role.id)
+                val sonic = extra.processingMethod == "sonic"
+                role.id to XpkVoiceCastPrompt.PromptProfileSettings(
+                    processingMethod = if (sonic) "sonic" else "system",
+                    speed = if (sonic) extra.sonicSpeed ?: role.sonicSpeed else extra.systemRate ?: role.rate,
+                    pitch = if (sonic) extra.sonicPitch ?: role.sonicPitch else extra.systemPitch ?: role.pitch,
+                    volume = if (sonic) extra.sonicVolume ?: role.volume else extra.systemVolume ?: role.volume,
+                )
+            }
+        } else emptyMap()
+
         val storyNote = StoryVoiceCastReferenceCodec.userNote(config.voiceCastNote)
-        val customGuidance = if (config.useCustomVoiceCastPrompt) {
-            renderCustomGuidance(config.voiceCastPrompt, request, storyNote)
-        } else ""
         val bundle = XpkVoiceCastPrompt.build(
             title = request.chapterTitle,
             body = rawText,
@@ -95,11 +113,11 @@ class XpkNarrationAiServices(
             pitchLimitPct = config.expressionPitchLimitPct,
             volumeLimitPct = config.expressionVolumeLimitPct,
             expressionPrompt = config.expressionPrompt,
-            customGuidance = customGuidance,
             includeVoiceCast = request.includeVoiceCast,
             includeSceneMusic = request.includeSceneMusic,
             tracks = request.tracks,
             context = request.context,
+            profileSettingsById = profileSettingsById,
         )
         val validSceneTrackIds = if (request.includeSceneMusic) {
             XpkSceneMusicParity.normalizeTracks(request.tracks).map(XpkSceneMusicParity.PromptTrack::id)
@@ -134,6 +152,9 @@ class XpkNarrationAiServices(
                         volumeLimitPct = config.expressionVolumeLimitPct.toFloat(),
                         expressiveAdjustment = config.expressiveAdjustment,
                         incomingTrackId = request.context.activeTrackId,
+                        dialogueGroupByUnitId = bundle.units
+                            .mapNotNull { unit -> unit.dialogueGroupId?.takeIf(String::isNotBlank)?.let { unit.id to it } }
+                            .toMap(),
                     ),
                 )
                 val roleByPromptId = profiles.associateBy(XpkVoiceCastPrompt::promptVoiceId)
@@ -161,21 +182,6 @@ class XpkNarrationAiServices(
         )
     }
 
-    private fun renderCustomGuidance(
-        template: String,
-        request: NarrationPlanRequest,
-        storyNote: String,
-    ): String {
-        if (template.isBlank()) return ""
-        return template
-            .replace("{{CHAPTER_TEXT}}", "Xem BẢN CHÉP UNIT/DIALOGUE do ứng dụng cung cấp; không dùng văn bản tự chia lại.")
-            .replace("{{CHAPTER_TITLE}}", request.chapterTitle)
-            .replace("{{STORY_NOTE}}", storyNote)
-            .replace("{{EXISTING_ROLES}}", "Chỉ dùng DANH SÁCH GIỌNG ĐƯỢC PHÉP SỬ DỤNG trong prompt chính.")
-            .replace("{{EXPRESSION_RULES}}", "Tuân theo giới hạn và quy tắc ba phần trăm trong prompt chính.")
-            .take(MAX_CUSTOM_GUIDANCE_CHARS)
-    }
-
     private suspend fun resolveConfiguration(storyId: String): EffectiveConfig {
         val global = settingsRepository.snapshot().aiOnline
         val profile = storyId.takeIf(String::isNotBlank)?.let { libraryRepository.getStoryAiProfile(it) }
@@ -188,8 +194,6 @@ class XpkNarrationAiServices(
             endpoint = profile?.endpoint?.takeIf { profile.overrideProvider && it.isNotBlank() } ?: global.endpoint,
             model = profile?.model?.takeIf { profile.overrideProvider && it.isNotBlank() } ?: global.model,
             temperature = profile?.temperature?.takeIf { it in 0f..2f } ?: global.temperature,
-            useCustomVoiceCastPrompt = profile?.useCustomVoiceCastPrompt == true,
-            voiceCastPrompt = profile?.voiceCastPrompt.orEmpty(),
             voiceCastNote = profile?.voiceCastNote.orEmpty(),
             expressiveAdjustment = profile?.expressiveAdjustment ?: true,
             expressionPrompt = profile?.expressionPrompt.orEmpty(),
@@ -419,8 +423,6 @@ class XpkNarrationAiServices(
         val endpoint: String,
         val model: String,
         val temperature: Float,
-        val useCustomVoiceCastPrompt: Boolean,
-        val voiceCastPrompt: String,
         val voiceCastNote: String,
         val expressiveAdjustment: Boolean,
         val expressionPrompt: String,
@@ -445,8 +447,7 @@ class XpkNarrationAiServices(
         private const val MAX_PLAN_CHARS = 60_000
         private const val MAX_PROMPT_CHARS = 160_000
         private const val MAX_RESPONSE_CHARS = 2_000_000
-        private const val MAX_CUSTOM_GUIDANCE_CHARS = 20_000
         private const val MAX_OUTPUT_TOKENS = 8_000
-        private const val MAX_VOICE_PROFILES = 40
+        private const val MAX_VOICE_PROFILES = 10
     }
 }

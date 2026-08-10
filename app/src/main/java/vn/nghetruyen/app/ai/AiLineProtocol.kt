@@ -1,6 +1,5 @@
 package vn.nghetruyen.app.ai
 
-import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
 
@@ -18,6 +17,14 @@ object AiLineProtocol {
         val expressiveAdjustment: Boolean = true,
     )
 
+    data class XpkRawAssignment(
+        val id: String,
+        val voice: String,
+        val speedAdjustPct: Float = 0f,
+        val pitchAdjustPct: Float = 0f,
+        val volumeAdjustPct: Float = 0f,
+    )
+
     fun parseXpkNarration(raw: String, options: XpkParseOptions): NarrationPlan {
         val root = JSONObject(extractJsonObject(raw))
         val voicePlan = if (options.includeVoiceCast) parseXpkVoiceCast(root, options) else VoiceCastPlan(emptyList(), emptyList())
@@ -27,6 +34,36 @@ object AiLineProtocol {
 
     private fun parseXpkVoiceCast(root: JSONObject, options: XpkParseOptions): VoiceCastPlan {
         val source = root.optJSONArray("assignments") ?: error("AI không trả đúng JSON assignments")
+        val rows = buildList {
+            for (index in 0 until source.length()) {
+                val row = source.optJSONObject(index) ?: continue
+                add(
+                    XpkRawAssignment(
+                        id = row.optString("id").trim(),
+                        voice = row.optString("voice").trim(),
+                        speedAdjustPct = adjustment(
+                            row,
+                            "speed_adjust_pct",
+                            listOf("speed_pct", "speed_delta_pct", "speedAdjustPct", "speed_adjustment_pct", "rate_adjust_pct", "rate_pct", "speed", "rate"),
+                        ),
+                        pitchAdjustPct = adjustment(
+                            row,
+                            "pitch_adjust_pct",
+                            listOf("pitch_pct", "pitch_delta_pct", "pitchAdjustPct", "pitch_adjustment_pct", "pitch"),
+                        ),
+                        volumeAdjustPct = adjustment(
+                            row,
+                            "volume_adjust_pct",
+                            listOf("volume_pct", "volume_delta_pct", "volumeAdjustPct", "volume_adjustment_pct", "gain_adjust_pct", "gain_pct", "volume", "gain"),
+                        ),
+                    ),
+                )
+            }
+        }
+        return repairXpkAssignments(rows, options)
+    }
+
+    fun repairXpkAssignments(rows: List<XpkRawAssignment>, options: XpkParseOptions): VoiceCastPlan {
         val validIds = options.validDialogueIds.map(String::trim).filter(String::isNotBlank)
         val idSet = validIds.toHashSet()
         val voices = options.validVoiceIds.map(String::trim).filter(String::isNotBlank).distinct()
@@ -35,64 +72,53 @@ object AiLineProtocol {
             ?: voices.firstOrNull()
             ?: error("Danh sách giọng hợp lệ đang trống")
         val hasCharacterVoice = voices.any { it != XpkVoiceCastSplitter.NARRATOR_ID }
-
         val assignmentMap = linkedMapOf<String, ParagraphVoiceAssignment>()
-        val duplicateIds = mutableListOf<String>()
-        val unexpectedIds = mutableListOf<String>()
-        val invalidVoiceIds = mutableListOf<String>()
+        var duplicateCount = 0
+        var unexpectedCount = 0
+        var invalidVoiceCount = 0
 
-        for (index in 0 until source.length()) {
-            val row = source.optJSONObject(index) ?: continue
-            val id = row.optString("id").trim()
-            val requestedVoice = row.optString("voice").trim()
+        rows.forEach { row ->
+            val id = row.id.trim()
+            val requestedVoice = row.voice.trim()
             if (id !in idSet) {
-                if (id.isNotBlank()) unexpectedIds += id
-                continue
+                if (id.isNotBlank()) unexpectedCount += 1
+                return@forEach
             }
             if (assignmentMap.containsKey(id)) {
-                duplicateIds += id
-                continue
+                duplicateCount += 1
+                return@forEach
             }
             val validDialogueVoice = requestedVoice in voiceSet &&
                 (requestedVoice != XpkVoiceCastSplitter.NARRATOR_ID || !hasCharacterVoice)
             val selectedVoice = if (validDialogueVoice) requestedVoice else fallbackVoice
-            if (!validDialogueVoice) invalidVoiceIds += id
-            val speed = if (options.expressiveAdjustment && selectedVoice != XpkVoiceCastSplitter.NARRATOR_ID) {
-                adjustment(row, "speed_adjust_pct", listOf("speed_pct", "speed_delta_pct", "speedAdjustPct", "speed_adjustment_pct", "rate_adjust_pct", "rate_pct", "speed", "rate"), options.speedLimitPct)
-            } else 0f
-            val pitch = if (options.expressiveAdjustment && selectedVoice != XpkVoiceCastSplitter.NARRATOR_ID) {
-                adjustment(row, "pitch_adjust_pct", listOf("pitch_pct", "pitch_delta_pct", "pitchAdjustPct", "pitch_adjustment_pct", "pitch"), options.pitchLimitPct)
-            } else 0f
-            val volume = if (options.expressiveAdjustment && selectedVoice != XpkVoiceCastSplitter.NARRATOR_ID) {
-                adjustment(row, "volume_adjust_pct", listOf("volume_pct", "volume_delta_pct", "volumeAdjustPct", "volume_adjustment_pct", "gain_adjust_pct", "gain_pct", "volume", "gain"), options.volumeLimitPct)
-            } else 0f
+            if (!validDialogueVoice) invalidVoiceCount += 1
+            val adjustmentsEnabled = options.expressiveAdjustment && selectedVoice != XpkVoiceCastSplitter.NARRATOR_ID
             assignmentMap[id] = ParagraphVoiceAssignment(
                 paragraphIndex = paragraphIndexFromUnitId(id),
                 confidence = 1f,
-                speedAdjustPct = speed,
-                pitchAdjustPct = pitch,
-                volumeAdjustPct = volume,
+                speedAdjustPct = if (adjustmentsEnabled) clamp(row.speedAdjustPct, options.speedLimitPct) else 0f,
+                pitchAdjustPct = if (adjustmentsEnabled) clamp(row.pitchAdjustPct, options.pitchLimitPct) else 0f,
+                volumeAdjustPct = if (adjustmentsEnabled) clamp(row.volumeAdjustPct, options.volumeLimitPct) else 0f,
                 unitId = id,
                 voiceId = selectedVoice,
             )
         }
-
         if (validIds.isNotEmpty() && assignmentMap.isEmpty()) error("Không có ID hợp lệ nào trong phản hồi AI")
 
-        val missingIds = mutableListOf<String>()
+        var missingCount = 0
         val assignments = validIds.map { id ->
             assignmentMap[id] ?: ParagraphVoiceAssignment(
                 paragraphIndex = paragraphIndexFromUnitId(id),
                 confidence = 1f,
                 unitId = id,
                 voiceId = fallbackVoice,
-            ).also { missingIds += id }
+            ).also { missingCount += 1 }
         }
         val warnings = buildList {
-            if (missingIds.isNotEmpty()) add("${missingIds.size} ID thiếu được dùng $fallbackVoice")
-            if (duplicateIds.isNotEmpty()) add("${duplicateIds.size} ID lặp đã bị bỏ")
-            if (unexpectedIds.isNotEmpty()) add("${unexpectedIds.size} ID lạ đã bị bỏ")
-            if (invalidVoiceIds.isNotEmpty()) add("${invalidVoiceIds.size} mã giọng sai được dùng $fallbackVoice")
+            if (missingCount > 0) add("$missingCount ID thiếu được dùng $fallbackVoice")
+            if (duplicateCount > 0) add("$duplicateCount ID lặp đã bị bỏ")
+            if (unexpectedCount > 0) add("$unexpectedCount ID lạ đã bị bỏ")
+            if (invalidVoiceCount > 0) add("$invalidVoiceCount mã giọng sai được dùng $fallbackVoice")
         }
         return VoiceCastPlan(emptyList(), assignments, warnings)
     }
@@ -193,7 +219,7 @@ object AiLineProtocol {
         return (paragraph - 1).coerceAtLeast(0)
     }
 
-    private fun adjustment(row: JSONObject, primary: String, aliases: List<String>, limit: Float): Float {
+    private fun adjustment(row: JSONObject, primary: String, aliases: List<String>): Float {
         val keys = listOf(primary) + aliases
         fun value(container: JSONObject): Any? {
             keys.forEach { key -> if (container.has(key)) return container.opt(key) }
@@ -203,11 +229,15 @@ object AiLineProtocol {
             ?: row.optJSONObject("adjustments")?.let(::value)
             ?: row.optJSONObject("prosody")?.let(::value)
             ?: return 0f
-        val number = when (raw) {
+        return when (raw) {
             is Number -> raw.toFloat()
             else -> Regex("[-+]?\\d+(?:[.,]\\d+)?").find(raw.toString())?.value?.replace(',', '.')?.toFloatOrNull()
         } ?: 0f
-        return number.coerceIn(-limit.coerceAtLeast(0f), limit.coerceAtLeast(0f))
+    }
+
+    private fun clamp(value: Float, limit: Float): Float {
+        val safe = limit.coerceAtLeast(0f)
+        return value.coerceIn(-safe, safe)
     }
 
     private fun extractJsonObject(raw: String): String {

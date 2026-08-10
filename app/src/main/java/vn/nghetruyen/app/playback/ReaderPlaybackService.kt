@@ -881,10 +881,25 @@ class ReaderPlaybackService : Service() {
         val speed = activeSonicSpeed.coerceIn(0.25f, 3f)
         val pitch = activeSonicPitch.coerceIn(0.5f, 2f)
         val volume = activeSonicVolume.coerceIn(0f, 2f)
+        val sonicGain = if (activeSpeechAttempt?.config?.sonicEnabled == true) volume else 1f
         serviceScope.launch {
+            var normalizationFailed = false
             val processed = runCatching {
-                Pcm16WaveConverter.convert(raw, pcm, volume)
-                SonicPcmProcessor.process(pcm, output, speed, pitch, activeSpeechAttempt?.config?.sonicAccurate ?: false)
+                // Normalize the raw TTS baseline before applying the user's volume.
+                // This prevents LUFS normalization from cancelling Sonic values above 100%.
+                Pcm16WaveConverter.convert(raw, pcm, 1f)
+                runCatching { normalizeRenderedSpeech(pcm) }
+                    .onFailure { normalizationFailed = true }
+                // Preserve the intentional two-stage Sonic gain: converter first, Sonic second.
+                Pcm16WaveConverter.convert(pcm, raw, volume)
+                SonicPcmProcessor.process(
+                    raw,
+                    output,
+                    speed,
+                    pitch,
+                    activeSpeechAttempt?.config?.sonicAccurate ?: false,
+                    gain = sonicGain,
+                )
             }
             withContext(Dispatchers.Main) {
                 if (activeUtteranceId != playbackId || activeSonicPlaybackId != playbackId) {
@@ -896,14 +911,12 @@ class ReaderPlaybackService : Service() {
                     clearSonicPlayback(deleteFiles = true)
                     recoverActiveSpeech("SONIC_PROCESS_FAILED")
                 }.onSuccess {
-                    val normalized = runCatching { normalizeRenderedSpeech(output) }
-                        .getOrElse {
-                            transitionMessage = "Không chuẩn hóa được âm lượng; đang dùng bản giọng an toàn."
-                            output
-                        }
-                    activeSonicOutputFile = normalized
-                    activeSonicCacheKey?.let { key -> runCatching { ttsCache?.put(key, normalized) } }
-                    startSonicPlayback(normalized, playbackId)
+                    if (normalizationFailed) {
+                        transitionMessage = "Không chuẩn hóa được âm lượng; đang dùng bản giọng an toàn."
+                    }
+                    activeSonicOutputFile = output
+                    activeSonicCacheKey?.let { key -> runCatching { ttsCache?.put(key, output) } }
+                    startSonicPlayback(output, playbackId)
                 }
             }
         }
@@ -978,13 +991,15 @@ class ReaderPlaybackService : Service() {
     private fun prepareRolePreview(intent: Intent) {
         val rawText = intent.getStringExtra(EXTRA_PREVIEW_TEXT).orEmpty()
         val sonicEnabled = intent.getBooleanExtra(EXTRA_PREVIEW_SONIC_ENABLED, false)
+        val systemVolume = intent.getFloatExtra(EXTRA_PREVIEW_VOLUME, 1f)
+        val sonicVolume = intent.getFloatExtra(EXTRA_PREVIEW_SONIC_VOLUME, systemVolume)
         val baseConfig = RuntimeVoiceConfig(
             enginePackage = intent.getStringExtra(EXTRA_PREVIEW_ENGINE)?.takeIf(String::isNotBlank),
             voiceName = intent.getStringExtra(EXTRA_PREVIEW_VOICE)?.takeIf(String::isNotBlank),
             languageTag = intent.getStringExtra(EXTRA_PREVIEW_LANGUAGE).orEmpty().ifBlank { "vi-VN" },
             rate = if (sonicEnabled) 1f else intent.getFloatExtra(EXTRA_PREVIEW_RATE, 1f).coerceIn(0.25f, 3f),
             pitch = if (sonicEnabled) 1f else intent.getFloatExtra(EXTRA_PREVIEW_PITCH, 1f).coerceIn(0.5f, 2f),
-            volume = intent.getFloatExtra(EXTRA_PREVIEW_VOLUME, 1f).coerceIn(0f, 2f),
+            volume = (if (sonicEnabled) sonicVolume else systemVolume).coerceIn(0f, if (sonicEnabled) 2f else 1f),
             sonicSpeed = intent.getFloatExtra(EXTRA_PREVIEW_SONIC_SPEED, 1f).coerceIn(0.25f, 3f),
             sonicPitch = intent.getFloatExtra(EXTRA_PREVIEW_SONIC_PITCH, 1f).coerceIn(0.5f, 2f),
             sonicEnabled = sonicEnabled,
@@ -2145,6 +2160,7 @@ class ReaderPlaybackService : Service() {
         private const val EXTRA_PREVIEW_RATE = "preview_rate"
         private const val EXTRA_PREVIEW_PITCH = "preview_pitch"
         private const val EXTRA_PREVIEW_VOLUME = "preview_volume"
+        private const val EXTRA_PREVIEW_SONIC_VOLUME = "preview_sonic_volume"
         private const val EXTRA_PREVIEW_SONIC_SPEED = "preview_sonic_speed"
         private const val EXTRA_PREVIEW_SONIC_PITCH = "preview_sonic_pitch"
         private const val EXTRA_PREVIEW_SONIC_ENABLED = "preview_sonic_enabled"
@@ -2189,6 +2205,7 @@ class ReaderPlaybackService : Service() {
                     .putExtra(EXTRA_PREVIEW_RATE, draft.rate)
                     .putExtra(EXTRA_PREVIEW_PITCH, draft.pitch)
                     .putExtra(EXTRA_PREVIEW_VOLUME, draft.volume)
+                    .putExtra(EXTRA_PREVIEW_SONIC_VOLUME, draft.sonicVolume)
                     .putExtra(EXTRA_PREVIEW_SONIC_SPEED, draft.sonicSpeed)
                     .putExtra(EXTRA_PREVIEW_SONIC_PITCH, draft.sonicPitch)
                     .putExtra(EXTRA_PREVIEW_SONIC_ENABLED, draft.processingMethod == "sonic")

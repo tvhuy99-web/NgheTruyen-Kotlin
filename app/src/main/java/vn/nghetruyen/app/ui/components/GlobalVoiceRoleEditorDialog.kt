@@ -63,21 +63,37 @@ fun GlobalVoiceRoleEditorDialog(
     LaunchedEffect(draft.originalRoleId) {
         draft.originalRoleId?.let { roleId ->
             val extra = ReferenceVoiceRoleExtras.load(context, roleId)
+            val systemRate = extra.systemRate
+                ?: if (extra.processingMethod == "system") draft.rate.coerceIn(0.25f, 3f) else 1f
+            val systemPitch = extra.systemPitch
+                ?: if (extra.processingMethod == "system") draft.pitch.coerceIn(0.5f, 2f) else 1f
             val systemVolume = extra.systemVolume
                 ?: if (extra.processingMethod == "system") draft.volume.coerceIn(0f, 1f) else 1f
+            val sonicSpeed = extra.sonicSpeed
+                ?: if (extra.processingMethod == "sonic") draft.sonicSpeed.coerceIn(0.25f, 3f) else 1f
+            val sonicPitch = extra.sonicPitch
+                ?: if (extra.processingMethod == "sonic") draft.sonicPitch.coerceIn(0.5f, 2f) else 1f
             val sonicVolume = extra.sonicVolume
                 ?: if (extra.processingMethod == "sonic") draft.volume.coerceIn(0f, 2f) else 1f
             if (
                 draft.processingMethod != extra.processingMethod ||
                 draft.sonicAccurate != extra.sonicAccurate ||
+                draft.rate != systemRate ||
+                draft.pitch != systemPitch ||
                 draft.volume != systemVolume ||
+                draft.sonicSpeed != sonicSpeed ||
+                draft.sonicPitch != sonicPitch ||
                 draft.sonicVolume != sonicVolume
             ) {
                 onDraftChange(
                     draft.copy(
                         processingMethod = extra.processingMethod,
                         sonicAccurate = extra.sonicAccurate,
+                        rate = systemRate,
+                        pitch = systemPitch,
                         volume = systemVolume,
+                        sonicSpeed = sonicSpeed,
+                        sonicPitch = sonicPitch,
                         sonicVolume = sonicVolume,
                     ),
                 )
@@ -329,11 +345,15 @@ fun GlobalVoiceRoleEditorDialog(
             TextButton(
                 enabled = draft.roleName.isNotBlank() && draft.description.isNotBlank(),
                 onClick = {
-                    ReferenceVoiceRoleExtras.stageVolumesForNextSave(
+                    ReferenceVoiceRoleExtras.stageProcessorValuesForNextSave(
                         ReferenceVoiceRoleExtra(
                             processingMethod = draft.processingMethod,
                             sonicAccurate = draft.sonicAccurate,
+                            systemRate = draft.rate,
+                            systemPitch = draft.pitch,
                             systemVolume = draft.volume,
+                            sonicSpeed = draft.sonicSpeed,
+                            sonicPitch = draft.sonicPitch,
                             sonicVolume = draft.sonicVolume,
                         ),
                     )

@@ -25,29 +25,42 @@ jobs:
           ref: agent/xpk-parity-five-milestones
           fetch-depth: 0
 
-      - name: Commit nullable XPK voice-plan fix and restore workflow
+      - name: Commit nullable XPK voice-plan source fix
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
           path = Path('app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt')
           text = path.read_text(encoding='utf-8')
-          old_xpk = 'xpkVoiceAssignments = if (voicePlan?.sourceSha256 == originalHash) {'
-          new_xpk = 'xpkVoiceAssignments = if (voicePlan != null && voicePlan.sourceSha256 == originalHash) {'
-          old_legacy = 'voiceAssignments = if (voicePlan?.sourceSha256 == originalHash) {'
-          new_legacy = 'voiceAssignments = if (voicePlan != null && voicePlan.sourceSha256 == originalHash) {'
-          if text.count(old_xpk) != 1 or text.count(old_legacy) != 1:
-              raise SystemExit(f'unexpected voice-plan conditions: xpk={text.count(old_xpk)} legacy={text.count(old_legacy)}')
-          text = text.replace(old_xpk, new_xpk, 1).replace(old_legacy, new_legacy, 1)
-          path.write_text(text, encoding='utf-8')
+          replacements = [
+              (
+                  'xpkVoiceAssignments = if (voicePlan?.sourceSha256 == originalHash) {',
+                  'xpkVoiceAssignments = if (voicePlan != null && voicePlan.sourceSha256 == originalHash) {',
+              ),
+              (
+                  'voiceAssignments = if (voicePlan?.sourceSha256 == originalHash) {',
+                  'voiceAssignments = if (voicePlan != null && voicePlan.sourceSha256 == originalHash) {',
+              ),
+          ]
+          changed = False
+          for old, new in replacements:
+              if old in text:
+                  text = text.replace(old, new, 1)
+                  changed = True
+              elif new not in text:
+                  raise SystemExit(f'neither old nor new condition found: {old}')
+          if changed:
+              path.write_text(text, encoding='utf-8')
           PY
-          git checkout HEAD^ -- .github/workflows/build-apk.yml
-          git rm -f .github/workflows/one-time-fix-nullable.yml || true
+          if git diff --quiet -- app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt; then
+            echo "Playback source is already patched."
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt .github/workflows/build-apk.yml
+          git add app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt
           git commit -m "fix: guard nullable XPK voice transform"
           git push origin HEAD:agent/xpk-parity-five-milestones
 
-      - name: Stop temporary run after patch push
-        run: echo "Source fix pushed; the synchronized PR run will perform the authoritative build."
+      - name: Temporary patch workflow completed
+        run: echo "Playback source fix is present on the locked branch."

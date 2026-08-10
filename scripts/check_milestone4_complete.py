@@ -27,9 +27,6 @@ def compile_smoke() -> None:
  data class VoiceRoleEntity(val id:String="",val storyId:String="",val roleName:String="",val aliasesCsv:String="",val enginePackage:String?=null,val voiceName:String?=null,val languageTag:String="vi-VN",val rate:Float=1f,val pitch:Float=1f,val volume:Float=1f,val expression:String="NEUTRAL",val expressionStrength:Float=.5f,val sonicSpeed:Float=1f,val sonicPitch:Float=1f,val isNarrator:Boolean=false,val enabled:Boolean=true,val updatedAt:Long=0)
  data class SceneMusicTrackEntity(val id:String="",val title:String="",val uri:String="",val tagsCsv:String="",val volume:Float=1f,val enabled:Boolean=true,val loudnessLufsEstimate:Float=-18f,val playCount:Int=0,val lastPlayedAt:Long=0,val orderIndex:Int=0,val updatedAt:Long=0)
 ''', encoding="utf-8")
-        # VoiceExpressionProcessor now consults canonical XPK runtime state. This historical smoke test
-        # validates the non-XPK/local expression path only, so provide the smallest adapter and keep
-        # canonical XPK bypass behavior covered by the dedicated XPK parity tests/gates.
         xpk_runtime = root / "XpkPlaybackRuntimeStub.kt"
         xpk_runtime.write_text('''package vn.nghetruyen.app.playback
 object XpkPlaybackRuntime {
@@ -51,7 +48,8 @@ fun main(){
  val speech=VoiceExpressionProcessor.resolve("Một câu bình thường",role)
  check(speech.expression==VoiceExpression.ANGRY && speech.rateMultiplier>1f)
  val tracks=listOf(SceneMusicTrackEntity(id="a",title="A",uri="a",tagsCsv="calm",orderIndex=0),SceneMusicTrackEntity(id="b",title="B",uri="b",tagsCsv="battle",orderIndex=1))
- check(SceneMusicSelector.select(tracks,null,"",SceneMusicPlaybackMode.SEQUENTIAL,emptyList(),"x")?.id=="a")
+ check(SceneMusicSelector.select(tracks,"a","",SceneMusicPlaybackMode.SEQUENTIAL,emptyList(),"x")?.id=="a")
+ check(SceneMusicSelector.select(tracks,null,"",SceneMusicPlaybackMode.SEQUENTIAL,emptyList(),"x")==null)
  val tempRoot=File(System.getenv("RUNNER_TEMP") ?: System.getenv("TMPDIR") ?: ".").apply{mkdirs()}; val dir=java.nio.file.Files.createTempDirectory(tempRoot.toPath(),"nghe-m4-smoke-").toFile(); val input=File(dir,"i.wav"); val output=File(dir,"o.wav"); wave(input,4000)
  val before=PcmLoudnessEstimator.estimateLufs(input); check(before in -70f..0f)
  val processed=SonicPcmProcessor.process(input,output,2f,1f); check(processed.dataLength in 7000L..9000L)

@@ -15,7 +15,13 @@ import vn.nghetruyen.app.sources.SourceImplementationKind
 import vn.nghetruyen.app.sources.StorySource
 import vn.nghetruyen.source.api.SourceCapabilityBrokers
 import vn.nghetruyen.source.api.JsonValue
+import vn.nghetruyen.source.api.JsonCodec
 import vn.nghetruyen.source.api.SourcePlatformResult
+import vn.nghetruyen.source.diagnostics.DiagnosticCategory
+import vn.nghetruyen.source.diagnostics.DiagnosticEvent
+import vn.nghetruyen.source.diagnostics.DiagnosticEvidence
+import vn.nghetruyen.source.diagnostics.DiagnosticEvidenceSink
+import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 import vn.nghetruyen.source.diagnostics.DiagnosticSink
 import vn.nghetruyen.source.runtime.SourceResourceProvider
 import vn.nghetruyen.source.vbook.VBookCompatibilityRuntime
@@ -31,6 +37,7 @@ import vn.nghetruyen.source.vbook.VBookScriptRole
 import vn.nghetruyen.source.vbook.VBookStoryNormalizer
 import java.net.URI
 import java.util.Base64
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -44,7 +51,8 @@ class VBookStorySource(
     packageBytes: ByteArray,
     brokers: SourceCapabilityBrokers,
     private val configReader: VBookConfigReader = VBookConfigReader { emptyMap() },
-    diagnostics: DiagnosticSink = DiagnosticSink.NONE,
+    private val diagnostics: DiagnosticSink = DiagnosticSink.NONE,
+    private val evidence: DiagnosticEvidenceSink = DiagnosticEvidenceSink.NONE,
 ) : StorySource {
     private val pkg: VBookPackage = VBookPackageReader.read(packageBytes)
     private val resources = PackageResources(pkg)
@@ -228,30 +236,122 @@ class VBookStorySource(
         role: VBookScriptRole,
         input: String,
         continuation: VBookContinuation = VBookContinuation(),
-    ): AppResult<VBookCompatibilityRuntime.ExecutionResult> = when (val result = runtime.executeDeclared(
-        sourceManifest = hostManifest,
-        resources = resources,
-        role = role,
-        input = input,
-        continuation = continuation,
-        persistedConfig = configReader.read(configKey),
-    )) {
-        is SourcePlatformResult.Success -> AppResult.Success(result.value)
-        is SourcePlatformResult.Failure -> AppResult.Failure(result.error.code.name, result.error.message, result.error.cause)
+    ): AppResult<VBookCompatibilityRuntime.ExecutionResult> {
+        val traceId = UUID.randomUUID().toString()
+        diagnostics.emit(DiagnosticEvent(
+            timestampEpochMs = System.currentTimeMillis(),
+            traceId = traceId,
+            sourceId = hostManifest.id,
+            sourceVersion = artifact.version,
+            category = DiagnosticCategory.RUNTIME,
+            name = "VBOOK_ROLE_STARTED",
+            attributes = mapOf("role" to role.manifestKey, "inputChars" to input.length.toString()),
+        ))
+        return when (val result = runtime.executeDeclared(
+            sourceManifest = hostManifest,
+            resources = resources,
+            role = role,
+            input = input,
+            continuation = continuation,
+            persistedConfig = configReader.read(configKey),
+            traceId = traceId,
+        )) {
+            is SourcePlatformResult.Success -> {
+                evidence.capture(DiagnosticEvidence(
+                    timestampEpochMs = System.currentTimeMillis(),
+                    traceId = traceId,
+                    sourceId = hostManifest.id,
+                    category = DiagnosticCategory.RUNTIME,
+                    name = "vbook-${role.manifestKey}-raw-envelope.json",
+                    contentType = "application/json",
+                    data = JsonCodec.stringify(result.value.rawEnvelope).toByteArray(Charsets.UTF_8),
+                    attributes = mapOf("profile" to result.value.profile.name, "instructions" to result.value.instructionCount.toString()),
+                ))
+                diagnostics.emit(DiagnosticEvent(
+                    timestampEpochMs = System.currentTimeMillis(),
+                    traceId = traceId,
+                    sourceId = hostManifest.id,
+                    sourceVersion = artifact.version,
+                    category = DiagnosticCategory.RUNTIME,
+                    name = "VBOOK_ROLE_COMPLETED",
+                    attributes = mapOf("role" to role.manifestKey, "instructions" to result.value.instructionCount.toString()),
+                ))
+                AppResult.Success(result.value)
+            }
+            is SourcePlatformResult.Failure -> {
+                diagnostics.emit(DiagnosticEvent(
+                    timestampEpochMs = System.currentTimeMillis(),
+                    traceId = traceId,
+                    sourceId = hostManifest.id,
+                    sourceVersion = artifact.version,
+                    category = DiagnosticCategory.RUNTIME,
+                    name = "VBOOK_ROLE_FAILED",
+                    severity = DiagnosticSeverity.ERROR,
+                    attributes = mapOf("role" to role.manifestKey, "code" to result.error.code.name, "error" to result.error.message),
+                ))
+                AppResult.Failure(result.error.code.name, result.error.message, result.error.cause)
+            }
+        }
     }
 
     private fun executeDynamic(
         action: VBookDynamicAction,
         continuation: VBookContinuation,
-    ): AppResult<VBookCompatibilityRuntime.ExecutionResult> = when (val result = runtime.executeDynamic(
-        sourceManifest = hostManifest,
-        resources = resources,
-        scriptPath = action.scriptPath,
-        args = action.invocation(continuation).args,
-        persistedConfig = configReader.read(configKey),
-    )) {
-        is SourcePlatformResult.Success -> AppResult.Success(result.value)
-        is SourcePlatformResult.Failure -> AppResult.Failure(result.error.code.name, result.error.message, result.error.cause)
+    ): AppResult<VBookCompatibilityRuntime.ExecutionResult> {
+        val traceId = UUID.randomUUID().toString()
+        diagnostics.emit(DiagnosticEvent(
+            timestampEpochMs = System.currentTimeMillis(),
+            traceId = traceId,
+            sourceId = hostManifest.id,
+            sourceVersion = artifact.version,
+            category = DiagnosticCategory.RUNTIME,
+            name = "VBOOK_DYNAMIC_STARTED",
+            attributes = mapOf("script" to action.scriptPath),
+        ))
+        return when (val result = runtime.executeDynamic(
+            sourceManifest = hostManifest,
+            resources = resources,
+            scriptPath = action.scriptPath,
+            args = action.invocation(continuation).args,
+            persistedConfig = configReader.read(configKey),
+            traceId = traceId,
+        )) {
+            is SourcePlatformResult.Success -> {
+                evidence.capture(DiagnosticEvidence(
+                    timestampEpochMs = System.currentTimeMillis(),
+                    traceId = traceId,
+                    sourceId = hostManifest.id,
+                    category = DiagnosticCategory.RUNTIME,
+                    name = "vbook-dynamic-raw-envelope.json",
+                    contentType = "application/json",
+                    data = JsonCodec.stringify(result.value.rawEnvelope).toByteArray(Charsets.UTF_8),
+                    attributes = mapOf("script" to action.scriptPath, "profile" to result.value.profile.name),
+                ))
+                diagnostics.emit(DiagnosticEvent(
+                    timestampEpochMs = System.currentTimeMillis(),
+                    traceId = traceId,
+                    sourceId = hostManifest.id,
+                    sourceVersion = artifact.version,
+                    category = DiagnosticCategory.RUNTIME,
+                    name = "VBOOK_DYNAMIC_COMPLETED",
+                    attributes = mapOf("script" to action.scriptPath, "instructions" to result.value.instructionCount.toString()),
+                ))
+                AppResult.Success(result.value)
+            }
+            is SourcePlatformResult.Failure -> {
+                diagnostics.emit(DiagnosticEvent(
+                    timestampEpochMs = System.currentTimeMillis(),
+                    traceId = traceId,
+                    sourceId = hostManifest.id,
+                    sourceVersion = artifact.version,
+                    category = DiagnosticCategory.RUNTIME,
+                    name = "VBOOK_DYNAMIC_FAILED",
+                    severity = DiagnosticSeverity.ERROR,
+                    attributes = mapOf("script" to action.scriptPath, "code" to result.error.code.name, "error" to result.error.message),
+                ))
+                AppResult.Failure(result.error.code.name, result.error.message, result.error.cause)
+            }
+        }
     }
 
     private fun declaredPage(

@@ -280,7 +280,9 @@ class UnifiedSourcePlatformManager(
 
     fun inspectSelector(html: String, selector: String, baseUrl: String) = legacy.inspectSelector(html, selector, baseUrl)
     fun diagnosticsSnapshot(sourceId: String? = null) =
-        (legacy.diagnosticsSnapshot(sourceId) + vBook.diagnosticsSnapshot(sourceId)).sortedBy { it.timestampEpochMs }
+        (legacy.diagnosticsSnapshot(sourceId) + vBook.diagnosticsSnapshot(sourceId))
+            .distinct()
+            .sortedBy { it.timestampEpochMs }
 
     fun diagnosticTraces(limit: Int = 20): List<SourceTraceUi> = SourceTraceExplorer.summarize(diagnosticsSnapshot())
         .take(limit.coerceIn(1, 200))

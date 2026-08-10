@@ -37,6 +37,7 @@ fun interface DiagnosticSink {
 class BoundedDiagnosticRecorder(
     private val maxEvents: Int = 2_000,
     @Volatile var level: DiagnosticLevel = DiagnosticLevel.BASIC,
+    private val mirror: DiagnosticSink = DiagnosticSink.NONE,
 ) : DiagnosticSink {
     private val lock = ReentrantLock()
     private val events = ArrayDeque<DiagnosticEvent>(maxEvents.coerceAtLeast(1))
@@ -53,6 +54,7 @@ class BoundedDiagnosticRecorder(
             while (events.size >= maxEvents) events.removeFirst()
             events.addLast(safe)
         }
+        runCatching { mirror.emit(safe) }
     }
 
     fun snapshot(sourceId: String? = null, traceId: String? = null): List<DiagnosticEvent> = lock.withLock {
@@ -71,6 +73,91 @@ class BoundedDiagnosticRecorder(
     }
 }
 
+data class DiagnosticEvidence(
+    val timestampEpochMs: Long,
+    val traceId: String,
+    val sourceId: String,
+    val category: DiagnosticCategory,
+    val name: String,
+    val contentType: String,
+    val data: ByteArray,
+    val attributes: Map<String, String> = emptyMap(),
+)
+
+interface DiagnosticEvidenceSink {
+    val enabled: Boolean
+    fun capture(evidence: DiagnosticEvidence)
+
+    companion object {
+        val NONE: DiagnosticEvidenceSink = object : DiagnosticEvidenceSink {
+            override val enabled: Boolean = false
+            override fun capture(evidence: DiagnosticEvidence) = Unit
+        }
+    }
+}
+
+data class DiagnosticEvidenceStats(
+    val itemCount: Int,
+    val retainedBytes: Long,
+    val evictedItems: Long,
+)
+
+class BoundedDiagnosticEvidenceRecorder(
+    private val maxBytes: Long = 64L * 1024L * 1024L,
+    private val maxItems: Int = 2_048,
+    private val maxItemBytes: Int = 8 * 1024 * 1024,
+    private val mirror: DiagnosticEvidenceSink = DiagnosticEvidenceSink.NONE,
+) : DiagnosticEvidenceSink {
+    private val lock = ReentrantLock()
+    private val items = ArrayDeque<DiagnosticEvidence>()
+    private var retainedBytes: Long = 0
+    private var evictedItems: Long = 0
+    @Volatile override var enabled: Boolean = false
+
+    init {
+        require(maxBytes in 1L..256L * 1024L * 1024L) { "DIAGNOSTIC_EVIDENCE_CAPACITY_INVALID" }
+        require(maxItems in 1..10_000) { "DIAGNOSTIC_EVIDENCE_ITEMS_INVALID" }
+        require(maxItemBytes in 1..32 * 1024 * 1024) { "DIAGNOSTIC_EVIDENCE_ITEM_LIMIT_INVALID" }
+    }
+
+    override fun capture(evidence: DiagnosticEvidence) {
+        if (!enabled) return
+        val truncated = evidence.data.size > maxItemBytes
+        val payload = if (truncated) evidence.data.copyOf(maxItemBytes) else evidence.data.copyOf()
+        val stored = evidence.copy(
+            name = evidence.name.take(512),
+            data = payload,
+            attributes = if (truncated) evidence.attributes + ("truncated" to "true") else evidence.attributes,
+        )
+        lock.withLock {
+            while (items.isNotEmpty() && (items.size >= maxItems || retainedBytes + payload.size > maxBytes)) {
+                val removed = items.removeFirst()
+                retainedBytes -= removed.data.size.toLong()
+                evictedItems += 1
+            }
+            if (payload.size.toLong() > maxBytes) {
+                evictedItems += 1
+                return
+            }
+            items.addLast(stored)
+            retainedBytes += payload.size.toLong()
+        }
+        runCatching { mirror.capture(stored) }
+    }
+
+    fun snapshot(): List<DiagnosticEvidence> = lock.withLock { items.toList() }
+
+    fun clear() = lock.withLock {
+        items.clear()
+        retainedBytes = 0
+        evictedItems = 0
+    }
+
+    fun stats(): DiagnosticEvidenceStats = lock.withLock {
+        DiagnosticEvidenceStats(items.size, retainedBytes, evictedItems)
+    }
+}
+
 object DiagnosticRedactor {
     private val sensitiveName = Regex(
         "(?i)(authorization|proxy-authorization|cookie|set-cookie|api[-_]?key|token|secret|password|passwd|session|credential)",
@@ -85,9 +172,23 @@ object DiagnosticRedactor {
         }
     }
 
-    fun redactText(value: String): String = keyValue.replace(bearer.replace(value, "Bearer <redacted>")) { match ->
-        "${match.groupValues[1]}=<redacted>"
-    }.take(4_096)
+    private val cookieLike = Regex("(?i)\\b(cookie|set-cookie|authorization|session|credential)=([^&\\s;]+)")
+    private val htmlSensitiveAttribute = Regex("(?is)(\\s(?:value|authorization|data-token|data-secret|data-password|data-cookie|data-session)\\s*=\\s*)([\\\"'])(.*?)\\2")
+
+    fun redactText(value: String): String = redactLongText(value, 4_096)
+
+    fun redactLongText(value: String, maxChars: Int = 8 * 1024 * 1024): String {
+        require(maxChars in 1..16 * 1024 * 1024) { "DIAGNOSTIC_REDACTION_LIMIT_INVALID" }
+        val bearerSafe = bearer.replace(value, "Bearer <redacted>")
+        val keySafe = keyValue.replace(bearerSafe) { match -> "${match.groupValues[1]}=<redacted>" }
+        return cookieLike.replace(keySafe) { match -> "${match.groupValues[1]}=<redacted>" }.take(maxChars)
+    }
+
+    /** Keep the DOM/script/style structure intact while stripping common credential-bearing values. */
+    fun redactHtmlPreservingStructure(raw: String, maxChars: Int = 8 * 1024 * 1024): String =
+        htmlSensitiveAttribute.replace(redactLongText(raw, maxChars)) { match ->
+            "${match.groupValues[1]}${match.groupValues[2]}<redacted>${match.groupValues[2]}"
+        }.take(maxChars)
 
     private fun fingerprint(value: String): String = MessageDigest.getInstance("SHA-256")
         .digest(value.toByteArray(StandardCharsets.UTF_8))
@@ -96,6 +197,8 @@ object DiagnosticRedactor {
 }
 
 object DiagnosticJsonExporter {
+    fun eventLine(event: DiagnosticEvent): String = JsonCodec.stringify(eventJson(event))
+
     fun export(events: List<DiagnosticEvent>): ByteArray {
         val root = JsonValue.Obj(linkedMapOf(
             "formatVersion" to JsonValue.Num(1.0, "1"),

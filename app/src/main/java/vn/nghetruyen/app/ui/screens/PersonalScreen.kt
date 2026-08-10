@@ -1322,8 +1322,19 @@ private fun SourceDiagnosticsSection(
     Card(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
         Column(Modifier.padding(14.dp)) {
             Text("NHẬT KÝ & TRACE", fontWeight = FontWeight.Bold)
+            Text(
+                when {
+                    state.diagnosticsMode == "off" -> "CHƯA BẬT NHẬT KÝ"
+                    state.sourceDiagnosticCount == 0 -> "ĐANG GHI NHẬT KÝ..."
+                    else -> "XEM NHẬT KÝ • ${state.sourceDiagnosticCount} sự kiện"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold,
+            )
             Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
-                Button(onExportDiagnostics, Modifier.weight(1f).padding(2.dp)) { Text("XUẤT CHẨN ĐOÁN") }
+                Button(onExportDiagnostics, Modifier.weight(1f).padding(2.dp)) {
+                    Text(if (state.diagnosticsMode == "advanced") "XUẤT HỘP ĐEN" else "XUẤT CHẨN ĐOÁN")
+                }
                 Button(onClearDiagnostics, Modifier.weight(1f).padding(2.dp)) { Text("XÓA NHẬT KÝ") }
             }
             state.sourceDiagnostics.take(8).forEach { event ->

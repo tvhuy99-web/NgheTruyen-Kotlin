@@ -29,6 +29,7 @@ import vn.nghetruyen.app.transfer.BackupTransferManager
 import vn.nghetruyen.app.transfer.BackupHistoryStore
 import vn.nghetruyen.app.transfer.LegacyXpkBackupImporter
 import vn.nghetruyen.app.transfer.LegacyXpkCompleteRestoreCoordinator
+import vn.nghetruyen.app.transfer.LegacyXpkEverythingRestoreCoordinator
 import vn.nghetruyen.app.transfer.VietPhraseTransferManager
 
 class AppContainer(context: Context) {
@@ -129,14 +130,19 @@ class AppContainer(context: Context) {
     val backupTransferManager: BackupTransferManager by lazy {
         BackupTransferManager(appContext, database, settingsRepository)
     }
-    val legacyXpkBackupImporter: LegacyXpkCompleteRestoreCoordinator by lazy {
-        LegacyXpkCompleteRestoreCoordinator(
+    val legacyXpkBackupImporter: LegacyXpkEverythingRestoreCoordinator by lazy {
+        val complete = LegacyXpkCompleteRestoreCoordinator(
             context = appContext,
             legacyImporter = LegacyXpkBackupImporter(appContext, database, settingsRepository),
             database = database,
             settingsRepository = settingsRepository,
             sourcePlatformManager = sourcePlatformManager,
             onSourcesChanged = ::refreshSourceRegistry,
+        )
+        LegacyXpkEverythingRestoreCoordinator(
+            context = appContext,
+            completeCoordinator = complete,
+            database = database,
         )
     }
     val backupHistoryStore: BackupHistoryStore by lazy { BackupHistoryStore(appContext) }

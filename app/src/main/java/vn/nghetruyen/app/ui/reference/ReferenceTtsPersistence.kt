@@ -23,6 +23,8 @@ object ReferenceTtsPersistence {
     private const val PREFS = "reference_tts_profile_extra"
     private const val DEFAULT_METHOD = "default_method"
     private const val DEFAULT_QUALITY = "default_quality"
+    private const val DEFAULT_SPEED = "default_sonic_speed"
+    private const val DEFAULT_PITCH = "default_sonic_pitch"
 
     suspend fun load(context: Context, storyId: String, hasStoryProfile: Boolean): ReferenceTtsDraft {
         val app = context.applicationContext as NgheTruyenApplication
@@ -47,13 +49,13 @@ object ReferenceTtsPersistence {
         val speed = when {
             profile != null && sonic -> prefs.getFloat(speedKey(storyId), profile.rate).coerceIn(0.25f, 3f)
             profile != null -> profile.rate.coerceIn(0.25f, 3f)
-            sonic -> settings.sonicDefaultSpeed.coerceIn(0.25f, 3f)
+            sonic -> prefs.getFloat(DEFAULT_SPEED, settings.sonicDefaultSpeed).coerceIn(0.25f, 3f)
             else -> settings.ttsRate.coerceIn(0.25f, 3f)
         }
         val pitch = when {
             profile != null && sonic -> prefs.getFloat(pitchKey(storyId), profile.pitch).coerceIn(0.5f, 2f)
             profile != null -> profile.pitch.coerceIn(0.5f, 2f)
-            sonic -> settings.sonicDefaultPitch.coerceIn(0.5f, 2f)
+            sonic -> prefs.getFloat(DEFAULT_PITCH, settings.sonicDefaultPitch).coerceIn(0.5f, 2f)
             else -> settings.ttsPitch.coerceIn(0.5f, 2f)
         }
         return ReferenceTtsDraft(
@@ -127,10 +129,15 @@ object ReferenceTtsPersistence {
                 settings.setSonicDefaultSpeed(normalized.speed)
                 settings.setSonicDefaultPitch(normalized.pitch)
             }
-            prefs.edit()
+            val editor = prefs.edit()
                 .putString(DEFAULT_METHOD, normalized.processingMethod)
                 .putInt(DEFAULT_QUALITY, if (normalized.sonicAccurate) 1 else 0)
-                .apply()
+            if (sonic) {
+                editor
+                    .putFloat(DEFAULT_SPEED, normalized.speed)
+                    .putFloat(DEFAULT_PITCH, normalized.pitch)
+            }
+            editor.apply()
         }
         applyRuntime(normalized)
     }
@@ -177,10 +184,19 @@ object ReferenceTtsPersistence {
         val method = prefs.getString(DEFAULT_METHOD, null)
             ?: if (snapshot.sonicProcessingEnabled) "sonic" else "system"
         val quality = prefs.getInt(DEFAULT_QUALITY, if (snapshot.sonicAccurateMode) 1 else 0) == 1
-        settings.setSonicProcessingEnabled(method == "sonic")
+        val sonic = method == "sonic"
+        settings.setSonicProcessingEnabled(sonic)
         settings.setSonicAccurateMode(quality)
+        if (sonic) {
+            settings.setSonicDefaultSpeed(
+                prefs.getFloat(DEFAULT_SPEED, snapshot.sonicDefaultSpeed).coerceIn(0.25f, 3f),
+            )
+            settings.setSonicDefaultPitch(
+                prefs.getFloat(DEFAULT_PITCH, snapshot.sonicDefaultPitch).coerceIn(0.5f, 2f),
+            )
+        }
         ReferenceSonicRuntime.accurateMode = quality
-        ReferenceSonicRuntime.outputGain = if (method == "sonic") snapshot.ttsVolume.coerceIn(0f, 2f) else 1f
+        ReferenceSonicRuntime.outputGain = if (sonic) snapshot.ttsVolume.coerceIn(0f, 2f) else 1f
     }
 
     fun previewDraft(draft: ReferenceTtsDraft): VoiceRoleDraft {

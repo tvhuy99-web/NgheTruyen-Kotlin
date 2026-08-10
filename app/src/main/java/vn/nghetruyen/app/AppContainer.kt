@@ -27,6 +27,7 @@ import vn.nghetruyen.app.sources.SourceHealthChecker
 import vn.nghetruyen.app.sources.SourceRegistry
 import vn.nghetruyen.app.transfer.BackupTransferManager
 import vn.nghetruyen.app.transfer.BackupHistoryStore
+import vn.nghetruyen.app.transfer.LegacyXpkBackupImporter
 import vn.nghetruyen.app.transfer.VietPhraseTransferManager
 
 class AppContainer(context: Context) {
@@ -126,6 +127,9 @@ class AppContainer(context: Context) {
     }
     val backupTransferManager: BackupTransferManager by lazy {
         BackupTransferManager(appContext, database, settingsRepository)
+    }
+    val legacyXpkBackupImporter: LegacyXpkBackupImporter by lazy {
+        LegacyXpkBackupImporter(appContext, database, settingsRepository)
     }
     val backupHistoryStore: BackupHistoryStore by lazy { BackupHistoryStore(appContext) }
 }

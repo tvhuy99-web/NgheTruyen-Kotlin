@@ -55,29 +55,33 @@ data class VoiceCastPlan(
 )
 
 /**
- * Scene interval returned by the XPK JSON contract.
- * start/end unit ids are canonical; startParagraph remains a temporary runtime bridge.
+ * Inclusive XPK scene interval. Unit ids are canonical; paragraph indexes are temporary runtime
+ * bridges until milestone 5 moves playback onto the unit timeline itself.
  */
 data class SceneMusicCue(
     val startParagraph: Int,
     val trackId: String,
-    val volume: Float = 0.25f,
+    val volume: Float = 1f,
     val mood: String = "",
     val startUnitId: String = "",
     val endUnitId: String = "",
+    val endParagraph: Int = startParagraph,
 )
 
 data class SceneMusicTrackOption(
     val id: String,
     val title: String,
     val tags: List<String>,
+    val description: String = tags.joinToString(" "),
 )
 
 data class NarrationPlanContext(
+    /** Serialized [PREVIOUS_UNIT ...] tail. It is context only and never a target timeline. */
     val previousChapterEnding: String = "",
     val activeTrackId: String? = null,
     val activeTrackTitle: String? = null,
     val previousMood: String = "",
+    val incomingSource: String = "",
 )
 
 data class NarrationPlanRequest(
@@ -94,6 +98,7 @@ data class NarrationPlanRequest(
 data class NarrationPlan(
     val voiceCast: VoiceCastPlan = VoiceCastPlan(emptyList(), emptyList()),
     val musicCues: List<SceneMusicCue> = emptyList(),
+    val musicSceneError: String = "",
 )
 
 interface TranslationEngine {

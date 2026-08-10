@@ -1,6 +1,7 @@
 package vn.nghetruyen.app.ui.reference
 
 import android.content.Context
+import android.content.SharedPreferences
 import kotlin.math.abs
 import vn.nghetruyen.app.NgheTruyenApplication
 import vn.nghetruyen.app.audio.ReferenceSonicRuntime
@@ -82,6 +83,12 @@ object ReferenceTtsPersistence {
         val normalized = normalize(draft)
         val sonic = normalized.processingMethod == "sonic"
         if (useStoryProfile && storyId.isNotBlank()) {
+            val beforeOverride = settings.snapshot()
+            preserveGlobalSonicDefaults(
+                prefs,
+                beforeOverride.sonicDefaultSpeed,
+                beforeOverride.sonicDefaultPitch,
+            )
             app.container.database.storyTtsProfileDao().upsert(
                 StoryTtsProfileEntity(
                     storyId = storyId,
@@ -99,8 +106,15 @@ object ReferenceTtsPersistence {
             prefs.edit()
                 .putString(methodKey(storyId), normalized.processingMethod)
                 .putInt(qualityKey(storyId), if (normalized.sonicAccurate) 1 else 0)
-                .putFloat(speedKey(storyId), normalized.speed)
-                .putFloat(pitchKey(storyId), normalized.pitch)
+                .apply {
+                    if (sonic) {
+                        putFloat(speedKey(storyId), normalized.speed)
+                        putFloat(pitchKey(storyId), normalized.pitch)
+                    } else {
+                        remove(speedKey(storyId))
+                        remove(pitchKey(storyId))
+                    }
+                }
                 .apply()
             settings.setSonicProcessingEnabled(sonic)
             settings.setSonicAccurateMode(normalized.sonicAccurate)
@@ -118,6 +132,12 @@ object ReferenceTtsPersistence {
                     .remove(pitchKey(storyId))
                     .apply()
             }
+            val beforeGlobalSave = settings.snapshot()
+            preserveGlobalSonicDefaults(
+                prefs,
+                beforeGlobalSave.sonicDefaultSpeed,
+                beforeGlobalSave.sonicDefaultPitch,
+            )
             settings.setTtsEngine(normalized.enginePackage)
             settings.setTtsVoice(normalized.voiceName, normalized.languageTag)
             settings.setTtsRate(if (sonic) 1f else normalized.speed)
@@ -147,6 +167,12 @@ object ReferenceTtsPersistence {
         val settings = app.container.settingsRepository
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         if (hasStoryProfile && storyId.isNotBlank() && prefs.contains(methodKey(storyId))) {
+            val beforeOverride = settings.snapshot()
+            preserveGlobalSonicDefaults(
+                prefs,
+                beforeOverride.sonicDefaultSpeed,
+                beforeOverride.sonicDefaultPitch,
+            )
             val method = prefs.getString(methodKey(storyId), "system") ?: "system"
             val quality = prefs.getInt(qualityKey(storyId), 0) == 1
             val sonic = method == "sonic"
@@ -187,12 +213,14 @@ object ReferenceTtsPersistence {
         val sonic = method == "sonic"
         settings.setSonicProcessingEnabled(sonic)
         settings.setSonicAccurateMode(quality)
-        if (sonic) {
+        if (prefs.contains(DEFAULT_SPEED)) {
             settings.setSonicDefaultSpeed(
-                prefs.getFloat(DEFAULT_SPEED, snapshot.sonicDefaultSpeed).coerceIn(0.25f, 3f),
+                prefs.getFloat(DEFAULT_SPEED, 1f).coerceIn(0.25f, 3f),
             )
+        }
+        if (prefs.contains(DEFAULT_PITCH)) {
             settings.setSonicDefaultPitch(
-                prefs.getFloat(DEFAULT_PITCH, snapshot.sonicDefaultPitch).coerceIn(0.5f, 2f),
+                prefs.getFloat(DEFAULT_PITCH, 1f).coerceIn(0.5f, 2f),
             )
         }
         ReferenceSonicRuntime.accurateMode = quality
@@ -235,6 +263,25 @@ object ReferenceTtsPersistence {
             pitch = value.pitch.coerceIn(0.5f, 2f),
             volume = value.volume.coerceIn(0f, maxVolume),
         )
+    }
+
+    private fun preserveGlobalSonicDefaults(prefs: SharedPreferences, speed: Float, pitch: Float) {
+        val editor = prefs.edit()
+        var changed = false
+        if (!prefs.contains(DEFAULT_SPEED)) {
+            editor.putFloat(DEFAULT_SPEED, speed.coerceIn(0.25f, 3f))
+            changed = true
+        }
+        if (!prefs.contains(DEFAULT_PITCH)) {
+            editor.putFloat(DEFAULT_PITCH, pitch.coerceIn(0.5f, 2f))
+            changed = true
+        }
+        if (changed) editor.apply()
+    }
+
+    private inline fun SharedPreferences.Editor.apply(block: SharedPreferences.Editor.() -> Unit): SharedPreferences.Editor {
+        block()
+        return this
     }
 
     private fun methodKey(storyId: String) = "story:$storyId:method"

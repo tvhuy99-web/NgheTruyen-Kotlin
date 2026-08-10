@@ -133,7 +133,7 @@ class AppContainer(context: Context) {
     val aiRequestGovernor: AiRequestGovernor by lazy { AiRequestGovernor(database, settingsRepository) }
     val aiServices: OnlineAiServices by lazy { OnlineAiServices(settingsRepository, aiCredentialStore, aiRequestGovernor, libraryRepository) }
     val xpkNarrationAiServices: XpkNarrationAiServices by lazy {
-        XpkNarrationAiServices(settingsRepository, aiCredentialStore, aiRequestGovernor, libraryRepository)
+        XpkNarrationAiServices(appContext, settingsRepository, aiCredentialStore, aiRequestGovernor, libraryRepository)
     }
     val narrationPlanCoordinator: NarrationPlanCoordinator by lazy {
         NarrationPlanCoordinator(libraryRepository, settingsRepository, xpkNarrationAiServices)

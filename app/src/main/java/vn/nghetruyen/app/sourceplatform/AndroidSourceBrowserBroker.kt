@@ -370,6 +370,7 @@ class AndroidSourceBrowserBroker(
                 }
             }
 
+            @android.annotation.TargetApi(27)
             override fun onSafeBrowsingHit(view: WebView, request: WebResourceRequest, threatType: Int, callback: SafeBrowsingResponse) {
                 callback.backToSafety(true)
                 sessionRef.get()?.apply {

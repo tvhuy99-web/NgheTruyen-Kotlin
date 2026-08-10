@@ -12,6 +12,15 @@ object ReferenceVoiceRolePersistence {
         val app = context.applicationContext as NgheTruyenApplication
         val id = draft.originalRoleId ?: UUID.randomUUID().toString()
         val narrator = draft.isNarrator
+        val method = if (draft.processingMethod == "sonic") "sonic" else "system"
+        // XPK has one method-specific profile.volume. Keep inactive system/Sonic values in Extras, but
+        // persist the active method's volume in VoiceRoleEntity so playback and the AI prompt share the
+        // same base value after every save.
+        val activeVolume = if (method == "sonic") {
+            draft.sonicVolume.coerceIn(0f, 2f)
+        } else {
+            draft.volume.coerceIn(0f, 1f)
+        }
         app.container.database.voiceRoleDao().upsert(
             VoiceRoleEntity(
                 id = id,
@@ -24,7 +33,7 @@ object ReferenceVoiceRolePersistence {
                 languageTag = draft.languageTag.ifBlank { "vi-VN" }.take(32),
                 rate = draft.rate.coerceIn(0.25f, 3f),
                 pitch = draft.pitch.coerceIn(0.5f, 2f),
-                volume = draft.volume.coerceIn(0f, 2f),
+                volume = activeVolume,
                 isNarrator = narrator,
                 expression = draft.expression.name,
                 expressionStrength = draft.expressionStrength.coerceIn(0f, 1f),

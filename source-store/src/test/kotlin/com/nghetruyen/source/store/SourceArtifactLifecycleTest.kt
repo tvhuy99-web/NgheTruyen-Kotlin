@@ -8,7 +8,6 @@ import com.nghetruyen.source.platform.SourceFailure
 import com.nghetruyen.source.platform.SourceFailureCode
 import com.nghetruyen.source.platform.SourceTrustState
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -64,6 +63,6 @@ class SourceArtifactLifecycleTest {
         assertEquals("v1", rollback.afterActive!!.artifactId)
         assertEquals(SourceArtifactState.ACTIVE, rollback.afterActive!!.state)
         assertEquals("v2", rollback.quarantined!!.artifactId)
-        assertNull(rollback.previousKnownGood)
+        assertTrue(rollback.previousKnownGood == null)
     }
 }

@@ -1,0 +1,1327 @@
+name: Implement diagnostics black box
+
+on:
+  push:
+    branches:
+      - agent/diagnostics-blackbox-vbook-url
+
+permissions:
+  contents: write
+
+jobs:
+  implement:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Apply diagnostics and vBook URL implementation
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace(path, old, new, count=1):
+              p = Path(path)
+              text = p.read_text()
+              if old not in text:
+                  raise SystemExit(f"missing patch anchor in {path}: {old[:120]!r}")
+              text = text.replace(old, new, count)
+              p.write_text(text)
+
+          # 1) Core diagnostic recorder: real levels, 64 MiB evidence ring, long-form redaction.
+          path = 'source-diagnostics/src/main/kotlin/vn/nghetruyen/source/diagnostics/SourceDiagnostics.kt'
+          replace(path,
+          '''class BoundedDiagnosticRecorder(
+              private val maxEvents: Int = 2_000,
+              @Volatile var level: DiagnosticLevel = DiagnosticLevel.BASIC,
+          ) : DiagnosticSink {''',
+          '''class BoundedDiagnosticRecorder(
+              private val maxEvents: Int = 2_000,
+              @Volatile var level: DiagnosticLevel = DiagnosticLevel.BASIC,
+              private val mirror: DiagnosticSink = DiagnosticSink.NONE,
+          ) : DiagnosticSink {''')
+          replace(path,
+          '''        lock.withLock {
+                      while (events.size >= maxEvents) events.removeFirst()
+                      events.addLast(safe)
+                  }
+              }
+          
+              fun snapshot''',
+          '''        lock.withLock {
+                      while (events.size >= maxEvents) events.removeFirst()
+                      events.addLast(safe)
+                  }
+                  runCatching { mirror.emit(safe) }
+              }
+          
+              fun snapshot''')
+          replace(path, 'object DiagnosticRedactor {', r'''data class DiagnosticEvidence(
+              val timestampEpochMs: Long,
+              val traceId: String,
+              val sourceId: String,
+              val category: DiagnosticCategory,
+              val name: String,
+              val contentType: String,
+              val data: ByteArray,
+              val attributes: Map<String, String> = emptyMap(),
+          )
+          
+          interface DiagnosticEvidenceSink {
+              val enabled: Boolean
+              fun capture(evidence: DiagnosticEvidence)
+          
+              companion object {
+                  val NONE: DiagnosticEvidenceSink = object : DiagnosticEvidenceSink {
+                      override val enabled: Boolean = false
+                      override fun capture(evidence: DiagnosticEvidence) = Unit
+                  }
+              }
+          }
+          
+          data class DiagnosticEvidenceStats(
+              val itemCount: Int,
+              val retainedBytes: Long,
+              val evictedItems: Long,
+          )
+          
+          class BoundedDiagnosticEvidenceRecorder(
+              private val maxBytes: Long = 64L * 1024L * 1024L,
+              private val maxItems: Int = 2_048,
+              private val maxItemBytes: Int = 8 * 1024 * 1024,
+              private val mirror: DiagnosticEvidenceSink = DiagnosticEvidenceSink.NONE,
+          ) : DiagnosticEvidenceSink {
+              private val lock = ReentrantLock()
+              private val items = ArrayDeque<DiagnosticEvidence>()
+              private var retainedBytes: Long = 0
+              private var evictedItems: Long = 0
+              @Volatile override var enabled: Boolean = false
+          
+              init {
+                  require(maxBytes in 1L..256L * 1024L * 1024L) { "DIAGNOSTIC_EVIDENCE_CAPACITY_INVALID" }
+                  require(maxItems in 1..10_000) { "DIAGNOSTIC_EVIDENCE_ITEMS_INVALID" }
+                  require(maxItemBytes in 1..32 * 1024 * 1024) { "DIAGNOSTIC_EVIDENCE_ITEM_LIMIT_INVALID" }
+              }
+          
+              override fun capture(evidence: DiagnosticEvidence) {
+                  if (!enabled) return
+                  val truncated = evidence.data.size > maxItemBytes
+                  val payload = if (truncated) evidence.data.copyOf(maxItemBytes) else evidence.data.copyOf()
+                  val stored = evidence.copy(
+                      name = evidence.name.take(512),
+                      data = payload,
+                      attributes = if (truncated) evidence.attributes + ("truncated" to "true") else evidence.attributes,
+                  )
+                  lock.withLock {
+                      while (items.isNotEmpty() && (items.size >= maxItems || retainedBytes + payload.size > maxBytes)) {
+                          val removed = items.removeFirst()
+                          retainedBytes -= removed.data.size.toLong()
+                          evictedItems += 1
+                      }
+                      if (payload.size.toLong() > maxBytes) {
+                          evictedItems += 1
+                          return
+                      }
+                      items.addLast(stored)
+                      retainedBytes += payload.size.toLong()
+                  }
+                  runCatching { mirror.capture(stored) }
+              }
+          
+              fun snapshot(): List<DiagnosticEvidence> = lock.withLock { items.toList() }
+          
+              fun clear() = lock.withLock {
+                  items.clear()
+                  retainedBytes = 0
+                  evictedItems = 0
+              }
+          
+              fun stats(): DiagnosticEvidenceStats = lock.withLock {
+                  DiagnosticEvidenceStats(items.size, retainedBytes, evictedItems)
+              }
+          }
+          
+          object DiagnosticRedactor {''')
+          replace(path,
+          r'''    fun redactText(value: String): String = keyValue.replace(bearer.replace(value, "Bearer <redacted>")) { match ->
+                  "${match.groupValues[1]}=<redacted>"
+              }.take(4_096)
+          ''',
+          r'''    private val cookieLike = Regex("(?i)\\b(cookie|set-cookie|authorization|session|credential)=([^&\\s;]+)")
+              private val htmlSensitiveAttribute = Regex("(?is)(\\s(?:value|authorization|data-token|data-secret|data-password|data-cookie|data-session)\\s*=\\s*)([\\\"'])(.*?)\\2")
+          
+              fun redactText(value: String): String = redactLongText(value, 4_096)
+          
+              fun redactLongText(value: String, maxChars: Int = 8 * 1024 * 1024): String {
+                  require(maxChars in 1..16 * 1024 * 1024) { "DIAGNOSTIC_REDACTION_LIMIT_INVALID" }
+                  val bearerSafe = bearer.replace(value, "Bearer <redacted>")
+                  val keySafe = keyValue.replace(bearerSafe) { match -> "${match.groupValues[1]}=<redacted>" }
+                  return cookieLike.replace(keySafe) { match -> "${match.groupValues[1]}=<redacted>" }.take(maxChars)
+              }
+          
+              /** Keep the DOM/script/style structure intact while stripping common credential-bearing values. */
+              fun redactHtmlPreservingStructure(raw: String, maxChars: Int = 8 * 1024 * 1024): String =
+                  htmlSensitiveAttribute.replace(redactLongText(raw, maxChars)) { match ->
+                      "${match.groupValues[1]}${match.groupValues[2]}<redacted>${match.groupValues[2]}"
+                  }.take(maxChars)
+          ''')
+          replace(path,
+          '''object DiagnosticJsonExporter {
+              fun export(events: List<DiagnosticEvent>): ByteArray {''',
+          '''object DiagnosticJsonExporter {
+              fun eventLine(event: DiagnosticEvent): String = JsonCodec.stringify(eventJson(event))
+          
+              fun export(events: List<DiagnosticEvent>): ByteArray {''')
+
+          # 2) Android black-box runtime: persisted mode, crash-safe journal and ZIP exporter.
+          runtime = r'''package vn.nghetruyen.app.sourceplatform
+          
+          import android.content.Context
+          import android.os.Build
+          import org.json.JSONArray
+          import org.json.JSONObject
+          import vn.nghetruyen.app.BuildConfig
+          import vn.nghetruyen.source.diagnostics.BoundedDiagnosticEvidenceRecorder
+          import vn.nghetruyen.source.diagnostics.BoundedDiagnosticRecorder
+          import vn.nghetruyen.source.diagnostics.DiagnosticEvidence
+          import vn.nghetruyen.source.diagnostics.DiagnosticEvidenceSink
+          import vn.nghetruyen.source.diagnostics.DiagnosticEvent
+          import vn.nghetruyen.source.diagnostics.DiagnosticJsonExporter
+          import vn.nghetruyen.source.diagnostics.DiagnosticLevel
+          import vn.nghetruyen.source.diagnostics.DiagnosticRedactor
+          import vn.nghetruyen.source.diagnostics.DiagnosticSink
+          import vn.nghetruyen.source.diagnostics.SourceSnapshotSanitizer
+          import vn.nghetruyen.source.diagnostics.SourceTraceExplorer
+          import java.io.ByteArrayOutputStream
+          import java.io.File
+          import java.time.Instant
+          import java.util.zip.ZipEntry
+          import java.util.zip.ZipOutputStream
+          
+          class SourceDiagnosticRuntime(private val context: Context) {
+              private val prefs = context.getSharedPreferences("source_diagnostics", Context.MODE_PRIVATE)
+              private val crashStore = CrashSafeDiagnosticStore(context)
+              val recorder = BoundedDiagnosticRecorder(
+                  maxEvents = 20_000,
+                  level = DiagnosticLevel.OFF,
+                  mirror = crashStore,
+              )
+              val evidence = BoundedDiagnosticEvidenceRecorder(
+                  maxBytes = 64L * 1024L * 1024L,
+                  maxItems = 2_048,
+                  maxItemBytes = 8 * 1024 * 1024,
+                  mirror = crashStore,
+              )
+          
+              @Volatile var mode: String = "off"
+                  private set
+          
+              init {
+                  applyMode(prefs.getString(KEY_MODE, "off").orEmpty(), rotateAdvanced = true)
+              }
+          
+              fun setMode(requested: String): String {
+                  val normalized = normalizeMode(requested)
+                  val enteringAdvanced = normalized == "advanced" && mode != "advanced"
+                  mode = normalized
+                  prefs.edit().putString(KEY_MODE, normalized).apply()
+                  applyMode(normalized, rotateAdvanced = enteringAdvanced)
+                  return normalized
+              }
+          
+              fun clearBlackBox() {
+                  recorder.clear()
+                  evidence.clear()
+                  crashStore.clear()
+              }
+          
+              fun exportBundle(
+                  events: List<DiagnosticEvent>,
+                  installed: List<SourcePackUiInfo>,
+                  repositories: List<SourceRepositoryUiInfo>,
+              ): ByteArray {
+                  val output = ByteArrayOutputStream()
+                  ZipOutputStream(output).use { zip ->
+                      zip.addText("README.txt", readme())
+                      zip.addBytes("report/events.json", DiagnosticJsonExporter.export(events))
+                      zip.addText("report/environment.json", environment(events).toString(2))
+                      zip.addText("report/installed_sources.json", installedJson(installed).toString(2))
+                      zip.addText("report/repositories.json", repositoriesJson(repositories).toString(2))
+                      zip.addText("report/traces.txt", traceReport(events))
+          
+                      evidence.snapshot().forEachIndexed { index, item ->
+                          val base = "evidence/current/${index.toString().padStart(4, '0')}-${safePath(item.name)}"
+                          zip.addBytes(base, safeEvidenceBytes(item))
+                          zip.addText("$base.meta.json", evidenceMeta(item).toString(2))
+                          if (item.contentType.contains("html", ignoreCase = true)) {
+                              val text = item.data.toString(Charsets.UTF_8)
+                              zip.addText(
+                                  "evidence/sanitized/${index.toString().padStart(4, '0')}-${safePath(item.name)}",
+                                  SourceSnapshotSanitizer.sanitizeHtml(text, 8 * 1024 * 1024),
+                              )
+                          }
+                      }
+          
+                      crashStore.snapshotForExport().forEach { (name, bytes) ->
+                          zip.addBytes("crash-safe/$name", safeStoredBytes(name, bytes))
+                      }
+                  }
+                  return output.toByteArray()
+              }
+          
+              private fun applyMode(raw: String, rotateAdvanced: Boolean) {
+                  val normalized = normalizeMode(raw)
+                  mode = normalized
+                  recorder.level = when (normalized) {
+                      "basic" -> DiagnosticLevel.BASIC
+                      "advanced" -> DiagnosticLevel.VERBOSE
+                      else -> DiagnosticLevel.OFF
+                  }
+                  evidence.enabled = normalized == "advanced"
+                  if (normalized == "advanced") {
+                      if (rotateAdvanced) crashStore.beginSession()
+                      crashStore.enabled = true
+                  } else {
+                      crashStore.enabled = false
+                  }
+              }
+          
+              private fun normalizeMode(value: String): String =
+                  value.takeIf { it in setOf("off", "basic", "advanced") } ?: "off"
+          
+              private fun environment(events: List<DiagnosticEvent>): JSONObject = JSONObject().apply {
+                  put("generatedAt", Instant.now().toString())
+                  put("diagnosticMode", mode)
+                  put("appVersionName", BuildConfig.VERSION_NAME)
+                  put("appVersionCode", BuildConfig.VERSION_CODE)
+                  put("androidSdk", Build.VERSION.SDK_INT)
+                  put("manufacturer", Build.MANUFACTURER)
+                  put("model", Build.MODEL)
+                  put("device", Build.DEVICE)
+                  put("product", Build.PRODUCT)
+                  put("eventCount", events.size)
+                  val stats = evidence.stats()
+                  put("evidenceItems", stats.itemCount)
+                  put("evidenceBytes", stats.retainedBytes)
+                  put("evidenceEvictedItems", stats.evictedItems)
+              }
+          
+              private fun installedJson(items: List<SourcePackUiInfo>): JSONArray = JSONArray().apply {
+                  items.forEach { item ->
+                      put(JSONObject().apply {
+                          put("id", item.id)
+                          put("name", item.name)
+                          put("version", item.version)
+                          put("enabled", item.enabled)
+                          put("ecosystem", item.ecosystem)
+                          put("runtimeMode", item.runtimeMode)
+                          put("contentType", item.contentType)
+                          put("compatibilityProfile", item.compatibilityProfile)
+                      })
+                  }
+              }
+          
+              private fun repositoriesJson(items: List<SourceRepositoryUiInfo>): JSONArray = JSONArray().apply {
+                  items.forEach { item ->
+                      put(JSONObject().apply {
+                          put("id", item.id)
+                          put("name", item.name)
+                          put("url", DiagnosticRedactor.redactLongText(item.url, 4_096))
+                          put("packageCount", item.packageCount)
+                      })
+                  }
+              }
+          
+              private fun traceReport(events: List<DiagnosticEvent>): String = SourceTraceExplorer.summarize(events)
+                  .joinToString("\n") { trace ->
+                      listOf(
+                          trace.traceId,
+                          trace.sourceId,
+                          "events=${trace.eventCount}",
+                          "errors=${trace.errorCount}",
+                          "durationMs=${trace.durationMs}",
+                          "categories=${trace.categories.joinToString(",")}",
+                          "final=${trace.finalEvent}",
+                      ).joinToString(" | ")
+                  }
+          
+              private fun evidenceMeta(item: DiagnosticEvidence): JSONObject = JSONObject().apply {
+                  put("timestampEpochMs", item.timestampEpochMs)
+                  put("traceId", item.traceId)
+                  put("sourceId", item.sourceId)
+                  put("category", item.category.name)
+                  put("name", item.name)
+                  put("contentType", item.contentType)
+                  put("bytes", item.data.size)
+                  put("attributes", JSONObject(DiagnosticRedactor.redact(item.attributes)))
+              }
+          
+              private fun safeEvidenceBytes(item: DiagnosticEvidence): ByteArray {
+                  if (item.contentType.contains("html", ignoreCase = true)) {
+                      return DiagnosticRedactor.redactHtmlPreservingStructure(
+                          item.data.toString(Charsets.UTF_8),
+                          8 * 1024 * 1024,
+                      ).toByteArray(Charsets.UTF_8)
+                  }
+                  if (item.contentType.startsWith("text/", true) || item.contentType.contains("json", true)) {
+                      return DiagnosticRedactor.redactLongText(
+                          item.data.toString(Charsets.UTF_8),
+                          8 * 1024 * 1024,
+                      ).toByteArray(Charsets.UTF_8)
+                  }
+                  return item.data
+              }
+          
+              private fun safeStoredBytes(name: String, bytes: ByteArray): ByteArray = when {
+                  name.endsWith(".html", true) -> DiagnosticRedactor.redactHtmlPreservingStructure(
+                      bytes.toString(Charsets.UTF_8), 8 * 1024 * 1024,
+                  ).toByteArray(Charsets.UTF_8)
+                  name.endsWith(".json", true) || name.endsWith(".jsonl", true) || name.endsWith(".txt", true) || name.endsWith(".log", true) ->
+                      DiagnosticRedactor.redactLongText(bytes.toString(Charsets.UTF_8), 8 * 1024 * 1024).toByteArray(Charsets.UTF_8)
+                  else -> bytes
+              }
+          
+              private fun readme(): String = buildString {
+                  appendLine("NgheTruyen diagnostic black box")
+                  appendLine("Mode: $mode")
+                  appendLine("This bundle intentionally keeps high-fidelity browser/runtime evidence for debugging.")
+                  appendLine("HTML keeps DOM, script and style structure; common credentials and sensitive values are redacted during export.")
+                  appendLine("Advanced mode retains up to 64 MiB of evidence and a crash-safe rolling journal in private app storage.")
+                  appendLine("The crash-safe/previous section may contain the final evidence from the process before the latest restart.")
+              }
+          
+              private fun safePath(value: String): String = value
+                  .replace('\\', '/')
+                  .split('/')
+                  .filter { it.isNotBlank() && it != "." && it != ".." }
+                  .joinToString("_") { part -> part.replace(Regex("[^A-Za-z0-9._-]"), "_").take(100) }
+                  .ifBlank { "evidence.bin" }
+          
+              private fun ZipOutputStream.addText(name: String, value: String) = addBytes(name, value.toByteArray(Charsets.UTF_8))
+          
+              private fun ZipOutputStream.addBytes(name: String, bytes: ByteArray) {
+                  putNextEntry(ZipEntry(name))
+                  write(bytes)
+                  closeEntry()
+              }
+          
+              companion object {
+                  private const val KEY_MODE = "diagnostics.mode"
+              }
+          }
+          
+          private class CrashSafeDiagnosticStore(private val context: Context) : DiagnosticSink, DiagnosticEvidenceSink {
+              private val lock = Any()
+              private val root = File(context.filesDir, "source-diagnostics-blackbox")
+              private val live = File(root, "live")
+              private val previous = File(root, "previous")
+              @Volatile override var enabled: Boolean = false
+          
+              init {
+                  live.mkdirs()
+              }
+          
+              fun beginSession() = synchronized(lock) {
+                  root.mkdirs()
+                  if (live.exists() && live.walkTopDown().any { it.isFile }) {
+                      previous.deleteRecursively()
+                      if (!live.renameTo(previous)) {
+                          copyDirectory(live, previous)
+                          live.deleteRecursively()
+                      }
+                  } else {
+                      live.deleteRecursively()
+                  }
+                  live.mkdirs()
+              }
+          
+              override fun emit(event: DiagnosticEvent) {
+                  if (!enabled) return
+                  synchronized(lock) {
+                      live.mkdirs()
+                      val file = File(live, "events.jsonl")
+                      if (file.exists() && file.length() >= 8L * 1024L * 1024L) {
+                          File(live, "events.previous.jsonl").delete()
+                          file.renameTo(File(live, "events.previous.jsonl"))
+                      }
+                      file.appendText(DiagnosticJsonExporter.eventLine(event) + "\n")
+                  }
+              }
+          
+              override fun capture(evidence: DiagnosticEvidence) {
+                  if (!enabled) return
+                  synchronized(lock) {
+                      val directory = File(live, "evidence").also(File::mkdirs)
+                      val base = evidence.name.replace(Regex("[^A-Za-z0-9._-]"), "_").take(140).ifBlank { "evidence.bin" }
+                      val file = File(directory, "${evidence.timestampEpochMs}-${base}")
+                      file.writeBytes(evidence.data)
+                      trimEvidence(directory)
+                  }
+              }
+          
+              fun clear() = synchronized(lock) {
+                  root.deleteRecursively()
+                  live.mkdirs()
+              }
+          
+              fun snapshotForExport(): List<Pair<String, ByteArray>> = synchronized(lock) {
+                  val out = mutableListOf<Pair<String, ByteArray>>()
+                  if (previous.exists()) {
+                      previous.walkTopDown().filter(File::isFile).forEach { file ->
+                          out += "previous/${file.relativeTo(previous).invariantSeparatorsPath}" to file.readBytes()
+                      }
+                  }
+                  live.listFiles()?.filter { it.isFile && it.name.startsWith("events") }?.forEach { file ->
+                      out += "current/${file.name}" to file.readBytes()
+                  }
+                  out
+              }
+          
+              private fun trimEvidence(directory: File) {
+                  val files = directory.listFiles()?.filter(File::isFile)?.sortedBy(File::lastModified)?.toMutableList() ?: return
+                  var total = files.sumOf(File::length)
+                  while (files.isNotEmpty() && total > 64L * 1024L * 1024L) {
+                      val file = files.removeAt(0)
+                      total -= file.length()
+                      file.delete()
+                  }
+              }
+          
+              private fun copyDirectory(from: File, to: File) {
+                  from.walkTopDown().forEach { file ->
+                      val target = File(to, file.relativeTo(from).path)
+                      if (file.isDirectory) target.mkdirs() else {
+                          target.parentFile?.mkdirs()
+                          file.copyTo(target, overwrite = true)
+                      }
+                  }
+              }
+          }
+          '''
+          p = Path('app/src/main/java/vn/nghetruyen/app/sourceplatform/SourceDiagnosticRuntime.kt')
+          p.parent.mkdir(parents=True, exist_ok=True)
+          p.write_text(runtime)
+
+          # 3) Shared recorder/evidence in AppContainer so native, vBook and repositories share one timeline.
+          path = 'app/src/main/java/vn/nghetruyen/app/AppContainer.kt'
+          replace(path,
+          'import vn.nghetruyen.app.sourceplatform.SourcePlatformManager\n',
+          'import vn.nghetruyen.app.sourceplatform.SourcePlatformManager\nimport vn.nghetruyen.app.sourceplatform.SourceDiagnosticRuntime\n')
+          replace(path,
+          '    val sourceSessionStore: EncryptedSourceSessionStore by lazy { EncryptedSourceSessionStore(appContext) }\n',
+          '    val sourceSessionStore: EncryptedSourceSessionStore by lazy { EncryptedSourceSessionStore(appContext) }\n    val sourceDiagnostics: SourceDiagnosticRuntime = SourceDiagnosticRuntime(appContext)\n')
+          replace(path,
+          '        VBookSourcePlatform(appContext, sourceSessionStore, aiServices)\n',
+          '''        VBookSourcePlatform(
+                      appContext,
+                      sourceSessionStore,
+                      aiServices,
+                      diagnostics = sourceDiagnostics.recorder,
+                      evidence = sourceDiagnostics.evidence,
+                  )
+          ''')
+          replace(path,
+          '    val vBookRepositoryClient: VBookRepositoryClient by lazy { VBookRepositoryClient() }\n',
+          '''    val vBookRepositoryClient: VBookRepositoryClient by lazy {
+                  VBookRepositoryClient(diagnostics = sourceDiagnostics.recorder, evidence = sourceDiagnostics.evidence)
+              }
+          ''')
+          replace(path,
+          '            onVBookChanged = { refreshSourceRegistry() },\n',
+          '''            onVBookChanged = { refreshSourceRegistry() },
+                      diagnostics = sourceDiagnostics.recorder,
+                      evidence = sourceDiagnostics.evidence,
+          ''')
+
+          # 4) Legacy SourcePlatform uses shared recorder and gives browser access to evidence capture.
+          path = 'app/src/main/java/vn/nghetruyen/app/sourceplatform/SourcePlatformManager.kt'
+          replace(path,
+          'import vn.nghetruyen.source.diagnostics.DiagnosticEvent\n',
+          'import vn.nghetruyen.source.diagnostics.DiagnosticEvent\nimport vn.nghetruyen.source.diagnostics.DiagnosticEvidence\nimport vn.nghetruyen.source.diagnostics.DiagnosticEvidenceSink\n')
+          replace(path,
+          '''    private val vBookSourcePlatform: VBookSourcePlatform? = null,
+              private val onVBookChanged: () -> Unit = {},
+          ) {''',
+          '''    private val vBookSourcePlatform: VBookSourcePlatform? = null,
+              private val onVBookChanged: () -> Unit = {},
+              private val diagnostics: BoundedDiagnosticRecorder = BoundedDiagnosticRecorder(maxEvents = 8_000, level = DiagnosticLevel.BASIC),
+              private val evidence: DiagnosticEvidenceSink = DiagnosticEvidenceSink.NONE,
+          ) {''')
+          replace(path,
+          '    private val diagnostics = BoundedDiagnosticRecorder(maxEvents = 8_000, level = DiagnosticLevel.BASIC)\n', '')
+          replace(path,
+          '    private val browserBroker = AndroidSourceBrowserBroker(appContext, cookieJar, diagnostics)\n',
+          '    private val browserBroker = AndroidSourceBrowserBroker(appContext, cookieJar, diagnostics, evidence = evidence)\n')
+          replace(path,
+          '''        val bytes = readBounded(input, VBookPackageLimits().maxZipBytes)
+                  val pkg = VBookPackageReader.read(bytes)
+          ''',
+          '''        val bytes = readBounded(input, VBookPackageLimits().maxZipBytes)
+                  val importTrace = "vbook-import:${UUID.randomUUID()}"
+                  evidence.capture(DiagnosticEvidence(
+                      timestampEpochMs = System.currentTimeMillis(),
+                      traceId = importTrace,
+                      sourceId = "vbook-import",
+                      category = DiagnosticCategory.PACKAGE,
+                      name = "manual-vbook-package.zip",
+                      contentType = "application/zip",
+                      data = bytes,
+                  ))
+                  val pkg = VBookPackageReader.read(bytes)
+          ''')
+
+          # 5) vBook persistent platform shares the same recorder/evidence.
+          path = 'app/src/main/java/vn/nghetruyen/app/sourceplatform/VBookSourcePlatform.kt'
+          replace(path,
+          'import vn.nghetruyen.source.diagnostics.DiagnosticEvent\n',
+          'import vn.nghetruyen.source.diagnostics.DiagnosticEvent\nimport vn.nghetruyen.source.diagnostics.DiagnosticEvidenceSink\n')
+          replace(path,
+          '''    root: File = File(context.filesDir, "source-platform/vbook"),
+              private val clockMs: () -> Long = System::currentTimeMillis,
+          ) {''',
+          '''    root: File = File(context.filesDir, "source-platform/vbook"),
+              private val clockMs: () -> Long = System::currentTimeMillis,
+              private val diagnostics: BoundedDiagnosticRecorder = BoundedDiagnosticRecorder(maxEvents = 8_000, level = DiagnosticLevel.BASIC),
+              private val evidence: DiagnosticEvidenceSink = DiagnosticEvidenceSink.NONE,
+          ) {''')
+          replace(path,
+          '    private val diagnostics = BoundedDiagnosticRecorder(maxEvents = 8_000, level = DiagnosticLevel.BASIC)\n', '')
+          replace(path,
+          '        browser = AndroidSourceBrowserBroker(appContext, cookiePartition, diagnostics),\n',
+          '        browser = AndroidSourceBrowserBroker(appContext, cookiePartition, diagnostics, evidence = evidence),\n')
+          replace(path,
+          '            VBookStorySource(artifact, bytes, brokers, configReader, diagnostics)\n',
+          '            VBookStorySource(artifact, bytes, brokers, configReader, diagnostics, evidence)\n')
+
+          # 6) High-fidelity browser black box: console + automatic DOM and request metadata snapshots.
+          path = 'app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidSourceBrowserBroker.kt'
+          replace(path, 'import android.webkit.CookieManager\n', 'import android.webkit.CookieManager\nimport android.webkit.ConsoleMessage\n')
+          replace(path,
+          'import vn.nghetruyen.source.diagnostics.DiagnosticEvent\n',
+          'import vn.nghetruyen.source.diagnostics.DiagnosticEvent\nimport vn.nghetruyen.source.diagnostics.DiagnosticEvidence\nimport vn.nghetruyen.source.diagnostics.DiagnosticEvidenceSink\n')
+          replace(path,
+          '''    private val clockMs: () -> Long = System::currentTimeMillis,
+              private val resolver: (String) -> List<InetAddress> = { host -> InetAddress.getAllByName(host).toList() },
+          ) : SourceBrowserBroker {''',
+          '''    private val clockMs: () -> Long = System::currentTimeMillis,
+              private val resolver: (String) -> List<InetAddress> = { host -> InetAddress.getAllByName(host).toList() },
+              private val evidence: DiagnosticEvidenceSink = DiagnosticEvidenceSink.NONE,
+          ) : SourceBrowserBroker {''')
+          replace(path,
+          '''                val session = ensureSession(manifest, request.url)
+                          diagnostics.emit(event(manifest, request, "BROWSER_ACTION_STARTED", attributes = mapOf("action" to request.action.name)))
+          ''',
+          '''                val session = ensureSession(manifest, request.url)
+                          session.currentTraceId = request.traceId
+                          diagnostics.emit(event(manifest, request, "BROWSER_ACTION_STARTED", attributes = mapOf("action" to request.action.name)))
+          ''')
+          replace(path,
+          '''                    diagnostics.emit(event(manifest, request, "BROWSER_ACTION_COMPLETED", durationMs = clockMs() - started, attributes = mapOf(
+                              "action" to request.action.name,
+                              "requests" to it.requestMetadata.size.toString(),
+                              "degradedIsolation" to it.degradedIsolation.toString(),
+                          )))
+                          SourcePlatformResult.Success(it)
+          ''',
+          '''                    diagnostics.emit(event(manifest, request, "BROWSER_ACTION_COMPLETED", durationMs = clockMs() - started, attributes = mapOf(
+                              "action" to request.action.name,
+                              "requests" to it.requestMetadata.size.toString(),
+                              "degradedIsolation" to it.degradedIsolation.toString(),
+                          )))
+                          active?.let { session -> captureBrowserEvidence(session, request, "completed-${request.action.name.lowercase()}") }
+                          SourcePlatformResult.Success(it)
+          ''')
+          replace(path,
+          '''                    diagnostics.emit(event(manifest, request, "BROWSER_ACTION_FAILED", DiagnosticSeverity.ERROR, clockMs() - started, mapOf(
+                              "action" to request.action.name,
+                              "code" to code.name,
+                              "error" to (error.message ?: error.javaClass.simpleName),
+                          )))
+                          SourcePlatformResult.Failure(SourcePlatformFailure(code, error.message ?: "SOURCE_BROWSER_FAILED", request.traceId, error))
+          ''',
+          '''                    diagnostics.emit(event(manifest, request, "BROWSER_ACTION_FAILED", DiagnosticSeverity.ERROR, clockMs() - started, mapOf(
+                              "action" to request.action.name,
+                              "code" to code.name,
+                              "error" to (error.message ?: error.javaClass.simpleName),
+                          )))
+                          active?.let { session -> captureBrowserEvidence(session, request, "failed-${request.action.name.lowercase()}") }
+                          SourcePlatformResult.Failure(SourcePlatformFailure(code, error.message ?: "SOURCE_BROWSER_FAILED", request.traceId, error))
+          ''')
+          replace(path,
+          '''            override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message?): Boolean = false
+          
+                      override fun onJsAlert''',
+          '''            override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message?): Boolean = false
+          
+                      override fun onConsoleMessage(consoleMessage: ConsoleMessage): Boolean {
+                          val session = sessionRef.get() ?: return false
+                          val severity = when (consoleMessage.messageLevel()) {
+                              ConsoleMessage.MessageLevel.ERROR -> DiagnosticSeverity.ERROR
+                              ConsoleMessage.MessageLevel.WARNING -> DiagnosticSeverity.WARN
+                              ConsoleMessage.MessageLevel.DEBUG -> DiagnosticSeverity.DEBUG
+                              else -> DiagnosticSeverity.INFO
+                          }
+                          val message = consoleMessage.message().orEmpty().take(16_000)
+                          diagnostics.emit(DiagnosticEvent(
+                              timestampEpochMs = clockMs(),
+                              traceId = session.currentTraceId.ifBlank { "browser-session:${manifest.id}" },
+                              sourceId = manifest.id,
+                              sourceVersion = manifest.version.toString(),
+                              category = DiagnosticCategory.BROWSER,
+                              name = "BROWSER_CONSOLE",
+                              severity = severity,
+                              attributes = mapOf(
+                                  "message" to message,
+                                  "line" to consoleMessage.lineNumber().toString(),
+                                  "source" to consoleMessage.sourceId().orEmpty(),
+                              ),
+                          ))
+                          evidence.capture(DiagnosticEvidence(
+                              timestampEpochMs = clockMs(),
+                              traceId = session.currentTraceId,
+                              sourceId = manifest.id,
+                              category = DiagnosticCategory.BROWSER,
+                              name = "browser-console-${clockMs()}.log",
+                              contentType = "text/plain",
+                              data = "${consoleMessage.sourceId()}:${consoleMessage.lineNumber()} $message".toByteArray(Charsets.UTF_8),
+                          ))
+                          return true
+                      }
+          
+                      override fun onJsAlert''')
+          replace(path,
+          '''    private fun requireCapability(manifest: SourceManifest, action: SourceBrowserAction) {''',
+          '''    private fun captureBrowserEvidence(session: Session, request: SourceBrowserRequest, reason: String) {
+                  if (!evidence.enabled || request.action in setOf(SourceBrowserAction.CLOSE_SESSION, SourceBrowserAction.CLEAR_SESSION)) return
+                  val trace = request.traceId.ifBlank { session.currentTraceId.ifBlank { "browser-session:${request.sourceId}" } }
+                  val html = runCatching {
+                      evaluate(
+                          session,
+                          "document.documentElement ? document.documentElement.outerHTML : ''",
+                          request.timeoutMs.coerceIn(100L, 5_000L),
+                      )
+                  }.getOrNull()
+                  if (html != null) {
+                      evidence.capture(DiagnosticEvidence(
+                          timestampEpochMs = clockMs(),
+                          traceId = trace,
+                          sourceId = request.sourceId,
+                          category = DiagnosticCategory.BROWSER,
+                          name = "browser-${reason}-${clockMs()}.html",
+                          contentType = "text/html",
+                          data = html.toByteArray(Charsets.UTF_8),
+                          attributes = mapOf(
+                              "action" to request.action.name,
+                              "url" to (session.webView.url ?: request.url.orEmpty()),
+                              "title" to session.webView.title.orEmpty(),
+                              "requests" to session.metadata.size.toString(),
+                          ),
+                      ))
+                  }
+                  val metadata = session.metadata.joinToString("\n") { it.toString() }
+                  if (metadata.isNotBlank()) {
+                      evidence.capture(DiagnosticEvidence(
+                          timestampEpochMs = clockMs(),
+                          traceId = trace,
+                          sourceId = request.sourceId,
+                          category = DiagnosticCategory.NETWORK,
+                          name = "browser-${reason}-requests-${clockMs()}.log",
+                          contentType = "text/plain",
+                          data = metadata.toByteArray(Charsets.UTF_8),
+                      ))
+                  }
+              }
+          
+              private fun requireCapability(manifest: SourceManifest, action: SourceBrowserAction) {''')
+          replace(path,
+          '''        val metadata = ArrayDeque<SourceBrowserRequestMetadata>()
+                  val dialogs = ArrayDeque<SourceBrowserDialog>()
+          ''',
+          '''        val metadata = ArrayDeque<SourceBrowserRequestMetadata>()
+                  val dialogs = ArrayDeque<SourceBrowserDialog>()
+                  @Volatile var currentTraceId: String = ""
+          ''')
+
+          # 7) vBook story actions now get their own trace IDs and retain raw envelopes.
+          path = 'app/src/main/java/vn/nghetruyen/app/sourceplatform/VBookStorySource.kt'
+          replace(path,
+          'import vn.nghetruyen.source.diagnostics.DiagnosticSink\n',
+          '''import vn.nghetruyen.source.diagnostics.DiagnosticCategory
+          import vn.nghetruyen.source.diagnostics.DiagnosticEvent
+          import vn.nghetruyen.source.diagnostics.DiagnosticEvidence
+          import vn.nghetruyen.source.diagnostics.DiagnosticEvidenceSink
+          import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
+          import vn.nghetruyen.source.diagnostics.DiagnosticSink
+          ''')
+          replace(path, 'import java.util.Base64\n', 'import java.util.Base64\nimport java.util.UUID\n')
+          replace(path,
+          '''    private val configReader: VBookConfigReader = VBookConfigReader { emptyMap() },
+              diagnostics: DiagnosticSink = DiagnosticSink.NONE,
+          ) : StorySource {''',
+          '''    private val configReader: VBookConfigReader = VBookConfigReader { emptyMap() },
+              private val diagnostics: DiagnosticSink = DiagnosticSink.NONE,
+              private val evidence: DiagnosticEvidenceSink = DiagnosticEvidenceSink.NONE,
+          ) : StorySource {''')
+          replace(path,
+          '''    private fun executeDeclared(
+                  role: VBookScriptRole,
+                  input: String,
+                  continuation: VBookContinuation = VBookContinuation(),
+              ): AppResult<VBookCompatibilityRuntime.ExecutionResult> = when (val result = runtime.executeDeclared(
+                  sourceManifest = hostManifest,
+                  resources = resources,
+                  role = role,
+                  input = input,
+                  continuation = continuation,
+                  persistedConfig = configReader.read(configKey),
+              )) {
+                  is SourcePlatformResult.Success -> AppResult.Success(result.value)
+                  is SourcePlatformResult.Failure -> AppResult.Failure(result.error.code.name, result.error.message, result.error.cause)
+              }
+          ''',
+          '''    private fun executeDeclared(
+                  role: VBookScriptRole,
+                  input: String,
+                  continuation: VBookContinuation = VBookContinuation(),
+              ): AppResult<VBookCompatibilityRuntime.ExecutionResult> {
+                  val traceId = UUID.randomUUID().toString()
+                  diagnostics.emit(DiagnosticEvent(
+                      timestampEpochMs = System.currentTimeMillis(),
+                      traceId = traceId,
+                      sourceId = hostManifest.id,
+                      sourceVersion = artifact.version,
+                      category = DiagnosticCategory.RUNTIME,
+                      name = "VBOOK_ROLE_STARTED",
+                      attributes = mapOf("role" to role.manifestKey, "inputChars" to input.length.toString()),
+                  ))
+                  return when (val result = runtime.executeDeclared(
+                      sourceManifest = hostManifest,
+                      resources = resources,
+                      role = role,
+                      input = input,
+                      continuation = continuation,
+                      persistedConfig = configReader.read(configKey),
+                      traceId = traceId,
+                  )) {
+                      is SourcePlatformResult.Success -> {
+                          evidence.capture(DiagnosticEvidence(
+                              timestampEpochMs = System.currentTimeMillis(),
+                              traceId = traceId,
+                              sourceId = hostManifest.id,
+                              category = DiagnosticCategory.RUNTIME,
+                              name = "vbook-${role.manifestKey}-raw-envelope.json",
+                              contentType = "application/json",
+                              data = JsonCodec.stringify(result.value.rawEnvelope).toByteArray(Charsets.UTF_8),
+                              attributes = mapOf("profile" to result.value.profile.name, "instructions" to result.value.instructionCount.toString()),
+                          ))
+                          diagnostics.emit(DiagnosticEvent(
+                              timestampEpochMs = System.currentTimeMillis(),
+                              traceId = traceId,
+                              sourceId = hostManifest.id,
+                              sourceVersion = artifact.version,
+                              category = DiagnosticCategory.RUNTIME,
+                              name = "VBOOK_ROLE_COMPLETED",
+                              attributes = mapOf("role" to role.manifestKey, "instructions" to result.value.instructionCount.toString()),
+                          ))
+                          AppResult.Success(result.value)
+                      }
+                      is SourcePlatformResult.Failure -> {
+                          diagnostics.emit(DiagnosticEvent(
+                              timestampEpochMs = System.currentTimeMillis(),
+                              traceId = traceId,
+                              sourceId = hostManifest.id,
+                              sourceVersion = artifact.version,
+                              category = DiagnosticCategory.RUNTIME,
+                              name = "VBOOK_ROLE_FAILED",
+                              severity = DiagnosticSeverity.ERROR,
+                              attributes = mapOf("role" to role.manifestKey, "code" to result.error.code.name, "error" to result.error.message),
+                          ))
+                          AppResult.Failure(result.error.code.name, result.error.message, result.error.cause)
+                      }
+                  }
+              }
+          ''')
+          replace(path,
+          '''    private fun executeDynamic(
+                  action: VBookDynamicAction,
+                  continuation: VBookContinuation,
+              ): AppResult<VBookCompatibilityRuntime.ExecutionResult> = when (val result = runtime.executeDynamic(
+                  sourceManifest = hostManifest,
+                  resources = resources,
+                  scriptPath = action.scriptPath,
+                  args = action.invocation(continuation).args,
+                  persistedConfig = configReader.read(configKey),
+              )) {
+                  is SourcePlatformResult.Success -> AppResult.Success(result.value)
+                  is SourcePlatformResult.Failure -> AppResult.Failure(result.error.code.name, result.error.message, result.error.cause)
+              }
+          ''',
+          '''    private fun executeDynamic(
+                  action: VBookDynamicAction,
+                  continuation: VBookContinuation,
+              ): AppResult<VBookCompatibilityRuntime.ExecutionResult> {
+                  val traceId = UUID.randomUUID().toString()
+                  diagnostics.emit(DiagnosticEvent(
+                      timestampEpochMs = System.currentTimeMillis(),
+                      traceId = traceId,
+                      sourceId = hostManifest.id,
+                      sourceVersion = artifact.version,
+                      category = DiagnosticCategory.RUNTIME,
+                      name = "VBOOK_DYNAMIC_STARTED",
+                      attributes = mapOf("script" to action.scriptPath),
+                  ))
+                  return when (val result = runtime.executeDynamic(
+                      sourceManifest = hostManifest,
+                      resources = resources,
+                      scriptPath = action.scriptPath,
+                      args = action.invocation(continuation).args,
+                      persistedConfig = configReader.read(configKey),
+                      traceId = traceId,
+                  )) {
+                      is SourcePlatformResult.Success -> {
+                          evidence.capture(DiagnosticEvidence(
+                              timestampEpochMs = System.currentTimeMillis(),
+                              traceId = traceId,
+                              sourceId = hostManifest.id,
+                              category = DiagnosticCategory.RUNTIME,
+                              name = "vbook-dynamic-raw-envelope.json",
+                              contentType = "application/json",
+                              data = JsonCodec.stringify(result.value.rawEnvelope).toByteArray(Charsets.UTF_8),
+                              attributes = mapOf("script" to action.scriptPath, "profile" to result.value.profile.name),
+                          ))
+                          diagnostics.emit(DiagnosticEvent(
+                              timestampEpochMs = System.currentTimeMillis(),
+                              traceId = traceId,
+                              sourceId = hostManifest.id,
+                              sourceVersion = artifact.version,
+                              category = DiagnosticCategory.RUNTIME,
+                              name = "VBOOK_DYNAMIC_COMPLETED",
+                              attributes = mapOf("script" to action.scriptPath, "instructions" to result.value.instructionCount.toString()),
+                          ))
+                          AppResult.Success(result.value)
+                      }
+                      is SourcePlatformResult.Failure -> {
+                          diagnostics.emit(DiagnosticEvent(
+                              timestampEpochMs = System.currentTimeMillis(),
+                              traceId = traceId,
+                              sourceId = hostManifest.id,
+                              sourceVersion = artifact.version,
+                              category = DiagnosticCategory.RUNTIME,
+                              name = "VBOOK_DYNAMIC_FAILED",
+                              severity = DiagnosticSeverity.ERROR,
+                              attributes = mapOf("script" to action.scriptPath, "code" to result.error.code.name, "error" to result.error.message),
+                          ))
+                          AppResult.Failure(result.error.code.name, result.error.message, result.error.cause)
+                      }
+                  }
+              }
+          ''')
+
+          # 8) Repository client now records every fetch and accepts direct plugin.json catalogs.
+          client = r'''package vn.nghetruyen.app.sourceplatform
+          
+          import vn.nghetruyen.source.api.JsonCodec
+          import vn.nghetruyen.source.api.JsonValue
+          import vn.nghetruyen.source.api.SemanticVersion
+          import vn.nghetruyen.source.api.SourceCapabilities
+          import vn.nghetruyen.source.api.SourceContentType
+          import vn.nghetruyen.source.api.SourceManifest
+          import vn.nghetruyen.source.api.SourceNetworkCapability
+          import vn.nghetruyen.source.api.SourceNetworkRequest
+          import vn.nghetruyen.source.api.SourcePlatformResult
+          import vn.nghetruyen.source.api.SourceRuntimeMode
+          import vn.nghetruyen.source.api.SourceRuntimePolicy
+          import vn.nghetruyen.source.diagnostics.DiagnosticCategory
+          import vn.nghetruyen.source.diagnostics.DiagnosticEvent
+          import vn.nghetruyen.source.diagnostics.DiagnosticEvidence
+          import vn.nghetruyen.source.diagnostics.DiagnosticEvidenceSink
+          import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
+          import vn.nghetruyen.source.diagnostics.DiagnosticSink
+          import vn.nghetruyen.source.network.OkHttpSourceNetworkBroker
+          import vn.nghetruyen.source.vbook.VBookAggregatedItem
+          import vn.nghetruyen.source.vbook.VBookCatalog
+          import vn.nghetruyen.source.vbook.VBookCatalogParser
+          import vn.nghetruyen.source.vbook.VBookRepositoryAggregator
+          import vn.nghetruyen.source.vbook.VBookRepositoryFetchResult
+          import vn.nghetruyen.source.vbook.VBookRepositoryFetcher
+          import vn.nghetruyen.source.vbook.VBookRepositorySnapshot
+          import java.net.URI
+          import java.security.MessageDigest
+          import java.util.UUID
+          
+          /** Repository/catalog/package transport with automatic repository.json vs plugin.json recognition. */
+          class VBookRepositoryClient(
+              network: OkHttpSourceNetworkBroker? = null,
+              private val diagnostics: DiagnosticSink = DiagnosticSink.NONE,
+              private val evidence: DiagnosticEvidenceSink = DiagnosticEvidenceSink.NONE,
+          ) {
+              private val traceContext = ThreadLocal<String>()
+              private val network = network ?: OkHttpSourceNetworkBroker(diagnostics = diagnostics)
+              private val fetcher = VBookRepositoryFetcher { url, maxBytes ->
+                  val bytes = fetchBytes(url, maxBytes)
+                  VBookRepositoryFetchResult(url, bytes.toString(Charsets.UTF_8), sha256(bytes))
+              }
+              private val aggregator = VBookRepositoryAggregator(fetcher)
+          
+              fun snapshot(indexUrl: String = OFFICIAL_INDEX, strict: Boolean = false): VBookRepositorySnapshot =
+                  withTrace("repository") { traceId ->
+                      emit(traceId, "VBOOK_REPOSITORY_INPUT_STARTED", attributes = mapOf("url" to indexUrl))
+                      val indexAttempt = runCatching { aggregator.fetchIndex(indexUrl, strict) }
+                      if (indexAttempt.isSuccess) {
+                          val snapshot = indexAttempt.getOrThrow()
+                          emit(traceId, "VBOOK_REPOSITORY_INPUT_CLASSIFIED", attributes = mapOf(
+                              "kind" to "repository-index",
+                              "catalogs" to snapshot.repositories.size.toString(),
+                              "items" to snapshot.items.size.toString(),
+                          ))
+                          return@withTrace snapshot
+                      }
+          
+                      val indexError = indexAttempt.exceptionOrNull()
+                      val directAttempt = runCatching {
+                          val canonical = canonicalUrl(indexUrl)
+                          val fetched = fetcher.fetch(canonical, VBookRepositoryAggregator.MAX_CATALOG_BYTES)
+                          val catalog = VBookCatalogParser.parse(fetched.body)
+                          directCatalogSnapshot(fetched, catalog, strict)
+                      }
+                      if (directAttempt.isSuccess) {
+                          val snapshot = directAttempt.getOrThrow()
+                          emit(traceId, "VBOOK_REPOSITORY_INPUT_CLASSIFIED", attributes = mapOf(
+                              "kind" to "direct-vbook-catalog",
+                              "catalogs" to snapshot.repositories.size.toString(),
+                              "items" to snapshot.items.size.toString(),
+                              "indexFailure" to indexError?.message.orEmpty(),
+                          ))
+                          return@withTrace snapshot
+                      }
+          
+                      val directError = directAttempt.exceptionOrNull()
+                      val message = listOf(indexError?.message, directError?.message).filterNotNull().filter(String::isNotBlank).joinToString(" | ")
+                      emit(traceId, "VBOOK_REPOSITORY_INPUT_FAILED", DiagnosticSeverity.ERROR, mapOf("url" to indexUrl, "error" to message))
+                      error(message.ifBlank { "VBOOK_REPOSITORY_INPUT_UNRECOGNIZED" })
+                  }
+          
+              fun downloadPackage(item: VBookAggregatedItem): ByteArray = withTrace("package") { traceId ->
+                  emit(traceId, "VBOOK_PACKAGE_DOWNLOAD_STARTED", attributes = mapOf("url" to item.item.packageUrl, "name" to item.item.name))
+                  val bytes = fetchBytes(item.item.packageUrl, MAX_PACKAGE_BYTES)
+                  emit(traceId, "VBOOK_PACKAGE_DOWNLOAD_COMPLETED", attributes = mapOf("bytes" to bytes.size.toString(), "sha256" to sha256(bytes)))
+                  bytes
+              }
+          
+              private fun directCatalogSnapshot(
+                  fetched: VBookRepositoryFetchResult,
+                  catalog: VBookCatalog,
+                  strict: Boolean,
+              ): VBookRepositorySnapshot {
+                  val wrapperUrl = syntheticWrapperUrl(fetched.url)
+                  val wrapperBody = JsonCodec.stringify(JsonValue.Arr(listOf(JsonValue.Obj(linkedMapOf(
+                      "link" to JsonValue.Str(fetched.url),
+                      "author" to JsonValue.Str(catalog.metadata.author),
+                      "description" to JsonValue.Str(catalog.metadata.description),
+                  )))))
+                  val wrapper = VBookRepositoryFetchResult(wrapperUrl, wrapperBody, sha256(wrapperBody.toByteArray(Charsets.UTF_8)))
+                  val directFetcher = VBookRepositoryFetcher { url, maxBytes ->
+                      when (url) {
+                          wrapperUrl -> wrapper
+                          fetched.url -> fetched
+                          else -> fetcher.fetch(url, maxBytes)
+                      }
+                  }
+                  return VBookRepositoryAggregator(directFetcher)
+                      .fetchIndex(wrapperUrl, strict)
+                      .copy(indexUrl = fetched.url, indexSha256 = fetched.sha256)
+              }
+          
+              private fun fetchBytes(url: String, maxBytes: Int): ByteArray {
+                  require(maxBytes in 1..MAX_PACKAGE_BYTES) { "VBOOK_REPOSITORY_FETCH_LIMIT_INVALID" }
+                  val traceId = traceContext.get().orEmpty().ifBlank { "vbook-fetch:${UUID.randomUUID()}" }
+                  emit(traceId, "VBOOK_FETCH_STARTED", attributes = mapOf("url" to url, "maxBytes" to maxBytes.toString()))
+                  val result = network.execute(
+                      manifest(maxBytes),
+                      SourceNetworkRequest(
+                          sourceId = FETCHER_SOURCE_ID,
+                          url = url,
+                          method = "GET",
+                          allowHttpError = false,
+                          timeoutMs = 45_000,
+                          traceId = traceId,
+                      ),
+                  )
+                  val response = when (result) {
+                      is SourcePlatformResult.Success -> result.value
+                      is SourcePlatformResult.Failure -> {
+                          emit(traceId, "VBOOK_FETCH_FAILED", DiagnosticSeverity.ERROR, mapOf("url" to url, "code" to result.error.code.name, "error" to result.error.message))
+                          error("VBOOK_REPOSITORY_FETCH_${result.error.code}:${result.error.message}")
+                      }
+                  }
+                  require(response.body.size <= maxBytes) { "VBOOK_REPOSITORY_RESPONSE_TOO_LARGE" }
+                  val bytes = response.body.copyOf()
+                  val digest = sha256(bytes)
+                  emit(traceId, "VBOOK_FETCH_COMPLETED", attributes = mapOf(
+                      "url" to url,
+                      "status" to response.statusCode.toString(),
+                      "bytes" to bytes.size.toString(),
+                      "sha256" to digest,
+                      "finalUrl" to response.finalUrl,
+                  ))
+                  if (evidence.enabled) {
+                      val zip = bytes.size >= 4 && bytes[0] == 0x50.toByte() && bytes[1] == 0x4b.toByte()
+                      evidence.capture(DiagnosticEvidence(
+                          timestampEpochMs = System.currentTimeMillis(),
+                          traceId = traceId,
+                          sourceId = FETCHER_SOURCE_ID,
+                          category = DiagnosticCategory.NETWORK,
+                          name = "repository-fetch-${sha256(url.toByteArray()).take(12)}-${digest.take(12)}.${if (zip) "zip" else "json"}",
+                          contentType = if (zip) "application/zip" else "application/json",
+                          data = bytes,
+                          attributes = mapOf("url" to url, "finalUrl" to response.finalUrl, "status" to response.statusCode.toString()),
+                      ))
+                  }
+                  return bytes
+              }
+          
+              private fun <T> withTrace(prefix: String, block: (String) -> T): T {
+                  val previous = traceContext.get()
+                  val traceId = "$prefix:${UUID.randomUUID()}"
+                  traceContext.set(traceId)
+                  return try {
+                      block(traceId)
+                  } finally {
+                      if (previous == null) traceContext.remove() else traceContext.set(previous)
+                  }
+              }
+          
+              private fun emit(
+                  traceId: String,
+                  name: String,
+                  severity: DiagnosticSeverity = DiagnosticSeverity.INFO,
+                  attributes: Map<String, String> = emptyMap(),
+              ) {
+                  diagnostics.emit(DiagnosticEvent(
+                      timestampEpochMs = System.currentTimeMillis(),
+                      traceId = traceId,
+                      sourceId = FETCHER_SOURCE_ID,
+                      sourceVersion = "1.0.0",
+                      category = if (name.contains("CLASSIFIED") || name.contains("INPUT")) DiagnosticCategory.PARSER else DiagnosticCategory.NETWORK,
+                      name = name,
+                      severity = severity,
+                      attributes = attributes,
+                  ))
+              }
+          
+              private fun manifest(maxBytes: Int) = SourceManifest(
+                  schemaVersion = 2,
+                  id = FETCHER_SOURCE_ID,
+                  name = "vBook repository transport",
+                  version = SemanticVersion(1, 0, 0),
+                  apiVersion = 2,
+                  contentType = SourceContentType.NOVEL,
+                  runtime = SourceRuntimePolicy(mode = SourceRuntimeMode.VBOOK_JS_COMPAT),
+                  origins = setOf("https://vbook.invalid"),
+                  capabilities = SourceCapabilities(
+                      network = SourceNetworkCapability(
+                          methods = setOf("GET"),
+                          maxResponseBytes = maxBytes.coerceAtLeast(1024),
+                          maxRequestBytes = 0,
+                          requestsPerMinute = 120,
+                          maxConcurrent = 4,
+                          publicInternet = true,
+                          allowCleartext = false,
+                      ),
+                  ),
+                  actions = emptyMap(),
+              )
+          
+              companion object {
+                  const val OFFICIAL_INDEX = "https://raw.githubusercontent.com/Darkrai9x/vbook-extensions/master/repository.json"
+                  const val MAX_PACKAGE_BYTES = 16 * 1024 * 1024
+                  private const val FETCHER_SOURCE_ID = "vbook.repository.transport"
+          
+                  private fun canonicalUrl(raw: String): String {
+                      val uri = URI(raw.trim())
+                      require(uri.scheme.equals("https", true) && !uri.host.isNullOrBlank()) { "VBOOK_REPOSITORY_HTTPS_REQUIRED" }
+                      require(uri.userInfo == null && uri.fragment == null) { "VBOOK_REPOSITORY_URL_INVALID" }
+                      return URI("https", null, uri.host.lowercase(), uri.port, uri.path.ifBlank { "/" }, uri.query, null).toASCIIString()
+                  }
+          
+                  private fun syntheticWrapperUrl(catalogUrl: String): String {
+                      val uri = URI(catalogUrl)
+                      val query = listOfNotNull(uri.query?.takeIf(String::isNotBlank), "__nghetruyen_direct_catalog=1").joinToString("&")
+                      return URI("https", null, uri.host.lowercase(), uri.port, uri.path.ifBlank { "/" }, query, null).toASCIIString()
+                  }
+          
+                  private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
+                      .digest(bytes)
+                      .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+              }
+          }
+          '''
+          Path('app/src/main/java/vn/nghetruyen/app/sourceplatform/VBookRepositoryClient.kt').write_text(client)
+
+          # 9) Unified view de-duplicates shared-recorder events.
+          path = 'app/src/main/java/vn/nghetruyen/app/sourceplatform/UnifiedSourcePlatformManager.kt'
+          replace(path,
+          '''    fun diagnosticsSnapshot(sourceId: String? = null) =
+                  (legacy.diagnosticsSnapshot(sourceId) + vBook.diagnosticsSnapshot(sourceId)).sortedBy { it.timestampEpochMs }
+          ''',
+          '''    fun diagnosticsSnapshot(sourceId: String? = null) =
+                  (legacy.diagnosticsSnapshot(sourceId) + vBook.diagnosticsSnapshot(sourceId))
+                      .distinct()
+                      .sortedBy { it.timestampEpochMs }
+          ''')
+
+          # 10) ViewModel: persisted real mode, live log status, ZIP export and full black-box clear.
+          path = 'app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt'
+          replace(path,
+          '''            sourceTraces = container.sourcePlatformManager.diagnosticTraces(),
+                      backupHistory = container.backupHistoryStore.entries(),
+          ''',
+          '''            sourceTraces = container.sourcePlatformManager.diagnosticTraces(),
+                      diagnosticsMode = container.sourceDiagnostics.mode,
+                      backupHistory = container.backupHistoryStore.entries(),
+          ''')
+          replace(path,
+          '''        observeSettings()
+                  observeLibrary()
+          ''',
+          '''        observeSettings()
+                  observeDiagnostics()
+                  observeLibrary()
+          ''')
+          replace(path,
+          '''    private fun observeLibrary() {''',
+          '''    private fun observeDiagnostics() {
+                  viewModelScope.launch {
+                      while (true) {
+                          val events = container.sourcePlatformManager.diagnosticsSnapshot()
+                          mutableState.update { current ->
+                              current.copy(
+                                  diagnosticsMode = container.sourceDiagnostics.mode,
+                                  sourceDiagnosticCount = events.size,
+                                  sourceDiagnostics = container.sourcePlatformManager.diagnosticSummaries(),
+                                  sourceTraces = container.sourcePlatformManager.diagnosticTraces(),
+                              )
+                          }
+                          delay(if (container.sourceDiagnostics.mode == "off") 2_000 else 750)
+                      }
+                  }
+              }
+          
+              private fun observeLibrary() {''')
+          replace(path,
+          '''    fun setDiagnosticsMode(mode: String) {
+                  val normalized = mode.takeIf { it in setOf("off", "basic", "advanced") } ?: "off"
+                  mutableState.update { it.copy(diagnosticsMode = normalized) }
+              }
+          ''',
+          '''    fun setDiagnosticsMode(mode: String) {
+                  val normalized = container.sourceDiagnostics.setMode(mode)
+                  mutableState.update { it.copy(diagnosticsMode = normalized) }
+                  showMessage(when (normalized) {
+                      "advanced" -> "Đã bật gỡ lỗi nâng cao: ghi trace, HTML/DOM, runtime, network và hộp đen chống mất log khi crash."
+                      "basic" -> "Đã bật gỡ lỗi cơ bản."
+                      else -> "Đã tắt ghi nhật ký chẩn đoán."
+                  })
+              }
+          ''')
+          replace(path,
+          '''                getApplication<Application>().contentResolver.openOutputStream(uri, "wt")?.use { output ->
+                          output.write(container.sourcePlatformManager.exportDiagnostics())
+                      } ?: error("Không mở được tệp báo cáo chẩn đoán.")
+                  }.onSuccess {
+                      showMessage("Đã xuất báo cáo Source Platform đã che dữ liệu nhạy cảm.")
+          ''',
+          '''                val payload = container.sourceDiagnostics.exportBundle(
+                          events = container.sourcePlatformManager.diagnosticsSnapshot(),
+                          installed = container.sourcePlatformManager.installedPacks(),
+                          repositories = container.sourcePlatformManager.repositories(),
+                      )
+                      getApplication<Application>().contentResolver.openOutputStream(uri, "w")?.use { output ->
+                          output.write(payload)
+                      } ?: error("Không mở được tệp báo cáo chẩn đoán.")
+                  }.onSuccess {
+                      showMessage("Đã xuất hộp đen chẩn đoán ZIP với trace và bằng chứng chi tiết.")
+          ''')
+          replace(path,
+          '''    fun clearSourceDiagnostics() {
+                  container.sourcePlatformManager.clearDiagnostics()
+                  refreshSourcePlatformState()
+                  showMessage("Đã xóa nhật ký Source Platform trong bộ đệm.")
+              }
+          ''',
+          '''    fun clearSourceDiagnostics() {
+                  container.sourcePlatformManager.clearDiagnostics()
+                  container.sourceDiagnostics.clearBlackBox()
+                  refreshSourcePlatformState()
+                  showMessage("Đã xóa nhật ký, bằng chứng Advanced và hộp đen crash-safe.")
+              }
+          ''')
+          replace(path,
+          'showMessage("Hãy nhập URL HTTPS của repository nguồn.")',
+          'showMessage("Hãy nhập URL HTTPS của repository.json hoặc plugin.json vBook.")')
+
+          # 11) Export is a ZIP bundle, matching the original app's advanced black-box flow.
+          path = 'app/src/main/java/vn/nghetruyen/app/MainActivity.kt'
+          replace(path,
+          'contract = ActivityResultContracts.CreateDocument("application/json"),',
+          'contract = ActivityResultContracts.CreateDocument("application/zip"),')
+          replace(path,
+          'sourceDiagnosticsExportLauncher.launch("source-platform-diagnostics-$stamp.json")',
+          'sourceDiagnosticsExportLauncher.launch("nghetruyen-diagnostics-$stamp.zip")')
+
+          # 12) User-facing status uses the original app's recording/view-log vocabulary.
+          path = 'app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt'
+          replace(path,
+          '''            Text("NHẬT KÝ & TRACE", fontWeight = FontWeight.Bold)
+                      Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                          Button(onExportDiagnostics, Modifier.weight(1f).padding(2.dp)) { Text("XUẤT CHẨN ĐOÁN") }
+          ''',
+          '''            Text("NHẬT KÝ & TRACE", fontWeight = FontWeight.Bold)
+                      Text(
+                          when {
+                              state.diagnosticsMode == "off" -> "CHƯA BẬT NHẬT KÝ"
+                              state.sourceDiagnosticCount == 0 -> "ĐANG GHI NHẬT KÝ..."
+                              else -> "XEM NHẬT KÝ • ${state.sourceDiagnosticCount} sự kiện"
+                          },
+                          style = MaterialTheme.typography.bodySmall,
+                          fontWeight = FontWeight.SemiBold,
+                      )
+                      Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                          Button(onExportDiagnostics, Modifier.weight(1f).padding(2.dp)) {
+                              Text(if (state.diagnosticsMode == "advanced") "XUẤT HỘP ĐEN" else "XUẤT CHẨN ĐOÁN")
+                          }
+          ''')
+
+          # Remove this one-shot implementation workflow from the resulting source commit.
+          Path('.github/workflows/diagnostics-blackbox-implement.yml').unlink()
+          PY
+      - name: Validate source modules and app
+        shell: bash
+        run: |
+          chmod +x gradlew
+          ./gradlew :source-diagnostics:test :source-vbook:test :app:testDebugUnitTest :app:compileDebugKotlin --stacktrace
+      - name: Build debug APK
+        shell: bash
+        run: ./gradlew :app:assembleDebug --stacktrace
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NgheTruyen-diagnostics-vbook-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+      - name: Commit validated implementation
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: add diagnostic black box and direct vBook catalog URLs"
+          git push origin HEAD:agent/diagnostics-blackbox-vbook-url

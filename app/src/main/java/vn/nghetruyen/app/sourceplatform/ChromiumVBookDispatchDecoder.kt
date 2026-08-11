@@ -15,6 +15,8 @@ internal object ChromiumVBookDispatchDecoder {
         repeat(MAX_LAYERS) {
             val snapshot = current
             val obj = snapshot as? JsonValue.Obj
+            val evaluationError = obj?.string(EVAL_ERROR_KEY)
+            if (!evaluationError.isNullOrBlank()) error("CHROMIUM_EVAL_ERROR:$evaluationError")
             if (obj != null && obj.values.containsKey(RAW_RESULT_KEY)) return obj
 
             current = when (snapshot) {
@@ -47,6 +49,7 @@ internal object ChromiumVBookDispatchDecoder {
     }
 
     private const val RAW_RESULT_KEY = "__ngheVBookRawResult"
+    private const val EVAL_ERROR_KEY = "__ngheChromiumEvalError"
     private const val MAX_LAYERS = 8
     private const val MAX_DEPTH = 96
     private const val MAX_NODES = 200_000

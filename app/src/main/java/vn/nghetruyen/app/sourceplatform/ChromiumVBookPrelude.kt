@@ -266,10 +266,20 @@ internal object ChromiumVBookPrelude {
                 return false;
               }
               function __browser(){
-                var out={};
+                var out={},lastUrl='';
                 function action(name,payload){payload=payload||{};payload.action=name;return __rpc('browser_action',payload)||{};}
-                out.launch=function(url){return action('NAVIGATE',{url:String(url||'')}).value;}; out.launchAsync=out.launch;
-                out.loadHtml=function(baseUrl,html){return action('LOAD_HTML',{url:String(baseUrl||''),value:String(html==null?'':html)}).value;};
+                function updateUrl(response,fallback){response=response||{};lastUrl=String(response.finalUrl||fallback||lastUrl||'');return response;}
+                function snapshot(){var response=updateUrl(action('DOM_SNAPSHOT',{}),lastUrl);return Html.parse(response.value||'',lastUrl);}
+                out.launch=function(url){var target=String(url||'');updateUrl(action('NAVIGATE',{url:target}),target);return snapshot();};
+                out.launchAsync=function(url){var target=String(url||'');updateUrl(action('NAVIGATE',{url:target}),target);return true;};
+                out.loadHtml=function(first,second){
+                  var a=String(first==null?'':first),b=String(second==null?'':second);
+                  var aLooksHtml=/<[A-Za-z!/][^>]*>/.test(a),aLooksUrl=/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(a),bLooksUrl=/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(b);
+                  var swap=(aLooksHtml&&(bLooksUrl||b.indexOf('/')===0))||(bLooksUrl&&!aLooksUrl);
+                  var baseUrl=swap?b:a,html=swap?a:b;
+                  updateUrl(action('LOAD_HTML',{url:baseUrl,value:html}),baseUrl);
+                  return out;
+                };
                 out.waitSelector=function(selector,timeoutMs){return action('WAIT_SELECTOR',{selector:String(selector||''),timeoutMs:Number(timeoutMs||0)}).value;};
                 out.requests=function(pattern){
                   var values=action('REQUEST_METADATA',{}).metadata||[];
@@ -287,7 +297,7 @@ internal object ChromiumVBookPrelude {
                   return false;
                 };
                 out.urls=function(){var values=out.requests();var result=[];for(var i=0;i<values.length;i++){var url=String(values[i]&&values[i].url||'');if(url&&result.indexOf(url)<0)result.push(url);}return result;};
-                out.html=function(){return action('DOM_SNAPSHOT',{}).value||'';};
+                out.html=function(){return snapshot();};
                 out.callJs=function(script){return action('EVALUATE_PAGE_SCRIPT',{script:String(script||'')}).value;}; out.evaluate=out.callJs;
                 out.callJson=function(script){var raw=out.callJs(script);try{return JSON.parse(String(raw));}catch(ignored){return undefined;}};
                 out.callJsAsync=function(script){return action('EVALUATE_PAGE_SCRIPT_ASYNC',{script:String(script||'')}).value;}; out.evaluate_async=out.callJsAsync;
@@ -305,7 +315,7 @@ internal object ChromiumVBookPrelude {
                 out.lastDialog=function(){var values=out.dialogs();return values.length?values[values.length-1]:undefined;};
                 out.waitDialog=function(options,timeoutMs){return action('WAIT_DIALOG',{options:options&&typeof options==='object'?options:{},timeoutMs:Number(timeoutMs||0)}).dialog;};
                 out.close=function(){return action('CLOSE_SESSION',{}).value;};
-                out.currentUrl=function(){return action('REQUEST_METADATA',{}).finalUrl||'';};
+                out.currentUrl=function(){var response=updateUrl(action('REQUEST_METADATA',{}),lastUrl);return String(response.finalUrl||lastUrl||'');};
                 return out;
               }
               global.Browser=__browser();

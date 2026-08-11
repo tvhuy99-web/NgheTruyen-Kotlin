@@ -28,6 +28,7 @@ on:
       - 'gradlew'
       - 'scripts/check_source_engine_specificity.py'
       - 'scripts/check_vbook_static.py'
+      - 'scripts/check_vbook_chromium_static.py'
       - 'scripts/check_vbook_differential_coverage.py'
       - 'scripts/capture_vbook_reference.py'
       - 'scripts/capture_vbook_reference_matrix.py'
@@ -65,6 +66,7 @@ on:
       - 'gradlew'
       - 'scripts/check_source_engine_specificity.py'
       - 'scripts/check_vbook_static.py'
+      - 'scripts/check_vbook_chromium_static.py'
       - 'scripts/check_vbook_differential_coverage.py'
       - 'scripts/capture_vbook_reference.py'
       - 'scripts/capture_vbook_reference_matrix.py'
@@ -97,6 +99,7 @@ jobs:
       - name: Verify vBook architecture and engine specificity
         run: |
           python3 scripts/check_vbook_static.py
+          python3 scripts/check_vbook_chromium_static.py
           python3 scripts/check_source_engine_specificity.py
 
       - name: Verify source platform and compile app

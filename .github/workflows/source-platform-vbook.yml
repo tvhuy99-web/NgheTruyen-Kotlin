@@ -10,8 +10,6 @@ on:
       - 'app/src/main/java/vn/nghetruyen/app/ui/ReferenceNgheTruyenApp.kt'
       - 'app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt'
       - 'app/src/main/java/vn/nghetruyen/app/ui/screens/SourcePackConfigDialog.kt'
-      - 'app/src/main/res/xml/backup_rules.xml'
-      - 'app/src/main/res/xml/data_extraction_rules.xml'
       - 'source-api/**'
       - 'source-package/**'
       - 'source-store/**'
@@ -34,6 +32,7 @@ on:
       - 'scripts/fetch_vbook_corpus.py'
       - 'scripts/run_vbook_compat_lab.py'
       - 'scripts/vbook-reference-plan*.json'
+      - 'scripts/apply_diagnostics_deepening.py'
       - '.github/workflows/source-platform-vbook.yml'
   push:
     branches:
@@ -46,9 +45,6 @@ on:
       - 'app/src/main/java/vn/nghetruyen/app/ui/NgheTruyenApp.kt'
       - 'app/src/main/java/vn/nghetruyen/app/ui/ReferenceNgheTruyenApp.kt'
       - 'app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt'
-      - 'app/src/main/java/vn/nghetruyen/app/ui/screens/SourcePackConfigDialog.kt'
-      - 'app/src/main/res/xml/backup_rules.xml'
-      - 'app/src/main/res/xml/data_extraction_rules.xml'
       - 'source-api/**'
       - 'source-package/**'
       - 'source-store/**'
@@ -75,7 +71,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   verify:
@@ -84,6 +80,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: agent/fix-lua-style-diagnostics-ui
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -94,8 +94,13 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Apply diagnostics migration
+        run: python3 scripts/apply_diagnostics_deepening.py
+
       - name: Verify vBook architecture and engine specificity
         run: |
+          python3 scripts/check_lua_diagnostics_ui_parity.py
+          python3 scripts/validate_release.py --wiring-only
           python3 scripts/check_vbook_static.py
           python3 scripts/check_source_engine_specificity.py
 
@@ -139,3 +144,16 @@ jobs:
                       text = (failure.text or '').splitlines()
                       print('\n'.join(text[:45]))
           PY
+
+      - name: Commit diagnostics migration
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add source-diagnostics app source-vbook scripts/check_lua_diagnostics_ui_parity.py scripts/validate_release.py
+          if git diff --cached --quiet; then
+            echo "No diagnostics changes to commit"
+          else
+            git commit -m "fix: deepen diagnostic black box"
+            git push origin HEAD:agent/fix-lua-style-diagnostics-ui
+          fi

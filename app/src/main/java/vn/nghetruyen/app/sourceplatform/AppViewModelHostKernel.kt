@@ -285,8 +285,11 @@ object ExtensionHostKernelInstaller {
     }
 }
 
-fun installExtensionHostKernel(viewModel: AppViewModel): SourceHostKernelDispatcher =
-    ExtensionHostKernelInstaller.install(viewModel)
+fun installExtensionHostKernel(viewModel: AppViewModel): SourceHostKernelDispatcher {
+    val dispatcher = ExtensionHostKernelInstaller.install(viewModel)
+    ExtensionHostEventPump.install(viewModel)
+    return dispatcher
+}
 
 private fun accepted(traceId: String): SourcePlatformResult<JsonValue> = SourcePlatformResult.Success(
     JsonValue.Obj(linkedMapOf(

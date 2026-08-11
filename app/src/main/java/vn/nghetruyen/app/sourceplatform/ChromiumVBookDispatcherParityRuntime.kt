@@ -129,7 +129,10 @@ internal object ChromiumVBookBrowserParityPatch {
             nativeBrowser.waitSelector=function(raw,timeoutMs){
               var selectors=strings(raw); if(!selectors.length)return false;
               var per=Math.max(250,Math.floor(Math.max(100,Number(timeoutMs||15000))/selectors.length));
-              for(var i=0;i<selectors.length;i++) if(lowWaitSelector.call(nativeBrowser,selectors[i],per)) return selectors[i];
+              for(var i=0;i<selectors.length;i++){
+                try { if(lowWaitSelector.call(nativeBrowser,selectors[i],per)) return selectors[i]; }
+                catch(ignored) {}
+              }
               return false;
             };
             nativeBrowser.requests=function(options){
@@ -148,6 +151,17 @@ internal object ChromiumVBookBrowserParityPatch {
             };
             nativeBrowser.urls=function(){
               var out=[]; nativeBrowser.requests({limit:500}).forEach(function(item){if(item.url&&out.indexOf(item.url)<0)out.push(item.url);}); return out;
+            };
+            nativeBrowser.waitUrl=function(raw,timeoutMs){
+              var patterns=strings(raw), deadline=Date.now()+Math.max(100,Number(timeoutMs||15000));
+              do {
+                var urls=nativeBrowser.urls();
+                var current=typeof nativeBrowser.currentUrl==='function'?String(nativeBrowser.currentUrl()||''):'';
+                if(current&&urls.indexOf(current)<0)urls.push(current);
+                for(var i=0;i<urls.length;i++)for(var j=0;j<patterns.length;j++)if(matchUrl(urls[i],patterns[j]))return urls[i];
+                if(typeof global.sleep==='function')global.sleep(100);
+              } while(Date.now()<deadline);
+              return false;
             };
             nativeBrowser.waitRequest=function(raw,timeoutMs,options){
               var patterns=strings(raw), deadline=Date.now()+Math.max(100,Number(timeoutMs||15000)), opts=options&&typeof options==='object'?options:{};
@@ -192,6 +206,8 @@ internal object ChromiumVBookBrowserParityPatch {
             var lowTap=nativeBrowser.tapSelector;
             nativeBrowser.tapSelector=function(selector,timeoutMs){return String(lowTap.call(nativeBrowser,selector,timeoutMs))==='true';};
             nativeBrowser.tap_selector=nativeBrowser.tapSelector;
+            var lowClose=nativeBrowser.close;
+            nativeBrowser.close=function(){if(typeof lowClose==='function')lowClose.call(nativeBrowser);return true;};
             return nativeBrowser;
           }
 

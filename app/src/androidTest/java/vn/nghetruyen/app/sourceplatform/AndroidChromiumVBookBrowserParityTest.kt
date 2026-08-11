@@ -2,7 +2,6 @@ package vn.nghetruyen.app.sourceplatform
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import vn.nghetruyen.source.api.JsonValue
@@ -57,8 +56,13 @@ class AndroidChromiumVBookBrowserParityTest {
             traceId = "chromium-browser-parity",
         )
 
-        assertTrue(result is SourcePlatformResult.Success)
-        val success = result as SourcePlatformResult.Success
+        val success = when (result) {
+            is SourcePlatformResult.Success -> result
+            is SourcePlatformResult.Failure -> throw AssertionError(
+                "${result.error.code}:${result.error.message}",
+                result.error.cause,
+            )
+        }
         val row = (success.value.data as JsonValue.Arr).values.first() as JsonValue.Obj
         assertEquals("chromium", row.string("engine"))
         assertEquals("First", row.string("first"))

@@ -17,13 +17,14 @@ def require(text: str, label: str, *tokens: str) -> None:
 def main() -> None:
     runtime = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidChromiumVBookRuntime.kt")
     prelude = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/ChromiumVBookPrelude.kt")
-    projection = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/ChromiumVBookNetworkProjectionBroker.kt")
     dispatch_decoder = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/ChromiumVBookDispatchDecoder.kt")
     browser_parity = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/ChromiumVBookDispatcherParityRuntime.kt")
     application = read("app/src/main/java/vn/nghetruyen/app/NgheTruyenApplication.kt")
     selector = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/PrimaryFallbackVBookActionRuntime.kt")
     registry = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookActionRuntimeRegistry.kt")
     compatibility = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookCompatibilityRuntime.kt")
+    safe_fetch = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookFetchSafePrelude.kt")
+    raw_network = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookRawNetworkBroker.kt")
 
     require(
         runtime,
@@ -73,12 +74,20 @@ def main() -> None:
         "out.setCookies=function(cookies,url)",
     )
     require(
-        projection,
-        "Chromium raw-network projection",
-        'envelope.int("__ngheVBookFetch") != 1',
-        "VBookRawNetworkBroker.INTERNAL_RESPONSE_KEY",
-        "VBookRawNetworkBroker.INTERNAL_RAW_SIZE",
-        "VBookRawNetworkBroker.INTERNAL_STATUS_TEXT",
+        safe_fetch,
+        "raw vBook fetch contract",
+        "var response=__vbookNativeFetch(url,nativeOptions);",
+        "envelope=JSON.parse(String(response.body || '{}'))",
+        "envelope.__ngheVBookFetch !== 1",
+        "__vbookSafeCachedResponse",
+    )
+    require(
+        raw_network,
+        "raw vBook network broker",
+        "responseEnvelopeJson(response, key ?: \"\")",
+        '"__ngheVBookFetch" to JsonValue.Num(1.0, "1")',
+        "INTERNAL_REQUEST_KEY",
+        "INTERNAL_OPERATION",
     )
     require(
         browser_parity,
@@ -97,10 +106,11 @@ def main() -> None:
         "VBookActionRuntimeRegistry.install",
         "WebView.getCurrentWebViewPackage() == null",
         '"CHROMIUM_WEBVIEW_UNAVAILABLE:provider-missing"',
-        "ChromiumVBookNetworkProjectionBroker(brokers.network)",
+        "brokers = brokers,",
         "ChromiumVBookDispatcherParityRuntime(",
         "IdentityHashMap<Any, VBookActionRuntime>()",
     )
+    assert "ChromiumVBookNetworkProjectionBroker" not in application, "Chromium must preserve the raw vBook metadata envelope"
     require(
         selector,
         "side-effect-safe fallback",

@@ -17,17 +17,18 @@ import java.net.InetAddress
 
 class SourceNetworkPolicyVBookTest {
     @Test
-    fun nativeRuntimeCannotRequestPublicInternetEscapeHatch() {
+    fun nativeRuntimeMayUseFullPublicInternetAuthority() {
         val manifest = manifest(
             mode = SourceRuntimeMode.DECLARATIVE,
-            network = SourceNetworkCapability(publicInternet = true),
+            network = SourceNetworkCapability(publicInternet = true, allowCleartext = true),
         )
-        val error = runCatching { manifest.validate() }.exceptionOrNull()
-        assertTrue(error?.message.orEmpty().contains("PUBLIC_INTERNET_MODE_DENIED"))
+        manifest.validate()
+        assertEquals("cdn.example", SourceOriginPolicy.requireInitialUrl(manifest, "https://cdn.example/x").host)
+        assertEquals("http", SourceOriginPolicy.requireInitialUrl(manifest, "http://legacy.example/x").scheme)
     }
 
     @Test
-    fun nativeRuntimeStillRequiresDeclaredOrigin() {
+    fun nativeRuntimeWithoutFullAuthorityStillRequiresDeclaredOrigin() {
         val manifest = manifest(SourceRuntimeMode.DECLARATIVE, SourceNetworkCapability())
         assertEquals("a.example", SourceOriginPolicy.requireInitialUrl(manifest, "https://a.example/x").host)
         val error = runCatching { SourceOriginPolicy.requireInitialUrl(manifest, "https://cdn.example/x") }.exceptionOrNull()
@@ -44,18 +45,18 @@ class SourceNetworkPolicyVBookTest {
     }
 
     @Test
-    fun cleartextRequiresExplicitVbookCapability() {
+    fun cleartextRequiresExplicitPublicInternetCapability() {
         val httpsOnly = manifest(
             SourceRuntimeMode.VBOOK_JS_COMPAT,
             SourceNetworkCapability(publicInternet = true, allowCleartext = false),
         )
         assertTrue(runCatching { SourceOriginPolicy.requireInitialUrl(httpsOnly, "http://legacy.example/a") }.isFailure)
 
-        val legacy = manifest(
+        val fullAuthority = manifest(
             SourceRuntimeMode.VBOOK_JS_COMPAT,
             SourceNetworkCapability(publicInternet = true, allowCleartext = true),
         )
-        assertEquals("http", SourceOriginPolicy.requireInitialUrl(legacy, "http://legacy.example/a").scheme)
+        assertEquals("http", SourceOriginPolicy.requireInitialUrl(fullAuthority, "http://legacy.example/a").scheme)
     }
 
     @Test

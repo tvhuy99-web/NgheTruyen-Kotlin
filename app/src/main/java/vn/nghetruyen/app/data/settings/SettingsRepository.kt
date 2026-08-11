@@ -297,9 +297,9 @@ class SettingsRepository(private val context: Context) {
             backgroundMusicUri = prefs[Keys.backgroundMusicUri]?.takeIf(String::isNotBlank),
             backgroundMusicEnabled = prefs[Keys.backgroundMusicEnabled] ?: false,
             backgroundMusicVolume = normalizeMusicVolume(prefs[Keys.backgroundMusicVolume] ?: 0.18f),
-            backgroundMusicDuckFactor = normalizeDuckFactor(prefs[Keys.backgroundMusicDuckFactor] ?: 0.25f),
-            backgroundMusicAttackMillis = normalizeMusicAttackMillis(prefs[Keys.backgroundMusicAttackMillis] ?: 250),
-            backgroundMusicReleaseMillis = normalizeMusicReleaseMillis(prefs[Keys.backgroundMusicReleaseMillis] ?: 900),
+            backgroundMusicDuckFactor = normalizeDuckFactor(prefs[Keys.backgroundMusicDuckFactor] ?: 0.63095734f),
+            backgroundMusicAttackMillis = normalizeMusicAttackMillis(prefs[Keys.backgroundMusicAttackMillis] ?: 1850),
+            backgroundMusicReleaseMillis = normalizeMusicReleaseMillis(prefs[Keys.backgroundMusicReleaseMillis] ?: 2050),
             followingUpdatesEnabled = prefs[Keys.followingUpdates] ?: false,
             readerCacheLimitMiB = normalizeCacheLimit(prefs[Keys.readerCacheLimitMiB] ?: 64),
             readerMode = runCatching { ReaderMode.valueOf(prefs[Keys.readerMode] ?: ReaderMode.TEXT.name) }
@@ -333,7 +333,7 @@ class SettingsRepository(private val context: Context) {
             sceneMusicPlaybackMode = runCatching {
                 SceneMusicPlaybackMode.valueOf(prefs[Keys.sceneMusicPlaybackMode] ?: SceneMusicPlaybackMode.SEQUENTIAL.name)
             }.getOrDefault(SceneMusicPlaybackMode.SEQUENTIAL),
-            sceneMusicTargetLufs = normalizeTargetLufs(prefs[Keys.sceneMusicTargetLufs] ?: -18.0f),
+            sceneMusicTargetLufs = normalizeTargetLufs(prefs[Keys.sceneMusicTargetLufs] ?: -24.0f),
             sceneMusicAvoidRepeatWindow = normalizeRepeatWindow(prefs[Keys.sceneMusicAvoidRepeatWindow] ?: 4),
             sonicProcessingEnabled = prefs[Keys.sonicProcessingEnabled] ?: false,
             sonicAccurateMode = prefs[Keys.sonicAccurateMode] ?: false,

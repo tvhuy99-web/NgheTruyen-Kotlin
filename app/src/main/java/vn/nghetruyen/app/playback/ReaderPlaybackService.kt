@@ -172,6 +172,8 @@ class ReaderPlaybackService : Service() {
     private var pauseOnHeadsetDisconnect = true
     private var restorePlaybackAfterProcessDeath = true
     private var autoVoiceCastEnabled = false
+    private var currentStoryAutoVoiceCastEnabled = false
+    private var currentStoryExpressiveAdjustmentEnabled = false
     private var autoSceneMusicEnabled = false
     private var prefetchNarrationPlansEnabled = true
     private var narrationPrefetchWindowChapters = 2
@@ -371,7 +373,9 @@ class ReaderPlaybackService : Service() {
         val previousAutoVoiceCastEnabled = autoVoiceCastEnabled
         autoVoiceCastEnabled = settings.autoVoiceCastEnabled
         if (previousAutoVoiceCastEnabled && !autoVoiceCastEnabled) {
+            currentStoryAutoVoiceCastEnabled = false
             narrationPlanJob?.cancel()
+            narrationPrefetchJob?.cancel()
             narrationPlanningChapterId = ""
             narrationPreparedChapterId = ""
             if (!PlaybackQueueStore.state.value.isPlaying) pendingPlay = false
@@ -686,9 +690,15 @@ class ReaderPlaybackService : Service() {
         }
         val roleConfig = resolved.role?.toRuntimeVoice() ?: activeBaseVoice
         val expression = VoiceExpressionProcessor.resolve(resolved.spokenText, resolved.role)
-        val speedAdjustPct = (unitAssignment?.speedAdjustPct ?: legacyAssignment?.speedAdjustPct ?: 0f).coerceIn(-100f, 100f)
-        val pitchAdjustPct = (unitAssignment?.pitchAdjustPct ?: legacyAssignment?.pitchAdjustPct ?: 0f).coerceIn(-100f, 100f)
-        val volumeAdjustPct = (unitAssignment?.volumeAdjustPct ?: legacyAssignment?.volumeAdjustPct ?: 0f).coerceIn(-100f, 100f)
+        val speedAdjustPct = if (currentStoryExpressiveAdjustmentEnabled) {
+            (unitAssignment?.speedAdjustPct ?: legacyAssignment?.speedAdjustPct ?: 0f).coerceIn(-100f, 100f)
+        } else 0f
+        val pitchAdjustPct = if (currentStoryExpressiveAdjustmentEnabled) {
+            (unitAssignment?.pitchAdjustPct ?: legacyAssignment?.pitchAdjustPct ?: 0f).coerceIn(-100f, 100f)
+        } else 0f
+        val volumeAdjustPct = if (currentStoryExpressiveAdjustmentEnabled) {
+            (unitAssignment?.volumeAdjustPct ?: legacyAssignment?.volumeAdjustPct ?: 0f).coerceIn(-100f, 100f)
+        } else 0f
         val aiRateMultiplier = 1f + speedAdjustPct / 100f
         val aiPitchMultiplier = 1f + pitchAdjustPct / 100f
         val aiVolumeMultiplier = 1f + volumeAdjustPct / 100f
@@ -1287,7 +1297,8 @@ class ReaderPlaybackService : Service() {
                 return@launch
             }
             val existingVoicePlanCount = container.narrationPlanCoordinator.voicePlanAssignmentCount(next)
-            val shouldAutoStart = autoVoiceCastEnabled || existingVoicePlanCount > 0
+            val shouldAutoStart = container.narrationPlanCoordinator.shouldAutoVoiceCast(next.chapter.storyId) ||
+                existingVoicePlanCount > 0
             withContext(Dispatchers.Main) {
                 val currentVoice = PlaybackQueueStore.state.value
                 PlaybackQueueStore.loadContent(
@@ -1340,7 +1351,7 @@ class ReaderPlaybackService : Service() {
     private fun shouldPlanAutoSceneMusic(): Boolean = backgroundMusicEnabled && autoSceneMusicEnabled
 
     private fun prepareCurrentNarrationBeforePlayback(snapshot: PlaybackSnapshot): Boolean {
-        if (!autoVoiceCastEnabled || snapshot.chapterId.isBlank()) return false
+        if (!currentStoryAutoVoiceCastEnabled || snapshot.chapterId.isBlank()) return false
         if (narrationPreparedChapterId == snapshot.chapterId) return false
         pendingPlay = true
         PlaybackQueueStore.setPlaying(false)
@@ -1350,7 +1361,7 @@ class ReaderPlaybackService : Service() {
         narrationPlanJob?.cancel()
         narrationPlanJob = serviceScope.launch {
             var attempt = 0
-            while (autoVoiceCastEnabled && PlaybackQueueStore.state.value.chapterId == snapshot.chapterId) {
+            while (currentStoryAutoVoiceCastEnabled && PlaybackQueueStore.state.value.chapterId == snapshot.chapterId) {
                 attempt += 1
                 PlaybackQueueStore.setNarrationAutomation(
                     stage = NarrationAutomationStage.CURRENT_PLANNING,
@@ -1460,7 +1471,7 @@ class ReaderPlaybackService : Service() {
     }
 
     private fun maybePrefetchNarrationPlans(content: ChapterContent, sourceId: String) {
-        if (!prefetchNarrationPlansEnabled || !autoVoiceCastEnabled) return
+        if (!prefetchNarrationPlansEnabled || !currentStoryAutoVoiceCastEnabled) return
         narrationPrefetchJob?.cancel()
         narrationPrefetchJob = serviceScope.launch {
             var current: ChapterContent? = content
@@ -1624,6 +1635,24 @@ class ReaderPlaybackService : Service() {
         val settings = container.settingsRepository.snapshot()
         applyRuntimeSettings(settings)
         val storyId = PlaybackQueueStore.state.value.storyId
+        val previousStoryAutoVoiceCastEnabled = currentStoryAutoVoiceCastEnabled
+        currentStoryAutoVoiceCastEnabled = if (useStoryProfile && storyId.isNotBlank()) {
+            container.narrationPlanCoordinator.shouldAutoVoiceCast(storyId)
+        } else false
+        currentStoryExpressiveAdjustmentEnabled = if (useStoryProfile && storyId.isNotBlank()) {
+            container.narrationPlanCoordinator.expressiveAdjustmentEnabled(storyId)
+        } else false
+        if (previousStoryAutoVoiceCastEnabled && !currentStoryAutoVoiceCastEnabled) {
+            narrationPlanJob?.cancel()
+            narrationPrefetchJob?.cancel()
+            narrationPlanningChapterId = ""
+            narrationPreparedChapterId = ""
+            PlaybackQueueStore.setNarrationAutomation(
+                stage = NarrationAutomationStage.IDLE,
+                progress = 0f,
+                message = null,
+            )
+        }
         val profile = if (useStoryProfile && storyId.isNotBlank()) {
             container.libraryRepository.getStoryTtsProfile(storyId)
         } else null
@@ -1654,7 +1683,7 @@ class ReaderPlaybackService : Service() {
         val playbackSnapshot = PlaybackQueueStore.state.value
         val chapterId = playbackSnapshot.chapterId
         voiceRoles = if (useStoryProfile && storyId.isNotBlank()) {
-            container.libraryRepository.listEffectiveVoiceRoles(storyId, settings.autoVoiceCastEnabled)
+            container.narrationPlanCoordinator.effectiveVoiceRoles(storyId)
         } else emptyList()
         val originalChapter = if (useStoryProfile && chapterId.isNotBlank()) {
             container.libraryRepository.loadCachedChapter(chapterId)

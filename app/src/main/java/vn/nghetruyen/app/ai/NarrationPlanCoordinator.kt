@@ -108,20 +108,29 @@ class NarrationPlanCoordinator(
         }.getOrDefault(0)
     }
 
+    suspend fun shouldAutoVoiceCast(storyId: String): Boolean {
+        val appEnabled = settings.snapshot().autoVoiceCastEnabled
+        if (!appEnabled) return false
+        val profile = library.getStoryAiProfile(storyId) ?: return true
+        val raw = profile.voiceCastNote
+        val storyVoice = StoryVoiceCastReferenceCodec.decode(raw)
+        if (storyVoice.mode == StoryVoiceCastMode.OFF) return false
+        return if (StoryVoiceCastReferenceCodec.hasStoredSettings(raw)) storyVoice.autoRunOnOpenTts else true
+    }
+
+    suspend fun expressiveAdjustmentEnabled(storyId: String): Boolean =
+        library.getStoryAiProfile(storyId)?.expressiveAdjustment == true
+
     private suspend fun storyVoiceSettings(storyId: String): StoryVoiceCastReferenceSettings =
         library.getStoryAiProfile(storyId)?.let { StoryVoiceCastReferenceCodec.decode(it.voiceCastNote) }
             ?: StoryVoiceCastReferenceSettings()
 
-    private suspend fun effectiveRoles(storyId: String): List<VoiceRoleEntity> {
-        val appSettings = settings.snapshot()
-        return when (storyVoiceSettings(storyId).mode) {
+    suspend fun effectiveVoiceRoles(storyId: String): List<VoiceRoleEntity> =
+        when (storyVoiceSettings(storyId).mode) {
             StoryVoiceCastMode.OFF -> emptyList()
             StoryVoiceCastMode.PRIVATE -> library.listVoiceRoles(storyId).filter(VoiceRoleEntity::enabled)
-            StoryVoiceCastMode.GLOBAL -> if (appSettings.autoVoiceCastEnabled) {
-                library.listVoiceRoles(GLOBAL_VOICE_PROFILE_STORY_ID).filter(VoiceRoleEntity::enabled)
-            } else emptyList()
+            StoryVoiceCastMode.GLOBAL -> library.listVoiceRoles(GLOBAL_VOICE_PROFILE_STORY_ID).filter(VoiceRoleEntity::enabled)
         }
-    }
 
     private suspend fun needsVoicePlan(content: ChapterContent, force: Boolean): Boolean {
         if (storyVoiceSettings(content.chapter.storyId).mode == StoryVoiceCastMode.OFF) return false

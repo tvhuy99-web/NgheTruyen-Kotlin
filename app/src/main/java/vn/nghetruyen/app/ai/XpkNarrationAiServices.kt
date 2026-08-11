@@ -10,6 +10,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import vn.nghetruyen.app.core.common.AppResult
+import vn.nghetruyen.app.core.model.GLOBAL_VOICE_PROFILE_STORY_ID
 import vn.nghetruyen.app.data.local.VoiceRoleEntity
 import vn.nghetruyen.app.data.repository.LibraryRepository
 import vn.nghetruyen.app.data.settings.AiOnlineSettings
@@ -73,11 +74,13 @@ class XpkNarrationAiServices(
 
         val config = resolveConfiguration(request.storyId)
         validateConfiguration(config)?.let { return it }
+        val storyVoice = StoryVoiceCastReferenceCodec.decode(config.voiceCastNote)
         val profiles = if (request.includeVoiceCast) {
-            libraryRepository.listEffectiveVoiceRoles(
-                request.storyId,
-                settingsRepository.snapshot().autoVoiceCastEnabled,
-            ).filter(VoiceRoleEntity::enabled)
+            when (storyVoice.mode) {
+                StoryVoiceCastMode.OFF -> emptyList()
+                StoryVoiceCastMode.PRIVATE -> libraryRepository.listVoiceRoles(request.storyId).filter(VoiceRoleEntity::enabled)
+                StoryVoiceCastMode.GLOBAL -> libraryRepository.listVoiceRoles(GLOBAL_VOICE_PROFILE_STORY_ID).filter(VoiceRoleEntity::enabled)
+            }
         } else emptyList()
 
         if (request.includeVoiceCast) {
@@ -198,7 +201,7 @@ class XpkNarrationAiServices(
             model = profile?.model?.takeIf { profile.overrideProvider && it.isNotBlank() } ?: global.model,
             temperature = profile?.temperature?.takeIf { it in 0f..2f } ?: global.temperature,
             voiceCastNote = profile?.voiceCastNote.orEmpty(),
-            expressiveAdjustment = profile?.expressiveAdjustment ?: true,
+            expressiveAdjustment = profile?.expressiveAdjustment ?: false,
             expressionPrompt = profile?.expressionPrompt.orEmpty(),
             expressionSpeedLimitPct = profile?.expressionSpeedLimitPct?.coerceIn(0, 100) ?: 10,
             expressionPitchLimitPct = profile?.expressionPitchLimitPct?.coerceIn(0, 100) ?: 10,

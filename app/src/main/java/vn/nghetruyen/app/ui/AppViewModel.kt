@@ -2054,8 +2054,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     val initialContent = initialVietPhraseContent ?: enriched
                     val initialTextMode = if (initialVietPhraseContent != null) ChapterTextMode.VIETPHRASE else ChapterTextMode.ORIGINAL
                     val existingVoicePlanCount = container.narrationPlanCoordinator.voicePlanAssignmentCount(enriched)
+                    val autoVoiceCastOnOpen = container.narrationPlanCoordinator.shouldAutoVoiceCast(enriched.chapter.storyId)
                     val shouldAutoStartNarration = settings.readerMode == ReaderMode.TTS &&
-                        (settings.autoVoiceCastEnabled || existingVoicePlanCount > 0)
+                        (autoVoiceCastOnOpen || existingVoicePlanCount > 0)
                     PlaybackQueueStore.loadContent(
                         sourceId = sourceId,
                         content = initialContent,
@@ -3417,8 +3418,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     expressionVolumeLimitPct = expressionVolumeLimitPct,
                     updatedAt = System.currentTimeMillis(),
                 ),
-            ).onSuccess { showMessage("Đã lưu cấu hình AI riêng cho truyện.") }
-                .onFailure { showMessage(it.message ?: "Không lưu được cấu hình AI theo truyện.") }
+            ).onSuccess {
+                ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
+                showMessage("Đã lưu cấu hình AI riêng cho truyện.")
+            }.onFailure { showMessage(it.message ?: "Không lưu được cấu hình AI theo truyện.") }
         }
     }
 

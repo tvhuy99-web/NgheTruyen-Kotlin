@@ -83,7 +83,7 @@ class AudioExportWorker(
 
             val rules = container.libraryRepository.listEnabledPronunciations()
             val settings = container.settingsRepository.snapshot()
-            val roles = container.libraryRepository.listEffectiveVoiceRoles(job.storyId, settings.autoVoiceCastEnabled)
+            val roles = container.narrationPlanCoordinator.effectiveVoiceRoles(job.storyId)
             val contentByChapter = LinkedHashMap<String, vn.nghetruyen.app.core.model.ChapterContent>()
             val assignmentsByChapter = LinkedHashMap<String, Map<Int, ChapterVoiceAssignmentEntity>>()
             for (chapter in chapters) {
@@ -228,6 +228,7 @@ class AudioExportWorker(
         outputFormat: AudioExportFormat,
     ): List<File> {
         val normalizedSegments = ArrayList<File>(chunks.size)
+        val expressiveAdjustmentEnabled = container.narrationPlanCoordinator.expressiveAdjustmentEnabled(job.storyId)
         val baseVoice = baseVoice(settings, profile)
         val baseEngine = profile?.enginePackage?.takeIf(String::isNotBlank)
             ?: settings.ttsEnginePackage?.takeIf(String::isNotBlank)
@@ -250,9 +251,15 @@ class AudioExportWorker(
                     val role = resolved.role
                     val expression = VoiceExpressionProcessor.resolve(resolved.spokenText, role)
                     val roleVoice = role?.toSynthesisVoice() ?: baseVoice
-                    val aiRateMultiplier = (1f + (assigned?.speedAdjustPct ?: 0f) / 100f).coerceIn(0.5f, 1.5f)
-                    val aiPitchMultiplier = (1f + (assigned?.pitchAdjustPct ?: 0f) / 100f).coerceIn(0.5f, 1.5f)
-                    val aiVolumeMultiplier = (1f + (assigned?.volumeAdjustPct ?: 0f) / 100f).coerceIn(0.2f, 2f)
+                    val aiRateMultiplier = if (expressiveAdjustmentEnabled) {
+                        1f + (assigned?.speedAdjustPct ?: 0f).coerceIn(-100f, 100f) / 100f
+                    } else 1f
+                    val aiPitchMultiplier = if (expressiveAdjustmentEnabled) {
+                        1f + (assigned?.pitchAdjustPct ?: 0f).coerceIn(-100f, 100f) / 100f
+                    } else 1f
+                    val aiVolumeMultiplier = if (expressiveAdjustmentEnabled) {
+                        1f + (assigned?.volumeAdjustPct ?: 0f).coerceIn(-100f, 100f) / 100f
+                    } else 1f
                     val voice = roleVoice.copy(
                         rate = (roleVoice.rate * expression.rateMultiplier * aiRateMultiplier).coerceIn(0.25f, 3f),
                         pitch = (roleVoice.pitch * expression.pitchMultiplier * aiPitchMultiplier).coerceIn(0.5f, 2f),
@@ -481,17 +488,25 @@ class AudioExportWorker(
                         }
                     }
                 }
-                val loudnessGain = PcmLoudnessEstimator.normalizationGain(
-                    track.loudnessLufsEstimate,
-                    settings.sceneMusicTargetLufs,
-                )
-                val gain = cue.volume.coerceIn(0f, 1f) * track.volume.coerceIn(0f, 1f) * loudnessGain *
-                    settings.backgroundMusicVolume.coerceIn(0f, 1f) * settings.backgroundMusicDuckFactor.coerceIn(0.05f, 1f)
+                val normalizationGain = if (
+                    PcmLoudnessEstimator.isReady(
+                        version = track.normalizationVersion,
+                        error = track.normalizationError,
+                        loudnessLufs = track.loudnessLufsEstimate,
+                        targetLufs = settings.sceneMusicTargetLufs,
+                        storedTargetLufs = track.normalizationTargetLufs,
+                        gainDb = track.normalizationGainDb,
+                    )
+                ) {
+                    PcmLoudnessEstimator.gainDbToLinear(track.normalizationGainDb)
+                } else 1f
+                val gain = cue.volume.coerceIn(0f, 1f) * track.volume.coerceIn(0f, 1f) * normalizationGain *
+                    settings.backgroundMusicDuckFactor.coerceIn(0.05f, 1f)
                 layers += SceneMixLayer(
                     sourceWav = trackWav,
                     startFrame = layerStart,
                     endFrameExclusive = layerEnd,
-                    volume = gain.coerceIn(0f, 0.6f),
+                    volume = gain.coerceIn(0f, 1f),
                     fadeFrames = (reference.sampleRate * settings.sceneMusicCrossfadeMillis.coerceIn(0, 8_000) / 1_000L).toInt(),
                 )
             }
@@ -560,6 +575,7 @@ class AudioExportWorker(
             settings.ttsEnginePackage, settings.ttsVoiceName, settings.ttsLanguageTag,
             settings.ttsRate, settings.ttsPitch, settings.ttsVolume, settings.sonicProcessingEnabled,
             settings.sonicDefaultSpeed, settings.sonicDefaultPitch, settings.sceneMusicTargetLufs,
+            settings.backgroundMusicDuckFactor,
         ).joinToString("|"))
         pronunciationRules.sortedBy { it.original }.forEach { add(listOf(it.original, it.replacement, it.enabled).joinToString("|")) }
         add(listOf(profile?.enginePackage, profile?.voiceName, profile?.languageTag, profile?.rate, profile?.pitch, profile?.volume).joinToString("|"))
@@ -578,6 +594,7 @@ class AudioExportWorker(
         musicPlan.tracks.toSortedMap().values.forEach {
             add(listOf(
                 it.id, it.uri, it.volume, it.enabled, it.loudnessLufsEstimate,
+                it.normalizationTargetLufs, it.normalizationGainDb, it.normalizationVersion, it.normalizationError,
                 it.playCount, it.lastPlayedAt, it.orderIndex, it.updatedAt,
             ).joinToString("|"))
         }

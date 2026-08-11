@@ -1,0 +1,54 @@
+name: Diagnostics Deepening PR
+
+on:
+  push:
+    branches:
+      - agent/fix-lua-style-diagnostics-ui
+    paths:
+      - scripts/apply_diagnostics_deepening.py
+      - .github/workflows/diagnostics-deepening-pr.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/fix-lua-style-diagnostics-ui
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Apply diagnostics migration
+        run: python3 scripts/apply_diagnostics_deepening.py
+
+      - name: Lua diagnostics parity gate
+        run: python3 scripts/check_lua_diagnostics_ui_parity.py
+
+      - name: Release wiring validation
+        run: python3 scripts/validate_release.py --wiring-only
+
+      - name: Compile diagnostics and app
+        run: ./gradlew :source-diagnostics:test :source-vbook:test :app:compileDebugKotlin --no-daemon --stacktrace
+
+      - name: Commit generated source changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add source-diagnostics app source-vbook scripts/check_lua_diagnostics_ui_parity.py scripts/validate_release.py
+          if git diff --cached --quiet; then
+            echo "No generated changes to commit"
+          else
+            git commit -m "fix: deepen diagnostic black box"
+            git push origin HEAD:agent/fix-lua-style-diagnostics-ui
+          fi

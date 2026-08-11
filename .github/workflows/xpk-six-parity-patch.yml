@@ -1,11 +1,9 @@
 name: Apply six XPK parity fixes
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/xpk-six-parity-fixes
-    paths:
-      - .github/workflows/xpk-six-parity-patch.yml
+      - main
   workflow_dispatch:
 
 permissions:
@@ -13,6 +11,7 @@ permissions:
 
 jobs:
   patch-and-verify:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -232,11 +231,12 @@ print("XPK_STRICT_PARITY=PASS")
       - name: Run focused JVM tests
         run: ./gradlew --no-daemon --stacktrace testDebugUnitTest
 
-      - name: Commit verified source changes
+      - name: Commit verified source changes and remove patch workflow
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/xpk-six-parity-patch.yml
           git add app/src/main/java/vn/nghetruyen/app/ai/XpkNarrationAiServices.kt \
                   app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt \
                   app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt \

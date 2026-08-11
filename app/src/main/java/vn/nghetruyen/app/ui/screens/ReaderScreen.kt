@@ -349,9 +349,13 @@ fun ReaderScreen(
             }.getOrNull()
         }
         vietPhraseDiagnosticBusy = true
+        val diagnosticTraceId = "vietphrase:${content.chapter.id}:${UUID.randomUUID()}"
+        val diagnosticSourceId = storyDetail?.story?.sourceId ?: "vietphrase"
         app.container.sourceDiagnostics.mark(
-            name = "VIETPHRASE_DIAGNOSTIC_START",
-            sourceId = storyDetail?.story?.sourceId ?: "vietphrase",
+            name = "VIETPHRASE_DIAGNOSTIC_STARTED",
+            sourceId = diagnosticSourceId,
+            traceId = diagnosticTraceId,
+            severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.INFO,
             attributes = mapOf("storyId" to storyId, "chapterId" to content.chapter.id, "rules" to rules.size.toString()),
         )
         scope.launch {
@@ -363,6 +367,9 @@ fun ReaderScreen(
                     rules = rules,
                     storyId = storyId,
                     fallbackHanViet = state.vietPhraseFallbackHanViet,
+                    diagnostics = app.container.sourceDiagnostics,
+                    diagnosticTraceId = diagnosticTraceId,
+                    diagnosticSourceId = diagnosticSourceId,
                 )
             }
             vietPhraseDiagnosticBusy = false
@@ -370,14 +377,17 @@ fun ReaderScreen(
                 vietPhraseDiagnosticResult = it
                 app.container.sourceDiagnostics.mark(
                     name = "VIETPHRASE_DIAGNOSTIC_COMPLETED",
-                    sourceId = storyDetail?.story?.sourceId ?: "vietphrase",
-                    attributes = mapOf("storyId" to storyId, "chapterId" to content.chapter.id),
+                    sourceId = diagnosticSourceId,
+                    traceId = diagnosticTraceId,
+                    severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.INFO,
+                    attributes = mapOf("storyId" to storyId, "chapterId" to content.chapter.id, "traceCount" to it.traceCount.toString(), "probeCount" to it.probeCount.toString()),
                 )
             }.onFailure { error ->
                 app.container.sourceDiagnostics.mark(
                     name = "VIETPHRASE_DIAGNOSTIC_FAILED",
                     severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.ERROR,
-                    sourceId = storyDetail?.story?.sourceId ?: "vietphrase",
+                    sourceId = diagnosticSourceId,
+                    traceId = diagnosticTraceId,
                     attributes = mapOf("storyId" to storyId, "chapterId" to content.chapter.id, "error" to (error.message ?: error.javaClass.simpleName)),
                 )
                 onMessage(error.message ?: "Lỗi tạo nhật ký VietPhrase.")

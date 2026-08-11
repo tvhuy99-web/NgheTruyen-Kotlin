@@ -4,29 +4,25 @@ import vn.nghetruyen.app.core.common.AppResult
 import vn.nghetruyen.app.data.repository.LibraryRepository
 import vn.nghetruyen.app.data.settings.AiProvider
 import vn.nghetruyen.app.data.settings.SettingsRepository
+import vn.nghetruyen.app.sourceplatform.SourceDiagnosticRuntime
 
-/**
- * Production-facing online AI surface for translation and VietPhrase only.
- *
- * [OnlineAiServices] still contains deprecated paragraph-era narration methods for source/binary
- * compatibility, but they are deliberately hidden behind this private delegate. All live narration
- * is routed through [XpkNarrationAiServices] and [NarrationPlanCoordinator].
- */
+/** Production-facing online AI surface for translation and VietPhrase. */
 class OnlineTextAiServices(
     settingsRepository: SettingsRepository,
     credentialStore: AiCredentialStore,
     requestGovernor: AiRequestGovernor,
     libraryRepository: LibraryRepository,
+    diagnostics: SourceDiagnosticRuntime? = null,
 ) : TranslationEngine, VietPhraseImprovementEngine {
     private val delegate = OnlineAiServices(
         settingsRepository = settingsRepository,
         credentialStore = credentialStore,
         requestGovernor = requestGovernor,
         libraryRepository = libraryRepository,
+        diagnostics = diagnostics,
     )
 
-    override suspend fun translate(request: TranslationRequest): AppResult<String> =
-        delegate.translate(request)
+    override suspend fun translate(request: TranslationRequest): AppResult<String> = delegate.translate(request)
 
     override suspend fun improveVietPhrase(
         request: VietPhraseImprovementRequest,

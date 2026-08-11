@@ -28,6 +28,51 @@ class VietPhraseEngine(
         val captures: Map<Int, String>,
     )
 
+    private class MutableEngineDiagnostics(private val probeLimit: Int) {
+        var cursorPositions = 0
+        var literalLookups = 0
+        var literalCandidates = 0
+        var directSelections = 0
+        var templateCandidates = 0
+        var templateAttempts = 0
+        var templateMatches = 0
+        var templateSelections = 0
+        var templateBudgetExceeded = 0
+        var captureCandidates = 0
+        var fallbackSelections = 0
+        var unmatchedCodePoints = 0
+        var aiReplaceSelections = 0
+        private val probes = ArrayList<VietPhraseProbeEntry>()
+        private var probesTruncated = false
+
+        fun probe(position: Int, phase: String, rule: VietPhraseRule?, outcome: String, detail: String = "") {
+            if (probeLimit <= 0) return
+            if (probes.size >= probeLimit) {
+                probesTruncated = true
+                return
+            }
+            probes += VietPhraseProbeEntry(position, phase, rule?.kind, rule?.id, outcome, detail.take(300))
+        }
+
+        fun snapshot() = VietPhraseEngineDiagnostics(
+            cursorPositions = cursorPositions,
+            literalLookups = literalLookups,
+            literalCandidates = literalCandidates,
+            directSelections = directSelections,
+            templateCandidates = templateCandidates,
+            templateAttempts = templateAttempts,
+            templateMatches = templateMatches,
+            templateSelections = templateSelections,
+            templateBudgetExceeded = templateBudgetExceeded,
+            captureCandidates = captureCandidates,
+            fallbackSelections = fallbackSelections,
+            unmatchedCodePoints = unmatchedCodePoints,
+            aiReplaceSelections = aiReplaceSelections,
+            probes = probes.toList(),
+            probesTruncated = probesTruncated,
+        )
+    }
+
     init {
         require(rules.size <= MAX_RULES) { "Bộ VietPhrase vượt giới hạn an toàn." }
     }
@@ -84,19 +129,21 @@ class VietPhraseEngine(
     fun translateWithTrace(text: String, options: VietPhraseOptions = VietPhraseOptions()): VietPhraseResult {
         if (text.isEmpty()) return VietPhraseResult(text, emptyList(), false, emptyMap())
         require(text.length <= MAX_INPUT_CHARS) { "Nội dung VietPhrase vượt giới hạn an toàn." }
-        val cacheable = options.traceLimit <= 0 && maxCacheEntries > 0
+        val cacheable = options.traceLimit <= 0 && options.diagnosticProbeLimit <= 0 && maxCacheEntries > 0
         val key = cacheKey(text, options)
         if (cacheable) cache[key]?.let { return it }
 
+        val diagnostics = MutableEngineDiagnostics(options.diagnosticProbeLimit)
         val trace = ArrayList<VietPhraseTraceEntry>()
         val counts = linkedMapOf<VietPhraseDictionaryKind, Int>()
         var truncated = false
         val base = StringBuilder(text.length + text.length / 8)
         var cursor = 0
         while (cursor < text.length) {
+            diagnostics.cursorPositions += 1
             val chLength = Character.charCount(Character.codePointAt(text, cursor))
-            val direct = bestLiteral(text, cursor, baseLiteralTrie, options)
-            val template = if (options.useRules) bestTemplate(text, cursor, options) else null
+            val direct = bestLiteral(text, cursor, baseLiteralTrie, options, diagnostics, "base_literal")
+            val template = if (options.useRules) bestTemplate(text, cursor, options, diagnostics) else null
             val choiceIsTemplate = when {
                 template == null -> false
                 direct == null -> true
@@ -108,6 +155,8 @@ class VietPhraseEngine(
             }
             if (choiceIsTemplate) {
                 val match = requireNotNull(template)
+                diagnostics.templateSelections += 1
+                diagnostics.probe(cursor, "selection", match.rule, "template_selected", "end=${match.end}")
                 appendSmart(base, resolveMeaning(match.replacement, match.rule.kind, options.oneMeaning))
                 counts[match.rule.kind] = (counts[match.rule.kind] ?: 0) + 1
                 if (options.traceLimit > 0 && trace.size < options.traceLimit) {
@@ -115,6 +164,8 @@ class VietPhraseEngine(
                 } else if (options.traceLimit > 0) truncated = true
                 cursor = match.end
             } else if (direct != null) {
+                diagnostics.directSelections += 1
+                diagnostics.probe(cursor, "selection", direct.rule, "direct_selected", "end=${direct.end}")
                 val replacement = resolveMeaning(direct.replacement, direct.rule.kind, options.oneMeaning)
                 appendSmart(base, replacement)
                 counts[direct.rule.kind] = (counts[direct.rule.kind] ?: 0) + 1
@@ -123,8 +174,10 @@ class VietPhraseEngine(
                 } else if (options.traceLimit > 0) truncated = true
                 cursor = direct.end
             } else {
-                val fallback = if (options.fallbackHanViet) bestLiteral(text, cursor, fallbackHanVietTrie, options) else null
+                val fallback = if (options.fallbackHanViet) bestLiteral(text, cursor, fallbackHanVietTrie, options, diagnostics, "hanviet_fallback") else null
                 if (fallback != null) {
+                    diagnostics.fallbackSelections += 1
+                    diagnostics.probe(cursor, "selection", fallback.rule, "fallback_selected", "end=${fallback.end}")
                     val replacement = resolveMeaning(fallback.replacement, fallback.rule.kind, options.oneMeaning)
                     appendSmart(base, replacement)
                     counts[fallback.rule.kind] = (counts[fallback.rule.kind] ?: 0) + 1
@@ -133,6 +186,8 @@ class VietPhraseEngine(
                     } else if (options.traceLimit > 0) truncated = true
                     cursor = fallback.end
                 } else {
+                    diagnostics.unmatchedCodePoints += 1
+                    diagnostics.probe(cursor, "selection", null, "unmatched_codepoint", "codePoint=${Character.codePointAt(text, cursor)}")
                     val raw = text.substring(cursor, cursor + chLength)
                     base.append(if (options.normalizePunctuation) PUNCTUATION[raw] ?: raw else raw)
                     cursor += chLength
@@ -142,12 +197,12 @@ class VietPhraseEngine(
 
         var output = normalizeSpacing(base.toString())
         if (aiReplaceRules.isNotEmpty()) {
-            val finalPass = applyFinalReplacement(output, options, trace, counts)
+            val finalPass = applyFinalReplacement(output, options, trace, counts, diagnostics)
             output = finalPass.first
             truncated = truncated || finalPass.second
         }
         if (options.capitalizeSentences) output = capitalizeSentenceStarts(output)
-        val result = VietPhraseResult(output, trace.toList(), truncated, counts.toMap())
+        val result = VietPhraseResult(output, trace.toList(), truncated, counts.toMap(), diagnostics.snapshot())
         if (cacheable) cache[key] = result
         return result
     }
@@ -160,7 +215,15 @@ class VietPhraseEngine(
         VietPhraseScope.STORY -> !options.storyId.isNullOrBlank() && options.storyId == rule.storyId
     }
 
-    private fun literalMatches(text: String, start: Int, trie: TrieNode, options: VietPhraseOptions): List<LiteralMatch> {
+    private fun literalMatches(
+        text: String,
+        start: Int,
+        trie: TrieNode,
+        options: VietPhraseOptions,
+        diagnostics: MutableEngineDiagnostics,
+        phase: String,
+    ): List<LiteralMatch> {
+        diagnostics.literalLookups += 1
         val matches = mutableListOf<LiteralMatch>()
         var node: TrieNode? = trie
         var cursor = start
@@ -168,28 +231,60 @@ class VietPhraseEngine(
             node = node?.children?.get(bucketKey(text[cursor])) ?: break
             cursor += 1
             for (rule in node.terminalRules) {
-                if (!ruleVisible(rule, options) || !matchesAt(text, start, rule)) continue
+                diagnostics.literalCandidates += 1
+                if (!ruleVisible(rule, options)) {
+                    diagnostics.probe(start, phase, rule, "scope_hidden")
+                    continue
+                }
+                if (!matchesAt(text, start, rule)) {
+                    diagnostics.probe(start, phase, rule, "case_or_text_mismatch")
+                    continue
+                }
                 val end = start + rule.source.length
-                if (end == cursor && safeBoundaries(text, start, end, rule.source)) matches += LiteralMatch(rule, end, rule.target)
+                if (end != cursor) continue
+                if (!safeBoundaries(text, start, end, rule.source)) {
+                    diagnostics.probe(start, phase, rule, "boundary_rejected")
+                    continue
+                }
+                diagnostics.probe(start, phase, rule, "candidate_matched", "end=$end")
+                matches += LiteralMatch(rule, end, rule.target)
             }
         }
         return matches
     }
 
-    private fun bestLiteral(text: String, start: Int, trie: TrieNode, options: VietPhraseOptions): LiteralMatch? =
-        literalMatches(text, start, trie, options).maxWithOrNull(
+    private fun bestLiteral(
+        text: String,
+        start: Int,
+        trie: TrieNode,
+        options: VietPhraseOptions,
+        diagnostics: MutableEngineDiagnostics,
+        phase: String,
+    ): LiteralMatch? =
+        literalMatches(text, start, trie, options, diagnostics, phase).maxWithOrNull(
             compareBy<LiteralMatch> { it.end }
                 .thenBy { it.rule.effectivePriority }
                 .thenBy { it.rule.updatedAt }
                 .thenByDescending { it.rule.id },
         )
 
-    private fun bestTemplate(text: String, start: Int, options: VietPhraseOptions): TemplateMatch? {
+    private fun bestTemplate(text: String, start: Int, options: VietPhraseOptions, diagnostics: MutableEngineDiagnostics): TemplateMatch? {
         var best: TemplateMatch? = null
         val candidates = templateBuckets[bucketKey(text[start])].orEmpty() + wildcardTemplates
+        diagnostics.templateCandidates += candidates.size
         for (compiled in candidates) {
-            if (!ruleVisible(compiled.rule, options)) continue
-            val match = matchTemplate(text, start, compiled, options) ?: continue
+            if (!ruleVisible(compiled.rule, options)) {
+                diagnostics.probe(start, "template", compiled.rule, "scope_hidden")
+                continue
+            }
+            diagnostics.templateAttempts += 1
+            val match = matchTemplate(text, start, compiled, options, diagnostics)
+            if (match == null) {
+                diagnostics.probe(start, "template", compiled.rule, "no_match")
+                continue
+            }
+            diagnostics.templateMatches += 1
+            diagnostics.probe(start, "template", compiled.rule, "candidate_matched", "end=${match.end}")
             if (best == null || match.end > best.end ||
                 (match.end == best.end && match.rule.effectivePriority > best.rule.effectivePriority) ||
                 (match.end == best.end && match.rule.effectivePriority == best.rule.effectivePriority && match.rule.source.length > best.rule.source.length)
@@ -198,11 +293,15 @@ class VietPhraseEngine(
         return best
     }
 
-    private fun matchTemplate(text: String, start: Int, compiled: CompiledTemplate, options: VietPhraseOptions): TemplateMatch? {
+    private fun matchTemplate(text: String, start: Int, compiled: CompiledTemplate, options: VietPhraseOptions, diagnostics: MutableEngineDiagnostics): TemplateMatch? {
         var budget = 0
         fun walk(partIndex: Int, cursor: Int, captures: Map<Int, LiteralMatch>): Pair<Int, Map<Int, LiteralMatch>>? {
             budget += 1
-            if (budget > MAX_TEMPLATE_STEPS) return null
+            if (budget > MAX_TEMPLATE_STEPS) {
+                diagnostics.templateBudgetExceeded += 1
+                diagnostics.probe(start, "template", compiled.rule, "budget_exceeded", "steps=$budget")
+                return null
+            }
             if (partIndex >= compiled.parts.size) return cursor to captures
             val part = compiled.parts[partIndex]
             part.literal?.let { literal ->
@@ -210,11 +309,12 @@ class VietPhraseEngine(
                 return walk(partIndex + 1, cursor + literal.length, captures)
             }
             val slot = part.slot ?: return null
-            val candidates = literalMatches(text, cursor, captureTrie, options).asSequence()
+            val candidates = literalMatches(text, cursor, captureTrie, options, diagnostics, "template_capture").asSequence()
                 .filter { !containsBoundary(text.substring(cursor, it.end)) }
                 .sortedWith(compareByDescending<LiteralMatch> { it.end }.thenByDescending { it.rule.effectivePriority }.thenBy { it.rule.id })
                 .take(MAX_CAPTURE_CANDIDATES)
                 .toList()
+            diagnostics.captureCandidates += candidates.size
             var best: Pair<Int, Map<Int, LiteralMatch>>? = null
             for (capture in candidates) {
                 val next = walk(partIndex + 1, capture.end, captures + (slot to capture)) ?: continue
@@ -235,17 +335,20 @@ class VietPhraseEngine(
         options: VietPhraseOptions,
         trace: MutableList<VietPhraseTraceEntry>,
         counts: MutableMap<VietPhraseDictionaryKind, Int>,
+        diagnostics: MutableEngineDiagnostics,
     ): Pair<String, Boolean> {
         val out = StringBuilder(input.length)
         var cursor = 0
         var traceTruncated = false
         while (cursor < input.length) {
-            val match = bestLiteral(input, cursor, aiReplaceTrie, options)
+            val match = bestLiteral(input, cursor, aiReplaceTrie, options, diagnostics, "ai_replace")
             if (match == null) {
                 val length = Character.charCount(Character.codePointAt(input, cursor))
                 out.append(input, cursor, cursor + length)
                 cursor += length
             } else {
+                diagnostics.aiReplaceSelections += 1
+                diagnostics.probe(cursor, "selection", match.rule, "ai_replace_selected", "end=${match.end}")
                 out.append(match.replacement)
                 counts[VietPhraseDictionaryKind.AI_REPLACE] = (counts[VietPhraseDictionaryKind.AI_REPLACE] ?: 0) + 1
                 if (options.traceLimit > 0 && trace.size < options.traceLimit) {

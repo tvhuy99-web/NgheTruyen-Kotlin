@@ -16,6 +16,9 @@ runtime = text("app/src/main/java/vn/nghetruyen/app/sourceplatform/SourceDiagnos
 vm = text("app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt")
 tts = text("app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt")
 ai = text("app/src/main/java/vn/nghetruyen/app/ai/XpkNarrationAiServices.kt")
+ai_text = text("app/src/main/java/vn/nghetruyen/app/ai/OnlineAiServices.kt")
+vp_engine = text("app/src/main/java/vn/nghetruyen/app/ai/vietphrase/VietPhraseEngine.kt")
+vp_export = text("app/src/main/java/vn/nghetruyen/app/ai/vietphrase/VietPhraseDiagnosticExporter.kt")
 download = text("app/src/main/java/vn/nghetruyen/app/downloads/ChapterDownloadWorker.kt")
 audio = text("app/src/main/java/vn/nghetruyen/app/audio/AudioExportWorker.kt")
 
@@ -65,6 +68,18 @@ checks = {
             "AI_NARRATION_FAILURE",
         )
     ),
+    "AI text HTTP diagnostics": all(marker in ai_text for marker in (
+        "AI_TRANSLATION_STARTED",
+        "AI_TRANSLATION_COMPLETED",
+        "AI_VIETPHRASE_IMPROVEMENT_STARTED",
+        "AI_HTTP_ATTEMPT_STARTED",
+        "AI_HTTP_RESPONSE_RECEIVED",
+        "AI_HTTP_ENDPOINT_FALLBACK",
+        "AI_HTTP_RETRY_SCHEDULED",
+    )),
+    "AI Advanced request response evidence": "captureAiEvidence" in ai_text and "DiagnosticEvidence" in ai_text,
+    "VietPhrase candidate probe diagnostics": all(token in vp_engine for token in ("literalCandidates", "templateAttempts", "templateBudgetExceeded", "unmatchedCodePoints", "diagnosticProbeLimit")),
+    "VietPhrase rich diagnostic bundle": all(token in vp_export for token in ("engine_stats.json", "probes.tsv", "VIETPHRASE_ENGINE_STATS", "vietphrase-source.txt")),
     "download diagnostics": all(
         marker in download
         for marker in (
@@ -89,7 +104,7 @@ checks = {
     "VietPhrase diagnostics joined to black box": all(
         marker in reader
         for marker in (
-            "VIETPHRASE_DIAGNOSTIC_START",
+            "VIETPHRASE_DIAGNOSTIC_STARTED",
             "VIETPHRASE_DIAGNOSTIC_COMPLETED",
             "VIETPHRASE_DIAGNOSTIC_FAILED",
         )

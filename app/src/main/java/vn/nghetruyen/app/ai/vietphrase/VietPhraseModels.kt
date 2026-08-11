@@ -66,6 +66,7 @@ data class VietPhraseOptions(
     val capitalizeSentences: Boolean = true,
     val fallbackHanViet: Boolean = true,
     val traceLimit: Int = 2_000,
+    val diagnosticProbeLimit: Int = 0,
 )
 
 data class VietPhraseTraceEntry(
@@ -78,11 +79,39 @@ data class VietPhraseTraceEntry(
     val captures: Map<Int, String> = emptyMap(),
 )
 
+data class VietPhraseProbeEntry(
+    val position: Int,
+    val phase: String,
+    val kind: VietPhraseDictionaryKind?,
+    val ruleId: String?,
+    val outcome: String,
+    val detail: String = "",
+)
+
+data class VietPhraseEngineDiagnostics(
+    val cursorPositions: Int = 0,
+    val literalLookups: Int = 0,
+    val literalCandidates: Int = 0,
+    val directSelections: Int = 0,
+    val templateCandidates: Int = 0,
+    val templateAttempts: Int = 0,
+    val templateMatches: Int = 0,
+    val templateSelections: Int = 0,
+    val templateBudgetExceeded: Int = 0,
+    val captureCandidates: Int = 0,
+    val fallbackSelections: Int = 0,
+    val unmatchedCodePoints: Int = 0,
+    val aiReplaceSelections: Int = 0,
+    val probes: List<VietPhraseProbeEntry> = emptyList(),
+    val probesTruncated: Boolean = false,
+)
+
 data class VietPhraseResult(
     val text: String,
     val trace: List<VietPhraseTraceEntry>,
     val traceTruncated: Boolean,
     val appliedByKind: Map<VietPhraseDictionaryKind, Int>,
+    val diagnostics: VietPhraseEngineDiagnostics = VietPhraseEngineDiagnostics(),
 )
 
 data class VietPhraseConflict(

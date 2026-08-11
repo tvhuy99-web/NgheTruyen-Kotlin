@@ -350,8 +350,9 @@ private class DiagnosticActivityTracker : DiagnosticSink {
         val traceId = event.traceId.trim()
         if (traceId.isBlank()) return@synchronized
         val name = event.name.uppercase()
+        val current = active[traceId]
         when {
-            isStart(name) -> {
+            isStart(name) && current == null -> {
                 active[traceId] = DiagnosticActiveOperation(
                     traceId = traceId,
                     sourceId = event.sourceId,
@@ -363,9 +364,10 @@ private class DiagnosticActivityTracker : DiagnosticSink {
                 )
                 while (active.size > 100) active.remove(active.entries.first().key)
             }
-            isTerminal(name) -> active.remove(traceId)
-            traceId in active -> {
-                val current = active.getValue(traceId)
+            isTerminal(name) && current != null && operationStem(name) == operationStem(current.startEvent.uppercase()) -> {
+                active.remove(traceId)
+            }
+            current != null -> {
                 active[traceId] = current.copy(
                     lastEventAtEpochMs = event.timestampEpochMs,
                     lastEvent = event.name,
@@ -382,14 +384,14 @@ private class DiagnosticActivityTracker : DiagnosticSink {
 
     private fun isStart(name: String): Boolean = name.endsWith("_START") || name.endsWith("_STARTED")
 
-    private fun isTerminal(name: String): Boolean {
-        if (name.endsWith("_ITEM_COMPLETED") || name.endsWith("_SEGMENT_COMPLETED")) return false
-        return name.endsWith("_COMPLETED") ||
-            name.endsWith("_FAILED") ||
-            name.endsWith("_ERROR") ||
-            name.endsWith("_DONE") ||
-            name.endsWith("_CANCELLED") ||
-            name.endsWith("_STOPPED")
+    private fun isTerminal(name: String): Boolean = TERMINAL_SUFFIXES.any(name::endsWith)
+
+    private fun operationStem(name: String): String =
+        (START_SUFFIXES + TERMINAL_SUFFIXES).firstOrNull(name::endsWith)?.let { suffix -> name.removeSuffix(suffix) } ?: name
+
+    companion object {
+        private val START_SUFFIXES = listOf("_STARTED", "_START")
+        private val TERMINAL_SUFFIXES = listOf("_COMPLETED", "_FAILED", "_ERROR", "_DONE", "_CANCELLED", "_STOPPED")
     }
 }
 

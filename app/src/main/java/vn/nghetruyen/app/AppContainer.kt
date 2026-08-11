@@ -132,7 +132,7 @@ class AppContainer(context: Context) {
     val aiCredentialStore: EncryptedAiCredentialStore by lazy { EncryptedAiCredentialStore(appContext) }
     val aiRequestGovernor: AiRequestGovernor by lazy { AiRequestGovernor(database, settingsRepository) }
     val aiServices: OnlineTextAiServices by lazy {
-        OnlineTextAiServices(settingsRepository, aiCredentialStore, aiRequestGovernor, libraryRepository)
+        OnlineTextAiServices(settingsRepository, aiCredentialStore, aiRequestGovernor, libraryRepository, sourceDiagnostics)
     }
     val xpkNarrationAiServices: XpkNarrationAiServices by lazy {
         XpkNarrationAiServices(appContext, settingsRepository, aiCredentialStore, aiRequestGovernor, libraryRepository)

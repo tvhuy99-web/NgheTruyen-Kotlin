@@ -41,6 +41,8 @@ import vn.nghetruyen.source.api.SourceStorageRequest
 import vn.nghetruyen.source.api.SourceTranslationRequest
 import vn.nghetruyen.source.api.SourceWebSocketRequest
 import vn.nghetruyen.source.diagnostics.DiagnosticCategory
+import vn.nghetruyen.source.diagnostics.DiagnosticEvidence
+import vn.nghetruyen.source.diagnostics.DiagnosticEvidenceSink
 import vn.nghetruyen.source.diagnostics.DiagnosticEvent
 import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 import vn.nghetruyen.source.diagnostics.DiagnosticSink
@@ -59,6 +61,7 @@ class VBookJsRuntime(
     private val brokers: SourceCapabilityBrokers = SourceCapabilityBrokers(),
     private val diagnostics: DiagnosticSink = DiagnosticSink.NONE,
     private val clockMs: () -> Long = System::currentTimeMillis,
+    private val evidence: DiagnosticEvidenceSink = DiagnosticEvidenceSink.NONE,
 ) {
     fun execute(
         manifest: SourceManifest,
@@ -73,25 +76,74 @@ class VBookJsRuntime(
             ?: return failure(SourceErrorCode.ACTION_NOT_FOUND, "SOURCE_ACTION_NOT_FOUND:${request.action}", request)
         val timeoutMs = action.timeoutMs ?: manifest.runtime.actionTimeoutMs
         diagnostics.emit(event(manifest, request, "VBOOK_ACTION_STARTED", attributes = mapOf("action" to request.action.name)))
+        runCatching { JsonCodec.stringify(request.input) }.getOrNull()?.let { input ->
+            captureEvidence(manifest, request, "executor-input.json", "application/json", input, mapOf("action" to request.action.name))
+        }
         return runCatching {
             sandboxExecutor(manifest, timeoutMs).execute { cx, scope, budget ->
+                diagnostics.emit(event(manifest, request, "VBOOK_STAGE_SANDBOX_ENTERED", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                    "action" to request.action.name,
+                    "timeoutMs" to timeoutMs.toString(),
+                    "instructionBudget" to manifest.runtime.instructionBudget.toString(),
+                    "memoryBudgetBytes" to manifest.runtime.memoryBudgetBytes.toString(),
+                )))
                 VBookSafeRhinoBoundary.installCurrentContext()
                 installHostApi(cx, scope, manifest, resources, request, budget)
+                diagnostics.emit(event(manifest, request, "VBOOK_STAGE_HOST_API_READY", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                    "remainingMs" to (budget.deadlineMs - clockMs()).coerceAtLeast(0L).toString(),
+                )))
                 cx.evaluateString(scope, BOOTSTRAP, "vbook-bootstrap", 1, null)
+                diagnostics.emit(event(manifest, request, "VBOOK_STAGE_BOOTSTRAP_EVALUATED", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                    "instructions" to budget.instructions.toString(),
+                    "remainingMs" to (budget.deadlineMs - clockMs()).coerceAtLeast(0L).toString(),
+                )))
                 val loaded = linkedSetOf<String>()
-                val loader = ScriptLoader(cx, scope, resources, loaded, budget)
+                val loader = ScriptLoader(cx, scope, resources, loaded, budget) { resourcePath, bytes ->
+                    diagnostics.emit(event(manifest, request, "VBOOK_RESOURCE_LOADED", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                        "path" to resourcePath.take(300),
+                        "bytes" to bytes.toString(),
+                        "loadedCount" to loaded.size.toString(),
+                        "instructions" to budget.instructions.toString(),
+                    )))
+                }
                 loader.install()
+                diagnostics.emit(event(manifest, request, "VBOOK_STAGE_ENTRY_LOADING", DiagnosticSeverity.DEBUG, attributes = mapOf("entry" to action.entry.take(300))))
                 loader.load(action.entry)
+                diagnostics.emit(event(manifest, request, "VBOOK_STAGE_ENTRY_LOADED", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                    "entry" to action.entry.take(300),
+                    "loadedResources" to loaded.size.toString(),
+                    "instructions" to budget.instructions.toString(),
+                )))
                 val execute = ScriptableObject.getProperty(scope, "execute") as? Function
                     ?: error("VBOOK_EXECUTE_FUNCTION_MISSING:${action.entry}")
                 val args = actionArguments(cx, scope, request)
+                diagnostics.emit(event(manifest, request, "VBOOK_STAGE_EXECUTOR_CALL", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                    "action" to request.action.name,
+                    "remainingMs" to (budget.deadlineMs - clockMs()).coerceAtLeast(0L).toString(),
+                )))
                 val rawResult = execute.call(cx, scope, scope, args)
+                diagnostics.emit(event(manifest, request, "VBOOK_STAGE_EXECUTOR_RETURNED", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                    "resultType" to (rawResult?.javaClass?.simpleName ?: "null"),
+                    "instructions" to budget.instructions.toString(),
+                )))
                 ScriptableObject.putProperty(scope, "__ngheResult", rawResult)
                 val json = Context.toString(cx.evaluateString(scope, "JSON.stringify(__ngheResult)", "vbook-result", 1, null))
+                diagnostics.emit(event(manifest, request, "VBOOK_STAGE_RESULT_STRINGIFIED", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                    "bytes" to json.toByteArray(Charsets.UTF_8).size.toString(),
+                    "instructions" to budget.instructions.toString(),
+                )))
+                captureEvidence(manifest, request, "executor-result-raw.json", "application/json", json, mapOf("action" to request.action.name))
                 require(json != "undefined" && json.toByteArray(Charsets.UTF_8).size <= action.maxOutputBytes) { "VBOOK_OUTPUT_TOO_LARGE" }
                 val parsed = JsonCodec.parse(json, maxDepth = 96, maxNodes = manifest.runtime.instructionBudget)
+                diagnostics.emit(event(manifest, request, "VBOOK_STAGE_RESULT_PARSED", DiagnosticSeverity.DEBUG, attributes = mapOf("instructions" to budget.instructions.toString())))
                 val normalized = normalizeResult(request, parsed)
-                val bytes = JsonCodec.stringify(normalized).toByteArray(Charsets.UTF_8).size
+                val normalizedJson = JsonCodec.stringify(normalized)
+                val bytes = normalizedJson.toByteArray(Charsets.UTF_8).size
+                diagnostics.emit(event(manifest, request, "VBOOK_STAGE_RESULT_NORMALIZED", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                    "bytes" to bytes.toString(),
+                    "instructions" to budget.instructions.toString(),
+                )))
+                captureEvidence(manifest, request, "executor-result-normalized.json", "application/json", normalizedJson, mapOf("action" to request.action.name))
                 require(bytes <= action.maxOutputBytes) { "VBOOK_OUTPUT_TOO_LARGE" }
                 SourceActionResponse(normalized, request.traceId, budget.instructions.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
             }.value
@@ -258,6 +310,13 @@ class VBookJsRuntime(
                     1,
                     null,
                 ))
+                diagnostics.emit(event(manifest, request, "VBOOK_BRIDGE_NATIVE_HOOK_STARTED", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                    "hook" to hookName.take(160),
+                    "inputBytes" to inputJson.toByteArray(Charsets.UTF_8).size.toString(),
+                    "sourceBytes" to sourceCode.size.toString(),
+                    "remainingMs" to (budget.deadlineMs - clockMs()).coerceAtLeast(0L).toString(),
+                )))
+                captureEvidence(manifest, request, "bridge-$hookName-input.json", "application/json", inputJson, mapOf("hook" to hookName))
                 val result = brokers.nativeHooks.execute(manifest, SourceNativeHookRequest(
                     sourceId = manifest.id,
                     sourceCode = sourceCode,
@@ -271,8 +330,23 @@ class VBookJsRuntime(
                     traceId = request.traceId,
                 ))
                 val output = when (result) {
-                    is SourcePlatformResult.Success -> result.value
-                    is SourcePlatformResult.Failure -> error("NATIVE_LUA_${result.error.code}:${result.error.message}")
+                    is SourcePlatformResult.Success -> {
+                        diagnostics.emit(event(manifest, request, "VBOOK_BRIDGE_NATIVE_HOOK_COMPLETED", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                            "hook" to hookName.take(160),
+                            "outputBytes" to result.value.toByteArray(Charsets.UTF_8).size.toString(),
+                            "remainingMs" to (budget.deadlineMs - clockMs()).coerceAtLeast(0L).toString(),
+                        )))
+                        captureEvidence(manifest, request, "bridge-$hookName-output.json", "application/json", result.value, mapOf("hook" to hookName))
+                        result.value
+                    }
+                    is SourcePlatformResult.Failure -> {
+                        diagnostics.emit(event(manifest, request, "VBOOK_BRIDGE_NATIVE_HOOK_FAILED", DiagnosticSeverity.ERROR, attributes = mapOf(
+                            "hook" to hookName.take(160),
+                            "code" to result.error.code.name,
+                            "message" to result.error.message.take(500),
+                        )))
+                        error("NATIVE_LUA_${result.error.code}:${result.error.message}")
+                    }
                 }
                 return cx.evaluateString(scope, "JSON.parse(${JsonCodec.stringify(JsonValue.Str(output))})", "native-hook-output", 1, null)
             }
@@ -959,6 +1033,29 @@ class VBookJsRuntime(
     private fun event(manifest: SourceManifest, request: SourceActionRequest, name: String, severity: DiagnosticSeverity = DiagnosticSeverity.INFO, durationMs: Long? = null, attributes: Map<String, String> = emptyMap()) =
         DiagnosticEvent(clockMs(), request.traceId, manifest.id, manifest.version.toString(), DiagnosticCategory.RUNTIME, name, severity, durationMs, attributes)
 
+    private fun captureEvidence(
+        manifest: SourceManifest,
+        request: SourceActionRequest,
+        name: String,
+        contentType: String,
+        text: String,
+        attributes: Map<String, String> = emptyMap(),
+    ) {
+        if (!evidence.enabled || text.isBlank()) return
+        evidence.capture(
+            DiagnosticEvidence(
+                timestampEpochMs = clockMs(),
+                traceId = request.traceId,
+                sourceId = manifest.id,
+                category = DiagnosticCategory.RUNTIME,
+                name = name.replace(Regex("[^A-Za-z0-9._-]"), "_").take(180),
+                contentType = contentType,
+                data = text.toByteArray(Charsets.UTF_8),
+                attributes = attributes + mapOf("action" to request.action.name),
+            ),
+        )
+    }
+
     companion object {
         private const val BOOTSTRAP = """
             'use strict';
@@ -1055,6 +1152,7 @@ private class ScriptLoader(
     private val resources: SourceResourceProvider,
     private val loaded: MutableSet<String>,
     private val budget: RhinoExecutionBudget,
+    private val onLoad: (String, Int) -> Unit = { _, _ -> },
 ) {
     fun install() {
         ScriptableObject.putProperty(scope, "load", object : BaseFunction() {
@@ -1071,6 +1169,7 @@ private class ScriptLoader(
         val bytes = resources.read(path, 2 * 1024 * 1024) ?: error("VBOOK_RESOURCE_MISSING:$path")
         budget.charge(1 + bytes.size / 128)
         cx.evaluateString(scope, bytes.toString(Charsets.UTF_8), path, 1, null)
+        onLoad(path, bytes.size)
     }
 
     private fun normalize(raw: String): String {

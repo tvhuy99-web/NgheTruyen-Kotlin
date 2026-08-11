@@ -441,7 +441,7 @@ private class CrashSafeDiagnosticStore(private val context: Context) : Diagnosti
             val directory = File(live, "evidence").also(File::mkdirs)
             val base = evidence.name.replace(Regex("[^A-Za-z0-9._-]"), "_").take(140).ifBlank { "evidence.bin" }
             val file = File(directory, "${evidence.timestampEpochMs}-${base}")
-            file.writeBytes(evidence.data)
+            file.writeBytes(redactEvidenceForDisk(evidence))
             trimEvidence(directory)
         }
     }
@@ -506,6 +506,19 @@ private class CrashSafeDiagnosticStore(private val context: Context) : Diagnosti
             out += "current/${file.name}" to file.readBytes()
         }
         out
+    }
+
+    private fun redactEvidenceForDisk(evidence: DiagnosticEvidence): ByteArray = when {
+        evidence.contentType.contains("html", ignoreCase = true) -> DiagnosticRedactor.redactHtmlPreservingStructure(
+            evidence.data.toString(Charsets.UTF_8),
+            8 * 1024 * 1024,
+        ).toByteArray(Charsets.UTF_8)
+        evidence.contentType.startsWith("text/", ignoreCase = true) || evidence.contentType.contains("json", ignoreCase = true) ->
+            DiagnosticRedactor.redactLongText(
+                evidence.data.toString(Charsets.UTF_8),
+                8 * 1024 * 1024,
+            ).toByteArray(Charsets.UTF_8)
+        else -> evidence.data
     }
 
     private fun trimEvidence(directory: File) {

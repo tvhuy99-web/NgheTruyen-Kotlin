@@ -20,6 +20,11 @@ ai_text = text("app/src/main/java/vn/nghetruyen/app/ai/OnlineAiServices.kt")
 vp_engine = text("app/src/main/java/vn/nghetruyen/app/ai/vietphrase/VietPhraseEngine.kt")
 vp_export = text("app/src/main/java/vn/nghetruyen/app/ai/vietphrase/VietPhraseDiagnosticExporter.kt")
 download = text("app/src/main/java/vn/nghetruyen/app/downloads/ChapterDownloadWorker.kt")
+browser = text("app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidSourceBrowserBroker.kt")
+login = text("app/src/main/java/vn/nghetruyen/app/sources/SourceLoginActivity.kt")
+diagnostic_browser = text("app/src/main/java/vn/nghetruyen/app/sources/SourceDiagnosticBrowserActivity.kt")
+vbook_runtime = text("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt")
+source_manager = text("app/src/main/java/vn/nghetruyen/app/sourceplatform/SourcePlatformManager.kt")
 audio = text("app/src/main/java/vn/nghetruyen/app/audio/AudioExportWorker.kt")
 
 checks = {
@@ -80,6 +85,46 @@ checks = {
     "AI Advanced request response evidence": "captureAiEvidence" in ai_text and "DiagnosticEvidence" in ai_text,
     "VietPhrase candidate probe diagnostics": all(token in vp_engine for token in ("literalCandidates", "templateAttempts", "templateBudgetExceeded", "unmatchedCodePoints", "diagnosticProbeLimit")),
     "VietPhrase rich diagnostic bundle": all(token in vp_export for token in ("engine_stats.json", "probes.tsv", "VIETPHRASE_ENGINE_STATS", "vietphrase-source.txt")),
+    "real login browser diagnostics": all(marker in login for marker in (
+        "SOURCE_LOGIN_STARTED",
+        "SOURCE_LOGIN_PAGE_STARTED",
+        "SOURCE_LOGIN_PAGE_FINISHED",
+        "SOURCE_LOGIN_REQUEST",
+        "SOURCE_LOGIN_WEB_ERROR",
+        "SOURCE_LOGIN_SSL_BLOCKED",
+        "SOURCE_LOGIN_SESSION_CAPTURED",
+        "SOURCE_LOGIN_STOPPED",
+        "EXTRA_TRACE_ID",
+    )) and "getInt(KEY_LOG_LEVEL, 1)" in login and "getBoolean(KEY_AUTO_CLEAR_LOG_ON_CLOSE, true)" in login,
+    "diagnostic browser mirrors global trace": "mirrorGlobal" in diagnostic_browser and "DIAGNOSTIC_BROWSER_STARTED" in diagnostic_browser and "DIAGNOSTIC_BROWSER_STOPPED" in diagnostic_browser,
+    "deep browser WebView timeline": all(marker in browser for marker in (
+        "BROWSER_PAGE_STARTED",
+        "BROWSER_PAGE_FINISHED",
+        "BROWSER_WEB_ERROR",
+        "BROWSER_SSL_ERROR",
+        "BROWSER_SAFE_BROWSING_BLOCKED",
+        "BROWSER_RENDERER_GONE",
+        "BROWSER_SELECTOR_PROBE",
+        "BROWSER_SELECTOR_FOUND",
+        "BROWSER_SELECTOR_TIMEOUT",
+        "BROWSER_ASYNC_SCRIPT_POLL",
+        "BROWSER_ASYNC_SCRIPT_RESOLVED",
+    )),
+    "vBook executor bridge diagnostics": all(marker in vbook_runtime for marker in (
+        "VBOOK_STAGE_SANDBOX_ENTERED",
+        "VBOOK_STAGE_HOST_API_READY",
+        "VBOOK_STAGE_BOOTSTRAP_EVALUATED",
+        "VBOOK_RESOURCE_LOADED",
+        "VBOOK_STAGE_EXECUTOR_CALL",
+        "VBOOK_STAGE_EXECUTOR_RETURNED",
+        "VBOOK_STAGE_RESULT_NORMALIZED",
+        "VBOOK_BRIDGE_NATIVE_HOOK_STARTED",
+        "VBOOK_BRIDGE_NATIVE_HOOK_COMPLETED",
+        "VBOOK_BRIDGE_NATIVE_HOOK_FAILED",
+        "executor-result-raw.json",
+    )),
+    "extension install critical boundary": "SOURCE_EXTENSION_INSTALL_FAILED" in source_manager and "recordExtensionFailure" in source_manager,
+    "crash-safe text evidence redacted on disk": "redactEvidenceForDisk" in runtime and "redactHtmlPreservingStructure" in runtime,
     "download diagnostics": all(
         marker in download
         for marker in (

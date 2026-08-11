@@ -1,9 +1,9 @@
-name: Apply six XPK parity fixes
+name: Apply Reader XPK parity fixes
 
 on:
-  pull_request:
+  push:
     branches:
-      - main
+      - agent/xpk-six-parity-fixes
   workflow_dispatch:
 
 permissions:
@@ -13,18 +13,24 @@ jobs:
   patch-and-verify:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout parity branch
+        uses: actions/checkout@v6
         with:
           ref: agent/xpk-six-parity-fixes
           fetch-depth: 0
 
-      - uses: actions/setup-java@v4
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Apply XPK reference parity fixes
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Apply Reader playback parity patch
         shell: bash
         run: |
           python3 - <<'PY'
@@ -43,56 +49,37 @@ jobs:
                   raise SystemExit(f'{label}: expected 1 match, found {count}')
               return text.replace(old, new, 1)
 
-          service_path = 'app/src/main/java/vn/nghetruyen/app/ai/XpkNarrationAiServices.kt'
-          service = read(service_path)
-          service = replace_once(
-              service,
-              '        if (!request.includeVoiceCast && !request.includeSceneMusic) return failure("AI_PLAN_EMPTY", "Không có hạng mục kể chuyện nào được yêu cầu.")\n        if (request.includeSceneMusic && request.tracks.isEmpty()) return failure("AI_TRACKS_EMPTY", "Chưa có tệp nhạc cảnh đang bật.")',
-              '        if (!request.includeVoiceCast && !request.includeSceneMusic) return failure("AI_PLAN_EMPTY", "Không có hạng mục kể chuyện nào được yêu cầu.")\n        if (!request.includeVoiceCast && request.includeSceneMusic) {\n            return failure("AI_SCENE_MUSIC_REQUIRES_VOICE_CAST", "Nhạc theo cảnh AI chỉ được lập cùng phân vai TTS.")\n        }\n        if (request.includeSceneMusic && request.tracks.isEmpty()) return failure("AI_TRACKS_EMPTY", "Chưa có tệp nhạc cảnh đang bật.")',
-              'scene music requires voice cast',
-          )
-          service = replace_once(
-              service,
-              '        val requests = runCatching { buildRequests(config, apiKey, prompt) }.getOrElse {\n            requestGovernor.finish(permit, 0, 0, "AI_CONFIGURATION_INVALID")\n            return@withContext failure("AI_CONFIGURATION_INVALID", it.message ?: "Cấu hình AI không hợp lệ.", it)\n        }\n        var lastFailure: AppResult.Failure? = null',
-              '        val requests = runCatching { buildRequests(config, apiKey, prompt) }.getOrElse {\n            requestGovernor.finish(permit, 0, 0, "AI_CONFIGURATION_INVALID")\n            return@withContext failure("AI_CONFIGURATION_INVALID", it.message ?: "Cấu hình AI không hợp lệ.", it)\n        }\n        val timeoutMillis = config.global.timeoutMillis.coerceAtLeast(10_000)\n        val callClient = client.newBuilder()\n            .connectTimeout(minOf(30_000, timeoutMillis).toLong(), TimeUnit.MILLISECONDS)\n            .readTimeout(timeoutMillis.toLong(), TimeUnit.MILLISECONDS)\n            .writeTimeout(timeoutMillis.toLong(), TimeUnit.MILLISECONDS)\n            .build()\n        var lastFailure: AppResult.Failure? = null',
-              'configurable AI timeout',
-          )
-          service = replace_once(service, '                val response = client.newCall(request).execute()', '                val response = callClient.newCall(request).execute()', 'call-specific client')
-          service = replace_once(service, '                        .put("maxOutputTokens", MAX_OUTPUT_TOKENS)\n', '', 'remove Gemini maxOutputTokens')
-          service = replace_once(service, '        private const val MAX_OUTPUT_TOKENS = 8_000\n', '', 'remove output token constant')
-          write(service_path, service)
-
-          coordinator_path = 'app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt'
-          coordinator = read(coordinator_path)
-          coordinator = replace_once(
-              coordinator,
-              '        if (!voice && !music) return Result(false, false, emptyList())\n        val storyVoice = storyVoiceSettings(content.chapter.storyId)\n        val voiceAllowed = voice && storyVoice.mode != StoryVoiceCastMode.OFF\n        if (!voiceAllowed && !music) {\n            return Result(false, false, listOf("Phân vai TTS đang tắt cho truyện này."))\n        }\n        val tracks = if (music) library.listEnabledSceneMusicTracks() else emptyList()\n        val voiceNeeded = voiceAllowed && needsVoicePlan(content, force)',
-              '        if (!voice && !music) return Result(false, false, emptyList())\n        if (!voice) {\n            return Result(false, false, listOf("Nhạc theo cảnh AI chỉ được lập cùng phân vai TTS."))\n        }\n        val storyVoice = storyVoiceSettings(content.chapter.storyId)\n        val voiceAllowed = storyVoice.mode != StoryVoiceCastMode.OFF\n        if (!voiceAllowed) {\n            return Result(false, false, listOf("Phân vai TTS đang tắt cho truyện này."))\n        }\n        val tracks = if (music) library.listEnabledSceneMusicTracks() else emptyList()\n        val voiceNeeded = needsVoicePlan(content, force)',
-              'coordinator no music-only mode',
-          )
-          write(coordinator_path, coordinator)
-
           playback_path = 'app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt'
           playback = read(playback_path)
+
           playback = replace_once(
               playback,
               '    private var narrationPlanningChapterId: String = ""\n    @Volatile private var narrationReloadPending = false',
               '    private var narrationPlanningChapterId: String = ""\n    private var narrationPreparedChapterId: String = ""',
               'narration preparation state',
           )
+
           playback = replace_once(
               playback,
               '        if (!ttsReady || !voiceSettingsReady) {\n            pendingPlay = true\n            return\n        }\n        if (!requestAudioFocus()) {',
               '        if (!ttsReady || !voiceSettingsReady) {\n            pendingPlay = true\n            return\n        }\n        if (prepareCurrentNarrationBeforePlayback(snapshot)) return\n        if (!requestAudioFocus()) {',
-              'block playback until narration attempt completes',
+              'block playback until narration preparation completes',
           )
+
           playback = replace_once(
               playback,
               '        val speedAdjustPct = unitAssignment?.speedAdjustPct ?: legacyAssignment?.speedAdjustPct ?: 0f\n        val pitchAdjustPct = unitAssignment?.pitchAdjustPct ?: legacyAssignment?.pitchAdjustPct ?: 0f\n        val volumeAdjustPct = unitAssignment?.volumeAdjustPct ?: legacyAssignment?.volumeAdjustPct ?: 0f\n        val aiRateMultiplier = (1f + speedAdjustPct / 100f).coerceIn(0.5f, 1.5f)\n        val aiPitchMultiplier = (1f + pitchAdjustPct / 100f).coerceIn(0.5f, 1.5f)\n        val aiVolumeMultiplier = (1f + volumeAdjustPct / 100f).coerceIn(0.2f, 2f)',
               '        val speedAdjustPct = (unitAssignment?.speedAdjustPct ?: legacyAssignment?.speedAdjustPct ?: 0f).coerceIn(-100f, 100f)\n        val pitchAdjustPct = (unitAssignment?.pitchAdjustPct ?: legacyAssignment?.pitchAdjustPct ?: 0f).coerceIn(-100f, 100f)\n        val volumeAdjustPct = (unitAssignment?.volumeAdjustPct ?: legacyAssignment?.volumeAdjustPct ?: 0f).coerceIn(-100f, 100f)\n        val aiRateMultiplier = 1f + speedAdjustPct / 100f\n        val aiPitchMultiplier = 1f + pitchAdjustPct / 100f\n        val aiVolumeMultiplier = 1f + volumeAdjustPct / 100f',
               'XPK prosody percentage application',
           )
-          playback = replace_once(playback, '        maybeEnsureCurrentNarrationPlans()\n', '', 'remove mid-play narration planning')
+
+          playback = replace_once(
+              playback,
+              '        persistCheckpoint(wasPlaying = true)\n        maybeEnsureCurrentNarrationPlans()\n        updateMediaState()',
+              '        persistCheckpoint(wasPlaying = true)\n        updateMediaState()',
+              'remove mid-play planning trigger',
+          )
+
           playback, count = re.subn(
               r'\n            if \(narrationReloadPending\) \{.*?\n            \}\n            if \(advancedInsideParagraph\) \{',
               '\n            if (advancedInsideParagraph) {',
@@ -170,9 +157,15 @@ jobs:
           )
           playback = replace_once(
               playback,
+              '        narrationPlanningChapterId = ""\n        narrationReloadPending = false',
+              '        narrationPlanningChapterId = ""\n        narrationPreparedChapterId = ""',
+              'reset narration preparation state',
+          )
+          playback = replace_once(
+              playback,
               '            volume = (track.volume * sceneVolume * normalizationGain).coerceIn(0f, 0.6f),',
               '            volume = (track.volume * sceneVolume * normalizationGain).coerceIn(0f, 1f),',
-              'remove 60 percent scene music cap',
+              'remove canonical scene 60 percent cap',
           )
           write(playback_path, playback)
 
@@ -195,9 +188,13 @@ require(
     "app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt",
     "Nhạc theo cảnh AI chỉ được lập cùng phân vai TTS.",
 )
+forbid(
+    "app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt",
+    "includeVoiceCast = false",
+)
 require(
     "app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt",
-    "private var narrationPreparedChapterId: String = \\\"\\\"",
+    'private var narrationPreparedChapterId: String = ""',
     "if (prepareCurrentNarrationBeforePlayback(snapshot)) return",
     "if (!autoVoiceCastEnabled || snapshot.chapterId.isBlank()) return false",
     "val aiRateMultiplier = 1f + speedAdjustPct / 100f",
@@ -231,16 +228,14 @@ print("XPK_STRICT_PARITY=PASS")
       - name: Run focused JVM tests
         run: ./gradlew --no-daemon --stacktrace testDebugUnitTest
 
-      - name: Commit verified source changes and remove patch workflow
+      - name: Commit verified source changes and self-clean
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git rm .github/workflows/xpk-six-parity-patch.yml
-          git add app/src/main/java/vn/nghetruyen/app/ai/XpkNarrationAiServices.kt \
-                  app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt \
-                  app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt \
+          git rm .github/workflows/xpk-six-parity-patch.yml .github/xpk-six-parity-trigger
+          git add app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt \
                   scripts/check_xpk_strict_parity.py
           git diff --cached --check
-          git commit -m "fix: align six XPK narration behaviors"
+          git commit -m "fix: align Reader playback with XPK narration"
           git push origin HEAD:agent/xpk-six-parity-fixes

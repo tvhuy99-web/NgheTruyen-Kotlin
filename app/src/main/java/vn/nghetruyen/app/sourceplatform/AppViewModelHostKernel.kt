@@ -144,6 +144,9 @@ object ExtensionHostKernelInstaller {
     }
 }
 
+fun installExtensionHostKernel(viewModel: AppViewModel): SourceHostKernelDispatcher =
+    ExtensionHostKernelInstaller.install(viewModel)
+
 private fun accepted(traceId: String): SourcePlatformResult<JsonValue> = SourcePlatformResult.Success(
     JsonValue.Obj(linkedMapOf(
         "accepted" to JsonValue.Bool(true),

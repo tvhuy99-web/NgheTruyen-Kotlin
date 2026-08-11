@@ -10,7 +10,9 @@ import vn.nghetruyen.app.ui.ExploreMode
 import vn.nghetruyen.app.ui.RootTab
 import vn.nghetruyen.source.api.JsonValue
 import vn.nghetruyen.source.api.SourceErrorCode
+import vn.nghetruyen.source.api.SourceHostEventBus
 import vn.nghetruyen.source.api.SourceHostKernelBus
+import vn.nghetruyen.source.api.SourceHostKernelContract
 import vn.nghetruyen.source.api.SourceHostKernelDispatcher
 import vn.nghetruyen.source.api.SourcePlatformFailure
 import vn.nghetruyen.source.api.SourcePlatformResult
@@ -31,6 +33,25 @@ object ExtensionHostKernelInstaller {
         fun host(): AppViewModel? = hostRef.get()
 
         val dispatcher = SourceHostKernelDispatcher()
+            .register("hooks", "poll") { sourceId, payload, traceId ->
+                val eventName = payload.stringValue("name")?.trim()?.takeIf(String::isNotEmpty)
+                val events = runCatching { SourceHostEventBus.drain(sourceId, eventName) }
+                    .getOrElse { error -> return@register invalid(traceId, error.message ?: "SOURCE_HOST_EVENT_POLL_FAILED") }
+                SourcePlatformResult.Success(
+                    JsonValue.Obj(linkedMapOf(
+                        "events" to JsonValue.Arr(events.map(SourceHostKernelContract::encode)),
+                        "traceId" to JsonValue.Str(traceId),
+                    )),
+                )
+            }
+            .register("hooks", "emit") { sourceId, payload, traceId ->
+                val eventName = payload.stringValue("name")?.trim().orEmpty()
+                val eventPayload = payload.objectValue("payload") ?: JsonValue.Obj()
+                val event = runCatching { SourceHostKernelContract.event(eventName, eventPayload) }
+                    .getOrElse { error -> return@register invalid(traceId, error.message ?: "SOURCE_HOST_EVENT_INVALID") }
+                SourceHostEventBus.emit(sourceId, event, traceId)
+                accepted(traceId)
+            }
             .register("ui", "notify") { _, payload, traceId ->
                 val host = host() ?: return@register uiUnavailable(traceId)
                 val message = payload.stringValue("message")?.trim().orEmpty().take(MAX_UI_MESSAGE_CHARS)
@@ -289,6 +310,7 @@ private fun invalid(traceId: String, message: String): SourcePlatformResult<Json
 private fun JsonValue.Obj.stringValue(name: String): String? = (values[name] as? JsonValue.Str)?.value
 private fun JsonValue.Obj.intValue(name: String): Int? = (values[name] as? JsonValue.Num)?.raw?.toIntOrNull()
 private fun JsonValue.Obj.floatValue(name: String): Float? = (values[name] as? JsonValue.Num)?.raw?.toFloatOrNull()
+private fun JsonValue.Obj.objectValue(name: String): JsonValue.Obj? = values[name] as? JsonValue.Obj
 
 private const val MAX_UI_MESSAGE_CHARS = 2_000
 private const val MAX_NOTE_CHARS = 10_000

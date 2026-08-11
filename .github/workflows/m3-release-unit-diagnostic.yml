@@ -1,6 +1,9 @@
 name: M3 Release Unit Diagnostic
 
 on:
+  pull_request:
+    paths:
+      - '.github/workflows/m3-release-unit-diagnostic.yml'
   push:
     branches:
       - agent/m3-chromium-js-engine
@@ -39,7 +42,9 @@ jobs:
           for path in sorted(root.glob('TEST-*.xml')):
               tree = ET.parse(path).getroot()
               for case in tree.findall('testcase'):
-                  failure = case.find('failure') or case.find('error')
+                  failure = case.find('failure')
+                  if failure is None:
+                      failure = case.find('error')
                   if failure is not None:
                       print('=== FAILURE', case.get('classname'), case.get('name'), '===')
                       print(failure.get('message', ''))

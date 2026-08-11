@@ -111,11 +111,12 @@ class NarrationPlanCoordinator(
     suspend fun shouldAutoVoiceCast(storyId: String): Boolean {
         val appEnabled = settings.snapshot().autoVoiceCastEnabled
         if (!appEnabled) return false
-        val profile = library.getStoryAiProfile(storyId) ?: return true
+        val profile = library.getStoryAiProfile(storyId) ?: return false
         val raw = profile.voiceCastNote
+        if (!StoryVoiceCastReferenceCodec.hasStoredSettings(raw)) return false
         val storyVoice = StoryVoiceCastReferenceCodec.decode(raw)
         if (storyVoice.mode == StoryVoiceCastMode.OFF) return false
-        return if (StoryVoiceCastReferenceCodec.hasStoredSettings(raw)) storyVoice.autoRunOnOpenTts else true
+        return storyVoice.autoRunOnOpenTts
     }
 
     suspend fun expressiveAdjustmentEnabled(storyId: String): Boolean =

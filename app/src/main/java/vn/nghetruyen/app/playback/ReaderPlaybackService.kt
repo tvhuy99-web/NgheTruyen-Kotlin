@@ -133,6 +133,7 @@ class ReaderPlaybackService : Service() {
     private var narrationPrefetchJob: Job? = null
     private var narrationPlanningChapterId: String = ""
     private var narrationPreparedChapterId: String = ""
+    private var manualNarrationChapterId: String = ""
     private var transitionMessage: String? = null
     private var currentEnginePackage: String? = null
     private var pendingRoleEnginePackage: String? = null
@@ -271,7 +272,10 @@ class ReaderPlaybackService : Service() {
             ACTION_PREVIOUS, ACTION_REWIND -> skip(-1)
             ACTION_STOP -> stopPlayback()
             ACTION_REFRESH -> refreshVoiceAndNotification()
-            ACTION_APPLY_NARRATION_AND_PLAY -> refreshVoiceAndNotification(playAfterRefresh = true)
+            ACTION_APPLY_NARRATION_AND_PLAY -> {
+                manualNarrationChapterId = PlaybackQueueStore.state.value.chapterId
+                refreshVoiceAndNotification(playAfterRefresh = true)
+            }
             ACTION_MUSIC_PREVIEW_BEGIN -> beginMusicPreview()
             ACTION_MUSIC_PREVIEW_END -> endMusicPreview()
             ACTION_SET_SLEEP_TIMER -> scheduleSleepTimer(intent.getIntExtra(EXTRA_SLEEP_MINUTES, 0))
@@ -1683,14 +1687,18 @@ class ReaderPlaybackService : Service() {
         activeBaseVoice = config
         val playbackSnapshot = PlaybackQueueStore.state.value
         val chapterId = playbackSnapshot.chapterId
-        voiceRoles = if (useStoryProfile && storyId.isNotBlank()) {
+        if (manualNarrationChapterId.isNotBlank() && manualNarrationChapterId != chapterId) {
+            manualNarrationChapterId = ""
+        }
+        val voicePlanEnabled = currentStoryAutoVoiceCastEnabled || manualNarrationChapterId == chapterId
+        voiceRoles = if (useStoryProfile && storyId.isNotBlank() && voicePlanEnabled) {
             container.narrationPlanCoordinator.effectiveVoiceRoles(storyId)
         } else emptyList()
         val originalChapter = if (useStoryProfile && chapterId.isNotBlank()) {
             container.libraryRepository.loadCachedChapter(chapterId)
         } else null
         val originalHash = originalChapter?.let { ChapterAiWorkflow.sha256(it.paragraphs) }
-        val voicePlan = if (originalHash != null) {
+        val voicePlan = if (voicePlanEnabled && originalHash != null) {
             container.libraryRepository.getChapterTransform(chapterId, ChapterAiWorkflow.KIND_VOICE_CAST)
         } else null
         val validRuntimeUnitIds = playbackSnapshot.speechChunks.mapNotNull { it.unitId.takeIf(String::isNotBlank) }

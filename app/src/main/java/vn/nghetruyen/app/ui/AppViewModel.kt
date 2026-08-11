@@ -2053,10 +2053,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     } else null
                     val initialContent = initialVietPhraseContent ?: enriched
                     val initialTextMode = if (initialVietPhraseContent != null) ChapterTextMode.VIETPHRASE else ChapterTextMode.ORIGINAL
-                    val existingVoicePlanCount = container.narrationPlanCoordinator.voicePlanAssignmentCount(enriched)
                     val autoVoiceCastOnOpen = container.narrationPlanCoordinator.shouldAutoVoiceCast(enriched.chapter.storyId)
-                    val shouldAutoStartNarration = settings.readerMode == ReaderMode.TTS &&
-                        (autoVoiceCastOnOpen || existingVoicePlanCount > 0)
+                    val shouldAutoStartNarration = settings.readerMode == ReaderMode.TTS && autoVoiceCastOnOpen
                     PlaybackQueueStore.loadContent(
                         sourceId = sourceId,
                         content = initialContent,
@@ -2092,7 +2090,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     if (shouldAutoStartNarration) {
                         ReaderPlaybackService.command(
                             getApplication(),
-                            ReaderPlaybackService.ACTION_APPLY_NARRATION_AND_PLAY,
+                            ReaderPlaybackService.ACTION_PLAY,
                         )
                     }
                     when {

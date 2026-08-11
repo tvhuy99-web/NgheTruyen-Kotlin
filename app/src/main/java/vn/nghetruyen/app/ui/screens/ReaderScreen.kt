@@ -180,8 +180,8 @@ fun ReaderScreen(
     val storyAiProfile = state.storyAiProfiles[storyId]
     val storyVoiceReference = storyAiProfile?.let { StoryVoiceCastReferenceCodec.decode(it.voiceCastNote) }
     val effectiveAutoVoiceCastEnabled = state.autoVoiceCastEnabled && when {
-        storyAiProfile == null -> true
-        !StoryVoiceCastReferenceCodec.hasStoredSettings(storyAiProfile.voiceCastNote) -> true
+        storyAiProfile == null -> false
+        !StoryVoiceCastReferenceCodec.hasStoredSettings(storyAiProfile.voiceCastNote) -> false
         storyVoiceReference?.mode == StoryVoiceCastMode.OFF -> false
         else -> storyVoiceReference?.autoRunOnOpenTts == true
     }

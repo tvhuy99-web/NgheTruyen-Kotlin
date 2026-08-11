@@ -157,6 +157,9 @@ require(
     "Nhạc theo cảnh AI chỉ được lập cùng phân vai TTS.",
     "suspend fun voicePlanAssignmentCount(content: ChapterContent): Int",
     "suspend fun shouldAutoVoiceCast(storyId: String): Boolean",
+    "val profile = library.getStoryAiProfile(storyId) ?: return false",
+    "if (!StoryVoiceCastReferenceCodec.hasStoredSettings(raw)) return false",
+    "return storyVoice.autoRunOnOpenTts",
     "suspend fun expressiveAdjustmentEnabled(storyId: String): Boolean",
     "suspend fun effectiveVoiceRoles(storyId: String): List<VoiceRoleEntity>",
 )
@@ -168,6 +171,7 @@ forbid(
 require(
     "app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt",
     'private var narrationPreparedChapterId: String = ""',
+    'private var manualNarrationChapterId: String = ""',
     "if (prepareCurrentNarrationBeforePlayback(snapshot)) return",
     "if (!currentStoryAutoVoiceCastEnabled || snapshot.chapterId.isBlank()) return false",
     "if (currentStoryExpressiveAdjustmentEnabled)",
@@ -186,6 +190,9 @@ require(
     "voicePlanAssignmentCount(content)",
     "NARRATION_RETRY_DELAY_MS = 5_000L",
     "ACTION_APPLY_NARRATION_AND_PLAY",
+    "manualNarrationChapterId = PlaybackQueueStore.state.value.chapterId",
+    "val voicePlanEnabled = currentStoryAutoVoiceCastEnabled || manualNarrationChapterId == chapterId",
+    "if (voicePlanEnabled && originalHash != null)",
     "Phân vai chưa thành công. Sẽ tự thử lại sau 5 giây.",
     "if (currentStoryAutoVoiceCastEnabled && prefetchNarrationPlansEnabled)",
     "if (!PlaybackQueueStore.state.value.isPlaying) pendingPlay = false",
@@ -205,13 +212,15 @@ require(
     "app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt",
     "includeMusic = state.value.backgroundMusicEnabled && state.value.autoSceneMusicEnabled",
     "val autoVoiceCastOnOpen = container.narrationPlanCoordinator.shouldAutoVoiceCast",
+    "val shouldAutoStartNarration = settings.readerMode == ReaderMode.TTS && autoVoiceCastOnOpen",
     "NarrationAutomationStage.IDLE",
-    "existingVoicePlanCount > 0",
+    "ReaderPlaybackService.ACTION_PLAY",
     "ACTION_APPLY_NARRATION_AND_PLAY",
 )
 forbid(
     "app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt",
     "Hãy thêm ít nhất một tệp nhạc cảnh đang bật.",
+    "existingVoicePlanCount > 0",
 )
 
 require(
@@ -221,6 +230,8 @@ require(
     "Từ 75% chương",
     "if (effectiveAutoVoiceCastEnabled)",
     "StoryVoiceCastReferenceCodec.hasStoredSettings",
+    "storyAiProfile == null -> false",
+    "!StoryVoiceCastReferenceCodec.hasStoredSettings(storyAiProfile.voiceCastNote) -> false",
     "view.announceForAccessibility(announcement)",
 )
 

@@ -23,7 +23,7 @@ object SourceHostKernelContract {
         ),
         "library" to setOf("follow", "unfollow", "bookmark", "unbookmark", "note", "removeNote"),
         "tts" to setOf("play", "pause", "stop", "toggle", "setRate", "setPitch", "setVoice"),
-        "hooks" to setOf("emit"),
+        "hooks" to setOf("emit", "poll"),
     )
 
     val lifecycleEvents: Set<String> = setOf(

@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 from pathlib import Path
-import re
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -18,378 +17,15 @@ def replace_once(path: str, old: str, new: str) -> None:
     if new in value:
         return
     if old not in value:
-        raise SystemExit(f"missing migration anchor in {path}: {old[:120]!r}")
+        raise SystemExit(f"missing migration anchor in {path}: {old[:160]!r}")
     write(path, value.replace(old, new, 1))
 
 
-# 1) Recorder keeps fatal breadcrumbs even while the visible diagnostics mode is OFF.
-path = "source-diagnostics/src/main/kotlin/vn/nghetruyen/source/diagnostics/SourceDiagnostics.kt"
+# Keep the root operation alive while nested HTTP/browser/bridge stages share the same trace.
+path = "app/src/main/java/vn/nghetruyen/app/sourceplatform/SourceDiagnosticRuntime.kt"
 replace_once(
     path,
-    """data class DiagnosticEvent(\n    val timestampEpochMs: Long,\n    val traceId: String,\n    val sourceId: String,\n    val sourceVersion: String? = null,\n    val category: DiagnosticCategory,\n    val name: String,\n    val severity: DiagnosticSeverity = DiagnosticSeverity.INFO,\n    val durationMs: Long? = null,\n    val attributes: Map<String, String> = emptyMap(),\n)\n\nfun interface DiagnosticSink""",
-    """data class DiagnosticEvent(\n    val timestampEpochMs: Long,\n    val traceId: String,\n    val sourceId: String,\n    val sourceVersion: String? = null,\n    val category: DiagnosticCategory,\n    val name: String,\n    val severity: DiagnosticSeverity = DiagnosticSeverity.INFO,\n    val durationMs: Long? = null,\n    val attributes: Map<String, String> = emptyMap(),\n)\n\n/**\n * Tiny always-on breadcrumb policy. Diagnostics OFF still hides the UI and suppresses normal\n * telemetry, but fatal errors and install/trust/security warnings survive so a user can enable\n * diagnostics after a failed extension install and still have something actionable to inspect.\n */\nfun DiagnosticEvent.shouldRetainWhenDiagnosticsOff(): Boolean =\n    severity == DiagnosticSeverity.ERROR ||\n        (severity == DiagnosticSeverity.WARN && category in setOf(\n            DiagnosticCategory.PACKAGE,\n            DiagnosticCategory.TRUST,\n            DiagnosticCategory.STORE,\n            DiagnosticCategory.SECURITY,\n        ))\n\nfun interface DiagnosticSink""",
-)
-replace_once(
-    path,
-    """    override fun emit(event: DiagnosticEvent) {\n        if (level == DiagnosticLevel.OFF) return\n        if (level == DiagnosticLevel.BASIC && event.severity == DiagnosticSeverity.DEBUG) return\n        val safe = event.copy(attributes = DiagnosticRedactor.redact(event.attributes))\n        lock.withLock {\n            while (events.size >= maxEvents) events.removeFirst()\n            events.addLast(safe)\n        }\n        runCatching { mirror.emit(safe) }\n    }\n\n    fun snapshot""",
-    """    override fun emit(event: DiagnosticEvent) {\n        val critical = event.shouldRetainWhenDiagnosticsOff()\n        if (level == DiagnosticLevel.OFF && !critical) return\n        if (level == DiagnosticLevel.BASIC && event.severity == DiagnosticSeverity.DEBUG && !critical) return\n        val safe = event.copy(attributes = DiagnosticRedactor.redact(event.attributes))\n        lock.withLock {\n            while (events.size >= maxEvents) events.removeFirst()\n            events.addLast(safe)\n        }\n        runCatching { mirror.emit(safe) }\n    }\n\n    /** Restore already-redacted persisted breadcrumbs without mirroring them back to disk. */\n    fun restore(restored: List<DiagnosticEvent>) = lock.withLock {\n        restored.takeLast(maxEvents).forEach { event ->\n            val safe = event.copy(attributes = DiagnosticRedactor.redact(event.attributes))\n            while (events.size >= maxEvents) events.removeFirst()\n            events.addLast(safe)\n        }\n    }\n\n    fun snapshot""",
-)
-
-# 2) Replace the app runtime with a dual Advanced profile + active-operation tracker + persistent critical ring.
-runtime_path = ROOT / "app/src/main/java/vn/nghetruyen/app/sourceplatform/SourceDiagnosticRuntime.kt"
-runtime_path.write_text(r'''package vn.nghetruyen.app.sourceplatform
-
-import android.content.Context
-import android.os.Build
-import org.json.JSONArray
-import org.json.JSONObject
-import vn.nghetruyen.app.BuildConfig
-import vn.nghetruyen.source.diagnostics.BoundedDiagnosticEvidenceRecorder
-import vn.nghetruyen.source.diagnostics.BoundedDiagnosticRecorder
-import vn.nghetruyen.source.diagnostics.DiagnosticCategory
-import vn.nghetruyen.source.diagnostics.DiagnosticEvidence
-import vn.nghetruyen.source.diagnostics.DiagnosticEvidenceSink
-import vn.nghetruyen.source.diagnostics.DiagnosticEvent
-import vn.nghetruyen.source.diagnostics.DiagnosticJsonExporter
-import vn.nghetruyen.source.diagnostics.DiagnosticLevel
-import vn.nghetruyen.source.diagnostics.DiagnosticRedactor
-import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
-import vn.nghetruyen.source.diagnostics.DiagnosticSink
-import vn.nghetruyen.source.diagnostics.SourceSnapshotSanitizer
-import vn.nghetruyen.source.diagnostics.SourceTraceExplorer
-import vn.nghetruyen.source.diagnostics.shouldRetainWhenDiagnosticsOff
-import java.io.ByteArrayOutputStream
-import java.io.File
-import java.time.Instant
-import java.util.UUID
-import java.util.zip.ZipEntry
-import java.util.zip.ZipOutputStream
-
-data class DiagnosticActiveOperation(
-    val traceId: String,
-    val sourceId: String,
-    val category: DiagnosticCategory,
-    val startedAtEpochMs: Long,
-    val lastEventAtEpochMs: Long,
-    val startEvent: String,
-    val lastEvent: String,
-)
-
-class SourceDiagnosticRuntime(private val context: Context) {
-    private val prefs = context.getSharedPreferences("source_diagnostics", Context.MODE_PRIVATE)
-    private val activityTracker = DiagnosticActivityTracker()
-    private val crashStore = CrashSafeDiagnosticStore(context)
-    private val mirror = DiagnosticSink { event ->
-        activityTracker.emit(event)
-        crashStore.emit(event)
-    }
-
-    val recorder = BoundedDiagnosticRecorder(
-        maxEvents = 20_000,
-        level = DiagnosticLevel.OFF,
-        mirror = mirror,
-    )
-    val evidence = BoundedDiagnosticEvidenceRecorder(
-        maxBytes = 64L * 1024L * 1024L,
-        maxItems = 2_048,
-        maxItemBytes = 16 * 1024 * 1024,
-        mirror = crashStore,
-    )
-
-    @Volatile var mode: String = "off"
-        private set
-
-    val advanced: Boolean get() = mode == MODE_ADVANCED_RAM || mode == MODE_ADVANCED_CRASH
-    val crashSafe: Boolean get() = mode == MODE_ADVANCED_CRASH
-
-    init {
-        applyMode(prefs.getString(KEY_MODE, "off").orEmpty(), rotateCrashSafe = true)
-        recorder.restore(crashStore.restoreCriticalEvents())
-    }
-
-    fun setMode(requested: String): String {
-        val normalized = normalizeMode(requested)
-        val previous = mode
-        val enteringCrashSafe = normalized == MODE_ADVANCED_CRASH && previous != MODE_ADVANCED_CRASH
-        if (normalized == "off" && previous != "off") {
-            mark(
-                name = "DIAGNOSTICS_MODE_CHANGED",
-                category = DiagnosticCategory.RUNTIME,
-                severity = DiagnosticSeverity.INFO,
-                attributes = mapOf("from" to previous, "to" to normalized),
-            )
-        }
-        mode = normalized
-        prefs.edit().putString(KEY_MODE, normalized).apply()
-        applyMode(normalized, rotateCrashSafe = enteringCrashSafe)
-        if (normalized != "off") {
-            mark(
-                name = "DIAGNOSTICS_MODE_CHANGED",
-                category = DiagnosticCategory.RUNTIME,
-                severity = DiagnosticSeverity.INFO,
-                attributes = mapOf("from" to previous, "to" to normalized),
-            )
-        }
-        return normalized
-    }
-
-    fun mark(
-        name: String,
-        category: DiagnosticCategory = DiagnosticCategory.RUNTIME,
-        severity: DiagnosticSeverity = DiagnosticSeverity.DEBUG,
-        sourceId: String = "app",
-        traceId: String = "",
-        durationMs: Long? = null,
-        attributes: Map<String, String> = emptyMap(),
-    ) {
-        val event = DiagnosticEvent(
-            timestampEpochMs = System.currentTimeMillis(),
-            traceId = traceId.ifBlank { "app:${UUID.randomUUID()}" },
-            sourceId = sourceId.ifBlank { "app" },
-            category = category,
-            name = name.take(160),
-            severity = severity,
-            durationMs = durationMs,
-            attributes = attributes + ("diagnosticsMode" to mode),
-        )
-        if (mode == "off" && !event.shouldRetainWhenDiagnosticsOff()) return
-        recorder.emit(event)
-    }
-
-    fun activitySnapshot(): List<DiagnosticActiveOperation> = activityTracker.snapshot()
-
-    fun activityLines(nowMs: Long = System.currentTimeMillis()): List<String> = activitySnapshot().map { operation ->
-        val elapsed = (nowMs - operation.startedAtEpochMs).coerceAtLeast(0L)
-        "${operation.sourceId} • ${operation.category}/${operation.lastEvent} • ${elapsed}ms • trace=${operation.traceId.take(28)}"
-    }
-
-    fun persistentCriticalCount(): Int = crashStore.persistentCriticalCount()
-
-    fun clearBlackBox() {
-        recorder.clear()
-        evidence.clear()
-        activityTracker.clear()
-        crashStore.clear()
-    }
-
-    fun exportBundle(
-        events: List<DiagnosticEvent>,
-        installed: List<SourcePackUiInfo>,
-        repositories: List<SourceRepositoryUiInfo>,
-        runtimeState: Map<String, String> = emptyMap(),
-        backupLogTail: String = "",
-    ): ByteArray {
-        val output = ByteArrayOutputStream()
-        ZipOutputStream(output).use { zip ->
-            zip.addText("README.txt", readme())
-            zip.addBytes("report/events.json", DiagnosticJsonExporter.export(events))
-            zip.addText("report/environment.json", environment(events).toString(2))
-            zip.addText("report/installed_sources.json", installedJson(installed).toString(2))
-            zip.addText("report/repositories.json", repositoriesJson(repositories).toString(2))
-            zip.addText("report/app_runtime.json", JSONObject(DiagnosticRedactor.redact(runtimeState)).toString(2))
-            zip.addText("report/active_operations.json", activeOperationsJson().toString(2))
-            if (backupLogTail.isNotBlank()) {
-                zip.addText("report/backup_tail.log", DiagnosticRedactor.redactLongText(backupLogTail, 64_000))
-            }
-            zip.addText("report/traces.txt", traceReport(events))
-
-            evidence.snapshot().forEachIndexed { index, item ->
-                val base = "evidence/current/${index.toString().padStart(4, '0')}-${safePath(item.name)}"
-                zip.addBytes(base, safeEvidenceBytes(item))
-                zip.addText("$base.meta.json", evidenceMeta(item).toString(2))
-                if (item.contentType.contains("html", ignoreCase = true)) {
-                    val text = item.data.toString(Charsets.UTF_8)
-                    zip.addText(
-                        "evidence/sanitized/${index.toString().padStart(4, '0')}-${safePath(item.name)}",
-                        SourceSnapshotSanitizer.sanitizeHtml(text, 8 * 1024 * 1024),
-                    )
-                }
-            }
-
-            crashStore.snapshotForExport().forEach { (name, bytes) ->
-                zip.addBytes("crash-safe/$name", safeStoredBytes(name, bytes))
-            }
-        }
-        return output.toByteArray()
-    }
-
-    private fun applyMode(raw: String, rotateCrashSafe: Boolean) {
-        val normalized = normalizeMode(raw)
-        mode = normalized
-        recorder.level = when (normalized) {
-            "basic" -> DiagnosticLevel.BASIC
-            MODE_ADVANCED_RAM, MODE_ADVANCED_CRASH -> DiagnosticLevel.VERBOSE
-            else -> DiagnosticLevel.OFF
-        }
-        evidence.enabled = normalized == MODE_ADVANCED_RAM || normalized == MODE_ADVANCED_CRASH
-        crashStore.enabled = normalized == MODE_ADVANCED_CRASH
-        if (normalized == MODE_ADVANCED_CRASH && rotateCrashSafe) crashStore.beginSession()
-        if (normalized == "off") activityTracker.clear()
-    }
-
-    private fun normalizeMode(value: String): String = when (value) {
-        "advanced" -> MODE_ADVANCED_CRASH // migrate the old single Advanced mode safely.
-        "off", "basic", MODE_ADVANCED_RAM, MODE_ADVANCED_CRASH -> value
-        else -> "off"
-    }
-
-    private fun environment(events: List<DiagnosticEvent>): JSONObject = JSONObject().apply {
-        put("generatedAt", Instant.now().toString())
-        put("diagnosticMode", mode)
-        put("advanced", advanced)
-        put("crashSafe", crashSafe)
-        put("appVersionName", BuildConfig.VERSION_NAME)
-        put("appVersionCode", BuildConfig.VERSION_CODE)
-        put("androidSdk", Build.VERSION.SDK_INT)
-        put("manufacturer", Build.MANUFACTURER)
-        put("model", Build.MODEL)
-        put("device", Build.DEVICE)
-        put("product", Build.PRODUCT)
-        put("eventCount", events.size)
-        put("activeOperationCount", activityTracker.snapshot().size)
-        put("persistentCriticalCount", persistentCriticalCount())
-        val stats = evidence.stats()
-        put("evidenceItems", stats.itemCount)
-        put("evidenceBytes", stats.retainedBytes)
-        put("evidenceEvictedItems", stats.evictedItems)
-    }
-
-    private fun activeOperationsJson(): JSONArray = JSONArray().apply {
-        activityTracker.snapshot().forEach { operation ->
-            put(JSONObject().apply {
-                put("traceId", operation.traceId)
-                put("sourceId", operation.sourceId)
-                put("category", operation.category.name)
-                put("startedAtEpochMs", operation.startedAtEpochMs)
-                put("lastEventAtEpochMs", operation.lastEventAtEpochMs)
-                put("startEvent", operation.startEvent)
-                put("lastEvent", operation.lastEvent)
-            })
-        }
-    }
-
-    private fun installedJson(items: List<SourcePackUiInfo>): JSONArray = JSONArray().apply {
-        items.forEach { item ->
-            put(JSONObject().apply {
-                put("id", item.id)
-                put("name", item.name)
-                put("version", item.version)
-                put("enabled", item.enabled)
-                put("ecosystem", item.ecosystem)
-                put("runtimeMode", item.runtimeMode)
-                put("contentType", item.contentType)
-                put("compatibilityProfile", item.compatibilityProfile)
-            })
-        }
-    }
-
-    private fun repositoriesJson(items: List<SourceRepositoryUiInfo>): JSONArray = JSONArray().apply {
-        items.forEach { item ->
-            put(JSONObject().apply {
-                put("id", item.id)
-                put("name", item.name)
-                put("url", DiagnosticRedactor.redactLongText(item.url, 4_096))
-                put("packageCount", item.packageCount)
-            })
-        }
-    }
-
-    private fun traceReport(events: List<DiagnosticEvent>): String = SourceTraceExplorer.summarize(events)
-        .joinToString("\n") { trace ->
-            listOf(
-                trace.traceId,
-                trace.sourceId,
-                "events=${trace.eventCount}",
-                "errors=${trace.errorCount}",
-                "durationMs=${trace.durationMs}",
-                "categories=${trace.categories.joinToString(",")}",
-                "final=${trace.finalEvent}",
-            ).joinToString(" | ")
-        }
-
-    private fun evidenceMeta(item: DiagnosticEvidence): JSONObject = JSONObject().apply {
-        put("timestampEpochMs", item.timestampEpochMs)
-        put("traceId", item.traceId)
-        put("sourceId", item.sourceId)
-        put("category", item.category.name)
-        put("name", item.name)
-        put("contentType", item.contentType)
-        put("bytes", item.data.size)
-        put("attributes", JSONObject(DiagnosticRedactor.redact(item.attributes)))
-    }
-
-    private fun safeEvidenceBytes(item: DiagnosticEvidence): ByteArray {
-        if (item.contentType.contains("html", ignoreCase = true)) {
-            return DiagnosticRedactor.redactHtmlPreservingStructure(
-                item.data.toString(Charsets.UTF_8),
-                8 * 1024 * 1024,
-            ).toByteArray(Charsets.UTF_8)
-        }
-        if (item.contentType.startsWith("text/", true) || item.contentType.contains("json", true)) {
-            return DiagnosticRedactor.redactLongText(
-                item.data.toString(Charsets.UTF_8),
-                8 * 1024 * 1024,
-            ).toByteArray(Charsets.UTF_8)
-        }
-        return item.data
-    }
-
-    private fun safeStoredBytes(name: String, bytes: ByteArray): ByteArray = when {
-        name.endsWith(".html", true) -> DiagnosticRedactor.redactHtmlPreservingStructure(
-            bytes.toString(Charsets.UTF_8), 8 * 1024 * 1024,
-        ).toByteArray(Charsets.UTF_8)
-        name.endsWith(".json", true) || name.endsWith(".jsonl", true) || name.endsWith(".txt", true) || name.endsWith(".log", true) ->
-            DiagnosticRedactor.redactLongText(bytes.toString(Charsets.UTF_8), 8 * 1024 * 1024).toByteArray(Charsets.UTF_8)
-        else -> bytes
-    }
-
-    private fun readme(): String = buildString {
-        appendLine("NgheTruyen diagnostic black box")
-        appendLine("Mode: $mode")
-        appendLine("This bundle keeps high-fidelity browser/runtime evidence for debugging while redacting common credentials on export.")
-        when (mode) {
-            MODE_ADVANCED_RAM -> appendLine("Advanced RAM-only keeps up to 64 MiB of evidence in memory and does not write the current diagnostic session to the crash-safe journal.")
-            MODE_ADVANCED_CRASH -> appendLine("Advanced crash-safe keeps up to 64 MiB of evidence plus a rolling private-storage journal so the previous process can be inspected after a crash.")
-            "basic" -> appendLine("Basic records INFO/WARN/ERROR structured events without browser/runtime evidence payloads.")
-            else -> appendLine("Diagnostics UI is off. Only a bounded always-on critical breadcrumb ring may be retained for fatal/install/trust/security failures.")
-        }
-        appendLine("HTML keeps DOM, script and style structure; common credentials and sensitive values are redacted during export.")
-        appendLine("The report includes a sanitized app runtime snapshot, active-operation state, and the backup/restore log tail when available.")
-        appendLine("crash-safe/critical/events.jsonl retains at most 100 critical breadcrumbs so failed extension installs are diagnosable even if diagnostics was previously off.")
-        if (crashSafe) appendLine("The crash-safe/previous section may contain the final evidence from the process before the latest restart.")
-    }
-
-    private fun safePath(value: String): String = value
-        .replace('\\', '/')
-        .split('/')
-        .filter { it.isNotBlank() && it != "." && it != ".." }
-        .joinToString("_") { part -> part.replace(Regex("[^A-Za-z0-9._-]"), "_").take(100) }
-        .ifBlank { "evidence.bin" }
-
-    private fun ZipOutputStream.addText(name: String, value: String) = addBytes(name, value.toByteArray(Charsets.UTF_8))
-
-    private fun ZipOutputStream.addBytes(name: String, bytes: ByteArray) {
-        putNextEntry(ZipEntry(name))
-        write(bytes)
-        closeEntry()
-    }
-
-    companion object {
-        private const val KEY_MODE = "diagnostics.mode"
-        const val MODE_ADVANCED_RAM = "advanced_ram"
-        const val MODE_ADVANCED_CRASH = "advanced_crash"
-    }
-}
-
-private class DiagnosticActivityTracker : DiagnosticSink {
-    private val lock = Any()
-    private val active = linkedMapOf<String, DiagnosticActiveOperation>()
-
-    override fun emit(event: DiagnosticEvent) = synchronized(lock) {
-        val traceId = event.traceId.trim()
-        if (traceId.isBlank()) return@synchronized
-        val name = event.name.uppercase()
-        when {
+    '''        when {
             isStart(name) -> {
                 active[traceId] = DiagnosticActiveOperation(
                     traceId = traceId,
@@ -411,17 +47,36 @@ private class DiagnosticActivityTracker : DiagnosticSink {
                 )
             }
         }
-    }
-
-    fun snapshot(): List<DiagnosticActiveOperation> = synchronized(lock) {
-        active.values.sortedByDescending(DiagnosticActiveOperation::lastEventAtEpochMs)
-    }
-
-    fun clear() = synchronized(lock) { active.clear() }
-
-    private fun isStart(name: String): Boolean = name.endsWith("_START") || name.endsWith("_STARTED")
-
-    private fun isTerminal(name: String): Boolean {
+''',
+    '''        val current = active[traceId]
+        when {
+            isStart(name) && current == null -> {
+                active[traceId] = DiagnosticActiveOperation(
+                    traceId = traceId,
+                    sourceId = event.sourceId,
+                    category = event.category,
+                    startedAtEpochMs = event.timestampEpochMs,
+                    lastEventAtEpochMs = event.timestampEpochMs,
+                    startEvent = event.name,
+                    lastEvent = event.name,
+                )
+                while (active.size > 100) active.remove(active.entries.first().key)
+            }
+            isTerminal(name) && current != null && operationStem(name) == operationStem(current.startEvent.uppercase()) -> {
+                active.remove(traceId)
+            }
+            current != null -> {
+                active[traceId] = current.copy(
+                    lastEventAtEpochMs = event.timestampEpochMs,
+                    lastEvent = event.name,
+                )
+            }
+        }
+''',
+)
+replace_once(
+    path,
+    '''    private fun isTerminal(name: String): Boolean {
         if (name.endsWith("_ITEM_COMPLETED") || name.endsWith("_SEGMENT_COMPLETED")) return false
         return name.endsWith("_COMPLETED") ||
             name.endsWith("_FAILED") ||
@@ -430,520 +85,1085 @@ private class DiagnosticActivityTracker : DiagnosticSink {
             name.endsWith("_CANCELLED") ||
             name.endsWith("_STOPPED")
     }
-}
+''',
+    '''    private fun isTerminal(name: String): Boolean = TERMINAL_SUFFIXES.any(name::endsWith)
 
-private class CrashSafeDiagnosticStore(private val context: Context) : DiagnosticSink, DiagnosticEvidenceSink {
-    private val lock = Any()
-    private val root = File(context.filesDir, "source-diagnostics-blackbox")
-    private val live = File(root, "live")
-    private val previous = File(root, "previous")
-    private val criticalFile = File(root, "critical-events.jsonl")
-    @Volatile override var enabled: Boolean = false
-
-    init {
-        live.mkdirs()
-    }
-
-    fun beginSession() = synchronized(lock) {
-        root.mkdirs()
-        if (live.exists() && live.walkTopDown().any { it.isFile }) {
-            previous.deleteRecursively()
-            if (!live.renameTo(previous)) {
-                copyDirectory(live, previous)
-                live.deleteRecursively()
-            }
-        } else {
-            live.deleteRecursively()
-        }
-        live.mkdirs()
-    }
-
-    override fun emit(event: DiagnosticEvent) {
-        if (event.shouldRetainWhenDiagnosticsOff()) persistCritical(event)
-        if (!enabled) return
-        synchronized(lock) {
-            live.mkdirs()
-            val file = File(live, "events.jsonl")
-            if (file.exists() && file.length() >= 8L * 1024L * 1024L) {
-                File(live, "events.previous.jsonl").delete()
-                file.renameTo(File(live, "events.previous.jsonl"))
-            }
-            file.appendText(DiagnosticJsonExporter.eventLine(event) + "\n")
-        }
-    }
-
-    override fun capture(evidence: DiagnosticEvidence) {
-        if (!enabled) return
-        synchronized(lock) {
-            val directory = File(live, "evidence").also(File::mkdirs)
-            val base = evidence.name.replace(Regex("[^A-Za-z0-9._-]"), "_").take(140).ifBlank { "evidence.bin" }
-            val file = File(directory, "${evidence.timestampEpochMs}-${base}")
-            file.writeBytes(evidence.data)
-            trimEvidence(directory)
-        }
-    }
-
-    fun restoreCriticalEvents(): List<DiagnosticEvent> = synchronized(lock) {
-        if (!criticalFile.isFile) return@synchronized emptyList()
-        criticalFile.readLines().takeLast(MAX_CRITICAL_EVENTS).mapNotNull(::parseEventLine)
-    }
-
-    fun persistentCriticalCount(): Int = synchronized(lock) {
-        if (!criticalFile.isFile) 0 else criticalFile.useLines { it.count() }.coerceAtMost(MAX_CRITICAL_EVENTS)
-    }
-
-    private fun persistCritical(event: DiagnosticEvent) = synchronized(lock) {
-        root.mkdirs()
-        criticalFile.appendText(DiagnosticJsonExporter.eventLine(event) + "\n")
-        val lines = criticalFile.readLines()
-        if (lines.size > MAX_CRITICAL_EVENTS) {
-            criticalFile.writeText(lines.takeLast(MAX_CRITICAL_EVENTS).joinToString("\n", postfix = "\n"))
-        }
-    }
-
-    private fun parseEventLine(line: String): DiagnosticEvent? = runCatching {
-        val json = JSONObject(line)
-        val attributes = buildMap<String, String> {
-            val raw = json.optJSONObject("attributes")
-            if (raw != null) {
-                val keys = raw.keys()
-                while (keys.hasNext()) {
-                    val key = keys.next()
-                    put(key, raw.optString(key))
-                }
-            }
-        }
-        DiagnosticEvent(
-            timestampEpochMs = json.optLong("timestampEpochMs"),
-            traceId = json.optString("traceId"),
-            sourceId = json.optString("sourceId"),
-            sourceVersion = json.optString("sourceVersion").takeIf { it.isNotBlank() && it != "null" },
-            category = DiagnosticCategory.valueOf(json.optString("category")),
-            name = json.optString("name"),
-            severity = DiagnosticSeverity.valueOf(json.optString("severity")),
-            durationMs = if (json.has("durationMs") && !json.isNull("durationMs")) json.optLong("durationMs") else null,
-            attributes = attributes,
-        )
-    }.getOrNull()
-
-    fun clear() = synchronized(lock) {
-        root.deleteRecursively()
-        live.mkdirs()
-    }
-
-    fun snapshotForExport(): List<Pair<String, ByteArray>> = synchronized(lock) {
-        val out = mutableListOf<Pair<String, ByteArray>>()
-        if (criticalFile.isFile) out += "critical/events.jsonl" to criticalFile.readBytes()
-        if (previous.exists()) {
-            previous.walkTopDown().filter(File::isFile).forEach { file ->
-                out += "previous/${file.relativeTo(previous).invariantSeparatorsPath}" to file.readBytes()
-            }
-        }
-        live.listFiles()?.filter { it.isFile && it.name.startsWith("events") }?.forEach { file ->
-            out += "current/${file.name}" to file.readBytes()
-        }
-        out
-    }
-
-    private fun trimEvidence(directory: File) {
-        val files = directory.listFiles()?.filter(File::isFile)?.sortedBy(File::lastModified)?.toMutableList() ?: return
-        var total = files.sumOf(File::length)
-        while (files.isNotEmpty() && total > 64L * 1024L * 1024L) {
-            val file = files.removeAt(0)
-            total -= file.length()
-            file.delete()
-        }
-    }
-
-    private fun copyDirectory(from: File, to: File) {
-        from.walkTopDown().forEach { file ->
-            val target = File(to, file.relativeTo(from).path)
-            if (file.isDirectory) target.mkdirs() else {
-                target.parentFile?.mkdirs()
-                file.copyTo(target, overwrite = true)
-            }
-        }
-    }
+    private fun operationStem(name: String): String =
+        (START_SUFFIXES + TERMINAL_SUFFIXES).firstOrNull(name::endsWith)?.let { suffix -> name.removeSuffix(suffix) } ?: name
 
     companion object {
-        private const val MAX_CRITICAL_EVENTS = 100
+        private val START_SUFFIXES = listOf("_STARTED", "_START")
+        private val TERMINAL_SUFFIXES = listOf("_COMPLETED", "_FAILED", "_ERROR", "_DONE", "_CANCELLED", "_STOPPED")
     }
+''',
+)
+
+# Wire the shared black box into online text AI.
+path = "app/src/main/java/vn/nghetruyen/app/AppContainer.kt"
+replace_once(
+    path,
+    '        OnlineTextAiServices(settingsRepository, aiCredentialStore, aiRequestGovernor, libraryRepository)',
+    '        OnlineTextAiServices(settingsRepository, aiCredentialStore, aiRequestGovernor, libraryRepository, sourceDiagnostics)',
+)
+
+path = "app/src/main/java/vn/nghetruyen/app/ai/OnlineTextAiServices.kt"
+write(path, '''package vn.nghetruyen.app.ai
+
+import vn.nghetruyen.app.core.common.AppResult
+import vn.nghetruyen.app.data.repository.LibraryRepository
+import vn.nghetruyen.app.data.settings.AiProvider
+import vn.nghetruyen.app.data.settings.SettingsRepository
+import vn.nghetruyen.app.sourceplatform.SourceDiagnosticRuntime
+
+/** Production-facing online AI surface for translation and VietPhrase. */
+class OnlineTextAiServices(
+    settingsRepository: SettingsRepository,
+    credentialStore: AiCredentialStore,
+    requestGovernor: AiRequestGovernor,
+    libraryRepository: LibraryRepository,
+    diagnostics: SourceDiagnosticRuntime? = null,
+) : TranslationEngine, VietPhraseImprovementEngine {
+    private val delegate = OnlineAiServices(
+        settingsRepository = settingsRepository,
+        credentialStore = credentialStore,
+        requestGovernor = requestGovernor,
+        libraryRepository = libraryRepository,
+        diagnostics = diagnostics,
+    )
+
+    override suspend fun translate(request: TranslationRequest): AppResult<String> = delegate.translate(request)
+
+    override suspend fun improveVietPhrase(
+        request: VietPhraseImprovementRequest,
+    ): AppResult<List<VietPhraseReplacementSuggestion>> = delegate.improveVietPhrase(request)
+
+    suspend fun listModels(
+        provider: AiProvider,
+        endpoint: String,
+        apiKeyOverride: String? = null,
+    ): AppResult<List<String>> = delegate.listModels(provider, endpoint, apiKeyOverride)
+
+    suspend fun listGeminiModels(): AppResult<List<String>> = delegate.listGeminiModels()
 }
-''', encoding="utf-8")
+''')
 
-# 3) Main UI state receives real active operations instead of guessing from unrelated loading booleans.
-path = "app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt"
+# Deep AI translation/VietPhrase HTTP timeline and Advanced request/response evidence.
+path = "app/src/main/java/vn/nghetruyen/app/ai/OnlineAiServices.kt"
 replace_once(
     path,
-    '    val diagnosticsMode: String = "off",\n    val sleepTimerStatus: String = "Đang tắt",',
-    '    val diagnosticsMode: String = "off",\n    val diagnosticActiveOperations: List<String> = emptyList(),\n    val diagnosticPersistentCriticalCount: Int = 0,\n    val sleepTimerStatus: String = "Đang tắt",',
+    'import vn.nghetruyen.app.data.settings.SettingsRepository\nimport java.io.IOException\nimport java.util.concurrent.TimeUnit',
+    'import vn.nghetruyen.app.data.settings.SettingsRepository\nimport vn.nghetruyen.app.sourceplatform.SourceDiagnosticRuntime\nimport vn.nghetruyen.source.diagnostics.DiagnosticCategory\nimport vn.nghetruyen.source.diagnostics.DiagnosticEvidence\nimport vn.nghetruyen.source.diagnostics.DiagnosticSeverity\nimport java.io.IOException\nimport java.net.URI\nimport java.util.UUID\nimport java.util.concurrent.TimeUnit',
 )
 replace_once(
     path,
-    '            diagnosticsMode = container.sourceDiagnostics.mode,\n            backupHistory = container.backupHistoryStore.entries(),',
-    '            diagnosticsMode = container.sourceDiagnostics.mode,\n            diagnosticActiveOperations = container.sourceDiagnostics.activityLines(),\n            diagnosticPersistentCriticalCount = container.sourceDiagnostics.persistentCriticalCount(),\n            backupHistory = container.backupHistoryStore.entries(),',
+    '''    private val libraryRepository: LibraryRepository,
+    private val client: OkHttpClient = OkHttpClient.Builder()''',
+    '''    private val libraryRepository: LibraryRepository,
+    private val client: OkHttpClient = OkHttpClient.Builder()''',
 )
+# Add diagnostics after client so existing positional test constructors remain source-compatible.
 replace_once(
     path,
-    '                        diagnosticsMode = container.sourceDiagnostics.mode,\n                        sourceDiagnosticCount = events.size,\n                        sourceDiagnostics = container.sourcePlatformManager.diagnosticSummaries(200),\n                        sourceTraces = container.sourcePlatformManager.diagnosticTraces(100),',
-    '                        diagnosticsMode = container.sourceDiagnostics.mode,\n                        diagnosticActiveOperations = container.sourceDiagnostics.activityLines(),\n                        diagnosticPersistentCriticalCount = container.sourceDiagnostics.persistentCriticalCount(),\n                        sourceDiagnosticCount = events.size,\n                        sourceDiagnostics = container.sourcePlatformManager.diagnosticSummaries(200),\n                        sourceTraces = container.sourcePlatformManager.diagnosticTraces(100),',
-)
-replace_once(
-    path,
-    '                sourceDiagnosticCount = container.sourcePlatformManager.diagnosticsSnapshot().size,\n                sourceDiagnostics = container.sourcePlatformManager.diagnosticSummaries(200),\n                sourceTraces = container.sourcePlatformManager.diagnosticTraces(100),\n            )',
-    '                sourceDiagnosticCount = container.sourcePlatformManager.diagnosticsSnapshot().size,\n                sourceDiagnostics = container.sourcePlatformManager.diagnosticSummaries(200),\n                sourceTraces = container.sourcePlatformManager.diagnosticTraces(100),\n                diagnosticActiveOperations = container.sourceDiagnostics.activityLines(),\n                diagnosticPersistentCriticalCount = container.sourceDiagnostics.persistentCriticalCount(),\n            )',
-)
-replace_once(
-    path,
-    '        "sourcePacks" to snapshot.sourcePacks.size.toString(),\n    )',
-    '        "sourcePacks" to snapshot.sourcePacks.size.toString(),\n        "diagnosticActiveOperations" to snapshot.diagnosticActiveOperations.size.toString(),\n        "diagnosticPersistentCriticalCount" to snapshot.diagnosticPersistentCriticalCount.toString(),\n    )',
-)
-replace_once(
-    path,
-    '        showMessage("Đã xóa nhật ký, bằng chứng Advanced và hộp đen crash-safe.")',
-    '        showMessage("Đã xóa nhật ký, evidence RAM, critical breadcrumbs và hộp đen crash-safe.")',
+    '''        .followSslRedirects(false)
+        .build(),
+) : TranslationEngine''',
+    '''        .followSslRedirects(false)
+        .build(),
+    private val diagnostics: SourceDiagnosticRuntime? = null,
+) : TranslationEngine''',
 )
 
-# 4) Replace the diagnostics chrome with operation-driven status and dual Advanced explanations.
-chrome_path = ROOT / "app/src/main/java/vn/nghetruyen/app/ui/components/ReferenceDiagnosticsChrome.kt"
-chrome_path.write_text(r'''package vn.nghetruyen.app.ui.components
+replace_once(
+    path,
+    '''    override suspend fun translate(request: TranslationRequest): AppResult<String> {
+        val source = request.sourceText.trim()
+        if (source.isBlank()) return failure("AI_EMPTY_INPUT", "Chương không có nội dung để dịch.")
+        if (source.length > MAX_TRANSLATION_CHARS) return failure("AI_INPUT_TOO_LARGE", "Chương vượt giới hạn dịch trong một lượt.")
+''',
+    '''    override suspend fun translate(request: TranslationRequest): AppResult<String> {
+        val traceId = "ai-translation:${UUID.randomUUID()}"
+        val startedAt = System.currentTimeMillis()
+        val source = request.sourceText.trim()
+        diagnostic(
+            traceId,
+            "AI_TRANSLATION_STARTED",
+            DiagnosticSeverity.INFO,
+            attributes = mapOf(
+                "storyId" to request.storyId,
+                "chapterTitle" to request.chapterTitle.take(160),
+                "inputChars" to source.length.toString(),
+            ),
+        )
+        if (source.isBlank()) return operationFailure(traceId, "AI_TRANSLATION_FAILED", "AI_EMPTY_INPUT", "Chương không có nội dung để dịch.", startedAt)
+        if (source.length > MAX_TRANSLATION_CHARS) return operationFailure(traceId, "AI_TRANSLATION_FAILED", "AI_INPUT_TOO_LARGE", "Chương vượt giới hạn dịch trong một lượt.", startedAt)
+''',
+)
+replace_once(
+    path,
+    '''        return when (val result = chat(prompt, maxOutputTokens = 12_000, config = config, jsonMode = true)) {
+            is AppResult.Failure -> result
+            is AppResult.Success -> {
+                val translated = runCatching {
+                    val obj = JSONObject(result.value)
+                    obj.optString("content").trim().takeIf(String::isNotBlank) ?: result.value.trim()
+                }.getOrDefault(result.value.trim())
+                AppResult.Success(translated)
+            }
+        }
+''',
+    '''        return when (val result = chat(prompt, maxOutputTokens = 12_000, config = config, jsonMode = true, traceId = traceId, operation = "translation")) {
+            is AppResult.Failure -> {
+                diagnostic(traceId, "AI_TRANSLATION_FAILED", DiagnosticSeverity.WARN, durationMs = System.currentTimeMillis() - startedAt, attributes = mapOf("code" to result.code, "message" to result.message.take(500)))
+                result
+            }
+            is AppResult.Success -> {
+                val translated = runCatching {
+                    val obj = JSONObject(result.value)
+                    obj.optString("content").trim().takeIf(String::isNotBlank) ?: result.value.trim()
+                }.getOrDefault(result.value.trim())
+                diagnostic(traceId, "AI_TRANSLATION_COMPLETED", DiagnosticSeverity.INFO, durationMs = System.currentTimeMillis() - startedAt, attributes = mapOf("outputChars" to translated.length.toString()))
+                AppResult.Success(translated)
+            }
+        }
+''',
+)
+replace_once(
+    path,
+    '''    ): AppResult<List<VietPhraseReplacementSuggestion>> {
+        val source = request.sourceText.trim()
+        val vietPhrase = request.vietPhraseText.trim()
+        if (source.isBlank() || vietPhrase.isBlank()) return failure("AI_EMPTY_INPUT", "Thiếu bản gốc hoặc bản VietPhrase để đối chiếu.")
+        if (source.length + vietPhrase.length > MAX_IMPROVEMENT_CHARS) {
+            return failure("AI_INPUT_TOO_LARGE", "Nội dung đối chiếu vượt giới hạn cải thiện VietPhrase trong một lượt.")
+        }
+''',
+    '''    ): AppResult<List<VietPhraseReplacementSuggestion>> {
+        val traceId = "ai-vietphrase:${UUID.randomUUID()}"
+        val startedAt = System.currentTimeMillis()
+        val source = request.sourceText.trim()
+        val vietPhrase = request.vietPhraseText.trim()
+        diagnostic(
+            traceId,
+            "AI_VIETPHRASE_IMPROVEMENT_STARTED",
+            DiagnosticSeverity.INFO,
+            attributes = mapOf(
+                "storyId" to request.storyId,
+                "chapterTitle" to request.chapterTitle.take(160),
+                "sourceChars" to source.length.toString(),
+                "vietPhraseChars" to vietPhrase.length.toString(),
+            ),
+        )
+        if (source.isBlank() || vietPhrase.isBlank()) return operationFailure(traceId, "AI_VIETPHRASE_IMPROVEMENT_FAILED", "AI_EMPTY_INPUT", "Thiếu bản gốc hoặc bản VietPhrase để đối chiếu.", startedAt)
+        if (source.length + vietPhrase.length > MAX_IMPROVEMENT_CHARS) {
+            return operationFailure(traceId, "AI_VIETPHRASE_IMPROVEMENT_FAILED", "AI_INPUT_TOO_LARGE", "Nội dung đối chiếu vượt giới hạn cải thiện VietPhrase trong một lượt.", startedAt)
+        }
+''',
+)
+replace_once(
+    path,
+    '''        return when (val result = chat(prompt, maxOutputTokens = 6_000, config = config, jsonMode = true)) {
+            is AppResult.Failure -> result
+            is AppResult.Success -> runCatching { parseVietPhraseSuggestions(result.value, vietPhrase) }
+                .fold(
+                    { AppResult.Success(it) },
+                    { failure("AI_BAD_RESPONSE", it.message ?: "Kết quả cải thiện VietPhrase không hợp lệ.") },
+                )
+        }
+''',
+    '''        return when (val result = chat(prompt, maxOutputTokens = 6_000, config = config, jsonMode = true, traceId = traceId, operation = "vietphrase_improvement")) {
+            is AppResult.Failure -> {
+                diagnostic(traceId, "AI_VIETPHRASE_IMPROVEMENT_FAILED", DiagnosticSeverity.WARN, durationMs = System.currentTimeMillis() - startedAt, attributes = mapOf("code" to result.code, "message" to result.message.take(500)))
+                result
+            }
+            is AppResult.Success -> runCatching { parseVietPhraseSuggestions(result.value, vietPhrase) }
+                .fold(
+                    {
+                        diagnostic(traceId, "AI_VIETPHRASE_IMPROVEMENT_COMPLETED", DiagnosticSeverity.INFO, durationMs = System.currentTimeMillis() - startedAt, attributes = mapOf("suggestions" to it.size.toString()))
+                        AppResult.Success(it)
+                    },
+                    {
+                        operationFailure(traceId, "AI_VIETPHRASE_IMPROVEMENT_FAILED", "AI_BAD_RESPONSE", it.message ?: "Kết quả cải thiện VietPhrase không hợp lệ.", startedAt, it)
+                    },
+                )
+        }
+''',
+)
 
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import vn.nghetruyen.app.sourceplatform.SourceDiagnosticUi
-import vn.nghetruyen.app.ui.MainUiState
+replace_once(
+    path,
+    '''    private suspend fun chat(
+        prompt: String,
+        maxOutputTokens: Int,
+        config: EffectiveAiConfiguration,
+        jsonMode: Boolean,
+    ): AppResult<String> = withContext(Dispatchers.IO) {
+''',
+    '''    private suspend fun chat(
+        prompt: String,
+        maxOutputTokens: Int,
+        config: EffectiveAiConfiguration,
+        jsonMode: Boolean,
+        traceId: String = "ai:${UUID.randomUUID()}",
+        operation: String = "generic",
+    ): AppResult<String> = withContext(Dispatchers.IO) {
+        diagnostic(
+            traceId,
+            "AI_REQUEST_CONTEXT",
+            DiagnosticSeverity.INFO,
+            attributes = mapOf(
+                "operation" to operation,
+                "provider" to config.provider.name,
+                "model" to config.model.take(160),
+                "promptChars" to prompt.length.toString(),
+                "maxOutputTokens" to maxOutputTokens.toString(),
+                "jsonMode" to jsonMode.toString(),
+            ),
+        )
+''',
+)
+replace_once(
+    path,
+    '''            candidateLoop@ for ((candidateIndex, candidateData) in candidates.withIndex()) {
+                val builder = Request.Builder()
+''',
+    '''            candidateLoop@ for ((candidateIndex, candidateData) in candidates.withIndex()) {
+                val requestStartedAt = System.currentTimeMillis()
+                val endpoint = diagnosticEndpoint(candidateData.url)
+                diagnostic(
+                    traceId,
+                    "AI_HTTP_ATTEMPT_STARTED",
+                    DiagnosticSeverity.INFO,
+                    DiagnosticCategory.NETWORK,
+                    attributes = mapOf(
+                        "operation" to operation,
+                        "provider" to config.provider.name,
+                        "model" to config.model.take(160),
+                        "attempt" to (attempt + 1).toString(),
+                        "candidate" to (candidateIndex + 1).toString(),
+                        "candidateCount" to candidates.size.toString(),
+                        "endpoint" to endpoint,
+                        "requestChars" to candidateData.body.length.toString(),
+                    ),
+                )
+                captureAiEvidence(traceId, operation, "request-a${attempt + 1}-c${candidateIndex + 1}.json", candidateData.body, mapOf("endpoint" to endpoint, "provider" to config.provider.name))
+                val builder = Request.Builder()
+''',
+)
+replace_once(
+    path,
+    '''                            }.orEmpty()
+                            if (raw.length > MAX_RESPONSE_CHARS) {
+''',
+    '''                            }.orEmpty()
+                            diagnostic(
+                                traceId,
+                                "AI_HTTP_RESPONSE_RECEIVED",
+                                if (response.isSuccessful) DiagnosticSeverity.INFO else DiagnosticSeverity.WARN,
+                                DiagnosticCategory.NETWORK,
+                                durationMs = System.currentTimeMillis() - requestStartedAt,
+                                attributes = mapOf(
+                                    "operation" to operation,
+                                    "provider" to config.provider.name,
+                                    "status" to response.code.toString(),
+                                    "responseChars" to raw.length.toString(),
+                                    "attempt" to (attempt + 1).toString(),
+                                    "candidate" to (candidateIndex + 1).toString(),
+                                    "endpoint" to endpoint,
+                                ),
+                            )
+                            captureAiEvidence(traceId, operation, "response-a${attempt + 1}-c${candidateIndex + 1}-http${response.code}.json", raw, mapOf("endpoint" to endpoint, "status" to response.code.toString(), "provider" to config.provider.name))
+                            if (raw.length > MAX_RESPONSE_CHARS) {
+''',
+)
+replace_once(
+    path,
+    '''                                if (content.isNotBlank()) {
+                                    requestGovernor.finish(permit, content.length, retries, null)
+                                    return@withContext AppResult.Success(content.trim())
+                                }
+''',
+    '''                                if (content.isNotBlank()) {
+                                    diagnostic(traceId, "AI_HTTP_CONTENT_PARSED", DiagnosticSeverity.INFO, DiagnosticCategory.NETWORK, attributes = mapOf("operation" to operation, "contentChars" to content.length.toString(), "provider" to config.provider.name, "model" to config.model.take(160)))
+                                    requestGovernor.finish(permit, content.length, retries, null)
+                                    return@withContext AppResult.Success(content.trim())
+                                }
+''',
+)
+replace_once(
+    path,
+    '''                    if (fallbackToNext) continue@candidateLoop
+                } catch (error: IOException) {
+                    lastFailure = failure("AI_NETWORK_ERROR", error.message ?: "Không kết nối được nhà cung cấp AI.", error)
+                    if (attempt < permit.maxRetries) {
+                        shouldRetry = true
+                    }
+                } catch (error: Exception) {
+                    lastFailure = failure("AI_NETWORK_ERROR", error.message ?: "Không kết nối được nhà cung cấp AI.", error)
+                }
+''',
+    '''                    if (fallbackToNext) {
+                        diagnostic(traceId, "AI_HTTP_ENDPOINT_FALLBACK", DiagnosticSeverity.WARN, DiagnosticCategory.NETWORK, attributes = mapOf("operation" to operation, "from" to endpoint, "nextCandidate" to (candidateIndex + 2).toString(), "status" to (lastFailure?.code ?: "")))
+                        continue@candidateLoop
+                    }
+                } catch (error: IOException) {
+                    lastFailure = failure("AI_NETWORK_ERROR", error.message ?: "Không kết nối được nhà cung cấp AI.", error)
+                    diagnostic(traceId, "AI_HTTP_NETWORK_ERROR", DiagnosticSeverity.WARN, DiagnosticCategory.NETWORK, durationMs = System.currentTimeMillis() - requestStartedAt, attributes = mapOf("operation" to operation, "endpoint" to endpoint, "type" to error.javaClass.simpleName, "message" to (error.message ?: "").take(500)))
+                    if (attempt < permit.maxRetries) {
+                        shouldRetry = true
+                    }
+                } catch (error: Exception) {
+                    lastFailure = failure("AI_NETWORK_ERROR", error.message ?: "Không kết nối được nhà cung cấp AI.", error)
+                    diagnostic(traceId, "AI_HTTP_RUNTIME_ERROR", DiagnosticSeverity.ERROR, DiagnosticCategory.NETWORK, durationMs = System.currentTimeMillis() - requestStartedAt, attributes = mapOf("operation" to operation, "endpoint" to endpoint, "type" to error.javaClass.simpleName, "message" to (error.message ?: "").take(500)))
+                }
+''',
+)
+replace_once(
+    path,
+    '''            if (shouldRetry) {
+                retries += 1
+                delay(retryDelayMillis(permit.retryBaseDelayMillis, attempt, retryAfterMillis))
+                continue
+            }
+''',
+    '''            if (shouldRetry) {
+                retries += 1
+                val retryDelay = retryDelayMillis(permit.retryBaseDelayMillis, attempt, retryAfterMillis)
+                diagnostic(traceId, "AI_HTTP_RETRY_SCHEDULED", DiagnosticSeverity.WARN, DiagnosticCategory.NETWORK, attributes = mapOf("operation" to operation, "retry" to retries.toString(), "delayMs" to retryDelay.toString(), "lastCode" to (lastFailure?.code ?: "")))
+                delay(retryDelay)
+                continue
+            }
+''',
+)
+replace_once(
+    path,
+    '''    private fun providerLabel(provider: AiProvider): String = when (provider) {
+        AiProvider.OPENAI_COMPATIBLE -> "OpenAI-compatible"
+        AiProvider.GEMINI -> "Gemini"
+    }
+
+    private fun failure(code: String, message: String, cause: Throwable? = null) = AppResult.Failure(code, message, cause)
+''',
+    '''    private fun providerLabel(provider: AiProvider): String = when (provider) {
+        AiProvider.OPENAI_COMPATIBLE -> "OpenAI-compatible"
+        AiProvider.GEMINI -> "Gemini"
+    }
+
+    private fun diagnostic(
+        traceId: String,
+        name: String,
+        severity: DiagnosticSeverity = DiagnosticSeverity.DEBUG,
+        category: DiagnosticCategory = DiagnosticCategory.RUNTIME,
+        durationMs: Long? = null,
+        attributes: Map<String, String> = emptyMap(),
+    ) {
+        diagnostics?.mark(name = name, category = category, severity = severity, sourceId = "ai", traceId = traceId, durationMs = durationMs, attributes = attributes)
+    }
+
+    private fun captureAiEvidence(
+        traceId: String,
+        operation: String,
+        name: String,
+        body: String,
+        attributes: Map<String, String>,
+    ) {
+        val sink = diagnostics?.evidence ?: return
+        if (!sink.enabled || body.isBlank()) return
+        sink.capture(
+            DiagnosticEvidence(
+                timestampEpochMs = System.currentTimeMillis(),
+                traceId = traceId,
+                sourceId = "ai",
+                category = DiagnosticCategory.NETWORK,
+                name = "ai-$operation-$name",
+                contentType = "application/json",
+                data = body.toByteArray(Charsets.UTF_8),
+                attributes = attributes + ("operation" to operation),
+            ),
+        )
+    }
+
+    private fun diagnosticEndpoint(value: String): String = runCatching {
+        val uri = URI(value)
+        if (!uri.scheme.equals("https", true) || uri.host.isNullOrBlank()) "[redacted-endpoint]"
+        else "https://${uri.host}${uri.rawPath.orEmpty().take(300)}"
+    }.getOrDefault("[invalid-endpoint]")
+
+    private fun operationFailure(
+        traceId: String,
+        eventName: String,
+        code: String,
+        message: String,
+        startedAt: Long,
+        cause: Throwable? = null,
+    ): AppResult.Failure {
+        diagnostic(traceId, eventName, DiagnosticSeverity.WARN, durationMs = System.currentTimeMillis() - startedAt, attributes = mapOf("code" to code, "message" to message.take(500), "cause" to (cause?.javaClass?.simpleName ?: "")))
+        return failure(code, message, cause)
+    }
+
+    private fun failure(code: String, message: String, cause: Throwable? = null) = AppResult.Failure(code, message, cause)
+''',
+)
+
+# VietPhrase result model now carries bounded candidate/failure probes and aggregate engine counters.
+path = "app/src/main/java/vn/nghetruyen/app/ai/vietphrase/VietPhraseModels.kt"
+replace_once(
+    path,
+    '    val traceLimit: Int = 2_000,\n)',
+    '    val traceLimit: Int = 2_000,\n    val diagnosticProbeLimit: Int = 0,\n)',
+)
+replace_once(
+    path,
+    '''data class VietPhraseResult(
+    val text: String,
+    val trace: List<VietPhraseTraceEntry>,
+    val traceTruncated: Boolean,
+    val appliedByKind: Map<VietPhraseDictionaryKind, Int>,
+)
+''',
+    '''data class VietPhraseProbeEntry(
+    val position: Int,
+    val phase: String,
+    val kind: VietPhraseDictionaryKind?,
+    val ruleId: String?,
+    val outcome: String,
+    val detail: String = "",
+)
+
+data class VietPhraseEngineDiagnostics(
+    val cursorPositions: Int = 0,
+    val literalLookups: Int = 0,
+    val literalCandidates: Int = 0,
+    val directSelections: Int = 0,
+    val templateCandidates: Int = 0,
+    val templateAttempts: Int = 0,
+    val templateMatches: Int = 0,
+    val templateSelections: Int = 0,
+    val templateBudgetExceeded: Int = 0,
+    val captureCandidates: Int = 0,
+    val fallbackSelections: Int = 0,
+    val unmatchedCodePoints: Int = 0,
+    val aiReplaceSelections: Int = 0,
+    val probes: List<VietPhraseProbeEntry> = emptyList(),
+    val probesTruncated: Boolean = false,
+)
+
+data class VietPhraseResult(
+    val text: String,
+    val trace: List<VietPhraseTraceEntry>,
+    val traceTruncated: Boolean,
+    val appliedByKind: Map<VietPhraseDictionaryKind, Int>,
+    val diagnostics: VietPhraseEngineDiagnostics = VietPhraseEngineDiagnostics(),
+)
+''',
+)
+
+path = "app/src/main/java/vn/nghetruyen/app/ai/vietphrase/VietPhraseEngine.kt"
+replace_once(
+    path,
+    '''    private data class TemplateMatch(
+        val rule: VietPhraseRule,
+        val end: Int,
+        val replacement: String,
+        val captures: Map<Int, String>,
+    )
+''',
+    '''    private data class TemplateMatch(
+        val rule: VietPhraseRule,
+        val end: Int,
+        val replacement: String,
+        val captures: Map<Int, String>,
+    )
+
+    private class MutableEngineDiagnostics(private val probeLimit: Int) {
+        var cursorPositions = 0
+        var literalLookups = 0
+        var literalCandidates = 0
+        var directSelections = 0
+        var templateCandidates = 0
+        var templateAttempts = 0
+        var templateMatches = 0
+        var templateSelections = 0
+        var templateBudgetExceeded = 0
+        var captureCandidates = 0
+        var fallbackSelections = 0
+        var unmatchedCodePoints = 0
+        var aiReplaceSelections = 0
+        private val probes = ArrayList<VietPhraseProbeEntry>()
+        private var probesTruncated = false
+
+        fun probe(position: Int, phase: String, rule: VietPhraseRule?, outcome: String, detail: String = "") {
+            if (probeLimit <= 0) return
+            if (probes.size >= probeLimit) {
+                probesTruncated = true
+                return
+            }
+            probes += VietPhraseProbeEntry(position, phase, rule?.kind, rule?.id, outcome, detail.take(300))
+        }
+
+        fun snapshot() = VietPhraseEngineDiagnostics(
+            cursorPositions = cursorPositions,
+            literalLookups = literalLookups,
+            literalCandidates = literalCandidates,
+            directSelections = directSelections,
+            templateCandidates = templateCandidates,
+            templateAttempts = templateAttempts,
+            templateMatches = templateMatches,
+            templateSelections = templateSelections,
+            templateBudgetExceeded = templateBudgetExceeded,
+            captureCandidates = captureCandidates,
+            fallbackSelections = fallbackSelections,
+            unmatchedCodePoints = unmatchedCodePoints,
+            aiReplaceSelections = aiReplaceSelections,
+            probes = probes.toList(),
+            probesTruncated = probesTruncated,
+        )
+    }
+''',
+)
+replace_once(
+    path,
+    '''        val cacheable = options.traceLimit <= 0 && maxCacheEntries > 0
+        val key = cacheKey(text, options)
+        if (cacheable) cache[key]?.let { return it }
+
+        val trace = ArrayList<VietPhraseTraceEntry>()
+''',
+    '''        val cacheable = options.traceLimit <= 0 && options.diagnosticProbeLimit <= 0 && maxCacheEntries > 0
+        val key = cacheKey(text, options)
+        if (cacheable) cache[key]?.let { return it }
+
+        val diagnostics = MutableEngineDiagnostics(options.diagnosticProbeLimit)
+        val trace = ArrayList<VietPhraseTraceEntry>()
+''',
+)
+replace_once(
+    path,
+    '''        while (cursor < text.length) {
+            val chLength = Character.charCount(Character.codePointAt(text, cursor))
+            val direct = bestLiteral(text, cursor, baseLiteralTrie, options)
+            val template = if (options.useRules) bestTemplate(text, cursor, options) else null
+''',
+    '''        while (cursor < text.length) {
+            diagnostics.cursorPositions += 1
+            val chLength = Character.charCount(Character.codePointAt(text, cursor))
+            val direct = bestLiteral(text, cursor, baseLiteralTrie, options, diagnostics, "base_literal")
+            val template = if (options.useRules) bestTemplate(text, cursor, options, diagnostics) else null
+''',
+)
+replace_once(
+    path,
+    '''            if (choiceIsTemplate) {
+                val match = requireNotNull(template)
+''',
+    '''            if (choiceIsTemplate) {
+                val match = requireNotNull(template)
+                diagnostics.templateSelections += 1
+                diagnostics.probe(cursor, "selection", match.rule, "template_selected", "end=${match.end}")
+''',
+)
+replace_once(
+    path,
+    '''            } else if (direct != null) {
+                val replacement = resolveMeaning(direct.replacement, direct.rule.kind, options.oneMeaning)
+''',
+    '''            } else if (direct != null) {
+                diagnostics.directSelections += 1
+                diagnostics.probe(cursor, "selection", direct.rule, "direct_selected", "end=${direct.end}")
+                val replacement = resolveMeaning(direct.replacement, direct.rule.kind, options.oneMeaning)
+''',
+)
+replace_once(
+    path,
+    '''                val fallback = if (options.fallbackHanViet) bestLiteral(text, cursor, fallbackHanVietTrie, options) else null
+                if (fallback != null) {
+                    val replacement = resolveMeaning(fallback.replacement, fallback.rule.kind, options.oneMeaning)
+''',
+    '''                val fallback = if (options.fallbackHanViet) bestLiteral(text, cursor, fallbackHanVietTrie, options, diagnostics, "hanviet_fallback") else null
+                if (fallback != null) {
+                    diagnostics.fallbackSelections += 1
+                    diagnostics.probe(cursor, "selection", fallback.rule, "fallback_selected", "end=${fallback.end}")
+                    val replacement = resolveMeaning(fallback.replacement, fallback.rule.kind, options.oneMeaning)
+''',
+)
+replace_once(
+    path,
+    '''                } else {
+                    val raw = text.substring(cursor, cursor + chLength)
+                    base.append(if (options.normalizePunctuation) PUNCTUATION[raw] ?: raw else raw)
+                    cursor += chLength
+                }
+''',
+    '''                } else {
+                    diagnostics.unmatchedCodePoints += 1
+                    diagnostics.probe(cursor, "selection", null, "unmatched_codepoint", "codePoint=${Character.codePointAt(text, cursor)}")
+                    val raw = text.substring(cursor, cursor + chLength)
+                    base.append(if (options.normalizePunctuation) PUNCTUATION[raw] ?: raw else raw)
+                    cursor += chLength
+                }
+''',
+)
+replace_once(
+    path,
+    '''            val finalPass = applyFinalReplacement(output, options, trace, counts)
+''',
+    '''            val finalPass = applyFinalReplacement(output, options, trace, counts, diagnostics)
+''',
+)
+replace_once(
+    path,
+    '''        val result = VietPhraseResult(output, trace.toList(), truncated, counts.toMap())
+''',
+    '''        val result = VietPhraseResult(output, trace.toList(), truncated, counts.toMap(), diagnostics.snapshot())
+''',
+)
+replace_once(
+    path,
+    '''    private fun literalMatches(text: String, start: Int, trie: TrieNode, options: VietPhraseOptions): List<LiteralMatch> {
+        val matches = mutableListOf<LiteralMatch>()
+''',
+    '''    private fun literalMatches(
+        text: String,
+        start: Int,
+        trie: TrieNode,
+        options: VietPhraseOptions,
+        diagnostics: MutableEngineDiagnostics,
+        phase: String,
+    ): List<LiteralMatch> {
+        diagnostics.literalLookups += 1
+        val matches = mutableListOf<LiteralMatch>()
+''',
+)
+replace_once(
+    path,
+    '''            for (rule in node.terminalRules) {
+                if (!ruleVisible(rule, options) || !matchesAt(text, start, rule)) continue
+                val end = start + rule.source.length
+                if (end == cursor && safeBoundaries(text, start, end, rule.source)) matches += LiteralMatch(rule, end, rule.target)
+            }
+''',
+    '''            for (rule in node.terminalRules) {
+                diagnostics.literalCandidates += 1
+                if (!ruleVisible(rule, options)) {
+                    diagnostics.probe(start, phase, rule, "scope_hidden")
+                    continue
+                }
+                if (!matchesAt(text, start, rule)) {
+                    diagnostics.probe(start, phase, rule, "case_or_text_mismatch")
+                    continue
+                }
+                val end = start + rule.source.length
+                if (end != cursor) continue
+                if (!safeBoundaries(text, start, end, rule.source)) {
+                    diagnostics.probe(start, phase, rule, "boundary_rejected")
+                    continue
+                }
+                diagnostics.probe(start, phase, rule, "candidate_matched", "end=$end")
+                matches += LiteralMatch(rule, end, rule.target)
+            }
+''',
+)
+replace_once(
+    path,
+    '''    private fun bestLiteral(text: String, start: Int, trie: TrieNode, options: VietPhraseOptions): LiteralMatch? =
+        literalMatches(text, start, trie, options).maxWithOrNull(
+''',
+    '''    private fun bestLiteral(
+        text: String,
+        start: Int,
+        trie: TrieNode,
+        options: VietPhraseOptions,
+        diagnostics: MutableEngineDiagnostics,
+        phase: String,
+    ): LiteralMatch? =
+        literalMatches(text, start, trie, options, diagnostics, phase).maxWithOrNull(
+''',
+)
+replace_once(
+    path,
+    '''    private fun bestTemplate(text: String, start: Int, options: VietPhraseOptions): TemplateMatch? {
+        var best: TemplateMatch? = null
+        val candidates = templateBuckets[bucketKey(text[start])].orEmpty() + wildcardTemplates
+        for (compiled in candidates) {
+            if (!ruleVisible(compiled.rule, options)) continue
+            val match = matchTemplate(text, start, compiled, options) ?: continue
+''',
+    '''    private fun bestTemplate(text: String, start: Int, options: VietPhraseOptions, diagnostics: MutableEngineDiagnostics): TemplateMatch? {
+        var best: TemplateMatch? = null
+        val candidates = templateBuckets[bucketKey(text[start])].orEmpty() + wildcardTemplates
+        diagnostics.templateCandidates += candidates.size
+        for (compiled in candidates) {
+            if (!ruleVisible(compiled.rule, options)) {
+                diagnostics.probe(start, "template", compiled.rule, "scope_hidden")
+                continue
+            }
+            diagnostics.templateAttempts += 1
+            val match = matchTemplate(text, start, compiled, options, diagnostics)
+            if (match == null) {
+                diagnostics.probe(start, "template", compiled.rule, "no_match")
+                continue
+            }
+            diagnostics.templateMatches += 1
+            diagnostics.probe(start, "template", compiled.rule, "candidate_matched", "end=${match.end}")
+''',
+)
+replace_once(
+    path,
+    '''    private fun matchTemplate(text: String, start: Int, compiled: CompiledTemplate, options: VietPhraseOptions): TemplateMatch? {
+        var budget = 0
+        fun walk(partIndex: Int, cursor: Int, captures: Map<Int, LiteralMatch>): Pair<Int, Map<Int, LiteralMatch>>? {
+            budget += 1
+            if (budget > MAX_TEMPLATE_STEPS) return null
+''',
+    '''    private fun matchTemplate(text: String, start: Int, compiled: CompiledTemplate, options: VietPhraseOptions, diagnostics: MutableEngineDiagnostics): TemplateMatch? {
+        var budget = 0
+        fun walk(partIndex: Int, cursor: Int, captures: Map<Int, LiteralMatch>): Pair<Int, Map<Int, LiteralMatch>>? {
+            budget += 1
+            if (budget > MAX_TEMPLATE_STEPS) {
+                diagnostics.templateBudgetExceeded += 1
+                diagnostics.probe(start, "template", compiled.rule, "budget_exceeded", "steps=$budget")
+                return null
+            }
+''',
+)
+replace_once(
+    path,
+    '''            val candidates = literalMatches(text, cursor, captureTrie, options).asSequence()
+                .filter { !containsBoundary(text.substring(cursor, it.end)) }
+''',
+    '''            val candidates = literalMatches(text, cursor, captureTrie, options, diagnostics, "template_capture").asSequence()
+                .filter { !containsBoundary(text.substring(cursor, it.end)) }
+''',
+)
+replace_once(
+    path,
+    '''                .take(MAX_CAPTURE_CANDIDATES)
+                .toList()
+            var best: Pair<Int, Map<Int, LiteralMatch>>? = null
+''',
+    '''                .take(MAX_CAPTURE_CANDIDATES)
+                .toList()
+            diagnostics.captureCandidates += candidates.size
+            var best: Pair<Int, Map<Int, LiteralMatch>>? = null
+''',
+)
+replace_once(
+    path,
+    '''        counts: MutableMap<VietPhraseDictionaryKind, Int>,
+    ): Pair<String, Boolean> {
+''',
+    '''        counts: MutableMap<VietPhraseDictionaryKind, Int>,
+        diagnostics: MutableEngineDiagnostics,
+    ): Pair<String, Boolean> {
+''',
+)
+replace_once(
+    path,
+    '''            val match = bestLiteral(input, cursor, aiReplaceTrie, options)
+''',
+    '''            val match = bestLiteral(input, cursor, aiReplaceTrie, options, diagnostics, "ai_replace")
+''',
+)
+replace_once(
+    path,
+    '''            } else {
+                out.append(match.replacement)
+                counts[VietPhraseDictionaryKind.AI_REPLACE]''',
+    '''            } else {
+                diagnostics.aiReplaceSelections += 1
+                diagnostics.probe(cursor, "selection", match.rule, "ai_replace_selected", "end=${match.end}")
+                out.append(match.replacement)
+                counts[VietPhraseDictionaryKind.AI_REPLACE]''',
+)
+
+# Enhanced VietPhrase diagnostic ZIP and mirror its stats/evidence into the global black box.
+path = "app/src/main/java/vn/nghetruyen/app/ai/vietphrase/VietPhraseDiagnosticExporter.kt"
+write(path, '''package vn.nghetruyen.app.ai.vietphrase
+
+import android.content.Context
+import org.json.JSONObject
+import vn.nghetruyen.app.sourceplatform.SourceDiagnosticRuntime
+import vn.nghetruyen.source.diagnostics.DiagnosticCategory
+import vn.nghetruyen.source.diagnostics.DiagnosticEvidence
+import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
+import java.io.File
+import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
-/** Global Lua-style diagnostics chrome backed by the actual diagnostic operation tracker. */
-@Composable
-fun ReferenceDiagnosticsChrome(
-    state: MainUiState,
-    onExport: () -> Unit,
-    onClear: () -> Unit,
-) {
-    if (state.diagnosticsMode == "off") return
+data class VietPhraseDiagnosticExport(
+    val path: String,
+    val summary: String,
+    val preview: String,
+    val traceCount: Int,
+    val probeCount: Int = 0,
+)
 
-    var showLog by remember { mutableStateOf(false) }
-    LaunchedEffect(state.diagnosticsMode) {
-        if (state.diagnosticsMode == "off") showLog = false
-    }
+object VietPhraseDiagnosticExporter {
+    private const val TRACE_LIMIT = 20_000
+    private const val PROBE_LIMIT = 20_000
 
-    val recording = state.diagnosticActiveOperations.isNotEmpty()
-    val label = when {
-        recording -> "ĐANG GHI NHẬT KÝ..."
-        state.sourceDiagnosticCount > 0 -> "XEM NHẬT KÝ"
-        else -> "CHƯA CÓ NHẬT KÝ"
-    }
-
-    Surface(color = Color(0xFFE5E5EA), modifier = Modifier.fillMaxWidth()) {
-        Button(
-            onClick = { showLog = true },
-            modifier = Modifier.fillMaxWidth().padding(3.dp),
-        ) {
-            Text(label)
-        }
-    }
-
-    if (showLog) {
-        ReferenceDiagnosticsDialog(
-            state = state,
-            onExport = onExport,
-            onClear = onClear,
-            onDismiss = { showLog = false },
+    fun export(
+        context: Context,
+        title: String,
+        paragraphs: List<String>,
+        rules: List<VietPhraseRule>,
+        storyId: String?,
+        fallbackHanViet: Boolean,
+        diagnostics: SourceDiagnosticRuntime? = null,
+        diagnosticTraceId: String = "",
+        diagnosticSourceId: String = "vietphrase",
+    ): Result<VietPhraseDiagnosticExport> = runCatching {
+        val traceId = diagnosticTraceId.ifBlank { "vietphrase:${UUID.randomUUID()}" }
+        val body = paragraphs.joinToString("\n\n").trim()
+        require(body.isNotBlank()) { "Hãy mở một chương truyện trước khi tạo nhật ký VietPhrase." }
+        val options = VietPhraseOptions(
+            storyId = storyId,
+            fallbackHanViet = fallbackHanViet,
+            traceLimit = TRACE_LIMIT,
+            diagnosticProbeLimit = PROBE_LIMIT,
         )
-    }
-}
-
-@Composable
-private fun ReferenceDiagnosticsDialog(
-    state: MainUiState,
-    onExport: () -> Unit,
-    onClear: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val events = state.sourceDiagnostics.take(200)
-    val traces = state.sourceTraces.take(100)
-    val errorCount = events.count { it.severity == "ERROR" }
-    val warningCount = events.count { it.severity == "WARN" }
-    val grouped = events.groupBy(::diagnosticGroup)
-    val timestamp = remember { SimpleDateFormat("HH:mm:ss.SSS", Locale.ROOT) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("NHẬT KÝ CHẨN ĐOÁN") },
-        text = {
-            Column(
-                Modifier
-                    .heightIn(max = 640.dp)
-                    .verticalScroll(rememberScrollState()),
-            ) {
-                Text(
-                    "Mức: ${diagnosticsModeLabel(state.diagnosticsMode)} • ${state.sourceDiagnosticCount} sự kiện • $errorCount lỗi • $warningCount cảnh báo",
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    diagnosticsModeDescription(state.diagnosticsMode),
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-                if (state.diagnosticPersistentCriticalCount > 0) {
-                    Text(
-                        "Critical breadcrumbs luôn giữ: ${state.diagnosticPersistentCriticalCount}/100. Các lỗi nghiêm trọng/cài extension vẫn còn khi trước đó bạn để Nhật ký = Tắt.",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(top = 4.dp),
-                    )
-                }
-
-                Row(Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                    Button(onClick = onExport, modifier = Modifier.weight(1f).padding(2.dp)) {
-                        Text(if (isAdvancedDiagnostics(state.diagnosticsMode)) "XUẤT HỘP ĐEN" else "XUẤT NHẬT KÝ")
-                    }
-                    Button(onClick = onClear, modifier = Modifier.weight(1f).padding(2.dp)) {
-                        Text("XÓA NHẬT KÝ")
-                    }
-                }
-
-                if (state.diagnosticActiveOperations.isNotEmpty()) {
-                    DiagnosticSection("ĐANG HOẠT ĐỘNG (${state.diagnosticActiveOperations.size})") {
-                        state.diagnosticActiveOperations.take(20).forEach { line ->
-                            Text(line, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 3.dp))
-                        }
-                    }
-                }
-
-                DiagnosticSection("TRẠNG THÁI RUNTIME") {
-                    val p = state.playback
-                    Text(
-                        "Đích=${state.destination} • tab=${state.rootTab} • source=${state.selectedSourceId} • loading=${state.loading} • AI=${state.aiBusy}",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    Text(
-                        "TTS: playing=${p.isPlaying} • prep=${p.preparationState} • story=${p.storyId.take(32)} • chapter=${p.chapterId.take(32)} • đoạn=${p.paragraphIndex + 1} • unit=${p.currentUnitId ?: "-"}",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    Text(
-                        "Giọng: rate=${"%.2f".format(Locale.ROOT, p.rate)} • pitch=${"%.2f".format(Locale.ROOT, p.pitch)} • volume=${"%.2f".format(Locale.ROOT, p.volume)} • Sonic=${state.sonicProcessingEnabled}",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-
-                DiagnosticSection("VIETPHRASE / AI") {
-                    Text(
-                        "VietPhrase=${state.vietPhraseEnabled} • rules=${state.vietPhraseRules.size} • dictionaries=${state.vietPhraseDictionaryStates.size} • suggestions=${state.vietPhraseSuggestions.size} • onlineBusy=${state.vietPhraseOnlineBusy}",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    Text(
-                        "AI provider=${state.aiOnline.provider} • enabled=${state.aiOnline.enabled} • model=${state.aiOnline.model.take(80)} • requestBusy=${state.aiBusy} • modelDiscovery=${state.aiModelDiscoveryBusy}",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-
-                val activeDownloads = state.downloads.filter { it.state != "COMPLETED" }.take(20)
-                val failedChapters = state.downloadFailures.take(20)
-                if (activeDownloads.isNotEmpty() || failedChapters.isNotEmpty()) {
-                    DiagnosticSection("TẢI TRUYỆN") {
-                        activeDownloads.forEach { job ->
-                            Text(
-                                "${job.state} • ${job.sourceId}/${job.storyId.take(24)} • ${job.completedChapters}/${job.totalChapters} • ${job.currentChapterTitle.take(80)} • retry=${job.retryCount}${job.errorMessage?.let { " • $it" }.orEmpty()}",
-                                style = MaterialTheme.typography.bodySmall,
-                                modifier = Modifier.padding(top = 3.dp),
-                            )
-                        }
-                        failedChapters.forEach { failure ->
-                            Text(
-                                "LỖI CHƯƠNG ${failure.chapterIndex + 1} • ${failure.chapterTitle.take(80)} • ${failure.errorMessage.take(180)} • retry=${failure.retryCount}",
-                                style = MaterialTheme.typography.bodySmall,
-                                modifier = Modifier.padding(top = 3.dp),
-                            )
-                        }
-                    }
-                }
-
-                val exportJobs = state.audioExports.filter { it.state != "COMPLETED" }.take(20)
-                if (exportJobs.isNotEmpty()) {
-                    DiagnosticSection("XUẤT SÁCH NÓI") {
-                        exportJobs.forEach { job ->
-                            Text(
-                                "${job.state}/${job.stage} • ${job.storyTitle.take(80)} • ${job.outputFormat} • ${job.completedSegments}/${job.totalSegments}${job.errorMessage?.let { " • $it" }.orEmpty()}",
-                                style = MaterialTheme.typography.bodySmall,
-                                modifier = Modifier.padding(top = 3.dp),
-                            )
-                        }
-                    }
-                }
-
-                if (state.backupLogText.isNotBlank()) {
-                    DiagnosticSection("SAO LƯU / KHÔI PHỤC") {
-                        Text("Tệp: ${state.backupLogPath}", style = MaterialTheme.typography.bodySmall)
-                        Text(state.backupLogText.takeLast(8_000), style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-
-                DIAGNOSTIC_GROUP_ORDER.forEach { group ->
-                    val rows = grouped[group].orEmpty()
-                    if (rows.isNotEmpty()) {
-                        DiagnosticSection("$group (${rows.size})") {
-                            rows.forEach { event ->
-                                val time = timestamp.format(Date(event.timestampEpochMs))
-                                val duration = event.durationMs?.let { " • ${it}ms" }.orEmpty()
-                                Text(
-                                    "$time • ${event.severity} • ${event.category}/${event.name}$duration",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = if (event.severity == "ERROR") FontWeight.SemiBold else FontWeight.Normal,
-                                    modifier = Modifier.padding(top = 4.dp),
-                                )
-                                Text(
-                                    "${event.sourceId} • trace=${event.traceId.take(28)}${event.detail.takeIf(String::isNotBlank)?.let { " • $it" }.orEmpty()}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                            }
-                        }
-                    }
-                }
-
-                if (traces.isNotEmpty()) {
-                    DiagnosticSection("TRACE (${traces.size})") {
-                        traces.forEach { trace ->
-                            Text(
-                                "${if (trace.failed) "LỖI" else "OK"} • ${trace.sourceId} • ${trace.eventCount} sự kiện • ${(trace.endedAtEpochMs - trace.startedAtEpochMs).coerceAtLeast(0)}ms • ${trace.traceId}",
-                                style = MaterialTheme.typography.bodySmall,
-                                modifier = Modifier.padding(top = 3.dp),
-                            )
-                        }
-                    }
-                }
-
-                if (events.isEmpty()) {
-                    Text(
-                        "Chưa có sự kiện. Nhật ký sẽ bắt đầu xuất hiện ngay khi có request nguồn, WebView, AI, TTS hoặc tác vụ nền.",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(top = 12.dp),
-                    )
-                }
+        val engine = VietPhraseEngine(rules)
+        val result = engine.translateWithTrace(body, options)
+        val translatedTitle = title.takeIf(String::isNotBlank)?.let { engine.translate(it, options.copy(traceLimit = 0, diagnosticProbeLimit = 0)) }.orEmpty()
+        val now = Date()
+        val stats = result.diagnostics
+        val summary = buildString {
+            appendLine("NHẬT KÝ VIETPHRASE - NGHE TRUYỆN")
+            appendLine("Thời gian: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ROOT).format(now)}")
+            appendLine("Tiêu đề: ${title.ifBlank { "Không có tiêu đề" }}")
+            appendLine("Độ dài nội dung gốc: ${body.toByteArray(Charsets.UTF_8).size} byte")
+            appendLine("Số quyết định được ghi: ${result.trace.size}${if (result.traceTruncated) " (BỊ CẮT DO GIỚI HẠN)" else ""}")
+            appendLine("Số probe candidate/failure: ${stats.probes.size}${if (stats.probesTruncated) " (BỊ CẮT DO GIỚI HẠN)" else ""}")
+            appendLine()
+            appendLine("CÀI ĐẶT")
+            appendLine("fallback_hanviet=$fallbackHanViet")
+            appendLine()
+            appendLine("THỐNG KÊ ENGINE")
+            appendLine("cursor_positions=${stats.cursorPositions}")
+            appendLine("literal_lookups=${stats.literalLookups}")
+            appendLine("literal_candidates=${stats.literalCandidates}")
+            appendLine("direct_selections=${stats.directSelections}")
+            appendLine("template_candidates=${stats.templateCandidates}")
+            appendLine("template_attempts=${stats.templateAttempts}")
+            appendLine("template_matches=${stats.templateMatches}")
+            appendLine("template_selections=${stats.templateSelections}")
+            appendLine("template_budget_exceeded=${stats.templateBudgetExceeded}")
+            appendLine("capture_candidates=${stats.captureCandidates}")
+            appendLine("fallback_selections=${stats.fallbackSelections}")
+            appendLine("unmatched_codepoints=${stats.unmatchedCodePoints}")
+            appendLine("ai_replace_selections=${stats.aiReplaceSelections}")
+            appendLine()
+            appendLine("THỐNG KÊ MATCH")
+            VietPhraseDictionaryKind.entries.forEach { kind ->
+                appendLine("${kind.fileName}: ${result.appliedByKind[kind] ?: 0}")
             }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("ĐÓNG") } },
-    )
-}
+        }.trimEnd()
+        val traceLines = buildList {
+            add("start\tend\tkind\tsource\treplacement\trule_id\tcaptures")
+            result.trace.forEach { entry ->
+                add(listOf(entry.inputStart, entry.inputEnd, entry.kind?.fileName.orEmpty(), entry.source.tsvSafe(), entry.replacement.tsvSafe(), entry.ruleId.orEmpty().tsvSafe(), entry.captures.entries.sortedBy(Map.Entry<Int, String>::key).joinToString(";") { (slot, value) -> "$slot=${value.tsvSafe()}" }).joinToString("\t"))
+            }
+        }
+        val probeLines = buildList {
+            add("position\tphase\tkind\trule_id\toutcome\tdetail")
+            stats.probes.forEach { probe ->
+                add(listOf(probe.position, probe.phase.tsvSafe(), probe.kind?.fileName.orEmpty(), probe.ruleId.orEmpty().tsvSafe(), probe.outcome.tsvSafe(), probe.detail.tsvSafe()).joinToString("\t"))
+            }
+        }
+        val statsJson = JSONObject()
+            .put("cursorPositions", stats.cursorPositions)
+            .put("literalLookups", stats.literalLookups)
+            .put("literalCandidates", stats.literalCandidates)
+            .put("directSelections", stats.directSelections)
+            .put("templateCandidates", stats.templateCandidates)
+            .put("templateAttempts", stats.templateAttempts)
+            .put("templateMatches", stats.templateMatches)
+            .put("templateSelections", stats.templateSelections)
+            .put("templateBudgetExceeded", stats.templateBudgetExceeded)
+            .put("captureCandidates", stats.captureCandidates)
+            .put("fallbackSelections", stats.fallbackSelections)
+            .put("unmatchedCodePoints", stats.unmatchedCodePoints)
+            .put("aiReplaceSelections", stats.aiReplaceSelections)
+            .put("probeCount", stats.probes.size)
+            .put("probesTruncated", stats.probesTruncated)
+            .toString(2)
+        val preview = (traceLines.drop(1).take(40) + probeLines.drop(1).take(40)).joinToString("\n")
+        val outputDir = diagnosticDirectory(context)
+        val stamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.ROOT).format(now)
+        val target = File(outputDir, "vietphrase_diagnostic_$stamp.zip")
+        val temp = File(outputDir, "${target.name}.tmp")
+        if (temp.exists()) temp.delete()
+        runCatching {
+            ZipOutputStream(FileOutputStream(temp)).use { zip ->
+                zip.addText("README.txt", "Gói này được tạo bởi chức năng Chẩn đoán VietPhrase.\nHãy gửi nguyên file ZIP để phân tích lỗi chất lượng dịch.\ntrace.tsv ghi quyết định được áp dụng; probes.tsv ghi candidate bị loại/match và lý do; engine_stats.json ghi bộ đếm của engine.\n")
+                zip.addText("summary.txt", summary + "\n")
+                zip.addText("engine_stats.json", statsJson + "\n")
+                zip.addText("source.txt", title + "\n\n" + body)
+                zip.addText("translated.txt", translatedTitle + "\n\n" + result.text)
+                zip.addText("trace.tsv", traceLines.joinToString("\n") + "\n")
+                zip.addText("probes.tsv", probeLines.joinToString("\n") + "\n")
+            }
+            if (target.exists()) target.delete()
+            require(temp.renameTo(target)) { "Không đổi tên được file ZIP tạm." }
+        }.onFailure {
+            temp.delete()
+            throw it
+        }
 
-@Composable
-private fun DiagnosticSection(title: String, content: @Composable () -> Unit) {
-    Text(
-        title,
-        fontWeight = FontWeight.Bold,
-        modifier = Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 3.dp),
-    )
-    content()
-}
+        diagnostics?.mark(
+            name = "VIETPHRASE_ENGINE_STATS",
+            category = DiagnosticCategory.PARSER,
+            severity = DiagnosticSeverity.INFO,
+            sourceId = diagnosticSourceId,
+            traceId = traceId,
+            attributes = mapOf(
+                "traceDecisions" to result.trace.size.toString(),
+                "probes" to stats.probes.size.toString(),
+                "literalCandidates" to stats.literalCandidates.toString(),
+                "templateAttempts" to stats.templateAttempts.toString(),
+                "templateMatches" to stats.templateMatches.toString(),
+                "templateBudgetExceeded" to stats.templateBudgetExceeded.toString(),
+                "fallbackSelections" to stats.fallbackSelections.toString(),
+                "unmatchedCodePoints" to stats.unmatchedCodePoints.toString(),
+                "aiReplaceSelections" to stats.aiReplaceSelections.toString(),
+            ),
+        )
+        diagnostics?.evidence?.takeIf { it.enabled }?.let { sink ->
+            fun evidence(name: String, value: String) = sink.capture(
+                DiagnosticEvidence(System.currentTimeMillis(), traceId, diagnosticSourceId, DiagnosticCategory.PARSER, name, "text/plain", value.toByteArray(Charsets.UTF_8)),
+            )
+            evidence("vietphrase-summary.txt", summary)
+            evidence("vietphrase-engine-stats.json", statsJson)
+            evidence("vietphrase-trace.tsv", traceLines.joinToString("\n"))
+            evidence("vietphrase-probes.tsv", probeLines.joinToString("\n"))
+            evidence("vietphrase-source.txt", title + "\n\n" + body)
+            evidence("vietphrase-translated.txt", translatedTitle + "\n\n" + result.text)
+        }
 
-private fun isAdvancedDiagnostics(mode: String): Boolean =
-    mode == "advanced" || mode == "advanced_ram" || mode == "advanced_crash"
-
-private fun diagnosticsModeLabel(mode: String): String = when (mode) {
-    "advanced_ram" -> "Gỡ lỗi nâng cao • RAM-only"
-    "advanced_crash", "advanced" -> "Gỡ lỗi nâng cao • crash-safe"
-    "basic" -> "Gỡ lỗi cơ bản"
-    else -> "Tắt"
-}
-
-private fun diagnosticsModeDescription(mode: String): String = when (mode) {
-    "advanced_ram" -> "Advanced RAM-only ghi DEBUG + evidence browser/runtime tối đa 64 MiB trong RAM; evidence phiên hiện tại biến mất khi tiến trình chết."
-    "advanced_crash", "advanced" -> "Advanced crash-safe ghi DEBUG + evidence tối đa 64 MiB và journal riêng tư để giữ dấu vết của tiến trình trước sau crash."
-    else -> "Basic ghi INFO/WARN/ERROR. Critical breadcrumb nghiêm trọng vẫn được giữ giới hạn để không mất lỗi cài extension xảy ra trước khi bạn bật Nhật ký."
-}
-
-private fun diagnosticGroup(event: SourceDiagnosticUi): String {
-    val key = "${event.category}/${event.name}".uppercase(Locale.ROOT)
-    return when {
-        event.severity == "ERROR" || event.severity == "WARN" -> "LỖI & CẢNH BÁO"
-        "BROWSER" in key || "WEBVIEW" in key || "RENDERER" in key || "DOM" in key -> "TRÌNH DUYỆT / WEBVIEW / DOM"
-        "NETWORK" in key || "HTTP" in key || "SSL" in key || "COOKIE" in key || "WEBSOCKET" in key -> "MẠNG / HTTP / COOKIE"
-        "AI_" in key || "VOICE_CAST" in key || "SCENE_MUSIC" in key || "NARRATION" in key -> "AI / PHÂN VAI / NHẠC CẢNH"
-        "TTS" in key || "SONIC" in key || "PLAYBACK" in key || "AUDIO_FOCUS" in key -> "TTS / SONIC / PLAYBACK"
-        "DOWNLOAD" in key || "AUDIO_EXPORT" in key || "VIETPHRASE" in key || "BACKUP" in key || "RESTORE" in key -> "TẢI / XUẤT / VIETPHRASE / BACKUP"
-        "PACKAGE" in key || "STORE" in key || "SOURCE" in key || "VBOOK" in key || "LUA" in key || "PARSER" in key || "EXTENSION" in key -> "NGUỒN / VBOOK / EXTENSION / PARSER"
-        "SECURITY" in key || "TRUST" in key || "REPLAY" in key -> "BẢO MẬT / TRUST / REPLAY"
-        else -> "RUNTIME / KHÁC"
+        VietPhraseDiagnosticExport(target.absolutePath, summary, preview, result.trace.size, stats.probes.size)
     }
+
+    private fun diagnosticDirectory(context: Context): File {
+        val candidates = buildList {
+            add(File("/storage/emulated/0/NgheTruyen/diagnostics"))
+            add(File("/storage/emulated/0/Download/NgheTruyen/diagnostics"))
+            context.getExternalFilesDir(null)?.let { add(File(it, "diagnostics")) }
+            add(File(context.filesDir, "diagnostics"))
+        }
+        return candidates.firstOrNull { candidate ->
+            runCatching {
+                if (!candidate.exists()) candidate.mkdirs()
+                require(candidate.isDirectory)
+                val probe = File(candidate, ".vp_probe_${System.nanoTime()}")
+                probe.writeText("ok")
+                probe.delete()
+                true
+            }.getOrDefault(false)
+        } ?: error("Không tạo được thư mục nhật ký VietPhrase.")
+    }
+
+    private fun ZipOutputStream.addText(name: String, value: String) {
+        putNextEntry(ZipEntry(name).apply { time = 0L })
+        write(value.toByteArray(Charsets.UTF_8))
+        closeEntry()
+    }
+
+    private fun String.tsvSafe(): String = replace('\t', ' ').replace('\r', ' ').replace('\n', ' ')
 }
+''')
 
-private val DIAGNOSTIC_GROUP_ORDER = listOf(
-    "LỖI & CẢNH BÁO",
-    "TRÌNH DUYỆT / WEBVIEW / DOM",
-    "MẠNG / HTTP / COOKIE",
-    "NGUỒN / VBOOK / EXTENSION / PARSER",
-    "AI / PHÂN VAI / NHẠC CẢNH",
-    "TTS / SONIC / PLAYBACK",
-    "TẢI / XUẤT / VIETPHRASE / BACKUP",
-    "BẢO MẬT / TRUST / REPLAY",
-    "RUNTIME / KHÁC",
-)
-''', encoding="utf-8")
-
-# 5) Settings exposes both Advanced profiles and treats both as black-box modes.
-path = "app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt"
+# One stable VietPhrase trace from button click through engine stats, evidence, ZIP and terminal outcome.
+path = "app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt"
 replace_once(
     path,
-    '            "basic" -> "Gỡ lỗi cơ bản"\n            "advanced" -> "Gỡ lỗi nâng cao"\n            else -> "Tắt"',
-    '            "basic" -> "Gỡ lỗi cơ bản"\n            "advanced_ram" -> "Gỡ lỗi nâng cao • RAM-only"\n            "advanced_crash", "advanced" -> "Gỡ lỗi nâng cao • crash-safe"\n            else -> "Tắt"',
+    '''        vietPhraseDiagnosticBusy = true
+        app.container.sourceDiagnostics.mark(
+            name = "VIETPHRASE_DIAGNOSTIC_START",
+            sourceId = storyDetail?.story?.sourceId ?: "vietphrase",
+            attributes = mapOf("storyId" to storyId, "chapterId" to content.chapter.id, "rules" to rules.size.toString()),
+        )
+''',
+    '''        vietPhraseDiagnosticBusy = true
+        val diagnosticTraceId = "vietphrase:${content.chapter.id}:${UUID.randomUUID()}"
+        val diagnosticSourceId = storyDetail?.story?.sourceId ?: "vietphrase"
+        app.container.sourceDiagnostics.mark(
+            name = "VIETPHRASE_DIAGNOSTIC_STARTED",
+            sourceId = diagnosticSourceId,
+            traceId = diagnosticTraceId,
+            severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.INFO,
+            attributes = mapOf("storyId" to storyId, "chapterId" to content.chapter.id, "rules" to rules.size.toString()),
+        )
+''',
 )
 replace_once(
     path,
-    '                    "off" to "Tắt",\n                    "basic" to "Gỡ lỗi cơ bản",\n                    "advanced" to "Gỡ lỗi nâng cao",',
-    '                    "off" to "Tắt",\n                    "basic" to "Gỡ lỗi cơ bản",\n                    "advanced_ram" to "Gỡ lỗi nâng cao • RAM-only",\n                    "advanced_crash" to "Gỡ lỗi nâng cao • crash-safe",',
+    '''                    fallbackHanViet = state.vietPhraseFallbackHanViet,
+                )
+''',
+    '''                    fallbackHanViet = state.vietPhraseFallbackHanViet,
+                    diagnostics = app.container.sourceDiagnostics,
+                    diagnosticTraceId = diagnosticTraceId,
+                    diagnosticSourceId = diagnosticSourceId,
+                )
+''',
 )
-value = read(path)
-value = value.replace('state.diagnosticsMode == "advanced"', 'state.diagnosticsMode.startsWith("advanced")')
-write(path, value)
+replace_once(
+    path,
+    '''                    name = "VIETPHRASE_DIAGNOSTIC_COMPLETED",
+                    sourceId = storyDetail?.story?.sourceId ?: "vietphrase",
+                    attributes = mapOf("storyId" to storyId, "chapterId" to content.chapter.id),
+''',
+    '''                    name = "VIETPHRASE_DIAGNOSTIC_COMPLETED",
+                    sourceId = diagnosticSourceId,
+                    traceId = diagnosticTraceId,
+                    severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.INFO,
+                    attributes = mapOf("storyId" to storyId, "chapterId" to content.chapter.id, "traceCount" to it.traceCount.toString(), "probeCount" to it.probeCount.toString()),
+''',
+)
+replace_once(
+    path,
+    '''                    severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.ERROR,
+                    sourceId = storyDetail?.story?.sourceId ?: "vietphrase",
+                    attributes = mapOf("storyId" to storyId, "chapterId" to content.chapter.id, "error" to (error.message ?: error.javaClass.simpleName)),
+''',
+    '''                    severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.ERROR,
+                    sourceId = diagnosticSourceId,
+                    traceId = diagnosticTraceId,
+                    attributes = mapOf("storyId" to storyId, "chapterId" to content.chapter.id, "error" to (error.message ?: error.javaClass.simpleName)),
+''',
+)
 
-# 6) Fix the duplicated audio error marker introduced by the previous migration.
-path = "app/src/main/java/vn/nghetruyen/app/audio/AudioExportWorker.kt"
-value = read(path)
-pattern = re.compile(r'(\n\s*container\.sourceDiagnostics\.mark\(name = "AUDIO_EXPORT_RUNTIME_ERROR"[^\n]*\))(?:\1)+')
-# Exact duplicate lines can differ only by indentation capture behavior, so use line-based collapse too.
-lines = value.splitlines()
-out = []
-for line in lines:
-    if out and line.strip().startswith('container.sourceDiagnostics.mark(name = "AUDIO_EXPORT_RUNTIME_ERROR"') and line.strip() == out[-1].strip():
-        continue
-    out.append(line)
-write(path, "\n".join(out) + ("\n" if value.endswith("\n") else ""))
-
-# 7) Strengthen the parity gate so these behaviors cannot silently regress.
+# Stronger parity gate for the new AI/VP black-box depth.
 path = "scripts/check_lua_diagnostics_ui_parity.py"
 replace_once(
     path,
-    '    "shared app diagnostic mark API": "fun mark(" in runtime and "DIAGNOSTICS_MODE_CHANGED" in runtime,',
-    '    "shared app diagnostic mark API": "fun mark(" in runtime and "DIAGNOSTICS_MODE_CHANGED" in runtime,\n    "dual Advanced profiles": all(token in runtime for token in ("advanced_ram", "advanced_crash", "crashSafe")),\n    "active operation tracker": "DiagnosticActivityTracker" in runtime and "diagnosticActiveOperations" in vm and "ĐANG HOẠT ĐỘNG" in chrome,\n    "critical breadcrumbs while OFF": "shouldRetainWhenDiagnosticsOff" in runtime and "MAX_CRITICAL_EVENTS = 100" in runtime,',
+    'ai = text("app/src/main/java/vn/nghetruyen/app/ai/XpkNarrationAiServices.kt")\n',
+    'ai = text("app/src/main/java/vn/nghetruyen/app/ai/XpkNarrationAiServices.kt")\nai_text = text("app/src/main/java/vn/nghetruyen/app/ai/OnlineAiServices.kt")\nvp_engine = text("app/src/main/java/vn/nghetruyen/app/ai/vietphrase/VietPhraseEngine.kt")\nvp_export = text("app/src/main/java/vn/nghetruyen/app/ai/vietphrase/VietPhraseDiagnosticExporter.kt")\n',
 )
 replace_once(
     path,
-    '    "audio export diagnostics": all(\n        marker in audio',
-    '    "audio runtime error marker is not duplicated": audio.count("AUDIO_EXPORT_RUNTIME_ERROR") == 1,\n    "audio export diagnostics": all(\n        marker in audio',
+    '    "download diagnostics": all(\n',
+    '''    "AI text HTTP diagnostics": all(marker in ai_text for marker in (
+        "AI_TRANSLATION_STARTED",
+        "AI_TRANSLATION_COMPLETED",
+        "AI_VIETPHRASE_IMPROVEMENT_STARTED",
+        "AI_HTTP_ATTEMPT_STARTED",
+        "AI_HTTP_RESPONSE_RECEIVED",
+        "AI_HTTP_ENDPOINT_FALLBACK",
+        "AI_HTTP_RETRY_SCHEDULED",
+    )),
+    "AI Advanced request response evidence": "captureAiEvidence" in ai_text and "DiagnosticEvidence" in ai_text,
+    "VietPhrase candidate probe diagnostics": all(token in vp_engine for token in ("literalCandidates", "templateAttempts", "templateBudgetExceeded", "unmatchedCodePoints", "diagnosticProbeLimit")),
+    "VietPhrase rich diagnostic bundle": all(token in vp_export for token in ("engine_stats.json", "probes.tsv", "VIETPHRASE_ENGINE_STATS", "vietphrase-source.txt")),
+    "download diagnostics": all(
+''',
 )
+# The Reader marker is now grammatically STARTED so the operation tracker can pair it with COMPLETED/FAILED.
+value = read(path).replace('"VIETPHRASE_DIAGNOSTIC_START",', '"VIETPHRASE_DIAGNOSTIC_STARTED",')
+write(path, value)
 
-print("DIAGNOSTICS_DEEPENING_STAGE_A=APPLIED")
+print("DIAGNOSTICS_DEEPENING_STAGE_B=APPLIED")

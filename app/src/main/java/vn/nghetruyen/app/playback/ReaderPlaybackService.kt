@@ -269,6 +269,7 @@ class ReaderPlaybackService : Service() {
             ACTION_PREVIOUS, ACTION_REWIND -> skip(-1)
             ACTION_STOP -> stopPlayback()
             ACTION_REFRESH -> refreshVoiceAndNotification()
+            ACTION_APPLY_NARRATION_AND_PLAY -> refreshVoiceAndNotification(playAfterRefresh = true)
             ACTION_MUSIC_PREVIEW_BEGIN -> beginMusicPreview()
             ACTION_MUSIC_PREVIEW_END -> endMusicPreview()
             ACTION_SET_SLEEP_TIMER -> scheduleSleepTimer(intent.getIntExtra(EXTRA_SLEEP_MINUTES, 0))
@@ -367,7 +368,19 @@ class ReaderPlaybackService : Service() {
         )
         pauseOnHeadsetDisconnect = settings.pauseOnHeadsetDisconnect
         restorePlaybackAfterProcessDeath = settings.restorePlaybackAfterProcessDeath
+        val previousAutoVoiceCastEnabled = autoVoiceCastEnabled
         autoVoiceCastEnabled = settings.autoVoiceCastEnabled
+        if (previousAutoVoiceCastEnabled && !autoVoiceCastEnabled) {
+            narrationPlanJob?.cancel()
+            narrationPlanningChapterId = ""
+            narrationPreparedChapterId = ""
+            if (!PlaybackQueueStore.state.value.isPlaying) pendingPlay = false
+            PlaybackQueueStore.setNarrationAutomation(
+                stage = NarrationAutomationStage.IDLE,
+                progress = 0f,
+                message = null,
+            )
+        }
         backgroundMusicEnabled = settings.backgroundMusicEnabled
         backgroundMusicDuckFactor = settings.backgroundMusicDuckFactor
         backgroundMusicAttackMillis = settings.backgroundMusicAttackMillis.coerceIn(0, 2_000)
@@ -1273,6 +1286,8 @@ class ReaderPlaybackService : Service() {
                 }
                 return@launch
             }
+            val existingVoicePlanCount = container.narrationPlanCoordinator.voicePlanAssignmentCount(next)
+            val shouldAutoStart = autoVoiceCastEnabled || existingVoicePlanCount > 0
             withContext(Dispatchers.Main) {
                 val currentVoice = PlaybackQueueStore.state.value
                 PlaybackQueueStore.loadContent(
@@ -1281,16 +1296,23 @@ class ReaderPlaybackService : Service() {
                     rate = currentVoice.rate,
                     pitch = currentVoice.pitch,
                     volume = currentVoice.volume,
-                    keepPlaying = true,
+                    keepPlaying = false,
                 )
                 prefetchParentId = ""
-                transitionMessage = null
-                persistCheckpoint(wasPlaying = true)
+                pendingPlay = shouldAutoStart
+                transitionMessage = if (shouldAutoStart) null
+                else "Chương mới chưa được phân vai; chưa tự động phát."
+                persistCheckpoint(wasPlaying = shouldAutoStart)
             }
             val configured = applyConfiguredVoice(useStoryProfile = true)
             withContext(Dispatchers.Main) {
                 voiceSettingsReady = configured
-                if (configured) play()
+                if (configured && pendingPlay) {
+                    play()
+                } else {
+                    updateMediaState()
+                    updateNotification()
+                }
             }
         }
     }
@@ -1322,72 +1344,117 @@ class ReaderPlaybackService : Service() {
         if (narrationPreparedChapterId == snapshot.chapterId) return false
         pendingPlay = true
         PlaybackQueueStore.setPlaying(false)
-        PlaybackQueueStore.setNarrationAutomation(
-            stage = NarrationAutomationStage.CURRENT_PLANNING,
-            progress = 0.55f,
-            message = "Đang kiểm tra/phân vai chương hiện tại: ${snapshot.chapterTitle}",
-        )
-        transitionMessage = "Đang phân vai và chuẩn bị nhạc nền…"
-        updateMediaState()
-        updateNotification()
         if (narrationPlanningChapterId == snapshot.chapterId && narrationPlanJob?.isActive == true) return true
 
         narrationPlanningChapterId = snapshot.chapterId
         narrationPlanJob?.cancel()
         narrationPlanJob = serviceScope.launch {
-            val planningAttempt = runCatching {
-                val content = container.libraryRepository.loadCachedChapter(snapshot.chapterId)
-                    ?: error("Không tải được chương để chuẩn bị phân vai.")
-                container.narrationPlanCoordinator.ensurePlans(
-                    content = content,
-                    voice = true,
-                    music = shouldPlanAutoSceneMusic(),
-                    activeTrackId = sceneMusicController.activeTrackId,
-                )
-            }
-            val planResult = planningAttempt.getOrNull()
-            val warnings = planResult?.warnings ?: listOf(
-                planningAttempt.exceptionOrNull()?.message ?: "Không chuẩn bị được phân vai TTS.",
-            )
-            PlaybackQueueStore.setNarrationAutomation(
-                stage = NarrationAutomationStage.CURRENT_APPLYING,
-                progress = 0.85f,
-                message = if (planResult == null) {
-                    "Phân vai tự động gặp lỗi. Đang áp dụng cấu hình giọng hiện có…"
-                } else {
-                    "Đã nhận kế hoạch. Đang áp dụng giọng${if (shouldPlanAutoSceneMusic()) " và nhạc cảnh" else ""}…"
-                },
-            )
-            val configured = applyConfiguredVoice(useStoryProfile = true)
-            withContext(Dispatchers.Main) {
-                if (PlaybackQueueStore.state.value.chapterId != snapshot.chapterId) return@withContext
-                narrationPreparedChapterId = snapshot.chapterId
-                narrationPlanningChapterId = ""
-                voiceSettingsReady = configured
-                val created = planResult?.let { it.voicePlanCreated || it.musicPlanCreated } == true
-                val planningFailed = planResult == null || (
-                    planResult.warnings.isNotEmpty() && !planResult.voicePlanCreated && !planResult.musicPlanCreated
-                )
-                val musicApplied = hasSceneMusicPlan()
-                val statusMessage = when {
-                    planningFailed -> "Phân vai tự động chưa thành công; đang đọc bằng cấu hình/phân vai hiện có."
-                    created -> "Đã áp dụng phân vai mới${if (musicApplied) " + nhạc cảnh" else ""} cho chương hiện tại."
-                    else -> "Đã áp dụng phân vai đã lưu${if (musicApplied) " + nhạc cảnh" else ""} cho chương hiện tại."
-                } + warnings.firstOrNull()?.takeIf(String::isNotBlank)?.let { " • ${it.take(120)}" }.orEmpty()
+            var attempt = 0
+            while (autoVoiceCastEnabled && PlaybackQueueStore.state.value.chapterId == snapshot.chapterId) {
+                attempt += 1
                 PlaybackQueueStore.setNarrationAutomation(
-                    stage = if (planningFailed) NarrationAutomationStage.FAILED else NarrationAutomationStage.CURRENT_READY,
-                    progress = 1f,
-                    message = statusMessage,
+                    stage = NarrationAutomationStage.CURRENT_PLANNING,
+                    progress = 0.35f,
+                    message = if (attempt == 1) {
+                        "Đang phân vai chương hiện tại."
+                    } else {
+                        "Đang thử phân vai lại lần $attempt."
+                    },
                 )
-                transitionMessage = warnings.firstOrNull()?.take(180)
-                if (configured && pendingPlay) {
-                    pendingPlay = false
-                    play()
-                } else {
+                transitionMessage = "Đang phân vai và chuẩn bị giọng đọc…"
+                withContext(Dispatchers.Main) {
                     updateMediaState()
                     updateNotification()
                 }
+
+                val content = container.libraryRepository.loadCachedChapter(snapshot.chapterId)
+                val planningAttempt = if (content == null) {
+                    Result.failure(IllegalStateException("Không tải được chương để chuẩn bị phân vai."))
+                } else {
+                    runCatching {
+                        container.narrationPlanCoordinator.ensurePlans(
+                            content = content,
+                            voice = true,
+                            music = shouldPlanAutoSceneMusic(),
+                            activeTrackId = sceneMusicController.activeTrackId,
+                        )
+                    }
+                }
+                val planResult = planningAttempt.getOrNull()
+                val warnings = planResult?.warnings ?: listOf(
+                    planningAttempt.exceptionOrNull()?.message ?: "Không chuẩn bị được phân vai TTS.",
+                )
+                val assignmentCount = if (content == null) 0
+                else container.narrationPlanCoordinator.voicePlanAssignmentCount(content)
+
+                if (assignmentCount > 0) {
+                    PlaybackQueueStore.setNarrationAutomation(
+                        stage = NarrationAutomationStage.CURRENT_APPLYING,
+                        progress = 0.85f,
+                        message = "Đã phân vai $assignmentCount mục. Đang áp dụng giọng${if (shouldPlanAutoSceneMusic()) " và nhạc cảnh" else ""}."
+                    )
+                    val configured = applyConfiguredVoice(useStoryProfile = true)
+                    withContext(Dispatchers.Main) {
+                        if (PlaybackQueueStore.state.value.chapterId != snapshot.chapterId) return@withContext
+                        narrationPreparedChapterId = snapshot.chapterId
+                        narrationPlanningChapterId = ""
+                        voiceSettingsReady = configured
+                        val musicApplied = hasSceneMusicPlan()
+                        PlaybackQueueStore.setNarrationAutomation(
+                            stage = NarrationAutomationStage.CURRENT_READY,
+                            progress = 1f,
+                            message = "Đã phân vai xong $assignmentCount mục${if (musicApplied) " và đã áp dụng nhạc cảnh" else ""}. Đang bắt đầu phát.",
+                        )
+                        transitionMessage = null
+                        if (configured && pendingPlay) {
+                            pendingPlay = false
+                            play()
+                        } else {
+                            updateMediaState()
+                            updateNotification()
+                        }
+                    }
+                    return@launch
+                }
+
+                val castDisabled = warnings.any { warning ->
+                    warning.contains("phân vai TTS đang tắt", ignoreCase = true)
+                }
+                if (castDisabled) {
+                    withContext(Dispatchers.Main) {
+                        narrationPlanningChapterId = ""
+                        pendingPlay = false
+                        PlaybackQueueStore.setPlaying(false)
+                        PlaybackQueueStore.setNarrationAutomation(
+                            stage = NarrationAutomationStage.FAILED,
+                            progress = 1f,
+                            message = "Phân vai TTS đang tắt cho truyện này. Chưa tự động phát.",
+                        )
+                        transitionMessage = warnings.firstOrNull()?.take(180)
+                        updateMediaState()
+                        updateNotification()
+                    }
+                    return@launch
+                }
+
+                val warningSuffix = warnings.firstOrNull()?.takeIf(String::isNotBlank)
+                    ?.let { " ${it.take(120)}" }
+                    .orEmpty()
+                withContext(Dispatchers.Main) {
+                    if (PlaybackQueueStore.state.value.chapterId != snapshot.chapterId) return@withContext
+                    PlaybackQueueStore.setPlaying(false)
+                    PlaybackQueueStore.setNarrationAutomation(
+                        stage = NarrationAutomationStage.FAILED,
+                        progress = 1f,
+                        message = "Phân vai chưa thành công. Sẽ tự thử lại sau 5 giây.$warningSuffix",
+                    )
+                    transitionMessage = "Phân vai chưa thành công; đang chờ thử lại."
+                    updateMediaState()
+                    updateNotification()
+                }
+                delay(NARRATION_RETRY_DELAY_MS)
             }
+            narrationPlanningChapterId = ""
         }
         return true
     }
@@ -1531,12 +1598,17 @@ class ReaderPlaybackService : Service() {
         }
     }
 
-    private fun refreshVoiceAndNotification() {
+    private fun refreshVoiceAndNotification(playAfterRefresh: Boolean = false) {
         serviceScope.launch {
+            if (playAfterRefresh) pendingPlay = true
             if (!applyConfiguredVoice(useStoryProfile = true)) return@launch
             withContext(Dispatchers.Main) {
                 val snapshot = PlaybackQueueStore.state.value
                 when {
+                    playAfterRefresh && snapshot.preparationState == PlaybackPreparationState.READY -> {
+                        pendingPlay = false
+                        play()
+                    }
                     pendingPlay && snapshot.preparationState == PlaybackPreparationState.READY -> {
                         pendingPlay = false
                         play()
@@ -2258,6 +2330,7 @@ class ReaderPlaybackService : Service() {
         private const val CHANNEL_ID = "reader_playback"
         private const val NOTIFICATION_ID = 3011
         private const val PREFETCH_THRESHOLD = 0.75f
+        private const val NARRATION_RETRY_DELAY_MS = 5_000L
         private const val WAKE_LOCK_TIMEOUT_MS = 30 * 60 * 1000L
         private const val MAX_PREVIEW_TEXT_CHARS = 320
         private const val MAX_PERSISTED_QUEUE_CHAPTERS = 5
@@ -2271,6 +2344,7 @@ class ReaderPlaybackService : Service() {
         const val ACTION_REWIND = "vn.nghetruyen.action.REWIND"
         const val ACTION_STOP = "vn.nghetruyen.action.STOP"
         const val ACTION_REFRESH = "vn.nghetruyen.action.REFRESH"
+        const val ACTION_APPLY_NARRATION_AND_PLAY = "vn.nghetruyen.action.APPLY_NARRATION_AND_PLAY"
         const val ACTION_MUSIC_PREVIEW_BEGIN = "vn.nghetruyen.action.MUSIC_PREVIEW_BEGIN"
         const val ACTION_MUSIC_PREVIEW_END = "vn.nghetruyen.action.MUSIC_PREVIEW_END"
         const val ACTION_SET_SLEEP_TIMER = "vn.nghetruyen.action.SET_SLEEP_TIMER"

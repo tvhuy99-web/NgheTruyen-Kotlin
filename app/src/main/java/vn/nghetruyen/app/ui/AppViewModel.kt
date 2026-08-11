@@ -81,6 +81,7 @@ import vn.nghetruyen.app.data.local.VoiceRoleEntity
 import vn.nghetruyen.app.data.settings.AiOnlineSettings
 import vn.nghetruyen.app.data.settings.AiProvider
 import vn.nghetruyen.app.playback.PlaybackQueueStore
+import vn.nghetruyen.app.playback.NarrationAutomationStage
 import vn.nghetruyen.app.playback.PlaybackPreparationState
 import vn.nghetruyen.app.playback.PlaybackSnapshot
 import vn.nghetruyen.app.playback.ReaderPlaybackService
@@ -297,6 +298,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var storyLoadJob: Job? = null
     private var chapterLoadJob: Job? = null
     private var aiTranslationJob: Job? = null
+    private var manualNarrationJob: Job? = null
     private var commentsLoadJob: Job? = null
     private val storyCommentCache = StoryCommentCache()
     private var sourceCheckAllJob: Job? = null
@@ -869,6 +871,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         container.settingsRepository.setRestorePlaybackAfterProcessDeath(value)
     }
     fun setAutoVoiceCastEnabled(value: Boolean) = viewModelScope.launch {
+        mutableState.update { it.copy(autoVoiceCastEnabled = value) }
+        if (!value) {
+            PlaybackQueueStore.setNarrationAutomation(
+                stage = NarrationAutomationStage.IDLE,
+                progress = 0f,
+                message = null,
+            )
+        }
         container.settingsRepository.setAutoVoiceCastEnabled(value)
         ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
     }
@@ -1980,6 +1990,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun openChapterAt(chapter: ChapterSummary, forcedStartIndex: Int?) {
         chapterLoadJob?.cancel()
         aiTranslationJob?.cancel()
+        manualNarrationJob?.cancel()
         chapterLoadJob = viewModelScope.launch {
             mutableState.update { it.copy(loading = true, message = null) }
             val detail = state.value.storyDetail
@@ -2042,6 +2053,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     } else null
                     val initialContent = initialVietPhraseContent ?: enriched
                     val initialTextMode = if (initialVietPhraseContent != null) ChapterTextMode.VIETPHRASE else ChapterTextMode.ORIGINAL
+                    val existingVoicePlanCount = container.narrationPlanCoordinator.voicePlanAssignmentCount(enriched)
+                    val shouldAutoStartNarration = settings.readerMode == ReaderMode.TTS &&
+                        (settings.autoVoiceCastEnabled || existingVoicePlanCount > 0)
                     PlaybackQueueStore.loadContent(
                         sourceId = sourceId,
                         content = initialContent,
@@ -2074,6 +2088,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         paragraphIndex = startIndex,
                         totalParagraphs = enriched.paragraphs.size,
                     )
+                    if (shouldAutoStartNarration) {
+                        ReaderPlaybackService.command(
+                            getApplication(),
+                            ReaderPlaybackService.ACTION_APPLY_NARRATION_AND_PLAY,
+                        )
+                    }
                     when {
                         autoTranslate -> when (val translated = resolveAiTranslation(enriched, forceRefresh = false)) {
                             is AppResult.Success -> showChapterVariant(
@@ -3561,39 +3581,94 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun planNarrationForCurrentChapter(includeVoice: Boolean, includeMusic: Boolean) {
         val original = state.value.originalChapterContent ?: state.value.chapterContent ?: return
         if (state.value.aiBusy) return
-        viewModelScope.launch {
+        manualNarrationJob?.cancel()
+        manualNarrationJob = viewModelScope.launch {
             mutableState.update {
                 it.copy(
                     aiBusy = true,
-                    message = when {
-                        includeVoice && includeMusic -> "AI đang phối hợp phân vai, biểu cảm và nhạc cảnh trong một lượt…"
-                        includeVoice -> "AI đang nhận diện người kể chuyện và nhân vật…"
-                        else -> "AI đang lập nhạc cảnh với ngữ cảnh liên chương…"
-                    },
+                    message = if (includeVoice) null else "AI đang lập nhạc cảnh với ngữ cảnh liên chương…",
                 )
             }
-            val result = container.narrationPlanCoordinator.ensurePlans(
-                content = original,
-                voice = includeVoice,
-                music = includeMusic,
-                force = true,
-            )
-            ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
-            mutableState.update {
-                it.copy(
-                    aiBusy = false,
-                    message = buildString {
-                        when {
-                            result.voicePlanCreated && result.musicPlanCreated -> append("Đã lưu kế hoạch giọng và nhạc cảnh thống nhất.")
-                            result.voicePlanCreated -> append("Đã lưu kế hoạch phân vai và biểu cảm.")
-                            result.musicPlanCreated -> append("Đã lưu kế hoạch nhạc cảnh có ngữ cảnh liên chương.")
-                            else -> append("Không có kế hoạch mới được tạo.")
-                        }
-                        if (result.usedUnifiedRequest) append(" AI đã phân tích chung trong một yêu cầu.")
-                        if (result.warnings.isNotEmpty()) append(" ${result.warnings.joinToString(" • ").take(360)}")
-                    },
+            if (includeVoice) {
+                PlaybackQueueStore.setNarrationAutomation(
+                    stage = NarrationAutomationStage.CURRENT_PLANNING,
+                    progress = 0.2f,
+                    message = "Đang phân vai chương hiện tại.",
                 )
             }
+            var attempt = 0
+            while (state.value.chapterContent?.chapter?.id == original.chapter.id) {
+                attempt += 1
+                val planningAttempt = runCatching {
+                    container.narrationPlanCoordinator.ensurePlans(
+                        content = original,
+                        voice = includeVoice,
+                        music = includeMusic,
+                        force = true,
+                    )
+                }
+                val result = planningAttempt.getOrNull()
+                if (!includeVoice) {
+                    mutableState.update {
+                        it.copy(
+                            aiBusy = false,
+                            message = result?.warnings?.joinToString(" • ")?.take(360)
+                                ?: planningAttempt.exceptionOrNull()?.message
+                                ?: "Không lập được kế hoạch nhạc cảnh.",
+                        )
+                    }
+                    ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
+                    return@launch
+                }
+
+                val assignmentCount = container.narrationPlanCoordinator.voicePlanAssignmentCount(original)
+                if (assignmentCount > 0) {
+                    PlaybackQueueStore.setNarrationAutomation(
+                        stage = NarrationAutomationStage.CURRENT_READY,
+                        progress = 1f,
+                        message = "Đã phân vai xong $assignmentCount mục. Đang bắt đầu phát.",
+                    )
+                    mutableState.update { it.copy(aiBusy = false, message = null) }
+                    ReaderPlaybackService.command(
+                        getApplication(),
+                        ReaderPlaybackService.ACTION_APPLY_NARRATION_AND_PLAY,
+                    )
+                    return@launch
+                }
+
+                val warnings = result?.warnings.orEmpty() +
+                    listOfNotNull(planningAttempt.exceptionOrNull()?.message)
+                val castDisabled = warnings.any { warning ->
+                    warning.contains("phân vai TTS đang tắt", ignoreCase = true)
+                }
+                if (castDisabled) {
+                    PlaybackQueueStore.setNarrationAutomation(
+                        stage = NarrationAutomationStage.FAILED,
+                        progress = 1f,
+                        message = "Phân vai TTS đang tắt cho truyện này. Chưa tự động phát.",
+                    )
+                    mutableState.update { it.copy(aiBusy = false, message = null) }
+                    return@launch
+                }
+
+                val retryMessage = buildString {
+                    append("Phân vai chưa thành công. Sẽ tự thử lại sau 5 giây.")
+                    warnings.firstOrNull()?.takeIf(String::isNotBlank)?.let { append(" ${it.take(120)}") }
+                }
+                PlaybackQueueStore.setNarrationAutomation(
+                    stage = NarrationAutomationStage.FAILED,
+                    progress = 1f,
+                    message = retryMessage,
+                )
+                mutableState.update { it.copy(message = null) }
+                delay(MANUAL_NARRATION_RETRY_DELAY_MS)
+                PlaybackQueueStore.setNarrationAutomation(
+                    stage = NarrationAutomationStage.CURRENT_PLANNING,
+                    progress = 0.2f,
+                    message = "Đang thử phân vai lại lần ${attempt + 1}.",
+                )
+            }
+            mutableState.update { it.copy(aiBusy = false) }
         }
     }
 
@@ -3864,6 +3939,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun setSceneMusicTrackEnabled(id: String, enabled: Boolean) { viewModelScope.launch { container.libraryRepository.setSceneMusicTrackEnabled(id, enabled) } }
     fun deleteSceneMusicTrack(id: String) { viewModelScope.launch { container.libraryRepository.deleteSceneMusicTrack(id) } }
 
+    private companion object {
+        const val MANUAL_NARRATION_RETRY_DELAY_MS = 5_000L
+    }
+
     private fun providerLabel(provider: AiProvider): String = when (provider) {
         AiProvider.GEMINI -> "Gemini"
         AiProvider.OPENAI_COMPATIBLE -> "OpenAI-compatible"
@@ -3875,7 +3954,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun back() {
         when (state.value.destination) {
-            Destination.Reader -> chapterLoadJob?.cancel()
+            Destination.Reader -> {
+                chapterLoadJob?.cancel()
+                manualNarrationJob?.cancel()
+            }
             Destination.Story -> {
                 storyLoadJob?.cancel()
                 chapterLoadJob?.cancel()

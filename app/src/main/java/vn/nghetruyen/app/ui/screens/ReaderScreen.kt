@@ -322,6 +322,13 @@ fun ReaderScreen(
         delay(120)
         view.announceForAccessibility("${content.chapter.title}. Chế độ ${if (textMode) "Văn bản" else "TTS"}. ${content.paragraphs.size} đoạn")
     }
+    LaunchedEffect(state.playback.narrationStage, state.playback.narrationMessage) {
+        val announcement = state.playback.narrationMessage?.trim().orEmpty()
+        if (announcement.isNotBlank()) {
+            delay(80)
+            view.announceForAccessibility(announcement)
+        }
+    }
 
     fun createVietPhraseDiagnostic() {
         if (vietPhraseDiagnosticBusy) {

@@ -153,6 +153,7 @@ require(
     "isCurrentTimelineTransform(previousTransform.transformedText, MUSIC_TRANSFORM_ENGINE, previous)",
     "XpkPlaybackRuntime.canonicalLines(content.paragraphs)",
     "Nhạc theo cảnh AI chỉ được lập cùng phân vai TTS.",
+    "suspend fun voicePlanAssignmentCount(content: ChapterContent): Int",
 )
 forbid(
     "app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt",
@@ -176,7 +177,10 @@ require(
     "NarrationAutomationStage.NEXT_PLANNING",
     "NarrationAutomationStage.NEXT_READY",
     "shouldPlanAutoSceneMusic()",
-    "val planningFailed = planResult == null || (",
+    "voicePlanAssignmentCount(content)",
+    "NARRATION_RETRY_DELAY_MS = 5_000L",
+    "ACTION_APPLY_NARRATION_AND_PLAY",
+    "Phân vai chưa thành công. Sẽ tự thử lại sau 5 giây.",
 )
 forbid(
     "app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt",
@@ -185,11 +189,15 @@ forbid(
     "val aiRateMultiplier = (1f + speedAdjustPct / 100f).coerceIn(0.5f, 1.5f)",
     "volume = (track.volume * sceneVolume * normalizationGain).coerceIn(0f, 0.6f)",
     "AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY",
+    "Phân vai tự động chưa thành công; đang đọc bằng cấu hình/phân vai hiện có.",
 )
 
 require(
     "app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt",
     "includeMusic = state.value.backgroundMusicEnabled && state.value.autoSceneMusicEnabled",
+    "NarrationAutomationStage.IDLE",
+    "existingVoicePlanCount > 0",
+    "ACTION_APPLY_NARRATION_AND_PLAY",
 )
 forbid(
     "app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt",
@@ -201,6 +209,8 @@ require(
     "LinearProgressIndicator(",
     "state.playback.narrationMessage",
     "Từ 75% chương",
+    "if (state.autoVoiceCastEnabled)",
+    "view.announceForAccessibility(announcement)",
 )
 
 require(

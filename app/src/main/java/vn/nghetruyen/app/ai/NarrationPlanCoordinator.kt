@@ -97,6 +97,17 @@ class NarrationPlanCoordinator(
         return Result(voiceCreated, false, warnings.distinct())
     }
 
+    suspend fun voicePlanAssignmentCount(content: ChapterContent): Int {
+        val sourceHash = ChapterAiWorkflow.sha256(content.paragraphs)
+        val cached = library.getChapterTransform(content.chapter.id, ChapterAiWorkflow.KIND_VOICE_CAST)
+            ?: return 0
+        if (cached.sourceSha256 != sourceHash) return 0
+        if (!isCurrentTimelineTransform(cached.transformedText, VOICE_TRANSFORM_ENGINE, content)) return 0
+        return runCatching {
+            JSONObject(cached.transformedText).optJSONArray("assignments")?.length() ?: 0
+        }.getOrDefault(0)
+    }
+
     private suspend fun storyVoiceSettings(storyId: String): StoryVoiceCastReferenceSettings =
         library.getStoryAiProfile(storyId)?.let { StoryVoiceCastReferenceCodec.decode(it.voiceCastNote) }
             ?: StoryVoiceCastReferenceSettings()

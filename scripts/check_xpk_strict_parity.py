@@ -119,6 +119,9 @@ require(
     "XpkPlaybackRuntime.resetCanonicalPlans()",
     "XpkPlaybackRuntime.canonicalLines(paragraphs)",
     "val dialogueGroupId: String? = null",
+    "enum class NarrationAutomationStage",
+    "val narrationProgress: Float = 0f",
+    "fun setNarrationAutomation(",
 )
 
 require(
@@ -165,6 +168,15 @@ require(
     "val aiPitchMultiplier = 1f + pitchAdjustPct / 100f",
     "val aiVolumeMultiplier = 1f + volumeAdjustPct / 100f",
     "volume = (track.volume * sceneVolume * normalizationGain).coerceIn(0f, 1f)",
+    "tts.setAudioAttributes(speechAudioAttributes())",
+    "private fun speechAudioAttributes(): AudioAttributes = AudioAttributes.Builder()",
+    ".setUsage(AudioAttributes.USAGE_MEDIA)",
+    "PREFETCH_THRESHOLD = 0.75f",
+    "NarrationAutomationStage.NEXT_LOADING",
+    "NarrationAutomationStage.NEXT_PLANNING",
+    "NarrationAutomationStage.NEXT_READY",
+    "shouldPlanAutoSceneMusic()",
+    "val planningFailed = planResult == null || (",
 )
 forbid(
     "app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt",
@@ -172,6 +184,19 @@ forbid(
     "maybeEnsureCurrentNarrationPlans()",
     "val aiRateMultiplier = (1f + speedAdjustPct / 100f).coerceIn(0.5f, 1.5f)",
     "volume = (track.volume * sceneVolume * normalizationGain).coerceIn(0f, 0.6f)",
+    "AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY",
+)
+
+require(
+    "app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt",
+    "includeMusic = state.value.backgroundMusicEnabled && state.value.autoSceneMusicEnabled",
+)
+
+require(
+    "app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt",
+    "LinearProgressIndicator(",
+    "state.playback.narrationMessage",
+    "Từ 75% chương",
 )
 
 require(

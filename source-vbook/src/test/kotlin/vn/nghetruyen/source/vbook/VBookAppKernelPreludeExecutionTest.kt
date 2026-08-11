@@ -13,6 +13,13 @@ class VBookAppKernelPreludeExecutionTest {
         try {
             cx.languageVersion = Context.VERSION_ES6
             val scope = cx.initStandardObjects()
+            cx.evaluateString(
+                scope,
+                "var __bridgeCalls=[]; function __bridge(op,payload){__bridgeCalls.push({op:op,payload:payload}); return {accepted:true,traceId:'rhino-test'};}",
+                "app-host-bridge-stub",
+                1,
+                null,
+            )
             cx.evaluateString(scope, VBookAppKernelPrelude.build(), "app-kernel-v2", 1, null)
 
             val uiJson = Context.toString(cx.evaluateString(
@@ -24,17 +31,37 @@ class VBookAppKernelPreludeExecutionTest {
             ))
             assertEquals("{\"message\":\"xin chao\",\"openUrl\":null,\"refresh\":false}", uiJson)
 
-            val commandJson = Context.toString(cx.evaluateString(
+            val executionJson = Context.toString(cx.evaluateString(
                 scope,
                 "JSON.stringify(App.reader.nextChapter())",
                 "app-reader-command",
                 1,
                 null,
             ))
-            assertTrue("\"kind\":\"nghetruyen.host-command\"" in commandJson)
-            assertTrue("\"version\":2" in commandJson)
-            assertTrue("\"domain\":\"reader\"" in commandJson)
-            assertTrue("\"action\":\"nextChapter\"" in commandJson)
+            assertEquals("{\"accepted\":true,\"traceId\":\"rhino-test\"}", executionJson)
+
+            val callJson = Context.toString(cx.evaluateString(
+                scope,
+                "JSON.stringify(__bridgeCalls[0])",
+                "app-reader-bridge-call",
+                1,
+                null,
+            ))
+            assertTrue("\"op\":\"host_command\"" in callJson)
+            assertTrue("\"kind\":\"nghetruyen.host-command\"" in callJson)
+            assertTrue("\"version\":2" in callJson)
+            assertTrue("\"domain\":\"reader\"" in callJson)
+            assertTrue("\"action\":\"nextChapter\"" in callJson)
+
+            val intentJson = Context.toString(cx.evaluateString(
+                scope,
+                "JSON.stringify(App.intent('tts','play',{}))",
+                "app-command-intent",
+                1,
+                null,
+            ))
+            assertTrue("\"domain\":\"tts\"" in intentJson)
+            assertTrue("\"action\":\"play\"" in intentJson)
         } finally {
             Context.exit()
         }

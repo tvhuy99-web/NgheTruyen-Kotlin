@@ -6,89 +6,105 @@ import vn.nghetruyen.app.playback.ReaderPlaybackService
 import vn.nghetruyen.app.ui.AppViewModel
 import vn.nghetruyen.source.api.JsonValue
 import vn.nghetruyen.source.api.SourceErrorCode
+import vn.nghetruyen.source.api.SourceHostKernelBus
 import vn.nghetruyen.source.api.SourceHostKernelDispatcher
 import vn.nghetruyen.source.api.SourcePlatformFailure
 import vn.nghetruyen.source.api.SourcePlatformResult
+import java.lang.ref.WeakReference
 
 /**
  * NgheTruyen-owned host bindings for extension kernel v2.
  *
  * The extension side only sends SourceHostCommand JSON values. This adapter intentionally owns all
  * Android/ViewModel interaction so no Activity, Context, Service or repository instance crosses the
- * extension boundary.
+ * extension boundary. The dispatcher keeps only a WeakReference to the UI session; the process bus
+ * therefore cannot keep a dead Activity/ViewModel alive.
  */
-fun AppViewModel.createExtensionHostKernel(): SourceHostKernelDispatcher {
+fun AppViewModel.installExtensionHostKernel(): SourceHostKernelDispatcher {
     val app = getApplication<Application>()
-    return SourceHostKernelDispatcher()
+    val hostRef = WeakReference(this)
+    fun host(traceId: String): AppViewModel? = hostRef.get()
+        ?: return null
+
+    val dispatcher = SourceHostKernelDispatcher()
         .register("reader", "refresh") { _, _, traceId ->
             ReaderPlaybackService.command(app, ReaderPlaybackService.ACTION_REFRESH)
             accepted(traceId)
         }
         .register("reader", "nextChapter") { _, _, traceId ->
-            nextChapter()
+            val host = host(traceId) ?: return@register uiUnavailable(traceId)
+            host.nextChapter()
             accepted(traceId)
         }
         .register("reader", "previousChapter") { _, _, traceId ->
-            previousChapter()
+            val host = host(traceId) ?: return@register uiUnavailable(traceId)
+            host.previousChapter()
             accepted(traceId)
         }
         .register("reader", "moveParagraph") { _, payload, traceId ->
+            val host = host(traceId) ?: return@register uiUnavailable(traceId)
             val delta = payload.intValue("delta")?.coerceIn(-10_000, 10_000)
                 ?: return@register invalid(traceId, "SOURCE_HOST_READER_DELTA_REQUIRED")
-            moveParagraph(delta)
+            host.moveParagraph(delta)
             accepted(traceId)
         }
         .register("reader", "setMode") { _, payload, traceId ->
+            val host = host(traceId) ?: return@register uiUnavailable(traceId)
             val raw = payload.stringValue("mode")?.trim().orEmpty()
             val mode = enumValues<ReaderMode>().firstOrNull { it.name.equals(raw, ignoreCase = true) }
                 ?: return@register invalid(traceId, "SOURCE_HOST_READER_MODE_INVALID:$raw")
-            setReaderMode(mode)
+            host.setReaderMode(mode)
             accepted(traceId)
         }
         .register("reader", "openChapter") { _, payload, traceId ->
+            val host = host(traceId) ?: return@register uiUnavailable(traceId)
             val chapterId = payload.stringValue("chapterId").orEmpty()
             val url = payload.stringValue("url").orEmpty()
-            val chapter = state.value.storyDetail?.chapters.orEmpty().firstOrNull { candidate ->
+            val chapter = host.state.value.storyDetail?.chapters.orEmpty().firstOrNull { candidate ->
                 (chapterId.isNotBlank() && candidate.id == chapterId) ||
                     (url.isNotBlank() && candidate.url == url)
             } ?: return@register invalid(traceId, "SOURCE_HOST_READER_CHAPTER_NOT_FOUND")
-            openChapter(chapter)
+            host.openChapter(chapter)
             accepted(traceId)
         }
         .register("library", "follow") { _, payload, traceId ->
+            val host = host(traceId) ?: return@register uiUnavailable(traceId)
             val storyId = payload.stringValue("storyId")?.trim().orEmpty()
-            val detail = state.value.storyDetail
+            val detail = host.state.value.storyDetail
                 ?: return@register invalid(traceId, "SOURCE_HOST_LIBRARY_STORY_CONTEXT_REQUIRED")
             if (storyId.isBlank() || detail.story.id != storyId) {
                 return@register invalid(traceId, "SOURCE_HOST_LIBRARY_STORY_CONTEXT_MISMATCH")
             }
-            if (state.value.following.none { it.storyId == storyId }) toggleFollowing()
+            if (host.state.value.following.none { it.storyId == storyId }) host.toggleFollowing()
             accepted(traceId)
         }
         .register("library", "unfollow") { _, payload, traceId ->
+            val host = host(traceId) ?: return@register uiUnavailable(traceId)
             val storyId = payload.stringValue("storyId")?.trim().orEmpty()
             if (storyId.isBlank()) return@register invalid(traceId, "SOURCE_HOST_LIBRARY_STORY_ID_REQUIRED")
-            unfollowStory(storyId)
+            host.unfollowStory(storyId)
             accepted(traceId)
         }
         .register("library", "bookmark") { _, payload, traceId ->
-            val content = state.value.chapterContent
+            val host = host(traceId) ?: return@register uiUnavailable(traceId)
+            val content = host.state.value.chapterContent
                 ?: return@register invalid(traceId, "SOURCE_HOST_LIBRARY_CHAPTER_CONTEXT_REQUIRED")
             val requestedChapterId = payload.stringValue("chapterId")?.trim().orEmpty()
             if (requestedChapterId.isNotBlank() && requestedChapterId != content.chapter.id) {
                 return@register invalid(traceId, "SOURCE_HOST_LIBRARY_CHAPTER_CONTEXT_MISMATCH")
             }
             val requestedParagraph = payload.intValue("paragraphIndex")
-            if (requestedParagraph != null && requestedParagraph != state.value.playback.paragraphIndex) {
+            if (requestedParagraph != null && requestedParagraph != host.state.value.playback.paragraphIndex) {
                 return@register invalid(traceId, "SOURCE_HOST_LIBRARY_PARAGRAPH_CONTEXT_MISMATCH")
             }
-            bookmarkCurrent()
+            host.bookmarkCurrent()
             accepted(traceId)
         }
         .register("library", "unbookmark") { _, payload, traceId ->
+            val host = host(traceId) ?: return@register uiUnavailable(traceId)
             val bookmarkId = payload.stringValue("bookmarkId")?.trim().orEmpty()
             if (bookmarkId.isBlank()) return@register invalid(traceId, "SOURCE_HOST_LIBRARY_BOOKMARK_ID_REQUIRED")
-            deleteBookmark(bookmarkId)
+            host.deleteBookmark(bookmarkId)
             accepted(traceId)
         }
         .register("tts", "play") { _, _, traceId ->
@@ -108,19 +124,23 @@ fun AppViewModel.createExtensionHostKernel(): SourceHostKernelDispatcher {
             accepted(traceId)
         }
         .register("tts", "setRate") { _, payload, traceId ->
+            val host = host(traceId) ?: return@register uiUnavailable(traceId)
             val rate = payload.floatValue("rate")?.coerceIn(0.25f, 4.0f)
                 ?: return@register invalid(traceId, "SOURCE_HOST_TTS_RATE_REQUIRED")
-            setTtsRate(rate)
+            host.setTtsRate(rate)
             ReaderPlaybackService.command(app, ReaderPlaybackService.ACTION_REFRESH)
             accepted(traceId)
         }
         .register("tts", "setPitch") { _, payload, traceId ->
+            val host = host(traceId) ?: return@register uiUnavailable(traceId)
             val pitch = payload.floatValue("pitch")?.coerceIn(0.25f, 4.0f)
                 ?: return@register invalid(traceId, "SOURCE_HOST_TTS_PITCH_REQUIRED")
-            setTtsPitch(pitch)
+            host.setTtsPitch(pitch)
             ReaderPlaybackService.command(app, ReaderPlaybackService.ACTION_REFRESH)
             accepted(traceId)
         }
+    SourceHostKernelBus.install(dispatcher)
+    return dispatcher
 }
 
 private fun accepted(traceId: String): SourcePlatformResult<JsonValue> = SourcePlatformResult.Success(
@@ -129,6 +149,9 @@ private fun accepted(traceId: String): SourcePlatformResult<JsonValue> = SourceP
         "traceId" to JsonValue.Str(traceId),
     )),
 )
+
+private fun uiUnavailable(traceId: String): SourcePlatformResult<JsonValue> =
+    invalid(traceId, "SOURCE_HOST_UI_SESSION_UNAVAILABLE")
 
 private fun invalid(traceId: String, message: String): SourcePlatformResult<JsonValue> =
     SourcePlatformResult.Failure(

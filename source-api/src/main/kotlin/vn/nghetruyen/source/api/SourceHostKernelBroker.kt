@@ -1,5 +1,6 @@
 package vn.nghetruyen.source.api
 
+import java.lang.ref.WeakReference
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
 
@@ -116,4 +117,43 @@ fun interface SourceHostEventSink {
     companion object {
         val NONE = SourceHostEventSink { _, event, _ -> SourceHostKernelContract.validate(event) }
     }
+}
+
+/**
+ * Process-stable host-to-extension event router.
+ *
+ * The bus keeps only weak sink references. Replacing or removing a source therefore cannot keep an
+ * old runtime alive. A new source instance may register the same source id and atomically replace
+ * the previous sink. Events for inactive sources are validated and then dropped.
+ */
+object SourceHostEventBus : SourceHostEventSink {
+    private val sinks = ConcurrentHashMap<String, WeakReference<SourceHostEventSink>>()
+
+    fun register(sourceId: String, sink: SourceHostEventSink) {
+        require(sourceId.isNotBlank() && sourceId.length <= MAX_SOURCE_ID_CHARS) { "SOURCE_HOST_EVENT_SOURCE_ID_INVALID" }
+        require(sink !== this) { "SOURCE_HOST_EVENT_RECURSIVE_SINK" }
+        sinks[sourceId] = WeakReference(sink)
+    }
+
+    fun unregister(sourceId: String, sink: SourceHostEventSink? = null) {
+        if (sink == null) {
+            sinks.remove(sourceId)
+            return
+        }
+        val current = sinks[sourceId]?.get()
+        if (current === sink || current == null) sinks.remove(sourceId)
+    }
+
+    override fun emit(sourceId: String, event: SourceHostEvent, traceId: String) {
+        SourceHostKernelContract.validate(event)
+        val reference = sinks[sourceId] ?: return
+        val sink = reference.get()
+        if (sink == null) {
+            sinks.remove(sourceId, reference)
+            return
+        }
+        sink.emit(sourceId, event, traceId)
+    }
+
+    private const val MAX_SOURCE_ID_CHARS = 512
 }

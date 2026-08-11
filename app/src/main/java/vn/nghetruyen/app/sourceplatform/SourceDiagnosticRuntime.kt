@@ -264,6 +264,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
         appendLine("The report also includes a sanitized app runtime snapshot plus the tail of the backup/restore log when available.")
         appendLine("The report also includes a sanitized app runtime snapshot plus the tail of the backup/restore log when available.")
         appendLine("The report also includes a sanitized app runtime snapshot plus the tail of the backup/restore log when available.")
+        appendLine("The report also includes a sanitized app runtime snapshot plus the tail of the backup/restore log when available.")
         appendLine("The crash-safe/previous section may contain the final evidence from the process before the latest restart.")
     }
 

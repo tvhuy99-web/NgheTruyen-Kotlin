@@ -94,6 +94,21 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Normalize diagnostics codegen quoting
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/apply_diagnostics_deepening.py')
+          value = path.read_text(encoding='utf-8')
+          old = "write(path, '''package vn.nghetruyen.app.ai.vietphrase\n\nimport android.content.Context"
+          new = "write(path, r'''package vn.nghetruyen.app.ai.vietphrase\n\nimport android.content.Context"
+          if old in value:
+              value = value.replace(old, new, 1)
+              path.write_text(value, encoding='utf-8')
+          elif new not in value:
+              raise SystemExit('VietPhrase exporter codegen anchor not found')
+          PY
+
       - name: Apply diagnostics migration
         run: python3 scripts/apply_diagnostics_deepening.py
 

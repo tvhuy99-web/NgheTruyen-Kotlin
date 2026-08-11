@@ -4,6 +4,7 @@ import android.app.Application
 import android.webkit.WebView
 import vn.nghetruyen.app.ai.vietphrase.ReferenceVietPhraseRuntime
 import vn.nghetruyen.app.sourceplatform.AndroidChromiumVBookRuntime
+import vn.nghetruyen.app.sourceplatform.ChromiumVBookDispatcherParityRuntime
 import vn.nghetruyen.app.sourceplatform.ChromiumVBookNetworkProjectionBroker
 import vn.nghetruyen.source.api.SourceErrorCode
 import vn.nghetruyen.source.api.SourcePlatformFailure
@@ -15,7 +16,7 @@ import java.util.IdentityHashMap
 class NgheTruyenApplication : Application() {
     val container: AppContainer by lazy { AppContainer(this) }
     private val chromiumRuntimeLock = Any()
-    private val chromiumRuntimes = IdentityHashMap<Any, AndroidChromiumVBookRuntime>()
+    private val chromiumRuntimes = IdentityHashMap<Any, VBookActionRuntime>()
 
     override fun onCreate() {
         super.onCreate()
@@ -29,12 +30,14 @@ class NgheTruyenApplication : Application() {
                     ))
                 }
             } else synchronized(chromiumRuntimeLock) {
-                chromiumRuntimes[brokers.storage] ?: AndroidChromiumVBookRuntime(
-                    context = this,
-                    brokers = brokers.copy(
-                        network = ChromiumVBookNetworkProjectionBroker(brokers.network),
+                chromiumRuntimes[brokers.storage] ?: ChromiumVBookDispatcherParityRuntime(
+                    AndroidChromiumVBookRuntime(
+                        context = this,
+                        brokers = brokers.copy(
+                            network = ChromiumVBookNetworkProjectionBroker(brokers.network),
+                        ),
+                        diagnostics = diagnostics,
                     ),
-                    diagnostics = diagnostics,
                 ).also { chromiumRuntimes[brokers.storage] = it }
             }
         }

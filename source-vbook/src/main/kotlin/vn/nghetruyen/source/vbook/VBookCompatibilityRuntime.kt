@@ -16,13 +16,13 @@ import vn.nghetruyen.source.runtime.SourceResourceProvider
 
 /** Contract-aware facade over the mature vBook host API implementation. */
 class VBookCompatibilityRuntime(
-    private val runtime: VBookJsRuntime = VBookJsRuntime(),
+    private val runtime: VBookActionRuntime = RhinoVBookActionRuntime(),
 ) {
     constructor(
         brokers: SourceCapabilityBrokers,
         diagnostics: DiagnosticSink = DiagnosticSink.NONE,
     ) : this(
-        VBookJsRuntime(
+        RhinoVBookActionRuntime(
             brokers.copy(
                 network = VBookRawNetworkBroker(brokers.network),
                 translation = VBookTranslationBrokerRouter(brokers.translation, brokers.quickTranslation),

@@ -132,7 +132,7 @@ class ReaderPlaybackService : Service() {
     private var narrationPlanJob: Job? = null
     private var narrationPrefetchJob: Job? = null
     private var narrationPlanningChapterId: String = ""
-    @Volatile private var narrationReloadPending = false
+    private var narrationPreparedChapterId: String = ""
     private var transitionMessage: String? = null
     private var currentEnginePackage: String? = null
     private var pendingRoleEnginePackage: String? = null
@@ -638,6 +638,7 @@ class ReaderPlaybackService : Service() {
             pendingPlay = true
             return
         }
+        if (prepareCurrentNarrationBeforePlayback(snapshot)) return
         if (!requestAudioFocus()) {
             pendingPlay = false
             PlaybackQueueStore.setPlaying(false)
@@ -671,12 +672,12 @@ class ReaderPlaybackService : Service() {
         }
         val roleConfig = resolved.role?.toRuntimeVoice() ?: activeBaseVoice
         val expression = VoiceExpressionProcessor.resolve(resolved.spokenText, resolved.role)
-        val speedAdjustPct = unitAssignment?.speedAdjustPct ?: legacyAssignment?.speedAdjustPct ?: 0f
-        val pitchAdjustPct = unitAssignment?.pitchAdjustPct ?: legacyAssignment?.pitchAdjustPct ?: 0f
-        val volumeAdjustPct = unitAssignment?.volumeAdjustPct ?: legacyAssignment?.volumeAdjustPct ?: 0f
-        val aiRateMultiplier = (1f + speedAdjustPct / 100f).coerceIn(0.5f, 1.5f)
-        val aiPitchMultiplier = (1f + pitchAdjustPct / 100f).coerceIn(0.5f, 1.5f)
-        val aiVolumeMultiplier = (1f + volumeAdjustPct / 100f).coerceIn(0.2f, 2f)
+        val speedAdjustPct = (unitAssignment?.speedAdjustPct ?: legacyAssignment?.speedAdjustPct ?: 0f).coerceIn(-100f, 100f)
+        val pitchAdjustPct = (unitAssignment?.pitchAdjustPct ?: legacyAssignment?.pitchAdjustPct ?: 0f).coerceIn(-100f, 100f)
+        val volumeAdjustPct = (unitAssignment?.volumeAdjustPct ?: legacyAssignment?.volumeAdjustPct ?: 0f).coerceIn(-100f, 100f)
+        val aiRateMultiplier = 1f + speedAdjustPct / 100f
+        val aiPitchMultiplier = 1f + pitchAdjustPct / 100f
+        val aiVolumeMultiplier = 1f + volumeAdjustPct / 100f
         val hasExplicitRole = resolved.role != null
         val config = roleConfig.copy(
             rate = if (roleConfig.sonicEnabled) 1f
@@ -734,7 +735,6 @@ class ReaderPlaybackService : Service() {
             maybePrefetchNextChapter(PlaybackQueueStore.state.value)
         }
         persistCheckpoint(wasPlaying = true)
-        maybeEnsureCurrentNarrationPlans()
         updateMediaState()
         updateNotification()
     }
@@ -1198,24 +1198,6 @@ class ReaderPlaybackService : Service() {
             }
 
             val advancedInsideParagraph = PlaybackQueueStore.advanceSpeechChunk()
-            if (narrationReloadPending) {
-                val afterAdvance = PlaybackQueueStore.state.value
-                val canContinue = advancedInsideParagraph || afterAdvance.paragraphIndex < afterAdvance.paragraphs.lastIndex
-                if (canContinue) {
-                    narrationReloadPending = false
-                    if (!advancedInsideParagraph) PlaybackQueueStore.moveBy(1)
-                    serviceScope.launch {
-                        val configured = applyConfiguredVoice(useStoryProfile = true)
-                        withContext(Dispatchers.Main) {
-                            voiceSettingsReady = configured
-                            persistCheckpoint(wasPlaying = true)
-                            maybePrefetchNextChapter(PlaybackQueueStore.state.value)
-                            if (configured) play()
-                        }
-                    }
-                    return@post
-                }
-            }
             if (advancedInsideParagraph) {
                 persistCheckpoint(wasPlaying = true)
                 maybePrefetchNextChapter(PlaybackQueueStore.state.value)
@@ -1315,32 +1297,52 @@ class ReaderPlaybackService : Service() {
         }
     }
 
-    private fun maybeEnsureCurrentNarrationPlans() {
-        val snapshot = PlaybackQueueStore.state.value
-        if ((!autoVoiceCastEnabled && !autoSceneMusicEnabled) || snapshot.chapterId.isBlank()) return
-        if (narrationPlanningChapterId == snapshot.chapterId && narrationPlanJob?.isActive == true) return
+    private fun prepareCurrentNarrationBeforePlayback(snapshot: PlaybackSnapshot): Boolean {
+        if (!autoVoiceCastEnabled || snapshot.chapterId.isBlank()) return false
+        if (narrationPreparedChapterId == snapshot.chapterId) return false
+        pendingPlay = true
+        PlaybackQueueStore.setPlaying(false)
+        transitionMessage = "Đang phân vai và chuẩn bị nhạc nền…"
+        updateMediaState()
+        updateNotification()
+        if (narrationPlanningChapterId == snapshot.chapterId && narrationPlanJob?.isActive == true) return true
+
         narrationPlanningChapterId = snapshot.chapterId
         narrationPlanJob?.cancel()
         narrationPlanJob = serviceScope.launch {
-            val content = container.libraryRepository.loadCachedChapter(snapshot.chapterId) ?: return@launch
-            val result = container.narrationPlanCoordinator.ensurePlans(
-                content = content,
-                voice = autoVoiceCastEnabled,
-                music = autoSceneMusicEnabled,
-                activeTrackId = sceneMusicController.activeTrackId,
-            )
-            if (result.voicePlanCreated || result.musicPlanCreated) narrationReloadPending = true
-            if (result.warnings.isNotEmpty()) {
-                withContext(Dispatchers.Main) {
-                    transitionMessage = result.warnings.first().take(180)
+            val warnings = runCatching {
+                val content = container.libraryRepository.loadCachedChapter(snapshot.chapterId)
+                    ?: error("Không tải được chương để chuẩn bị phân vai.")
+                container.narrationPlanCoordinator.ensurePlans(
+                    content = content,
+                    voice = true,
+                    music = autoSceneMusicEnabled,
+                    activeTrackId = sceneMusicController.activeTrackId,
+                ).warnings
+            }.getOrElse { error ->
+                listOf(error.message ?: "Không chuẩn bị được phân vai TTS.")
+            }
+            val configured = applyConfiguredVoice(useStoryProfile = true)
+            withContext(Dispatchers.Main) {
+                if (PlaybackQueueStore.state.value.chapterId != snapshot.chapterId) return@withContext
+                narrationPreparedChapterId = snapshot.chapterId
+                narrationPlanningChapterId = ""
+                voiceSettingsReady = configured
+                transitionMessage = warnings.firstOrNull()?.take(180)
+                if (configured && pendingPlay) {
+                    pendingPlay = false
+                    play()
+                } else {
+                    updateMediaState()
                     updateNotification()
                 }
             }
         }
+        return true
     }
 
     private fun maybePrefetchNarrationPlans(content: ChapterContent, sourceId: String) {
-        if (!prefetchNarrationPlansEnabled || (!autoVoiceCastEnabled && !autoSceneMusicEnabled)) return
+        if (!prefetchNarrationPlansEnabled || !autoVoiceCastEnabled) return
         narrationPrefetchJob?.cancel()
         narrationPrefetchJob = serviceScope.launch {
             var current: ChapterContent? = content
@@ -1348,7 +1350,7 @@ class ReaderPlaybackService : Service() {
                 val chapter = current ?: return@repeat
                 container.narrationPlanCoordinator.ensurePlans(
                     content = chapter,
-                    voice = autoVoiceCastEnabled,
+                    voice = true,
                     music = autoSceneMusicEnabled,
                     activeTrackId = if (chapter.chapter.id == content.chapter.id) sceneMusicController.activeTrackId else null,
                 )
@@ -1401,7 +1403,7 @@ class ReaderPlaybackService : Service() {
         narrationPlanJob?.cancel()
         narrationPrefetchJob?.cancel()
         narrationPlanningChapterId = ""
-        narrationReloadPending = false
+        narrationPreparedChapterId = ""
         backgroundMusicShuffleBag.clear()
         sleepTimerJob = null
         PlaybackQueueStore.setSleepTimer(null)
@@ -1725,7 +1727,7 @@ class ReaderPlaybackService : Service() {
         sceneMusicController.transition(
             trackId = track.id,
             uri = track.uri,
-            volume = (track.volume * sceneVolume * normalizationGain).coerceIn(0f, 0.6f),
+            volume = (track.volume * sceneVolume * normalizationGain).coerceIn(0f, 1f),
             duckFactor = backgroundMusicDuckFactor,
             crossfadeMillis = sceneMusicCrossfadeMillis,
         )

@@ -120,7 +120,7 @@ internal object ChromiumVBookBrowserParityPatch {
               return global.Html.parse(String(lowHtml.call(nativeBrowser)||''),String(base||''));
             };
             nativeBrowser.launchAsync=function(url){ lowLaunch.call(nativeBrowser,String(url||'')); return true; };
-            nativeBrowser.loadHtml=function(html,baseUrl){ lowLoadHtml.call(nativeBrowser,String(baseUrl||''),String(html==null?'':html)); return nativeBrowser; };
+            nativeBrowser.loadHtml=function(baseUrl,html){ lowLoadHtml.call(nativeBrowser,String(baseUrl||''),String(html==null?'':html)); return nativeBrowser; };
             nativeBrowser.html=function(waitMs){
               var wait=Math.max(0,Math.min(2000,Number(waitMs||0))); if(wait>0&&typeof global.sleep==='function')global.sleep(wait);
               var base=typeof nativeBrowser.currentUrl==='function'?nativeBrowser.currentUrl():'';

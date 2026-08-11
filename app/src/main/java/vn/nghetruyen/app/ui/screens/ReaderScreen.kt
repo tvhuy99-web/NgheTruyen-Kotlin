@@ -214,7 +214,6 @@ fun ReaderScreen(
     var showExportDialog by remember { mutableStateOf(false) }
     var showCopyDialog by remember { mutableStateOf(false) }
     var showChapterInfoDialog by remember { mutableStateOf(false) }
-    var showDiagnosticLogDialog by remember { mutableStateOf(false) }
     var vietPhraseDiagnosticBusy by remember(content.chapter.id) { mutableStateOf(false) }
     var vietPhraseDiagnosticResult by remember(content.chapter.id) { mutableStateOf<VietPhraseDiagnosticExport?>(null) }
     var showNoteDialog by remember { mutableStateOf(false) }
@@ -1262,21 +1261,6 @@ fun ReaderScreen(
                 clipboard.setText(AnnotatedString(result.path))
                 onMessage("Đã sao chép đường dẫn file ZIP.")
             }) { Text("SAO CHÉP ĐƯỜNG DẪN") } },
-        )
-    }
-
-    if (showDiagnosticLogDialog) {
-        val sourceId = storyDetail?.story?.sourceId ?: storyId
-        val events = state.sourceDiagnostics.filter { it.sourceId == sourceId }.take(40)
-        AlertDialog(
-            onDismissRequest = { showDiagnosticLogDialog = false },
-            title = { Text("NHẬT KÝ CHẨN ĐOÁN") },
-            text = { Column(Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState())) {
-                Text("Mức: ${state.diagnosticsMode}", fontWeight = FontWeight.SemiBold)
-                events.forEach { event -> Text("${event.severity} • ${event.category}/${event.name}${event.detail.takeIf(String::isNotBlank)?.let { " • $it" }.orEmpty()}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 5.dp)) }
-                if (events.isEmpty()) Text("Chưa có sự kiện chẩn đoán cho nguồn hiện tại.")
-            } },
-            confirmButton = { TextButton(onClick = { showDiagnosticLogDialog = false }) { Text("ĐÓNG") } },
         )
     }
 

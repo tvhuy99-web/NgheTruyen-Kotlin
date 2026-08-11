@@ -180,6 +180,7 @@ class AudioExportWorker(
         } catch (error: Throwable) {
             val message = error.message?.take(500) ?: "Không xuất được tệp âm thanh."
             container.sourceDiagnostics.mark(name = "AUDIO_EXPORT_RUNTIME_ERROR", sourceId = "audio-export", traceId = "audio-export:$jobId", severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.ERROR, attributes = mapOf("storyId" to job.storyId, "error" to message, "type" to error.javaClass.simpleName, "attempt" to runAttemptCount.toString()))
+            container.sourceDiagnostics.mark(name = "AUDIO_EXPORT_RUNTIME_ERROR", sourceId = "audio-export", traceId = "audio-export:$jobId", severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.ERROR, attributes = mapOf("storyId" to job.storyId, "error" to message, "type" to error.javaClass.simpleName, "attempt" to runAttemptCount.toString()))
             val latest = container.libraryRepository.getAudioExportJob(jobId)
             val retryable = runAttemptCount < MAX_RETRIES && error is IOException && !isStopped
             container.libraryRepository.updateAudioExportProgress(

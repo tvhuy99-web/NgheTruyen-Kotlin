@@ -9,6 +9,7 @@ import vn.nghetruyen.source.diagnostics.BoundedDiagnosticEvidenceRecorder
 import vn.nghetruyen.source.diagnostics.BoundedDiagnosticRecorder
 import vn.nghetruyen.source.diagnostics.DiagnosticEvidence
 import vn.nghetruyen.source.diagnostics.DiagnosticCategory
+import vn.nghetruyen.source.diagnostics.DiagnosticCategory
 import vn.nghetruyen.source.diagnostics.DiagnosticEvidenceSink
 import vn.nghetruyen.source.diagnostics.DiagnosticEvent
 import vn.nghetruyen.source.diagnostics.DiagnosticJsonExporter
@@ -261,6 +262,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
         appendLine("This bundle intentionally keeps high-fidelity browser/runtime evidence for debugging.")
         appendLine("HTML keeps DOM, script and style structure; common credentials and sensitive values are redacted during export.")
         appendLine("Advanced mode retains up to 64 MiB of evidence and a crash-safe rolling journal in private app storage.")
+        appendLine("The report also includes a sanitized app runtime snapshot plus the tail of the backup/restore log when available.")
         appendLine("The report also includes a sanitized app runtime snapshot plus the tail of the backup/restore log when available.")
         appendLine("The crash-safe/previous section may contain the final evidence from the process before the latest restart.")
     }

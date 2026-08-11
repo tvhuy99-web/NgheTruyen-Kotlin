@@ -119,7 +119,7 @@ def migration_smoke() -> None:
 def main() -> None:
     require("app/src/main/java/vn/nghetruyen/app/data/local/AppDatabase.kt", "version = 18", "MIGRATION_12_13", "ai_usage_daily", "sonicSpeed", "loudnessLufsEstimate")
     require("app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt", "pendingRoleEnginePackage", "synthesizeAndPlaySonic", "VoiceExpressionProcessor.resolve", "SceneMusicSelector.select", "narrationPrefetchWindowChapters")
-    require("app/src/main/java/vn/nghetruyen/app/audio/AudioExportWorker.kt", "SonicPcmProcessor.process", "PcmLoudnessEstimator.normalizationGain", "enginePackage")
+    require("app/src/main/java/vn/nghetruyen/app/audio/AudioExportWorker.kt", "SonicPcmProcessor.process", "PcmLoudnessEstimator.isReady", "PcmLoudnessEstimator.gainDbToLinear", "enginePackage")
     require("app/src/main/java/vn/nghetruyen/app/ai/OnlineAiServices.kt", "RETRYABLE_HTTP_CODES", "Retry-After", "requestGovernor.reserve", "retryDelayMillis")
     require("app/src/main/java/vn/nghetruyen/app/ai/AiRequestGovernor.kt", "Compatibility request policy", "device-local daily AI quotas", "AppResult.Success(Permit())")
     require("app/src/main/java/vn/nghetruyen/app/data/settings/SettingsRepository.kt", "dailyRequestLimit", "sceneMusicPlaybackMode", "sonicProcessingEnabled", "narrationPrefetchWindowChapters")

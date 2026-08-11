@@ -97,7 +97,7 @@ def main() -> None:
         "app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt",
         "setMediaButtonBroadcastReceiver", "onMediaButtonEvent", "ACTION_AUDIO_BECOMING_NOISY",
         "mediaButtonKeyEvent", "restoreCheckpointAndMaybePlay", "persistCheckpoint",
-        "maybeEnsureCurrentNarrationPlans", "maybePrefetchNarrationPlans", "musicSourceHash",
+        "prepareCurrentNarrationBeforePlayback", "maybePrefetchNarrationPlans", "musicSourceHash",
         "SceneMusicController", "START_STICKY",
     )
     require(
@@ -106,7 +106,7 @@ def main() -> None:
     )
     require(
         "app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt",
-        "ensureVoicePlan", "ensureMusicPlan", "replaceVoiceAssignments",
+        "ensureVoicePlan", "persistMusicPlan", "buildContinuityContext", "replaceVoiceAssignments",
         "replaceSceneMusicCues", "SceneMusicTrackOption",
     )
     # Scene-catalog randomization moved out of the coordinator when canonical XPK scene planning was

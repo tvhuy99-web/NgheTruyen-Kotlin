@@ -35,6 +35,17 @@ class ChromiumVBookDispatchDecoderTest {
     }
 
     @Test
+    fun reportsGuardedChromiumEvaluationError() {
+        val failure = "{\"__ngheChromiumEvalError\":\"TypeError: readonly global\"}"
+
+        val error = assertThrows(IllegalStateException::class.java) {
+            ChromiumVBookDispatchDecoder.decode(failure)
+        }
+
+        assertEquals("CHROMIUM_EVAL_ERROR:TypeError: readonly global", error.message)
+    }
+
+    @Test
     fun rejectsNonSuccessEnvelope() {
         val failure = "{\"code\":1,\"data\":\"boom\"}"
 

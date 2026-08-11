@@ -161,14 +161,31 @@ object VBookAppKernelPrelude {
             hostEvent: function(name,payload){ return hostCommand('hooks', 'emit', {name:String(name || ''),payload:copyObject(payload)}); }
           });
 
+          function pollLifecycleEvents(name) {
+            name = String(name || '');
+            var response = hostCommand('hooks', 'poll', {name:name});
+            var events = response && response.events && typeof response.events.length === 'number' ? response.events : [];
+            for (var i=0; i<events.length; i++) {
+              var event = events[i] || {};
+              if (String(event.name || '') === name) hooksApi.emit(name, event.payload || {});
+            }
+            return events.length;
+          }
+          function subscribeLifecycle(name, handler, once) {
+            name = String(name || '');
+            var registered = once ? hooksApi.once(name, handler) : hooksApi.on(name, handler);
+            try { pollLifecycleEvents(name); } catch (ignored) {}
+            return registered;
+          }
           var lifecycleApi = freeze({
             events: freeze([
               'app.start','app.resume','app.pause','explore.enter','story.enter','reader.enter','reader.leave',
               'reader.chapterChanged','playback.changed','library.changed'
             ]),
-            on: hooksApi.on,
-            once: hooksApi.once,
-            off: hooksApi.off
+            on: function(name,handler){ return subscribeLifecycle(name, handler, false); },
+            once: function(name,handler){ return subscribeLifecycle(name, handler, true); },
+            off: hooksApi.off,
+            poll: pollLifecycleEvents
           });
 
           var capabilityView = freeze({

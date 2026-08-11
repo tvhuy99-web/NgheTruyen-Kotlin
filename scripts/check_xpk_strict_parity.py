@@ -81,11 +81,17 @@ require(
     "ReferenceVoiceRoleExtras.load(appContext, role.id)",
     "profileSettingsById = profileSettingsById",
     "dialogueGroupByUnitId = bundle.units",
+    "AI_SCENE_MUSIC_REQUIRES_VOICE_CAST",
+    "val timeoutMillis = config.global.timeoutMillis.coerceAtLeast(10_000)",
+    ".connectTimeout(minOf(30_000, timeoutMillis).toLong(), TimeUnit.MILLISECONDS)",
+    ".readTimeout(timeoutMillis.toLong(), TimeUnit.MILLISECONDS)",
 )
 forbid(
     "app/src/main/java/vn/nghetruyen/app/ai/XpkNarrationAiServices.kt",
     "customGuidance =",
     "MAX_VOICE_PROFILES = 40",
+    "maxOutputTokens",
+    "MAX_OUTPUT_TOKENS",
 )
 
 require(
@@ -143,6 +149,29 @@ require(
     'put("timeline_fingerprint_version", XpkPlaybackRuntime.TIMELINE_FINGERPRINT_VERSION)',
     "isCurrentTimelineTransform(previousTransform.transformedText, MUSIC_TRANSFORM_ENGINE, previous)",
     "XpkPlaybackRuntime.canonicalLines(content.paragraphs)",
+    "Nhạc theo cảnh AI chỉ được lập cùng phân vai TTS.",
+)
+forbid(
+    "app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt",
+    "includeVoiceCast = false",
+)
+
+require(
+    "app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt",
+    'private var narrationPreparedChapterId: String = ""',
+    "if (prepareCurrentNarrationBeforePlayback(snapshot)) return",
+    "if (!autoVoiceCastEnabled || snapshot.chapterId.isBlank()) return false",
+    "val aiRateMultiplier = 1f + speedAdjustPct / 100f",
+    "val aiPitchMultiplier = 1f + pitchAdjustPct / 100f",
+    "val aiVolumeMultiplier = 1f + volumeAdjustPct / 100f",
+    "volume = (track.volume * sceneVolume * normalizationGain).coerceIn(0f, 1f)",
+)
+forbid(
+    "app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt",
+    "narrationReloadPending",
+    "maybeEnsureCurrentNarrationPlans()",
+    "val aiRateMultiplier = (1f + speedAdjustPct / 100f).coerceIn(0.5f, 1.5f)",
+    "volume = (track.volume * sceneVolume * normalizationGain).coerceIn(0f, 0.6f)",
 )
 
 require(

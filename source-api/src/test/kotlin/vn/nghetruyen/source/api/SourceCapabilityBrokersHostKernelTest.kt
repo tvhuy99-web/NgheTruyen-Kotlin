@@ -1,6 +1,5 @@
 package vn.nghetruyen.source.api
 
-import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -13,8 +12,8 @@ class SourceCapabilityBrokersHostKernelTest {
         val events = SourceHostEventSink { _, _, _ -> }
         val original = SourceCapabilityBrokers(hostKernel = host, hostEvents = events)
         val copy = original.copy(network = SourceNetworkBroker.DENY_ALL)
-        assertSame(host, copy.hostKernel)
-        assertSame(events, copy.hostEvents)
+        assertTrue(host === copy.hostKernel)
+        assertTrue(events === copy.hostEvents)
     }
 
     @Test

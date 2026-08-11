@@ -10,8 +10,10 @@ import vn.nghetruyen.source.runtime.SourceResourceProvider
 /**
  * Selects a primary engine without replaying extension side effects after ordinary script failures.
  *
- * Fallback is allowed only when the primary explicitly reports runtime unavailability. A network,
- * host-command, script, browser or data error is returned as-is so an action is never executed twice.
+ * Runtime-unavailable alone is not sufficient to replay an action. Fallback is restricted to a
+ * small set of explicit pre-execution Chromium states. Renderer crashes and future unavailable
+ * errors therefore fail closed unless they are deliberately classified here after proving that no
+ * extension code or host side effect could have run.
  */
 class PrimaryFallbackVBookActionRuntime(
     private val primary: VBookActionRuntime,
@@ -23,8 +25,22 @@ class PrimaryFallbackVBookActionRuntime(
         request: SourceActionRequest,
     ): SourcePlatformResult<SourceActionResponse> = when (val result = primary.execute(manifest, resources, request)) {
         is SourcePlatformResult.Success -> result
-        is SourcePlatformResult.Failure -> if (result.error.code == SourceErrorCode.VBOOK_RUNTIME_UNAVAILABLE) {
+        is SourcePlatformResult.Failure -> if (canFallback(result)) {
             fallback.execute(manifest, resources, request)
         } else result
+    }
+
+    private fun canFallback(result: SourcePlatformResult.Failure): Boolean {
+        if (result.error.code != SourceErrorCode.VBOOK_RUNTIME_UNAVAILABLE) return false
+        return PRE_EXECUTION_UNAVAILABLE_PREFIXES.any(result.error.message::startsWith)
+    }
+
+    companion object {
+        private val PRE_EXECUTION_UNAVAILABLE_PREFIXES = setOf(
+            "CHROMIUM_RUNTIME_CLOSED",
+            "CHROMIUM_VBOOK_MODE_REQUIRED",
+            "CHROMIUM_COMPAT_DISPATCH_ACTION_REQUIRED:",
+            "CHROMIUM_WEBVIEW_UNAVAILABLE:",
+        )
     }
 }

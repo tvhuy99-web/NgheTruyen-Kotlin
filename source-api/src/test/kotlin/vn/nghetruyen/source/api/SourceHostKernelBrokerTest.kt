@@ -88,8 +88,10 @@ class SourceHostKernelBrokerTest {
     }
 
     @Test
-    fun eventBusRoutesOnlyToRegisteredSourceAndSupportsReplacement() {
+    fun eventBusRoutesLiveSinkThenFallsBackToNameScopedPolling() {
         val sourceId = "vn.nghetruyen.sources.events"
+        SourceHostEventBus.unregister(sourceId)
+        SourceHostEventBus.drain(sourceId)
         val firstEvents = mutableListOf<String>()
         val secondEvents = mutableListOf<String>()
         val first = SourceHostEventSink { _, event, traceId -> firstEvents += "${event.name}:$traceId" }
@@ -100,9 +102,19 @@ class SourceHostKernelBrokerTest {
         SourceHostEventBus.register(sourceId, second)
         SourceHostEventBus.emit(sourceId, SourceHostKernelContract.event("playback.changed"), "trace-second")
         SourceHostEventBus.unregister(sourceId, second)
-        SourceHostEventBus.emit(sourceId, SourceHostKernelContract.event("library.changed"), "trace-dropped")
+        SourceHostEventBus.emit(
+            sourceId,
+            SourceHostKernelContract.event("library.changed", JsonValue.Obj(linkedMapOf("bookmarks" to JsonValue.Num(2.0, "2")))),
+            "trace-queued-library",
+        )
+        SourceHostEventBus.emit(sourceId, SourceHostKernelContract.event("app.resume"), "trace-queued-resume")
 
         assertEquals(listOf("reader.enter:trace-first"), firstEvents)
         assertEquals(listOf("playback.changed:trace-second"), secondEvents)
+        val library = SourceHostEventBus.drain(sourceId, "library.changed")
+        assertEquals(1, library.size)
+        assertEquals("library.changed", library.single().name)
+        assertEquals("2", ((library.single().payload.values["bookmarks"] as JsonValue.Num).raw))
+        assertEquals(listOf("app.resume"), SourceHostEventBus.drain(sourceId).map(SourceHostEvent::name))
     }
 }

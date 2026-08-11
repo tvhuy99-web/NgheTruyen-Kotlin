@@ -59,7 +59,7 @@ internal object ChromiumVBookPrelude {
                   if(!/^[A-Za-z_$][A-Za-z0-9_$]{0,127}$/.test(requested)) throw new Error('VBOOK_SCRIPT_FUNCTION_INVALID');
                   var code=__source(path);
                   var factory=(0,eval)('(function(){\n'+code+'\n;return (typeof '+requested+'===\'function\'?'+requested+':(typeof execute===\'function\'?execute:null));})\n//# sourceURL='+path.replace(/\s/g,'_'));
-                  var fn=factory();
+                  var fn=factory.call(global);
                   if(typeof fn!=='function') throw new Error('VBOOK_SCRIPT_FUNCTION_MISSING:'+requested);
                   return fn.apply(global,Array.prototype.slice.call(arguments,2));
                 }
@@ -132,7 +132,7 @@ internal object ChromiumVBookPrelude {
                 out.body=function(){return __nativeElement(doc.body,baseUrl);};
                 return out;
               }
-              global.Html=global.HTML=global.Document=Object.freeze({parse:function(content,baseUrl){return __nativeDocument(content,baseUrl);}});
+              global.Html=global.HTML=global.Document={parse:function(content,baseUrl){return __nativeDocument(content,baseUrl);}};
 
               function __storage(prefix){
                 prefix=String(prefix||'');
@@ -236,25 +236,55 @@ internal object ChromiumVBookPrelude {
                 chrome:function(){return String(__rpc('user_agent',{})||'');},
                 ios:function(){return 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Version/17.0 Mobile/15E148 Safari/604.1';}
               });
-              global.Qt=Object.freeze({translate:function(text,target,options){options=options&&typeof options==='object'?options:{};return __rpc('translate',{text:String(text==null?'':text),targetLanguage:(typeof target==='string'?target:String(options.targetLanguage||options.to||'vi')),sourceLanguage:String(options.sourceLanguage||options.from||''),storyId:String(options.storyId||''),chapterId:String(options.chapterId||''),instruction:String(options.instruction||'')});}});
+              global.Qt={translate:function(text,target,options){options=options&&typeof options==='object'?options:{};return __rpc('translate',{text:String(text==null?'':text),targetLanguage:(typeof target==='string'?target:String(options.targetLanguage||options.to||'vi')),sourceLanguage:String(options.sourceLanguage||options.from||''),storyId:String(options.storyId||''),chapterId:String(options.chapterId||''),instruction:String(options.instruction||'')});}};
 
+              function __browserMatch(url,pattern){
+                url=String(url||''); pattern=String(pattern||'');
+                if(!pattern) return false;
+                if(url.toLowerCase().indexOf(pattern.toLowerCase())>=0) return true;
+                var explicitRegex=pattern.indexOf('regex:')===0;
+                var raw=explicitRegex?pattern.substring(6):pattern;
+                var looksRegex=explicitRegex||raw.indexOf('.*')>=0||/[+?^$()|\[\]\\]/.test(raw);
+                try {
+                  if(looksRegex) return new RegExp(raw).test(url);
+                  if(raw.indexOf('*')>=0){
+                    var escaped=raw.split('*').map(function(part){return part.replace(/[.*+?^${'$'}{}()|\[\]\\]/g,'\\${'$'}&');}).join('.*');
+                    return new RegExp('^'+escaped+'${'$'}','i').test(url);
+                  }
+                } catch(ignored) { return false; }
+                return false;
+              }
               function __browser(){
                 var out={};
                 function action(name,payload){payload=payload||{};payload.action=name;return __rpc('browser_action',payload)||{};}
                 out.launch=function(url){return action('NAVIGATE',{url:String(url||'')}).value;}; out.launchAsync=out.launch;
-                out.loadHtml=function(html,baseUrl){return action('LOAD_HTML',{url:String(baseUrl||''),value:String(html==null?'':html)}).value;};
+                out.loadHtml=function(baseUrl,html){return action('LOAD_HTML',{url:String(baseUrl||''),value:String(html==null?'':html)}).value;};
                 out.waitSelector=function(selector,timeoutMs){return action('WAIT_SELECTOR',{selector:String(selector||''),timeoutMs:Number(timeoutMs||0)}).value;};
-                out.waitRequest=function(){return false;};
-                out.requests=function(){return action('REQUEST_METADATA',{}).metadata||[];};
-                out.urls=function(){var v=action('REQUEST_METADATA',{}).finalUrl;return v?[v]:[];};
+                out.requests=function(pattern){
+                  var values=action('REQUEST_METADATA',{}).metadata||[];
+                  if(pattern===undefined||pattern===null||String(pattern)==='') return values;
+                  var patterns=Array.isArray(pattern)?pattern:[pattern];
+                  return values.filter(function(item){var url=String(item&&item.url||'');for(var i=0;i<patterns.length;i++)if(__browserMatch(url,patterns[i]))return true;return false;});
+                };
+                out.waitRequest=function(pattern,timeoutMs){
+                  var patterns=Array.isArray(pattern)?pattern:[pattern], deadline=Date.now()+Math.max(0,Number(timeoutMs||15000));
+                  do {
+                    var values=out.requests();
+                    for(var i=values.length-1;i>=0;i--){var url=String(values[i]&&values[i].url||'');for(var j=0;j<patterns.length;j++)if(__browserMatch(url,patterns[j]))return values[i];}
+                    sleep(100);
+                  } while(Date.now()<deadline);
+                  return false;
+                };
+                out.urls=function(){var values=out.requests();var result=[];for(var i=0;i<values.length;i++){var url=String(values[i]&&values[i].url||'');if(url&&result.indexOf(url)<0)result.push(url);}return result;};
                 out.html=function(){return action('DOM_SNAPSHOT',{}).value||'';};
-                out.callJs=function(script){return action('EVALUATE_PAGE_SCRIPT',{script:String(script||'')}).value;}; out.evaluate=out.callJs; out.callJson=out.callJs;
+                out.callJs=function(script){return action('EVALUATE_PAGE_SCRIPT',{script:String(script||'')}).value;}; out.evaluate=out.callJs;
+                out.callJson=function(script){var raw=out.callJs(script);try{return JSON.parse(String(raw));}catch(ignored){return undefined;}};
                 out.callJsAsync=function(script){return action('EVALUATE_PAGE_SCRIPT_ASYNC',{script:String(script||'')}).value;}; out.evaluate_async=out.callJsAsync;
                 out.tapSelector=function(selector){return action('CLICK',{selector:String(selector||'')}).value;}; out.tap_selector=out.tapSelector;
-                out.getVariable=function(name){return out.callJs('JSON.stringify(window['+JSON.stringify(String(name||''))+'])');};
+                out.getVariable=function(name){return out.callJs(String(name||''));};
                 out.cookie=function(url){return localCookie.getCookie(url);}; out.cookieSnapshot=out.cookie;
                 out.syncSession=function(url,direction){return action('SYNC_SESSION',{url:String(url||''),options:{direction:String(direction||'both')}}).value;};
-                out.setCookies=function(url,cookies){return action('SET_COOKIES',{url:String(url||''),values:Array.isArray(cookies)?cookies:[cookies]}).value;};
+                out.setCookies=function(cookies,url){return action('SET_COOKIES',{url:String(url||''),values:Array.isArray(cookies)?cookies:[cookies]}).value;};
                 out.clearCookies=function(url,names){return action('CLEAR_COOKIES',{url:String(url||''),values:Array.isArray(names)?names:[]}).value;};
                 out.block=function(patterns){return action('SET_BLOCK_PATTERNS',{values:Array.isArray(patterns)?patterns:[patterns]}).value;};
                 out.setUserAgent=function(value){return action('SET_USER_AGENT',{value:String(value||'')}).value;};
@@ -268,7 +298,7 @@ internal object ChromiumVBookPrelude {
                 return out;
               }
               global.Browser=__browser();
-              global.Engine=Object.freeze({newBrowser:function(){return __browser();},browser:function(){return __browser();}});
+              global.Engine={newBrowser:function(){return __browser();},browser:function(){return __browser();}};
 
               global.WebSocketHost=Object.freeze({exchange:function(url,messages,maxResponses){var r=__rpc('websocket_exchange',{url:String(url||''),messages:Array.isArray(messages)?messages:[],maxResponses:Number(maxResponses||1)});return r&&r.messages||[];}});
               global.WebSocket=function(url){
@@ -300,10 +330,8 @@ internal object ChromiumVBookPrelude {
               global.Log=global.Console=Object.freeze({d:function(){return __log('DEBUG',arguments);},i:function(){return __log('INFO',arguments);},w:function(){return __log('WARN',arguments);},e:function(){return __log('ERROR',arguments);},debug:function(){return __log('DEBUG',arguments);},info:function(){return __log('INFO',arguments);},log:function(){return __log('INFO',arguments);},warn:function(){return __log('WARN',arguments);},error:function(){return __log('ERROR',arguments);}});
               global.console=global.Console;
 
-              load($entry);
-              if(typeof global.execute!=='function') throw new Error('VBOOK_EXECUTE_FUNCTION_MISSING:'+$entry);
               var __payload=JSON.parse($input);
-              return String(global.execute(__payload));
+              return String(Script.execute($entry,'execute',__payload));
             })(this)
         """.trimIndent()
     }

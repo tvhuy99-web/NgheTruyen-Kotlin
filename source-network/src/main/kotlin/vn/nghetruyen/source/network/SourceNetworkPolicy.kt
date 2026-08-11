@@ -1,7 +1,6 @@
 package vn.nghetruyen.source.network
 
 import vn.nghetruyen.source.api.SourceManifest
-import vn.nghetruyen.source.api.SourceRuntimeMode
 import java.net.Inet4Address
 import java.net.Inet6Address
 import java.net.InetAddress
@@ -52,15 +51,15 @@ object SourceOriginPolicy {
         require(rawUrl.length in 1..4096) { "SOURCE_NETWORK_URL_INVALID" }
         val uri = runCatching { URI(rawUrl) }.getOrNull() ?: error("SOURCE_NETWORK_URL_INVALID")
         val network = manifest.capabilities.network
-        val vbookPublicInternet = manifest.runtime.mode == SourceRuntimeMode.VBOOK_JS_COMPAT && network?.publicInternet == true
-        val vbookCleartext = vbookPublicInternet && network.allowCleartext
+        val publicInternet = network?.publicInternet == true
+        val cleartext = publicInternet && network?.allowCleartext == true
         val scheme = uri.scheme?.lowercase(Locale.ROOT)
-        require(scheme == "https" || (vbookCleartext && scheme == "http")) {
+        require(scheme == "https" || (cleartext && scheme == "http")) {
             if (scheme == "http") "SOURCE_NETWORK_CLEARTEXT_DENIED" else "SOURCE_NETWORK_HTTPS_REQUIRED"
         }
         require(!uri.host.isNullOrBlank() && uri.userInfo == null && uri.fragment == null) { "SOURCE_NETWORK_URL_INVALID" }
         require(uri.port == -1 || uri.port in 1..65535) { "SOURCE_NETWORK_URL_INVALID" }
-        if (!vbookPublicInternet) {
+        if (!publicInternet) {
             require(allowedOrigins.any { matchesOrigin(uri, it) }) { error }
         }
         return uri

@@ -5,7 +5,7 @@ package vn.nghetruyen.source.vbook
  *
  * vBook historically grows by adding globals (Http, Engine, localStorage, Qt, ...). `App` does not
  * remove those globals; it gives new extensions one stable root that represents NgheTruyen itself.
- * The surface deliberately exposes host capabilities and serializable host-command intents rather
+ * The surface deliberately exposes host capabilities and serializable host-command messages rather
  * than Java/Android implementation objects. That is the containment boundary for the full-authority
  * extension model.
  */
@@ -26,7 +26,7 @@ object VBookAppKernelPrelude {
             for (var i=0; i<keys.length; i++) out[keys[i]] = input[keys[i]];
             return out;
           }
-          function hostCommand(domain, action, payload) {
+          function hostCommandIntent(domain, action, payload) {
             return freeze({
               kind: 'nghetruyen.host-command',
               version: 2,
@@ -34,6 +34,13 @@ object VBookAppKernelPrelude {
               action: String(action || ''),
               payload: freeze(copyObject(payload))
             });
+          }
+          function executeHostCommand(command) {
+            if (typeof global.__bridge !== 'function') throw new Error('APP_HOST_COMMAND_BRIDGE_UNAVAILABLE');
+            return global.__bridge('host_command', command);
+          }
+          function hostCommand(domain, action, payload) {
+            return executeHostCommand(hostCommandIntent(domain, action, payload));
           }
 
           var engine = value('Engine');
@@ -68,9 +75,9 @@ object VBookAppKernelPrelude {
           });
 
           /*
-           * Existing UI_ACTION handlers already understand message/openUrl/refresh. These helpers
-           * therefore work immediately without a second bridge. More invasive host commands use
-           * the stable v2 intent envelope and are consumed by the host-kernel command dispatcher.
+           * Existing UI_ACTION handlers already understand message/openUrl/refresh. Those helpers
+           * keep their compatibility result contract. Explicit ui.command() and the Reader/Library/
+           * TTS helpers use the v2 bridge and execute against the NgheTruyen host immediately.
            */
           function uiResult(options) {
             var input = options && typeof options === 'object' ? options : {};
@@ -182,6 +189,7 @@ object VBookAppKernelPrelude {
             hooks: true,
             lifecycle: true,
             hostCommandContract: true,
+            hostCommandExecution: true,
             rawAndroid: false,
             hostSecrets: false
           });
@@ -208,6 +216,8 @@ object VBookAppKernelPrelude {
             tts: ttsApi,
             hooks: hooksApi,
             lifecycle: lifecycleApi,
+            intent: hostCommandIntent,
+            execute: executeHostCommand,
             command: hostCommand
           });
         })(this);

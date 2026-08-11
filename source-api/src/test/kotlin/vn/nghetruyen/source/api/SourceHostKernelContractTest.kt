@@ -35,9 +35,28 @@ class SourceHostKernelContractTest {
     }
 
     @Test
-    fun validatesLifecycleEvents() {
-        val event = SourceHostKernelContract.event("reader.enter")
-        assertEquals("reader.enter", event.name)
+    fun commandWireFormatRoundTrips() {
+        val original = SourceHostKernelContract.command(
+            domain = "tts",
+            action = "setRate",
+            payload = JsonValue.Obj(linkedMapOf("rate" to JsonValue.Num(1.15, "1.15"))),
+        )
+        val encoded = SourceHostKernelContract.encode(original)
+        val decoded = SourceHostKernelContract.parseCommand(encoded)
+        assertEquals(original, decoded)
+        assertEquals(
+            SourceHostKernelContract.COMMAND_KIND,
+            (encoded.values["kind"] as JsonValue.Str).value,
+        )
+    }
+
+    @Test
+    fun validatesLifecycleEventsAndWireFormat() {
+        val event = SourceHostKernelContract.event(
+            "reader.enter",
+            JsonValue.Obj(linkedMapOf("chapterId" to JsonValue.Str("chapter-1"))),
+        )
+        assertEquals(event, SourceHostKernelContract.parseEvent(SourceHostKernelContract.encode(event)))
         val failure = runCatching { SourceHostKernelContract.event("android.activity") }.exceptionOrNull()
         assertTrue(failure?.message.orEmpty().contains("SOURCE_HOST_EVENT_INVALID"))
     }

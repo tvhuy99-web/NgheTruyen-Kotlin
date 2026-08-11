@@ -95,7 +95,7 @@ def main() -> None:
         "ChromiumVBookDispatcherParityRuntime",
         "CHROMIUM_PATCH_MARKER",
         "nativeBrowser.launch=function(url,timeoutMs)",
-        "nativeBrowser.loadHtml=function(html,baseUrl)",
+        "nativeBrowser.loadHtml=function(baseUrl,html)",
         "lowLoadHtml.call(nativeBrowser,String(baseUrl||''),String(html==null?'':html))",
         "nativeBrowser.html=function(waitMs)",
         "nativeBrowser.waitRequest=function(raw,timeoutMs,options)",

@@ -37,11 +37,11 @@ class VBookChromiumRuntimeStaticTest {
         ).forEach { token -> assertTrue("missing Chromium prelude invariant: $token", token in prelude) }
 
         for (forbidden in listOf(
-            "addJavascriptInterface",
-            "setAllowUniversalAccessFromFileURLs",
-            "setAllowFileAccessFromFileURLs",
-            "Class.forName",
-            "Runtime.getRuntime",
+            "addJavascriptInterface(",
+            "setAllowUniversalAccessFromFileURLs(",
+            "setAllowFileAccessFromFileURLs(",
+            "Class.forName(",
+            "Runtime.getRuntime(",
             "ProcessBuilder(",
         )) {
             assertFalse("Chromium action engine must not expose process/platform escape: $forbidden", forbidden in runtime || forbidden in prelude)

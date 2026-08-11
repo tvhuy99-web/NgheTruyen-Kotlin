@@ -1,5 +1,7 @@
 package vn.nghetruyen.app.sources
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import vn.nghetruyen.app.core.common.AppResult
 import vn.nghetruyen.app.core.model.ChapterContent
 import vn.nghetruyen.app.core.model.ChapterSummary
@@ -72,7 +74,7 @@ class SourceRegistry(
                 selected[id] = candidate
             }
         }
-        return selected
+        return selected.mapValues { (_, source) -> source.withVBookExecutionBoundary() }
     }
 
     companion object {
@@ -87,6 +89,48 @@ class SourceRegistry(
             NotPortedSource("wattpad", "Wattpad / vBook", "https://www.wattpad.com"),
         )
     }
+}
+
+/**
+ * vBook compatibility scripts expose synchronous Http/fetch helpers to JavaScript. Their host
+ * implementation is intentionally blocking, so the complete source call must leave the Android
+ * main thread before script execution begins. Keeping the boundary here protects every UI caller
+ * while preserving the vBook JavaScript contract and lets browser/host brokers do their own
+ * thread-hops internally when they need Android's main looper.
+ */
+private fun StorySource.withVBookExecutionBoundary(): StorySource = when {
+    descriptor.implementationKind != SourceImplementationKind.VBOOK -> this
+    this is IoBoundVBookStorySource -> this
+    else -> IoBoundVBookStorySource(this)
+}
+
+private class IoBoundVBookStorySource(
+    private val delegate: StorySource,
+) : StorySource {
+    override val descriptor: SourceDescriptor get() = delegate.descriptor
+    override val selectionPriority: Int get() = delegate.selectionPriority
+
+    override suspend fun search(query: String, page: Int) = onIo { delegate.search(query, page) }
+    override suspend fun category(category: String, page: Int) = onIo { delegate.category(category, page) }
+    override suspend fun story(url: String) = onIo { delegate.story(url) }
+    override suspend fun chapter(url: String) = onIo { delegate.chapter(url) }
+    override suspend fun home(page: Int) = onIo { delegate.home(page) }
+    override suspend fun suggestions(query: String) = onIo { delegate.suggestions(query) }
+    override suspend fun comments(url: String) = onIo { delegate.comments(url) }
+    override suspend fun commentsPage(url: String) = onIo { delegate.commentsPage(url) }
+    override suspend fun runUiAction(
+        actionId: String,
+        surface: SourceUiSurface,
+        currentUrl: String?,
+        storyId: String?,
+        chapterId: String?,
+    ) = onIo { delegate.runUiAction(actionId, surface, currentUrl, storyId, chapterId) }
+
+    override suspend fun latestChapter(url: String) = onIo { delegate.latestChapter(url) }
+    override suspend fun chapterPage(storyId: String, url: String, startIndex: Int) =
+        onIo { delegate.chapterPage(storyId, url, startIndex) }
+
+    private suspend fun <T> onIo(block: suspend () -> T): T = withContext(Dispatchers.IO) { block() }
 }
 
 private class NotPortedSource(

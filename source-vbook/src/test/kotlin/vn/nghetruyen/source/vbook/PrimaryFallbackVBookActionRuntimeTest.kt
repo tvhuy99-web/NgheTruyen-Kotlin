@@ -21,14 +21,14 @@ import vn.nghetruyen.source.runtime.SourceResourceProvider
 
 class PrimaryFallbackVBookActionRuntimeTest {
     @Test
-    fun fallsBackOnlyWhenPrimaryIsUnavailableBeforeExecution() {
+    fun fallsBackOnlyForWhitelistedPreExecutionUnavailableState() {
         var primaryCalls = 0
         var fallbackCalls = 0
         val primary = VBookActionRuntime { _, _, request ->
             primaryCalls += 1
             SourcePlatformResult.Failure(SourcePlatformFailure(
                 SourceErrorCode.VBOOK_RUNTIME_UNAVAILABLE,
-                "CHROMIUM_NOT_AVAILABLE",
+                "CHROMIUM_WEBVIEW_UNAVAILABLE:provider-missing",
                 request.traceId,
             ))
         }
@@ -48,6 +48,26 @@ class PrimaryFallbackVBookActionRuntimeTest {
         val expected = SourcePlatformResult.Failure(SourcePlatformFailure(
             SourceErrorCode.VBOOK_SCRIPT_ERROR,
             "SCRIPT_ALREADY_RAN_AND_FAILED",
+            "trace",
+        ))
+        val primary = VBookActionRuntime { _, _, _ -> expected }
+        val fallback = VBookActionRuntime { _, _, _ ->
+            fallbackCalls += 1
+            SourcePlatformResult.Success(SourceActionResponse(JsonValue.Str("must-not-run"), "trace", 0))
+        }
+
+        val actual = PrimaryFallbackVBookActionRuntime(primary, fallback).execute(manifest(), resources(), request())
+
+        assertSame(expected, actual)
+        assertEquals(0, fallbackCalls)
+    }
+
+    @Test
+    fun doesNotReplayUnrecognizedUnavailableFailureSuchAsRendererCrash() {
+        var fallbackCalls = 0
+        val expected = SourcePlatformResult.Failure(SourcePlatformFailure(
+            SourceErrorCode.VBOOK_RUNTIME_UNAVAILABLE,
+            "CHROMIUM_RENDERER_GONE:true",
             "trace",
         ))
         val primary = VBookActionRuntime { _, _, _ -> expected }

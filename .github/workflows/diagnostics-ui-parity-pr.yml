@@ -26,8 +26,116 @@ jobs:
           java-version: '17'
       - name: Apply deterministic parity migration
         run: python3 scripts/run_lua_diagnostics_migration.py
-      - name: Clean duplicate imports
-        run: python3 scripts/cleanup_lua_diagnostics_patch.py
+      - name: Normalize migrated Kotlin source
+        shell: bash
+        run: |
+          python3 scripts/cleanup_lua_diagnostics_patch.py
+          python3 <<'PY'
+          from pathlib import Path
+
+          root = Path('.')
+
+          # Compose exposes Modifier.weight through RowScope/ColumnScope; importing the internal
+          # backing property breaks compilation on the current Compose version.
+          chrome = root / 'app/src/main/java/vn/nghetruyen/app/ui/components/ReferenceDiagnosticsChrome.kt'
+          text = chrome.read_text(encoding='utf-8').replace('import androidx.compose.foundation.layout.weight\n', '')
+          chrome.write_text(text, encoding='utf-8')
+
+          # A retried migration may have inserted this helper repeatedly because its anchor is a
+          # prefix of the inserted block. Collapse the whole helper region to one canonical copy.
+          playback = root / 'app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt'
+          text = playback.read_text(encoding='utf-8')
+          start = text.find('    private fun diagnostic(\n')
+          end = text.find('    private var transitionMessage:', start)
+          if start < 0 or end < 0:
+              raise SystemExit('missing TTS diagnostic helper region')
+          helper = '''    private fun diagnostic(
+              name: String,
+              severity: DiagnosticSeverity = DiagnosticSeverity.DEBUG,
+              attributes: Map<String, String> = emptyMap(),
+          ) {
+              val snapshot = PlaybackQueueStore.state.value
+              container.sourceDiagnostics.mark(
+                  name = name,
+                  category = DiagnosticCategory.RUNTIME,
+                  severity = severity,
+                  sourceId = snapshot.sourceId.ifBlank { "tts" },
+                  traceId = "tts:$playbackSessionId",
+                  attributes = attributes + mapOf(
+                      "storyId" to snapshot.storyId,
+                      "chapterId" to snapshot.chapterId,
+                      "unitId" to snapshot.currentUnitId.orEmpty(),
+                      "speechChunkIndex" to snapshot.speechChunkIndex.toString(),
+                  ),
+              )
+          }
+
+          '''
+          playback.write_text(text[:start] + helper + text[end:], encoding='utf-8')
+
+          # Same normalization for the exported app runtime snapshot helper.
+          vm = root / 'app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt'
+          text = vm.read_text(encoding='utf-8')
+          start = text.find('    private fun diagnosticsRuntimeSnapshot(): Map<String, String> {\n')
+          end = text.find('    fun exportSourceDiagnostics(uri: Uri) {\n', start)
+          if start < 0 or end < 0:
+              raise SystemExit('missing diagnosticsRuntimeSnapshot region')
+          snapshot = '''    private fun diagnosticsRuntimeSnapshot(): Map<String, String> {
+              val snapshot = state.value
+              val playback = snapshot.playback
+              return linkedMapOf(
+                  "destination" to snapshot.destination.toString(),
+                  "rootTab" to snapshot.rootTab.name,
+                  "selectedSourceId" to snapshot.selectedSourceId,
+                  "loading" to snapshot.loading.toString(),
+                  "aiBusy" to snapshot.aiBusy.toString(),
+                  "storyId" to playback.storyId,
+                  "chapterId" to playback.chapterId,
+                  "chapterIndex" to playback.chapterIndex.toString(),
+                  "paragraphIndex" to playback.paragraphIndex.toString(),
+                  "speechChunkIndex" to playback.speechChunkIndex.toString(),
+                  "unitId" to playback.currentUnitId.orEmpty(),
+                  "playbackPlaying" to playback.isPlaying.toString(),
+                  "playbackPreparation" to playback.preparationState.name,
+                  "ttsRate" to playback.rate.toString(),
+                  "ttsPitch" to playback.pitch.toString(),
+                  "ttsVolume" to playback.volume.toString(),
+                  "sonicEnabled" to snapshot.sonicProcessingEnabled.toString(),
+                  "downloadJobs" to snapshot.downloads.size.toString(),
+                  "downloadFailures" to snapshot.downloadFailures.size.toString(),
+                  "audioExportJobs" to snapshot.audioExports.size.toString(),
+                  "vietPhraseRules" to snapshot.vietPhraseRules.size.toString(),
+                  "vietPhraseDictionaries" to snapshot.vietPhraseDictionaryStates.size.toString(),
+                  "sourceSessions" to snapshot.sourceSessions.size.toString(),
+                  "sourcePacks" to snapshot.sourcePacks.size.toString(),
+              )
+          }
+
+          '''
+          vm.write_text(text[:start] + snapshot + text[end:], encoding='utf-8')
+
+          # Keep the rich AppResult source-failure event in handleSourceFailure(). In failJob(),
+          # only message is available, so record a valid generic terminal failure instead.
+          download = root / 'app/src/main/java/vn/nghetruyen/app/downloads/ChapterDownloadWorker.kt'
+          text = download.read_text(encoding='utf-8')
+          fail_start = text.find('    private suspend fun failJob(\n')
+          fail_end = text.find('    private suspend fun publishProgress', fail_start)
+          if fail_start < 0 or fail_end < 0:
+              raise SystemExit('missing failJob region')
+          region = text[fail_start:fail_end]
+          bad = '        (applicationContext as? NgheTruyenApplication)?.container?.sourceDiagnostics?.mark(name = "DOWNLOAD_SOURCE_FAILURE", sourceId = sourceId, traceId = "download:$jobId", severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.ERROR, attributes = mapOf("storyId" to storyId, "code" to failure.code, "error" to failure.message.take(500), "completed" to completed.toString(), "total" to total.toString()))\n'
+          if bad in region:
+              good = '''        (applicationContext as? NgheTruyenApplication)?.container?.sourceDiagnostics?.mark(
+              name = "DOWNLOAD_JOB_FAILED",
+              sourceId = sourceId,
+              traceId = "download:$jobId",
+              severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.ERROR,
+              attributes = mapOf("storyId" to storyId, "error" to message.take(500)),
+          )
+          '''
+              region = region.replace(bad, good, 1)
+          download.write_text(text[:fail_start] + region + text[fail_end:], encoding='utf-8')
+          PY
       - name: Persist migrated source and release gate
         shell: bash
         run: |

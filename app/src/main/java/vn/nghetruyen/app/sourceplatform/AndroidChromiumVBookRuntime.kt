@@ -126,7 +126,7 @@ class AndroidChromiumVBookRuntime(
         return evaluation.fold(
             onSuccess = { raw ->
                 runCatching {
-                    val normalized = decodeCompatibilityResult(raw)
+                    val normalized = ChromiumVBookDispatchDecoder.decode(raw)
                     val bytes = JsonCodec.stringify(normalized).toByteArray(Charsets.UTF_8).size
                     require(bytes <= action.maxOutputBytes) { "CHROMIUM_OUTPUT_TOO_LARGE" }
                     SourceActionResponse(normalized, request.traceId, 0)
@@ -290,22 +290,6 @@ class AndroidChromiumVBookRuntime(
             return Result.failure(IllegalStateException("CHROMIUM_ACTION_TIMEOUT"))
         }
         return outcome.get() ?: Result.failure(IllegalStateException("CHROMIUM_RESULT_MISSING"))
-    }
-
-    private fun decodeCompatibilityResult(raw: String): JsonValue {
-        val first = JsonCodec.parse(raw, maxDepth = 96, maxNodes = 200_000)
-        val decoded = if (first is JsonValue.Str) {
-            runCatching { JsonCodec.parse(first.value, maxDepth = 96, maxNodes = 200_000) }.getOrDefault(first)
-        } else first
-        val obj = decoded as? JsonValue.Obj ?: return decoded
-        val code = obj.int("code")
-        if (code != null && code != 0) error("VBOOK_RESPONSE_ERROR:${obj.string("data") ?: obj.string("error").orEmpty()}")
-        if (obj.bool("success") == false) error("VBOOK_RESPONSE_ERROR:${obj.string("error").orEmpty()}")
-        return when {
-            code == 0 -> obj.values["data"] ?: JsonValue.Null
-            obj.bool("success") == true -> obj.values["data"] ?: JsonValue.Null
-            else -> decoded
-        }
     }
 
     override fun close() {

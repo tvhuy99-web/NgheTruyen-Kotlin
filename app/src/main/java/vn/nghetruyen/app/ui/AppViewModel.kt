@@ -3431,6 +3431,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             ?: return
         viewModelScope.launch {
             container.libraryRepository.deleteStoryAiProfile(storyId)
+            ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
             showMessage("Đã chuyển truyện về cấu hình AI chung.")
         }
     }

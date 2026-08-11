@@ -1647,6 +1647,7 @@ class ReaderPlaybackService : Service() {
             narrationPrefetchJob?.cancel()
             narrationPlanningChapterId = ""
             narrationPreparedChapterId = ""
+            if (!PlaybackQueueStore.state.value.isPlaying) pendingPlay = false
             PlaybackQueueStore.setNarrationAutomation(
                 stage = NarrationAutomationStage.IDLE,
                 progress = 0f,

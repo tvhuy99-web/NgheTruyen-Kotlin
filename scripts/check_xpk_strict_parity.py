@@ -188,6 +188,7 @@ require(
     "ACTION_APPLY_NARRATION_AND_PLAY",
     "Phân vai chưa thành công. Sẽ tự thử lại sau 5 giây.",
     "if (currentStoryAutoVoiceCastEnabled && prefetchNarrationPlansEnabled)",
+    "if (!PlaybackQueueStore.state.value.isPlaying) pendingPlay = false",
 )
 forbid(
     "app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt",

@@ -13,18 +13,19 @@ internal object ChromiumVBookDispatchDecoder {
     fun decode(raw: String): JsonValue.Obj {
         var current = JsonCodec.parse(raw, maxDepth = MAX_DEPTH, maxNodes = MAX_NODES)
         repeat(MAX_LAYERS) {
-            val obj = current as? JsonValue.Obj
+            val snapshot = current
+            val obj = snapshot as? JsonValue.Obj
             if (obj != null && obj.values.containsKey(RAW_RESULT_KEY)) return obj
 
-            current = when (current) {
+            current = when (snapshot) {
                 is JsonValue.Str -> runCatching {
-                    JsonCodec.parse(current.value, maxDepth = MAX_DEPTH, maxNodes = MAX_NODES)
+                    JsonCodec.parse(snapshot.value, maxDepth = MAX_DEPTH, maxNodes = MAX_NODES)
                 }.getOrElse {
                     error("CHROMIUM_DISPATCH_STRING_JSON_REQUIRED")
                 }
 
-                is JsonValue.Obj -> unwrapEnvelope(current)
-                else -> error("CHROMIUM_DISPATCH_RESULT_OBJECT_REQUIRED:${current.javaClass.simpleName}")
+                is JsonValue.Obj -> unwrapEnvelope(snapshot)
+                else -> error("CHROMIUM_DISPATCH_RESULT_OBJECT_REQUIRED:${snapshot.javaClass.simpleName}")
             }
         }
         error("CHROMIUM_DISPATCH_RESULT_DEPTH_EXCEEDED")

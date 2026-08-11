@@ -8,17 +8,20 @@ import vn.nghetruyen.app.BuildConfig
 import vn.nghetruyen.source.diagnostics.BoundedDiagnosticEvidenceRecorder
 import vn.nghetruyen.source.diagnostics.BoundedDiagnosticRecorder
 import vn.nghetruyen.source.diagnostics.DiagnosticEvidence
+import vn.nghetruyen.source.diagnostics.DiagnosticCategory
 import vn.nghetruyen.source.diagnostics.DiagnosticEvidenceSink
 import vn.nghetruyen.source.diagnostics.DiagnosticEvent
 import vn.nghetruyen.source.diagnostics.DiagnosticJsonExporter
 import vn.nghetruyen.source.diagnostics.DiagnosticLevel
 import vn.nghetruyen.source.diagnostics.DiagnosticRedactor
+import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 import vn.nghetruyen.source.diagnostics.DiagnosticSink
 import vn.nghetruyen.source.diagnostics.SourceSnapshotSanitizer
 import vn.nghetruyen.source.diagnostics.SourceTraceExplorer
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.time.Instant
+import java.util.UUID
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -46,11 +49,52 @@ class SourceDiagnosticRuntime(private val context: Context) {
 
     fun setMode(requested: String): String {
         val normalized = normalizeMode(requested)
+        val previous = mode
         val enteringAdvanced = normalized == "advanced" && mode != "advanced"
+        if (normalized == "off" && previous != "off") {
+            mark(
+                name = "DIAGNOSTICS_MODE_CHANGED",
+                category = DiagnosticCategory.RUNTIME,
+                severity = DiagnosticSeverity.INFO,
+                attributes = mapOf("from" to previous, "to" to normalized),
+            )
+        }
         mode = normalized
         prefs.edit().putString(KEY_MODE, normalized).apply()
         applyMode(normalized, rotateAdvanced = enteringAdvanced)
+        if (normalized != "off") {
+            mark(
+                name = "DIAGNOSTICS_MODE_CHANGED",
+                category = DiagnosticCategory.RUNTIME,
+                severity = DiagnosticSeverity.INFO,
+                attributes = mapOf("from" to previous, "to" to normalized),
+            )
+        }
         return normalized
+    }
+
+    fun mark(
+        name: String,
+        category: DiagnosticCategory = DiagnosticCategory.RUNTIME,
+        severity: DiagnosticSeverity = DiagnosticSeverity.DEBUG,
+        sourceId: String = "app",
+        traceId: String = "",
+        durationMs: Long? = null,
+        attributes: Map<String, String> = emptyMap(),
+    ) {
+        if (mode == "off") return
+        recorder.emit(
+            DiagnosticEvent(
+                timestampEpochMs = System.currentTimeMillis(),
+                traceId = traceId.ifBlank { "app:${UUID.randomUUID()}" },
+                sourceId = sourceId.ifBlank { "app" },
+                category = category,
+                name = name.take(160),
+                severity = severity,
+                durationMs = durationMs,
+                attributes = attributes + ("diagnosticsMode" to mode),
+            ),
+        )
     }
 
     fun clearBlackBox() {
@@ -63,6 +107,8 @@ class SourceDiagnosticRuntime(private val context: Context) {
         events: List<DiagnosticEvent>,
         installed: List<SourcePackUiInfo>,
         repositories: List<SourceRepositoryUiInfo>,
+        runtimeState: Map<String, String> = emptyMap(),
+        backupLogTail: String = "",
     ): ByteArray {
         val output = ByteArrayOutputStream()
         ZipOutputStream(output).use { zip ->
@@ -71,6 +117,10 @@ class SourceDiagnosticRuntime(private val context: Context) {
             zip.addText("report/environment.json", environment(events).toString(2))
             zip.addText("report/installed_sources.json", installedJson(installed).toString(2))
             zip.addText("report/repositories.json", repositoriesJson(repositories).toString(2))
+            zip.addText("report/app_runtime.json", JSONObject(DiagnosticRedactor.redact(runtimeState)).toString(2))
+            if (backupLogTail.isNotBlank()) {
+                zip.addText("report/backup_tail.log", DiagnosticRedactor.redactLongText(backupLogTail, 64_000))
+            }
             zip.addText("report/traces.txt", traceReport(events))
 
             evidence.snapshot().forEachIndexed { index, item ->
@@ -211,6 +261,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
         appendLine("This bundle intentionally keeps high-fidelity browser/runtime evidence for debugging.")
         appendLine("HTML keeps DOM, script and style structure; common credentials and sensitive values are redacted during export.")
         appendLine("Advanced mode retains up to 64 MiB of evidence and a crash-safe rolling journal in private app storage.")
+        appendLine("The report also includes a sanitized app runtime snapshot plus the tail of the backup/restore log when available.")
         appendLine("The crash-safe/previous section may contain the final evidence from the process before the latest restart.")
     }
 

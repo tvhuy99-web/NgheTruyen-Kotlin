@@ -9,6 +9,9 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import vn.nghetruyen.app.NgheTruyenApplication
+import vn.nghetruyen.source.diagnostics.DiagnosticCategory
+import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 import vn.nghetruyen.app.core.common.AppResult
 import vn.nghetruyen.app.data.local.VoiceRoleEntity
 import vn.nghetruyen.app.data.repository.LibraryRepository
@@ -62,6 +65,10 @@ class XpkNarrationAiServices(
     }
 
     suspend fun planNarration(request: NarrationPlanRequest): AppResult<NarrationPlan> {
+        diagnostic(
+            "AI_NARRATION_PLAN_START",
+            attributes = mapOf("storyId" to request.storyId, "chapterId" to request.chapterId, "voiceCast" to request.includeVoiceCast.toString(), "sceneMusic" to request.includeSceneMusic.toString(), "inputChars" to request.rawText.length.toString()),
+        )
         val rawText = request.rawText.trim()
         if (rawText.isBlank()) return failure("AI_EMPTY_INPUT", "Chương không có nội dung để lập kế hoạch kể chuyện.")
         if (rawText.length > MAX_PLAN_CHARS) return failure("AI_INPUT_TOO_LARGE", "Chương quá dài để lập kế hoạch kể chuyện trong một lượt.")
@@ -168,7 +175,10 @@ class XpkNarrationAiServices(
                 } else parsed.voiceCast
                 parsed.copy(voiceCast = normalizedVoice)
             }.fold(
-                { AppResult.Success(it) },
+                {
+                    diagnostic("AI_NARRATION_PLAN_COMPLETED", DiagnosticSeverity.INFO, mapOf("storyId" to request.storyId, "chapterId" to request.chapterId))
+                    AppResult.Success(it)
+                },
                 { failure("AI_BAD_RESPONSE", it.message ?: "Kết quả kế hoạch kể chuyện không hợp lệ.", it) },
             )
         }
@@ -437,7 +447,14 @@ class XpkNarrationAiServices(
         val body: String,
     )
 
-    private fun failure(code: String, message: String, cause: Throwable? = null) = AppResult.Failure(code, message, cause)
+    private fun diagnostic(name: String, severity: DiagnosticSeverity = DiagnosticSeverity.DEBUG, attributes: Map<String, String> = emptyMap()) {
+        (appContext as? NgheTruyenApplication)?.container?.sourceDiagnostics?.mark(name = name, category = DiagnosticCategory.RUNTIME, severity = severity, sourceId = "ai", attributes = attributes)
+    }
+
+    private fun failure(code: String, message: String, cause: Throwable? = null): AppResult.Failure {
+        diagnostic("AI_NARRATION_FAILURE", DiagnosticSeverity.WARN, mapOf("code" to code, "message" to message.take(500), "cause" to (cause?.javaClass?.simpleName ?: "")))
+        return AppResult.Failure(code, message, cause)
+    }
 
     companion object {
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()

@@ -58,6 +58,8 @@ import vn.nghetruyen.app.ui.reference.ReferenceVoiceRoleExtras
 import vn.nghetruyen.app.audio.Pcm16WaveConverter
 import vn.nghetruyen.app.audio.SonicPcmProcessor
 import vn.nghetruyen.app.audio.PcmLoudnessEstimator
+import vn.nghetruyen.source.diagnostics.DiagnosticCategory
+import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 import java.io.File
 import java.util.ArrayDeque
 import java.util.Locale
@@ -133,6 +135,27 @@ class ReaderPlaybackService : Service() {
     private var narrationPrefetchJob: Job? = null
     private var narrationPlanningChapterId: String = ""
     @Volatile private var narrationReloadPending = false
+
+    private fun diagnostic(
+        name: String,
+        severity: DiagnosticSeverity = DiagnosticSeverity.DEBUG,
+        attributes: Map<String, String> = emptyMap(),
+    ) {
+        val snapshot = PlaybackQueueStore.state.value
+        container.sourceDiagnostics.mark(
+            name = name,
+            category = DiagnosticCategory.RUNTIME,
+            severity = severity,
+            sourceId = snapshot.sourceId.ifBlank { "tts" },
+            traceId = "tts:$playbackSessionId",
+            attributes = attributes + mapOf(
+                "storyId" to snapshot.storyId,
+                "chapterId" to snapshot.chapterId,
+                "unitId" to snapshot.currentUnitId.orEmpty(),
+                "speechChunkIndex" to snapshot.speechChunkIndex.toString(),
+            ),
+        )
+    }
     private var transitionMessage: String? = null
     private var currentEnginePackage: String? = null
     private var pendingRoleEnginePackage: String? = null
@@ -191,6 +214,7 @@ class ReaderPlaybackService : Service() {
                 pauseOnHeadsetDisconnect && PlaybackQueueStore.state.value.isPlaying
             ) {
                 transitionMessage = "Đã tạm dừng vì tai nghe bị ngắt kết nối."
+                diagnostic("TTS_HEADSET_DISCONNECTED_PAUSE", DiagnosticSeverity.WARN)
                 pause()
             }
         }
@@ -198,6 +222,7 @@ class ReaderPlaybackService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        diagnostic("TTS_SERVICE_CREATED", DiagnosticSeverity.INFO)
         createNotificationChannel()
         audioManager = getSystemService(AudioManager::class.java)
         sceneMusicController = SceneMusicController(this, serviceScope) { message ->
@@ -260,6 +285,7 @@ class ReaderPlaybackService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(NOTIFICATION_ID, buildNotification())
         val action = intent?.action
+        diagnostic("TTS_COMMAND", attributes = mapOf("action" to (action ?: "RESTORE"), "startId" to startId.toString()))
         when (action) {
             null -> restoreCheckpointAndMaybePlay(playAfterRestore = false)
             ACTION_PLAY -> playOrRestore()
@@ -565,6 +591,11 @@ class ReaderPlaybackService : Service() {
         initWatchdog?.let(mainHandler::removeCallbacks)
         initWatchdog = null
         ttsReady = status == TextToSpeech.SUCCESS
+        if (ttsReady) {
+            diagnostic("TTS_ENGINE_READY", DiagnosticSeverity.INFO, mapOf("engine" to currentEnginePackage.orEmpty()))
+        } else {
+            diagnostic("TTS_ENGINE_INIT_FAILED", DiagnosticSeverity.ERROR, mapOf("engine" to currentEnginePackage.orEmpty(), "status" to status.toString()))
+        }
         if (!ttsReady && !currentEnginePackage.isNullOrBlank()) {
             failedEnginePackages += currentEnginePackage.orEmpty()
             pendingRoleEnginePackage = null
@@ -574,12 +605,16 @@ class ReaderPlaybackService : Service() {
         }
         if (ttsReady) {
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                override fun onStart(utteranceId: String?) = Unit
+                override fun onStart(utteranceId: String?) {
+                    diagnostic("TTS_UTTERANCE_START", attributes = mapOf("utteranceId" to utteranceId.orEmpty()))
+                }
                 override fun onError(utteranceId: String?) {
+                    diagnostic("TTS_UTTERANCE_ERROR", DiagnosticSeverity.ERROR, mapOf("utteranceId" to utteranceId.orEmpty()))
                     if (utteranceId == activeSonicSynthesisId) onSonicSynthesisCompleted(false)
                     else onSpeechCompleted(utteranceId, false)
                 }
                 override fun onDone(utteranceId: String?) {
+                    diagnostic("TTS_UTTERANCE_DONE", attributes = mapOf("utteranceId" to utteranceId.orEmpty()))
                     if (utteranceId == activeSonicSynthesisId) onSonicSynthesisCompleted(true)
                     else onSpeechCompleted(utteranceId, true)
                 }
@@ -639,6 +674,7 @@ class ReaderPlaybackService : Service() {
             return
         }
         if (!requestAudioFocus()) {
+            diagnostic("TTS_AUDIO_FOCUS_FAILED", DiagnosticSeverity.WARN)
             pendingPlay = false
             PlaybackQueueStore.setPlaying(false)
             transitionMessage = "Không lấy được quyền phát âm thanh."
@@ -697,6 +733,7 @@ class ReaderPlaybackService : Service() {
         val desiredEngine = config.enginePackage?.takeUnless(failedEnginePackages::contains)
             ?: activeBaseVoice.enginePackage?.takeUnless(failedEnginePackages::contains)
         if (desiredEngine != currentEnginePackage) {
+            diagnostic("TTS_VOICE_ENGINE_SWITCH", DiagnosticSeverity.INFO, mapOf("from" to currentEnginePackage.orEmpty(), "to" to desiredEngine.orEmpty()))
             pendingRoleEnginePackage = desiredEngine ?: "__DEFAULT__"
             pendingConfigUseStoryProfile = true
             pendingPlay = true

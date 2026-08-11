@@ -417,6 +417,23 @@ fun PersonalScreen(
         }
         "settings_diagnostics" -> PersonalSubPage("CHẨN ĐOÁN") {
             PerformanceCard(state.performanceReport, onRunPerformanceDiagnostics)
+            SourceDiagnosticsSection(
+                state = state,
+                selectorBaseUrl = selectorBaseUrl,
+                onSelectorBaseUrlChange = { selectorBaseUrl = it },
+                selector = selector,
+                onSelectorChange = { selector = it },
+                selectorHtml = selectorHtml,
+                onSelectorHtmlChange = { selectorHtml = it },
+                onInspectSelector = onInspectSourceSelector,
+                onExportDiagnostics = onExportSourceDiagnostics,
+                onClearDiagnostics = onClearSourceDiagnostics,
+                onCheckSource = onCheckSource,
+                onCheckAll = onCheckAllSources,
+                onOpenLogin = onOpenSourceLogin,
+                onOpenDiagnosticBrowser = onOpenSourceDiagnosticBrowser,
+                onClearSession = onClearSourceSession,
+            )
         }
         "extensions_home" -> PersonalMenuPage(
             title = "TIỆN ÍCH MỞ RỘNG",
@@ -1203,31 +1220,29 @@ private fun SourceDiagnosticsSection(
     onOpenDiagnosticBrowser: (String) -> Unit,
     onClearSession: (String) -> Unit,
 ) {
-    Card(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
-        Column(Modifier.padding(14.dp)) {
-            Text("NHẬT KÝ & TRACE", fontWeight = FontWeight.Bold)
-            Text(
-                when {
-                    state.diagnosticsMode == "off" -> "CHƯA BẬT NHẬT KÝ"
-                    state.sourceDiagnosticCount == 0 -> "ĐANG GHI NHẬT KÝ..."
-                    else -> "XEM NHẬT KÝ • ${state.sourceDiagnosticCount} sự kiện"
-                },
-                style = MaterialTheme.typography.bodySmall,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
-                Button(onExportDiagnostics, Modifier.weight(1f).padding(2.dp)) {
-                    Text(if (state.diagnosticsMode == "advanced") "XUẤT HỘP ĐEN" else "XUẤT CHẨN ĐOÁN")
+    if (state.diagnosticsMode != "off") {
+        Card(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+            Column(Modifier.padding(14.dp)) {
+                Text("NHẬT KÝ & TRACE", fontWeight = FontWeight.Bold)
+                Text(
+                    if (state.sourceDiagnosticCount == 0) "CHƯA CÓ NHẬT KÝ" else "XEM NHẬT KÝ • ${state.sourceDiagnosticCount} sự kiện",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                    Button(onExportDiagnostics, Modifier.weight(1f).padding(2.dp)) {
+                        Text(if (state.diagnosticsMode == "advanced") "XUẤT HỘP ĐEN" else "XUẤT CHẨN ĐOÁN")
+                    }
+                    Button(onClearDiagnostics, Modifier.weight(1f).padding(2.dp)) { Text("XÓA NHẬT KÝ") }
                 }
-                Button(onClearDiagnostics, Modifier.weight(1f).padding(2.dp)) { Text("XÓA NHẬT KÝ") }
-            }
-            state.sourceDiagnostics.take(8).forEach { event ->
-                val duration = event.durationMs?.let { " • ${it} ms" }.orEmpty()
-                Text("${event.severity} ${event.category}/${event.name}$duration", style = MaterialTheme.typography.bodySmall, fontWeight = if (event.severity == "ERROR") FontWeight.SemiBold else FontWeight.Normal)
-                Text("${event.sourceId} • trace ${event.traceId.take(8)}${event.detail.takeIf(String::isNotBlank)?.let { " • $it" }.orEmpty()}", style = MaterialTheme.typography.bodySmall)
-            }
-            state.sourceTraces.take(8).forEach { trace ->
-                Text("${if (trace.failed) "LỖI" else "OK"} • ${trace.sourceId} • ${trace.eventCount} sự kiện • ${trace.endedAtEpochMs - trace.startedAtEpochMs} ms", style = MaterialTheme.typography.bodySmall)
+                state.sourceDiagnostics.take(30).forEach { event ->
+                    val duration = event.durationMs?.let { " • ${it} ms" }.orEmpty()
+                    Text("${event.severity} ${event.category}/${event.name}$duration", style = MaterialTheme.typography.bodySmall, fontWeight = if (event.severity == "ERROR") FontWeight.SemiBold else FontWeight.Normal)
+                    Text("${event.sourceId} • trace ${event.traceId.take(16)}${event.detail.takeIf(String::isNotBlank)?.let { " • $it" }.orEmpty()}", style = MaterialTheme.typography.bodySmall)
+                }
+                state.sourceTraces.take(20).forEach { trace ->
+                    Text("${if (trace.failed) "LỖI" else "OK"} • ${trace.sourceId} • ${trace.eventCount} sự kiện • ${trace.endedAtEpochMs - trace.startedAtEpochMs} ms", style = MaterialTheme.typography.bodySmall)
+                }
             }
         }
     }

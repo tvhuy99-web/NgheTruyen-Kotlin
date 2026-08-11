@@ -350,6 +350,11 @@ fun ReaderScreen(
             }.getOrNull()
         }
         vietPhraseDiagnosticBusy = true
+        app.container.sourceDiagnostics.mark(
+            name = "VIETPHRASE_DIAGNOSTIC_START",
+            sourceId = storyDetail?.story?.sourceId ?: "vietphrase",
+            attributes = mapOf("storyId" to storyId, "chapterId" to content.chapter.id, "rules" to rules.size.toString()),
+        )
         scope.launch {
             val exported = withContext(Dispatchers.IO) {
                 VietPhraseDiagnosticExporter.export(
@@ -362,8 +367,22 @@ fun ReaderScreen(
                 )
             }
             vietPhraseDiagnosticBusy = false
-            exported.onSuccess { vietPhraseDiagnosticResult = it }
-                .onFailure { onMessage(it.message ?: "Lỗi tạo nhật ký VietPhrase.") }
+            exported.onSuccess {
+                vietPhraseDiagnosticResult = it
+                app.container.sourceDiagnostics.mark(
+                    name = "VIETPHRASE_DIAGNOSTIC_COMPLETED",
+                    sourceId = storyDetail?.story?.sourceId ?: "vietphrase",
+                    attributes = mapOf("storyId" to storyId, "chapterId" to content.chapter.id),
+                )
+            }.onFailure { error ->
+                app.container.sourceDiagnostics.mark(
+                    name = "VIETPHRASE_DIAGNOSTIC_FAILED",
+                    severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.ERROR,
+                    sourceId = storyDetail?.story?.sourceId ?: "vietphrase",
+                    attributes = mapOf("storyId" to storyId, "chapterId" to content.chapter.id, "error" to (error.message ?: error.javaClass.simpleName)),
+                )
+                onMessage(error.message ?: "Lỗi tạo nhật ký VietPhrase.")
+            }
         }
     }
 
@@ -458,7 +477,6 @@ fun ReaderScreen(
                 }
             }
             Row(Modifier.fillMaxWidth()) {
-                ReaderButton("XEM NHẬT KÝ", { showDiagnosticLogDialog = true }, Modifier.weight(1f), normalColor = ReferenceGray)
                 ReaderButton(if (state.aiBusy) "AI ĐANG CHẠY…" else if (state.chapterTextMode == ChapterTextMode.AI_TRANSLATION) "DỊCH LẠI" else "DỊCH AI", onAiTranslate, Modifier.weight(1f), enabled = !state.aiBusy, normalColor = ReferencePurple)
                 ReaderButton("PHÂN VAI AI", onVoiceCast, Modifier.weight(1f), enabled = !state.aiBusy, normalColor = Color(0xFFAF52DE))
             }

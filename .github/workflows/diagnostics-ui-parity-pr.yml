@@ -28,12 +28,12 @@ jobs:
         run: python3 scripts/run_lua_diagnostics_migration.py
       - name: Clean duplicate imports
         run: python3 scripts/cleanup_lua_diagnostics_patch.py
-      - name: Persist migrated source
+      - name: Persist migrated source and release gate
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/src/main/java/vn/nghetruyen/app
+          git add app/src/main/java/vn/nghetruyen/app scripts/validate_release.py
           if ! git diff --cached --quiet; then
             git commit -m "fix: mirror Lua diagnostics lifecycle and coverage"
             git push origin HEAD:${{ github.event.pull_request.head.ref }}
@@ -42,5 +42,7 @@ jobs:
         run: python3 scripts/check_lua_diagnostics_ui_parity.py
       - name: Verify existing strict XPK parity
         run: python3 scripts/check_xpk_strict_parity.py
+      - name: Verify release wiring
+        run: python3 scripts/validate_release.py --wiring-only
       - name: Compile Android Kotlin
         run: ./gradlew :app:compileDebugKotlin --no-daemon --stacktrace

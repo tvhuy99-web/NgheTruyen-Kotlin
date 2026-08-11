@@ -755,7 +755,8 @@ private fun ReferenceSettingsHomePage(
         var diagnosticsExpanded by remember { mutableStateOf(false) }
         val diagnosticsLabel = when (diagnosticsMode) {
             "basic" -> "Gỡ lỗi cơ bản"
-            "advanced" -> "Gỡ lỗi nâng cao"
+            "advanced_ram" -> "Gỡ lỗi nâng cao • RAM-only"
+            "advanced_crash", "advanced" -> "Gỡ lỗi nâng cao • crash-safe"
             else -> "Tắt"
         }
         Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp)) {
@@ -766,7 +767,8 @@ private fun ReferenceSettingsHomePage(
                 listOf(
                     "off" to "Tắt",
                     "basic" to "Gỡ lỗi cơ bản",
-                    "advanced" to "Gỡ lỗi nâng cao",
+                    "advanced_ram" to "Gỡ lỗi nâng cao • RAM-only",
+                    "advanced_crash" to "Gỡ lỗi nâng cao • crash-safe",
                 ).forEach { (value, label) ->
                     DropdownMenuItem(
                         text = { Text((if (diagnosticsMode == value) "✓ " else "") + label) },
@@ -1231,7 +1233,7 @@ private fun SourceDiagnosticsSection(
                 )
                 Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
                     Button(onExportDiagnostics, Modifier.weight(1f).padding(2.dp)) {
-                        Text(if (state.diagnosticsMode == "advanced") "XUẤT HỘP ĐEN" else "XUẤT CHẨN ĐOÁN")
+                        Text(if (state.diagnosticsMode.startsWith("advanced")) "XUẤT HỘP ĐEN" else "XUẤT CHẨN ĐOÁN")
                     }
                     Button(onClearDiagnostics, Modifier.weight(1f).padding(2.dp)) { Text("XÓA NHẬT KÝ") }
                 }

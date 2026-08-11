@@ -244,6 +244,8 @@ data class MainUiState(
     val readerMode: ReaderMode = ReaderMode.TEXT,
     val chapterSortDescending: Boolean = false,
     val diagnosticsMode: String = "off",
+    val diagnosticActiveOperations: List<String> = emptyList(),
+    val diagnosticPersistentCriticalCount: Int = 0,
     val sleepTimerStatus: String = "Đang tắt",
     val readerDisplay: ReaderDisplaySettings = ReaderDisplaySettings(),
     val storyTtsProfiles: Map<String, StoryTtsProfileEntity> = emptyMap(),
@@ -282,6 +284,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             sourceDiagnostics = container.sourcePlatformManager.diagnosticSummaries(200),
             sourceTraces = container.sourcePlatformManager.diagnosticTraces(100),
             diagnosticsMode = container.sourceDiagnostics.mode,
+            diagnosticActiveOperations = container.sourceDiagnostics.activityLines(),
+            diagnosticPersistentCriticalCount = container.sourceDiagnostics.persistentCriticalCount(),
             backupHistory = container.backupHistoryStore.entries(),
             backupLogPath = container.backupHistoryStore.logPath(),
             backupLogText = container.backupHistoryStore.logText(),
@@ -399,6 +403,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 mutableState.update { current ->
                     current.copy(
                         diagnosticsMode = container.sourceDiagnostics.mode,
+                        diagnosticActiveOperations = container.sourceDiagnostics.activityLines(),
+                        diagnosticPersistentCriticalCount = container.sourceDiagnostics.persistentCriticalCount(),
                         sourceDiagnosticCount = events.size,
                         sourceDiagnostics = container.sourcePlatformManager.diagnosticSummaries(200),
                         sourceTraces = container.sourcePlatformManager.diagnosticTraces(100),
@@ -1269,6 +1275,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 sourceDiagnosticCount = container.sourcePlatformManager.diagnosticsSnapshot().size,
                 sourceDiagnostics = container.sourcePlatformManager.diagnosticSummaries(200),
                 sourceTraces = container.sourcePlatformManager.diagnosticTraces(100),
+                diagnosticActiveOperations = container.sourceDiagnostics.activityLines(),
+                diagnosticPersistentCriticalCount = container.sourceDiagnostics.persistentCriticalCount(),
             )
         }
     }
@@ -1301,6 +1309,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         "vietPhraseDictionaries" to snapshot.vietPhraseDictionaryStates.size.toString(),
         "sourceSessions" to snapshot.sourceSessions.size.toString(),
         "sourcePacks" to snapshot.sourcePacks.size.toString(),
+        "diagnosticActiveOperations" to snapshot.diagnosticActiveOperations.size.toString(),
+        "diagnosticPersistentCriticalCount" to snapshot.diagnosticPersistentCriticalCount.toString(),
     )
 }
 
@@ -1330,7 +1340,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         container.sourcePlatformManager.clearDiagnostics()
         container.sourceDiagnostics.clearBlackBox()
         refreshSourcePlatformState()
-        showMessage("Đã xóa nhật ký, bằng chứng Advanced và hộp đen crash-safe.")
+        showMessage("Đã xóa nhật ký, evidence RAM, critical breadcrumbs và hộp đen crash-safe.")
     }
 
     fun refreshSourceSessions() {

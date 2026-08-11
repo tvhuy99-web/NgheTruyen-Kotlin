@@ -39,6 +39,9 @@ checks = {
     "large live event window": "diagnosticSummaries(200)" in vm,
     "large live trace window": "diagnosticTraces(100)" in vm,
     "shared app diagnostic mark API": "fun mark(" in runtime and "DIAGNOSTICS_MODE_CHANGED" in runtime,
+    "dual Advanced profiles": all(token in runtime for token in ("advanced_ram", "advanced_crash", "crashSafe")),
+    "active operation tracker": "DiagnosticActivityTracker" in runtime and "diagnosticActiveOperations" in vm and "ĐANG HOẠT ĐỘNG" in chrome,
+    "critical breadcrumbs while OFF": "shouldRetainWhenDiagnosticsOff" in runtime and "MAX_CRITICAL_EVENTS = 100" in runtime,
     "runtime snapshot exported": "report/app_runtime.json" in runtime,
     "backup log tail exported": "report/backup_tail.log" in runtime,
     "TTS lifecycle diagnostics": all(
@@ -72,6 +75,7 @@ checks = {
             "DOWNLOAD_RUNTIME_ERROR",
         )
     ),
+    "audio runtime error marker is not duplicated": audio.count("AUDIO_EXPORT_RUNTIME_ERROR") == 1,
     "audio export diagnostics": all(
         marker in audio
         for marker in (

@@ -29,14 +29,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/**
- * Lua/XPK-style global diagnostic chrome.
- *
- * The reference XPK owns a diagnostic bar immediately above the bottom navigation. The diagnostic
- * button does not exist while diagnostics are OFF, changes its text while a runtime operation is
- * active, and opens one combined log surface. Keep that lifecycle here instead of letting individual
- * screens invent their own always-visible diagnostic buttons.
- */
+/** Global Lua-style diagnostics chrome backed by the actual diagnostic operation tracker. */
 @Composable
 fun ReferenceDiagnosticsChrome(
     state: MainUiState,
@@ -50,7 +43,7 @@ fun ReferenceDiagnosticsChrome(
         if (state.diagnosticsMode == "off") showLog = false
     }
 
-    val recording = diagnosticsRecording(state)
+    val recording = state.diagnosticActiveOperations.isNotEmpty()
     val label = when {
         recording -> "ĐANG GHI NHẬT KÝ..."
         state.sourceDiagnosticCount > 0 -> "XEM NHẬT KÝ"
@@ -104,21 +97,33 @@ private fun ReferenceDiagnosticsDialog(
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    if (state.diagnosticsMode == "advanced") {
-                        "Advanced đang giữ trace chi tiết, browser/network evidence, DOM/HTML đã khử bí mật và hộp đen crash-safe 64 MiB."
-                    } else {
-                        "Basic ghi INFO/WARN/ERROR. Chọn Gỡ lỗi nâng cao để ghi DEBUG và evidence browser/runtime."
-                    },
+                    diagnosticsModeDescription(state.diagnosticsMode),
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(top = 4.dp),
                 )
+                if (state.diagnosticPersistentCriticalCount > 0) {
+                    Text(
+                        "Critical breadcrumbs luôn giữ: ${state.diagnosticPersistentCriticalCount}/100. Các lỗi nghiêm trọng/cài extension vẫn còn khi trước đó bạn để Nhật ký = Tắt.",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
 
                 Row(Modifier.fillMaxWidth().padding(top = 8.dp)) {
                     Button(onClick = onExport, modifier = Modifier.weight(1f).padding(2.dp)) {
-                        Text(if (state.diagnosticsMode == "advanced") "XUẤT HỘP ĐEN" else "XUẤT NHẬT KÝ")
+                        Text(if (isAdvancedDiagnostics(state.diagnosticsMode)) "XUẤT HỘP ĐEN" else "XUẤT NHẬT KÝ")
                     }
                     Button(onClick = onClear, modifier = Modifier.weight(1f).padding(2.dp)) {
                         Text("XÓA NHẬT KÝ")
+                    }
+                }
+
+                if (state.diagnosticActiveOperations.isNotEmpty()) {
+                    DiagnosticSection("ĐANG HOẠT ĐỘNG (${state.diagnosticActiveOperations.size})") {
+                        state.diagnosticActiveOperations.take(20).forEach { line ->
+                            Text(line, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 3.dp))
+                        }
                     }
                 }
 
@@ -204,7 +209,7 @@ private fun ReferenceDiagnosticsDialog(
                                     modifier = Modifier.padding(top = 4.dp),
                                 )
                                 Text(
-                                    "${event.sourceId} • trace=${event.traceId.take(18)}${event.detail.takeIf(String::isNotBlank)?.let { " • $it" }.orEmpty()}",
+                                    "${event.sourceId} • trace=${event.traceId.take(28)}${event.detail.takeIf(String::isNotBlank)?.let { " • $it" }.orEmpty()}",
                                     style = MaterialTheme.typography.bodySmall,
                                 )
                             }
@@ -247,22 +252,20 @@ private fun DiagnosticSection(title: String, content: @Composable () -> Unit) {
     content()
 }
 
-private fun diagnosticsRecording(state: MainUiState): Boolean =
-    state.loading ||
-        state.aiBusy ||
-        state.storyCommentsLoading ||
-        state.sourceRepositoryRefreshing ||
-        state.sourceHealthChecking.isNotEmpty() ||
-        state.vietPhraseOnlineBusy ||
-        state.aiModelDiscoveryBusy ||
-        state.ttsVoiceLoading ||
-        state.downloads.any { it.state == "RUNNING" } ||
-        state.audioExports.any { it.state == "RUNNING" }
+private fun isAdvancedDiagnostics(mode: String): Boolean =
+    mode == "advanced" || mode == "advanced_ram" || mode == "advanced_crash"
 
 private fun diagnosticsModeLabel(mode: String): String = when (mode) {
-    "advanced" -> "Gỡ lỗi nâng cao"
+    "advanced_ram" -> "Gỡ lỗi nâng cao • RAM-only"
+    "advanced_crash", "advanced" -> "Gỡ lỗi nâng cao • crash-safe"
     "basic" -> "Gỡ lỗi cơ bản"
     else -> "Tắt"
+}
+
+private fun diagnosticsModeDescription(mode: String): String = when (mode) {
+    "advanced_ram" -> "Advanced RAM-only ghi DEBUG + evidence browser/runtime tối đa 64 MiB trong RAM; evidence phiên hiện tại biến mất khi tiến trình chết."
+    "advanced_crash", "advanced" -> "Advanced crash-safe ghi DEBUG + evidence tối đa 64 MiB và journal riêng tư để giữ dấu vết của tiến trình trước sau crash."
+    else -> "Basic ghi INFO/WARN/ERROR. Critical breadcrumb nghiêm trọng vẫn được giữ giới hạn để không mất lỗi cài extension xảy ra trước khi bạn bật Nhật ký."
 }
 
 private fun diagnosticGroup(event: SourceDiagnosticUi): String {
@@ -274,7 +277,7 @@ private fun diagnosticGroup(event: SourceDiagnosticUi): String {
         "AI_" in key || "VOICE_CAST" in key || "SCENE_MUSIC" in key || "NARRATION" in key -> "AI / PHÂN VAI / NHẠC CẢNH"
         "TTS" in key || "SONIC" in key || "PLAYBACK" in key || "AUDIO_FOCUS" in key -> "TTS / SONIC / PLAYBACK"
         "DOWNLOAD" in key || "AUDIO_EXPORT" in key || "VIETPHRASE" in key || "BACKUP" in key || "RESTORE" in key -> "TẢI / XUẤT / VIETPHRASE / BACKUP"
-        "PACKAGE" in key || "STORE" in key || "SOURCE" in key || "VBOOK" in key || "LUA" in key || "PARSER" in key -> "NGUỒN / VBOOK / EXTENSION / PARSER"
+        "PACKAGE" in key || "STORE" in key || "SOURCE" in key || "VBOOK" in key || "LUA" in key || "PARSER" in key || "EXTENSION" in key -> "NGUỒN / VBOOK / EXTENSION / PARSER"
         "SECURITY" in key || "TRUST" in key || "REPLAY" in key -> "BẢO MẬT / TRUST / REPLAY"
         else -> "RUNTIME / KHÁC"
     }

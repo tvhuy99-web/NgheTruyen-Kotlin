@@ -65,6 +65,8 @@ import kotlin.math.log10
 import kotlin.math.pow
 import java.util.UUID
 import vn.nghetruyen.app.NgheTruyenApplication
+import vn.nghetruyen.app.ai.StoryVoiceCastMode
+import vn.nghetruyen.app.ai.StoryVoiceCastReferenceCodec
 import vn.nghetruyen.app.ai.vietphrase.VietPhraseDiagnosticExport
 import vn.nghetruyen.app.ai.vietphrase.VietPhraseDiagnosticExporter
 import vn.nghetruyen.app.ai.vietphrase.VietPhraseDictionaryKind
@@ -175,6 +177,14 @@ fun ReaderScreen(
     val display = state.readerDisplay
     val textMode = state.readerMode == ReaderMode.TEXT
     val storyId = content.chapter.storyId
+    val storyAiProfile = state.storyAiProfiles[storyId]
+    val storyVoiceReference = storyAiProfile?.let { StoryVoiceCastReferenceCodec.decode(it.voiceCastNote) }
+    val effectiveAutoVoiceCastEnabled = state.autoVoiceCastEnabled && when {
+        storyAiProfile == null -> true
+        !StoryVoiceCastReferenceCodec.hasStoredSettings(storyAiProfile.voiceCastNote) -> true
+        storyVoiceReference?.mode == StoryVoiceCastMode.OFF -> false
+        else -> storyVoiceReference?.autoRunOnOpenTts == true
+    }
     val activeIndex = state.playback.paragraphIndex.coerceIn(0, content.paragraphs.lastIndex.coerceAtLeast(0))
     val storyDetail = state.storyDetail
     val sourceDescriptor = storyDetail?.story?.sourceId?.let { id -> state.sources.firstOrNull { it.id == id } }
@@ -465,7 +475,7 @@ fun ReaderScreen(
                     ReaderButton(if (sourceDescriptor.id in state.sourceHealthChecking) "ĐANG KIỂM TRA" else "KIỂM TRA NGUỒN", { onCheckSource(sourceDescriptor.id) }, Modifier.weight(1f), enabled = sourceDescriptor.id !in state.sourceHealthChecking, normalColor = ReferenceGray)
                 }
             }
-            if (state.autoVoiceCastEnabled) {
+            if (effectiveAutoVoiceCastEnabled) {
                 val autoNarrationStatus = state.playback.narrationMessage ?: if (state.prefetchNarrationPlansEnabled) {
                     "Tự phân vai đang bật. Từ 75% chương, ứng dụng sẽ tải và phân vai trước chương tiếp theo."
                 } else {

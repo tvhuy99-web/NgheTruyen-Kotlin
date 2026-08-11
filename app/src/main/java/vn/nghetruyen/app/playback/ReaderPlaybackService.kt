@@ -1242,7 +1242,7 @@ class ReaderPlaybackService : Service() {
         if (prefetchParentId == snapshot.chapterId && prefetchJob?.isActive == true) return
         if (snapshot.sourceId != "offline" && snapshot.nextChapterUrl.isNullOrBlank()) return
 
-        if (autoVoiceCastEnabled && prefetchNarrationPlansEnabled) {
+        if (currentStoryAutoVoiceCastEnabled && prefetchNarrationPlansEnabled) {
             PlaybackQueueStore.setNarrationAutomation(
                 stage = NarrationAutomationStage.NEXT_LOADING,
                 progress = 0.15f,
@@ -1254,7 +1254,7 @@ class ReaderPlaybackService : Service() {
         prefetchJob = serviceScope.launch {
             val next = loadNextChapter(snapshot)
             if (next != null && PlaybackQueueStore.state.value.chapterId == snapshot.chapterId) {
-                if (autoVoiceCastEnabled && prefetchNarrationPlansEnabled) {
+                if (currentStoryAutoVoiceCastEnabled && prefetchNarrationPlansEnabled) {
                     PlaybackQueueStore.setNarrationAutomation(
                         stage = NarrationAutomationStage.NEXT_PLANNING,
                         progress = 0.45f,
@@ -1264,7 +1264,7 @@ class ReaderPlaybackService : Service() {
                 NextChapterCache.put(snapshot.chapterId, next)
                 persistPlaybackQueue(snapshot)
                 maybePrefetchNarrationPlans(next, snapshot.sourceId)
-            } else if (autoVoiceCastEnabled && prefetchNarrationPlansEnabled &&
+            } else if (currentStoryAutoVoiceCastEnabled && prefetchNarrationPlansEnabled &&
                 PlaybackQueueStore.state.value.chapterId == snapshot.chapterId
             ) {
                 PlaybackQueueStore.setNarrationAutomation(

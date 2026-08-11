@@ -187,6 +187,7 @@ require(
     "NARRATION_RETRY_DELAY_MS = 5_000L",
     "ACTION_APPLY_NARRATION_AND_PLAY",
     "Phân vai chưa thành công. Sẽ tự thử lại sau 5 giây.",
+    "if (currentStoryAutoVoiceCastEnabled && prefetchNarrationPlansEnabled)",
 )
 forbid(
     "app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt",
@@ -196,6 +197,7 @@ forbid(
     "volume = (track.volume * sceneVolume * normalizationGain).coerceIn(0f, 0.6f)",
     "AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY",
     "Phân vai tự động chưa thành công; đang đọc bằng cấu hình/phân vai hiện có.",
+    "if (autoVoiceCastEnabled && prefetchNarrationPlansEnabled)",
 )
 
 require(
@@ -216,7 +218,8 @@ require(
     "LinearProgressIndicator(",
     "state.playback.narrationMessage",
     "Từ 75% chương",
-    "if (state.autoVoiceCastEnabled)",
+    "if (effectiveAutoVoiceCastEnabled)",
+    "StoryVoiceCastReferenceCodec.hasStoredSettings",
     "view.announceForAccessibility(announcement)",
 )
 

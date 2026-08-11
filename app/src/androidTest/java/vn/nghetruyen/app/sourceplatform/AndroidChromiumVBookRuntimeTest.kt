@@ -77,7 +77,10 @@ class AndroidChromiumVBookRuntimeTest {
                 traceId = "chromium-host-bridge-e2e",
             )
 
-            assertTrue(result is SourcePlatformResult.Success)
+            assertTrue(
+                (result as? SourcePlatformResult.Failure)?.let { "${it.error.code}:${it.error.message}" } ?: "expected success",
+                result is SourcePlatformResult.Success,
+            )
             val success = result as SourcePlatformResult.Success
             val row = (success.value.data as JsonValue.Arr).values.first() as JsonValue.Obj
             assertEquals(VBookContractProfile.CURRENT_JS, success.value.profile)
@@ -184,7 +187,10 @@ class AndroidChromiumVBookRuntimeTest {
             traceId = "chromium-core-parity",
         )
 
-        assertTrue(result is SourcePlatformResult.Success)
+        assertTrue(
+            (result as? SourcePlatformResult.Failure)?.let { "${it.error.code}:${it.error.message}" } ?: "expected success",
+            result is SourcePlatformResult.Success,
+        )
         val success = result as SourcePlatformResult.Success
         val row = (success.value.data as JsonValue.Arr).values.first() as JsonValue.Obj
         assertEquals("chromium", row.string("engine"))

@@ -3562,10 +3562,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val original = state.value.originalChapterContent ?: state.value.chapterContent ?: return
         if (state.value.aiBusy) return
         viewModelScope.launch {
-            if (includeMusic && container.libraryRepository.listEnabledSceneMusicTracks().isEmpty()) {
-                showMessage("Hãy thêm ít nhất một tệp nhạc cảnh đang bật.")
-                return@launch
-            }
             mutableState.update {
                 it.copy(
                     aiBusy = true,

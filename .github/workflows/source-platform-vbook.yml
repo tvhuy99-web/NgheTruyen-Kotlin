@@ -113,6 +113,21 @@ jobs:
       - name: Apply core AI and VietPhrase migration
         run: python3 scripts/apply_diagnostics_deepening.py
 
+      - name: Normalize Stage C parity anchor
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/check_lua_diagnostics_ui_parity.py')
+          value = path.read_text(encoding='utf-8')
+          browser = 'browser = text("app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidSourceBrowserBroker.kt")\n'
+          if browser not in value:
+              anchor = 'audio = text("app/src/main/java/vn/nghetruyen/app/audio/AudioExportWorker.kt")\n'
+              if anchor not in value:
+                  raise SystemExit('parity insertion anchor not found')
+              value = value.replace(anchor, browser + anchor, 1)
+              path.write_text(value, encoding='utf-8')
+          PY
+
       - name: Apply browser and vBook migration
         run: python3 scripts/apply_diagnostics_stage_c.py
 

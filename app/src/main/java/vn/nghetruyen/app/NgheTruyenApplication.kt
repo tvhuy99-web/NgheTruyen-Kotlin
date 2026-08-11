@@ -5,7 +5,6 @@ import android.webkit.WebView
 import vn.nghetruyen.app.ai.vietphrase.ReferenceVietPhraseRuntime
 import vn.nghetruyen.app.sourceplatform.AndroidChromiumVBookRuntime
 import vn.nghetruyen.app.sourceplatform.ChromiumVBookDispatcherParityRuntime
-import vn.nghetruyen.app.sourceplatform.ChromiumVBookNetworkProjectionBroker
 import vn.nghetruyen.source.api.SourceErrorCode
 import vn.nghetruyen.source.api.SourcePlatformFailure
 import vn.nghetruyen.source.api.SourcePlatformResult
@@ -33,9 +32,7 @@ class NgheTruyenApplication : Application() {
                 chromiumRuntimes[brokers.storage] ?: ChromiumVBookDispatcherParityRuntime(
                     AndroidChromiumVBookRuntime(
                         context = this,
-                        brokers = brokers.copy(
-                            network = ChromiumVBookNetworkProjectionBroker(brokers.network),
-                        ),
+                        brokers = brokers,
                         diagnostics = diagnostics,
                     ),
                 ).also { chromiumRuntimes[brokers.storage] = it }

@@ -23,8 +23,7 @@ import java.lang.ref.WeakReference
 fun AppViewModel.installExtensionHostKernel(): SourceHostKernelDispatcher {
     val app = getApplication<Application>()
     val hostRef = WeakReference(this)
-    fun host(traceId: String): AppViewModel? = hostRef.get()
-        ?: return null
+    fun host(): AppViewModel? = hostRef.get()
 
     val dispatcher = SourceHostKernelDispatcher()
         .register("reader", "refresh") { _, _, traceId ->
@@ -32,24 +31,24 @@ fun AppViewModel.installExtensionHostKernel(): SourceHostKernelDispatcher {
             accepted(traceId)
         }
         .register("reader", "nextChapter") { _, _, traceId ->
-            val host = host(traceId) ?: return@register uiUnavailable(traceId)
+            val host = host() ?: return@register uiUnavailable(traceId)
             host.nextChapter()
             accepted(traceId)
         }
         .register("reader", "previousChapter") { _, _, traceId ->
-            val host = host(traceId) ?: return@register uiUnavailable(traceId)
+            val host = host() ?: return@register uiUnavailable(traceId)
             host.previousChapter()
             accepted(traceId)
         }
         .register("reader", "moveParagraph") { _, payload, traceId ->
-            val host = host(traceId) ?: return@register uiUnavailable(traceId)
+            val host = host() ?: return@register uiUnavailable(traceId)
             val delta = payload.intValue("delta")?.coerceIn(-10_000, 10_000)
                 ?: return@register invalid(traceId, "SOURCE_HOST_READER_DELTA_REQUIRED")
             host.moveParagraph(delta)
             accepted(traceId)
         }
         .register("reader", "setMode") { _, payload, traceId ->
-            val host = host(traceId) ?: return@register uiUnavailable(traceId)
+            val host = host() ?: return@register uiUnavailable(traceId)
             val raw = payload.stringValue("mode")?.trim().orEmpty()
             val mode = enumValues<ReaderMode>().firstOrNull { it.name.equals(raw, ignoreCase = true) }
                 ?: return@register invalid(traceId, "SOURCE_HOST_READER_MODE_INVALID:$raw")
@@ -57,7 +56,7 @@ fun AppViewModel.installExtensionHostKernel(): SourceHostKernelDispatcher {
             accepted(traceId)
         }
         .register("reader", "openChapter") { _, payload, traceId ->
-            val host = host(traceId) ?: return@register uiUnavailable(traceId)
+            val host = host() ?: return@register uiUnavailable(traceId)
             val chapterId = payload.stringValue("chapterId").orEmpty()
             val url = payload.stringValue("url").orEmpty()
             val chapter = host.state.value.storyDetail?.chapters.orEmpty().firstOrNull { candidate ->
@@ -68,7 +67,7 @@ fun AppViewModel.installExtensionHostKernel(): SourceHostKernelDispatcher {
             accepted(traceId)
         }
         .register("library", "follow") { _, payload, traceId ->
-            val host = host(traceId) ?: return@register uiUnavailable(traceId)
+            val host = host() ?: return@register uiUnavailable(traceId)
             val storyId = payload.stringValue("storyId")?.trim().orEmpty()
             val detail = host.state.value.storyDetail
                 ?: return@register invalid(traceId, "SOURCE_HOST_LIBRARY_STORY_CONTEXT_REQUIRED")
@@ -79,14 +78,14 @@ fun AppViewModel.installExtensionHostKernel(): SourceHostKernelDispatcher {
             accepted(traceId)
         }
         .register("library", "unfollow") { _, payload, traceId ->
-            val host = host(traceId) ?: return@register uiUnavailable(traceId)
+            val host = host() ?: return@register uiUnavailable(traceId)
             val storyId = payload.stringValue("storyId")?.trim().orEmpty()
             if (storyId.isBlank()) return@register invalid(traceId, "SOURCE_HOST_LIBRARY_STORY_ID_REQUIRED")
             host.unfollowStory(storyId)
             accepted(traceId)
         }
         .register("library", "bookmark") { _, payload, traceId ->
-            val host = host(traceId) ?: return@register uiUnavailable(traceId)
+            val host = host() ?: return@register uiUnavailable(traceId)
             val content = host.state.value.chapterContent
                 ?: return@register invalid(traceId, "SOURCE_HOST_LIBRARY_CHAPTER_CONTEXT_REQUIRED")
             val requestedChapterId = payload.stringValue("chapterId")?.trim().orEmpty()
@@ -101,7 +100,7 @@ fun AppViewModel.installExtensionHostKernel(): SourceHostKernelDispatcher {
             accepted(traceId)
         }
         .register("library", "unbookmark") { _, payload, traceId ->
-            val host = host(traceId) ?: return@register uiUnavailable(traceId)
+            val host = host() ?: return@register uiUnavailable(traceId)
             val bookmarkId = payload.stringValue("bookmarkId")?.trim().orEmpty()
             if (bookmarkId.isBlank()) return@register invalid(traceId, "SOURCE_HOST_LIBRARY_BOOKMARK_ID_REQUIRED")
             host.deleteBookmark(bookmarkId)
@@ -124,7 +123,7 @@ fun AppViewModel.installExtensionHostKernel(): SourceHostKernelDispatcher {
             accepted(traceId)
         }
         .register("tts", "setRate") { _, payload, traceId ->
-            val host = host(traceId) ?: return@register uiUnavailable(traceId)
+            val host = host() ?: return@register uiUnavailable(traceId)
             val rate = payload.floatValue("rate")?.coerceIn(0.25f, 4.0f)
                 ?: return@register invalid(traceId, "SOURCE_HOST_TTS_RATE_REQUIRED")
             host.setTtsRate(rate)
@@ -132,7 +131,7 @@ fun AppViewModel.installExtensionHostKernel(): SourceHostKernelDispatcher {
             accepted(traceId)
         }
         .register("tts", "setPitch") { _, payload, traceId ->
-            val host = host(traceId) ?: return@register uiUnavailable(traceId)
+            val host = host() ?: return@register uiUnavailable(traceId)
             val pitch = payload.floatValue("pitch")?.coerceIn(0.25f, 4.0f)
                 ?: return@register invalid(traceId, "SOURCE_HOST_TTS_PITCH_REQUIRED")
             host.setTtsPitch(pitch)

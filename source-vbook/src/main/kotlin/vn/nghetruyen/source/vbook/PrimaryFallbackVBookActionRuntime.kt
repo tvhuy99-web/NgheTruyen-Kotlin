@@ -41,6 +41,7 @@ class PrimaryFallbackVBookActionRuntime(
             "CHROMIUM_VBOOK_MODE_REQUIRED",
             "CHROMIUM_COMPAT_DISPATCH_ACTION_REQUIRED:",
             "CHROMIUM_WEBVIEW_UNAVAILABLE:",
+            "CHROMIUM_MAIN_THREAD_CALLER_UNSUPPORTED",
         )
     }
 }

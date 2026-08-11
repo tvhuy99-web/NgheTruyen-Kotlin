@@ -1,6 +1,5 @@
 package vn.nghetruyen.source.packagekit
 
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import vn.nghetruyen.source.api.SemanticVersion
@@ -32,14 +31,22 @@ class SourceManifestVBookNetworkTest {
     }
 
     @Test
-    fun nativeManifestCannotSmugglePublicInternetFlagsThroughParser() {
+    fun nativePublicInternetFlagsRoundTripWithoutRuntimeDowngrade() {
         val manifest = base(SourceRuntimeMode.DECLARATIVE).copy(
-            capabilities = SourceCapabilities(network = SourceNetworkCapability(publicInternet = false)),
+            origins = setOf("http://legacy.example"),
+            capabilities = SourceCapabilities(
+                network = SourceNetworkCapability(
+                    methods = setOf("GET", "POST", "PUT"),
+                    publicInternet = true,
+                    allowCleartext = true,
+                ),
+            ),
         )
-        val json = SourceManifestWriter.write(manifest).toString(Charsets.UTF_8)
-            .replace("\"publicInternet\":false", "\"publicInternet\":true")
-        val failure = runCatching { SourceManifestParser.parse(json.toByteArray()) }.exceptionOrNull()
-        assertTrue(failure?.message.orEmpty().contains("PUBLIC_INTERNET_MODE_DENIED"))
+        manifest.validate()
+        val parsed = SourceManifestParser.parse(SourceManifestWriter.write(manifest))
+        assertTrue(parsed.capabilities.network!!.publicInternet)
+        assertTrue(parsed.capabilities.network!!.allowCleartext)
+        assertTrue("PUT" in parsed.capabilities.network!!.methods)
     }
 
     private fun base(mode: SourceRuntimeMode) = SourceManifest(

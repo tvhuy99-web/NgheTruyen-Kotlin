@@ -41,7 +41,7 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Normalize Stage B codegen
+      - name: Normalize migration codegen
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -54,6 +54,17 @@ jobs:
               path.write_text(value, encoding='utf-8')
           elif new not in value:
               raise SystemExit('VietPhrase exporter codegen anchor not found')
+
+          path = Path('scripts/apply_diagnostics_stage_d.py')
+          value = path.read_text(encoding='utf-8')
+          old = "    '''    private fun resolveMeaning(raw: String, kind: VietPhraseDictionaryKind, oneMeaning: Boolean): String {"
+          new = "    r'''    private fun resolveMeaning(raw: String, kind: VietPhraseDictionaryKind, oneMeaning: Boolean): String {"
+          count = value.count(old)
+          if count:
+              value = value.replace(old, new)
+              path.write_text(value, encoding='utf-8')
+          elif new not in value:
+              raise SystemExit('Stage D VietPhrase raw-string anchor not found')
           PY
 
       - name: Apply core diagnostics stages

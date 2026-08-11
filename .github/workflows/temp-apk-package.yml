@@ -1,0 +1,114 @@
+name: Temp APK Package
+
+on:
+  pull_request_target:
+    branches:
+      - agent/apk-build-base
+    types: [synchronize, opened, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  package-test-apk:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'agent/xpk-six-parity-fixes'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout exact test head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install required Android SDK packages
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            'platform-tools' \
+            'platforms;android-36' \
+            'build-tools;36.0.0'
+
+      - name: Install validation dependencies
+        shell: bash
+        run: python3 -m pip install --disable-pip-version-check beautifulsoup4 cryptography
+
+      - name: Bootstrap verified Gradle Wrapper
+        shell: bash
+        run: |
+          chmod +x gradlew scripts/bootstrap-wrapper.sh scripts/m0_gate.sh
+          ./scripts/bootstrap-wrapper.sh
+
+      - name: Run release gate
+        run: bash scripts/m0_gate.sh
+
+      - name: Package APK and checksum
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk dist/NgheTruyen-debug.apk
+          sha256sum dist/NgheTruyen-debug.apk | tee dist/NgheTruyen-debug.apk.sha256
+
+      - name: Upload APK
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: NgheTruyen-debug-apk-test-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            dist/NgheTruyen-debug.apk
+            dist/NgheTruyen-debug.apk.sha256
+
+      - name: Publish artifact locator
+        if: success()
+        uses: actions/github-script@v7
+        env:
+          RESULT_ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+          RESULT_RUN_ID: ${{ github.run_id }}
+          RESULT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const path = 'apk-build-result.txt';
+            const branch = 'agent/apk-output';
+            const body = [
+              `artifact_id=${process.env.RESULT_ARTIFACT_ID}`,
+              `run_id=${process.env.RESULT_RUN_ID}`,
+              `head_sha=${process.env.RESULT_HEAD_SHA}`,
+              `created_at=${new Date().toISOString()}`,
+              ''
+            ].join('\n');
+            let sha;
+            try {
+              const existing = await github.rest.repos.getContent({ owner, repo, path, ref: branch });
+              if (!Array.isArray(existing.data)) sha = existing.data.sha;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            await github.rest.repos.createOrUpdateFileContents({
+              owner,
+              repo,
+              path,
+              branch,
+              message: `ci: record APK artifact ${process.env.RESULT_RUN_ID}`,
+              content: Buffer.from(body).toString('base64'),
+              ...(sha ? { sha } : {}),
+            });

@@ -297,6 +297,48 @@ class VBookJsRuntime(
         ScriptableObject.putProperty(scope, "__bridge", object : BaseFunction() {
             override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<out Any>): Any {
                 val operation = Context.toString(args.getOrNull(0) ?: "")
+                if (operation == "host_command") {
+                    val inputObject = args.getOrNull(1) as? Scriptable ?: error("SOURCE_HOST_COMMAND_INPUT_REQUIRED")
+                    ScriptableObject.putProperty(scope, "__ngheHostCommandInput", inputObject)
+                    val inputJson = try {
+                        Context.toString(cx.evaluateString(
+                            scope,
+                            "JSON.stringify(__ngheHostCommandInput)",
+                            "host-command-input",
+                            1,
+                            null,
+                        ))
+                    } finally {
+                        ScriptableObject.deleteProperty(scope, "__ngheHostCommandInput")
+                    }
+                    budget.charge(25 + inputJson.toByteArray(Charsets.UTF_8).size / 256)
+                    diagnostics.emit(event(manifest, request, "VBOOK_BRIDGE_HOST_COMMAND_STARTED", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                        "inputBytes" to inputJson.toByteArray(Charsets.UTF_8).size.toString(),
+                        "remainingMs" to (budget.deadlineMs - clockMs()).coerceAtLeast(0L).toString(),
+                    )))
+                    val output = when (val result = vn.nghetruyen.source.api.SourceHostKernelWireExecutor.execute(
+                        broker = brokers.hostKernel,
+                        sourceId = manifest.id,
+                        rawCommandJson = inputJson,
+                        traceId = request.traceId,
+                    )) {
+                        is SourcePlatformResult.Success -> {
+                            diagnostics.emit(event(manifest, request, "VBOOK_BRIDGE_HOST_COMMAND_COMPLETED", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                                "outputBytes" to result.value.toByteArray(Charsets.UTF_8).size.toString(),
+                                "remainingMs" to (budget.deadlineMs - clockMs()).coerceAtLeast(0L).toString(),
+                            )))
+                            result.value
+                        }
+                        is SourcePlatformResult.Failure -> {
+                            diagnostics.emit(event(manifest, request, "VBOOK_BRIDGE_HOST_COMMAND_FAILED", DiagnosticSeverity.ERROR, attributes = mapOf(
+                                "code" to result.error.code.name,
+                                "message" to result.error.message.take(500),
+                            )))
+                            error("VBOOK_HOST_COMMAND_${result.error.code}:${result.error.message}")
+                        }
+                    }
+                    return cx.evaluateString(scope, "JSON.parse(${JsonCodec.stringify(JsonValue.Str(output))})", "host-command-output", 1, null)
+                }
                 require(operation == "native_hook") { "VBOOK_BRIDGE_OPERATION_DENIED:$operation" }
                 val inputObject = args.getOrNull(1) as? Scriptable ?: error("NATIVE_LUA_HOOK_INPUT_REQUIRED")
                 val hookName = inputObject.propertyString("name") ?: error("NATIVE_LUA_HOOK_NAME_REQUIRED")

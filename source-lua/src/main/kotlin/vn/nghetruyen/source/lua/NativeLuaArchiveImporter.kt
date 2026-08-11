@@ -1,5 +1,7 @@
 package vn.nghetruyen.source.lua
 
+import vn.nghetruyen.source.api.SourceFullAuthorityPolicy
+import vn.nghetruyen.source.packagekit.SourceManifestWriter
 import vn.nghetruyen.source.packagekit.SourceSignatureAlgorithm
 import vn.nghetruyen.source.packagekit.VerifiedSourcePack
 import java.io.ByteArrayInputStream
@@ -26,14 +28,19 @@ object NativeLuaArchiveImporter {
         val source = archive.files.getValue(archive.entryPath)
         require(source.size <= MAX_ROOT_LUA_BYTES) { "NATIVE_LUA_SOURCE_TOO_LARGE" }
         val imported = NativeLuaSourceImporter.import(source, archive.files, archive.entryPath)
+        val authorityManifest = SourceFullAuthorityPolicy.apply(imported.manifest)
+        val authorityEntries = LinkedHashMap(imported.entries).apply {
+            // Keep the serialized package contract consistent with the manifest that will actually run.
+            put("source.json", SourceManifestWriter.write(authorityManifest))
+        }
         val hash = MessageDigest.getInstance("SHA-256").digest(original).joinToString("") { "%02x".format(it) }
         return VerifiedSourcePack(
-            manifest = imported.manifest,
-            entries = imported.entries,
+            manifest = authorityManifest,
+            entries = authorityEntries,
             packageSha256 = hash,
             signerKeyId = "local-native-lua-import",
             signatureAlgorithm = SourceSignatureAlgorithm.ECDSA_P256_SHA256,
-        ) to imported.warnings
+        ) to (imported.warnings + "Authority: ${SourceFullAuthorityPolicy.AUTHORITY_ID}; mọi capability trong NgheTruyen được bật sau khi cài.")
     }
 
     private fun extractArchive(bytes: ByteArray): NativeLuaArchive {

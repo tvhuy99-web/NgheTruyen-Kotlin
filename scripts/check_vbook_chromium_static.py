@@ -18,6 +18,7 @@ def main() -> None:
     runtime = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidChromiumVBookRuntime.kt")
     prelude = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/ChromiumVBookPrelude.kt")
     projection = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/ChromiumVBookNetworkProjectionBroker.kt")
+    browser_parity = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/ChromiumVBookDispatcherParityRuntime.kt")
     application = read("app/src/main/java/vn/nghetruyen/app/NgheTruyenApplication.kt")
     selector = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/PrimaryFallbackVBookActionRuntime.kt")
     registry = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookActionRuntimeRegistry.kt")
@@ -56,13 +57,25 @@ def main() -> None:
         "VBookRawNetworkBroker.INTERNAL_STATUS_TEXT",
     )
     require(
+        browser_parity,
+        "Chromium browser ABI parity",
+        "ChromiumVBookDispatcherParityRuntime",
+        "CHROMIUM_PATCH_MARKER",
+        "nativeBrowser.launch=function(url,timeoutMs)",
+        "nativeBrowser.html=function(waitMs)",
+        "nativeBrowser.waitRequest=function(raw,timeoutMs,options)",
+        "nativeBrowser.cookieSnapshot=function(url)",
+        "nativeBrowser.waitDialog=function(options,timeoutMs)",
+    )
+    require(
         application,
         "Android Chromium primary selection",
         "VBookActionRuntimeRegistry.install",
         "WebView.getCurrentWebViewPackage() == null",
         '"CHROMIUM_WEBVIEW_UNAVAILABLE:provider-missing"',
         "ChromiumVBookNetworkProjectionBroker(brokers.network)",
-        "IdentityHashMap<Any, AndroidChromiumVBookRuntime>()",
+        "ChromiumVBookDispatcherParityRuntime(",
+        "IdentityHashMap<Any, VBookActionRuntime>()",
     )
     require(
         selector,
@@ -74,7 +87,7 @@ def main() -> None:
     require(registry, "platform runtime registry", "AtomicReference<VBookActionRuntimeFactory?>(null)", "platformRuntime(")
     require(compatibility, "runtime-neutral compatibility facade", "private val runtime: VBookActionRuntime")
 
-    combined = "\n".join((runtime, prelude))
+    combined = "\n".join((runtime, prelude, browser_parity))
     for forbidden in (
         "addJavascriptInterface(",
         "setAllowUniversalAccessFromFileURLs(",

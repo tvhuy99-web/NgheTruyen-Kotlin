@@ -6,6 +6,7 @@ import vn.nghetruyen.app.playback.ReaderPlaybackService
 import vn.nghetruyen.app.ui.AppViewModel
 import vn.nghetruyen.app.ui.ChapterTextMode
 import vn.nghetruyen.app.ui.Destination
+import vn.nghetruyen.app.ui.ExploreMode
 import vn.nghetruyen.app.ui.RootTab
 import vn.nghetruyen.source.api.JsonValue
 import vn.nghetruyen.source.api.SourceErrorCode
@@ -44,6 +45,32 @@ object ExtensionHostKernelInstaller {
                     return@register invalid(traceId, "SOURCE_HOST_UI_HTTPS_URL_REQUIRED")
                 }
                 host.openExternalUrl(url)
+                accepted(traceId)
+            }
+            .register("ui", "refresh") { _, _, traceId ->
+                val host = host() ?: return@register uiUnavailable(traceId)
+                val current = host.state.value
+                when (current.destination) {
+                    Destination.Root -> when (current.rootTab) {
+                        RootTab.EXPLORE -> when (current.exploreMode) {
+                            ExploreMode.HOME -> host.browseHome()
+                            ExploreMode.CATEGORY -> current.activeCategory?.let(host::browseCategory) ?: host.browseHome()
+                            ExploreMode.SEARCH -> host.search()
+                        }
+                        RootTab.LIBRARY -> host.setRootTab(RootTab.LIBRARY)
+                        RootTab.PERSONAL -> host.setRootTab(RootTab.PERSONAL)
+                    }
+                    Destination.Story -> {
+                        val story = current.storyDetail?.story
+                            ?: return@register invalid(traceId, "SOURCE_HOST_UI_STORY_CONTEXT_REQUIRED")
+                        host.openStory(story)
+                    }
+                    Destination.Reader -> {
+                        val chapter = current.chapterContent?.chapter
+                            ?: return@register invalid(traceId, "SOURCE_HOST_READER_CHAPTER_CONTEXT_REQUIRED")
+                        host.openChapter(chapter)
+                    }
+                }
                 accepted(traceId)
             }
             .register("ui", "navigate") { _, payload, traceId ->

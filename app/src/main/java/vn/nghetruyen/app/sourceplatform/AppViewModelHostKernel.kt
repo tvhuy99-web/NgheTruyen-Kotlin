@@ -55,6 +55,42 @@ fun AppViewModel.createExtensionHostKernel(): SourceHostKernelDispatcher {
             openChapter(chapter)
             accepted(traceId)
         }
+        .register("library", "follow") { _, payload, traceId ->
+            val storyId = payload.stringValue("storyId")?.trim().orEmpty()
+            val detail = state.value.storyDetail
+                ?: return@register invalid(traceId, "SOURCE_HOST_LIBRARY_STORY_CONTEXT_REQUIRED")
+            if (storyId.isBlank() || detail.story.id != storyId) {
+                return@register invalid(traceId, "SOURCE_HOST_LIBRARY_STORY_CONTEXT_MISMATCH")
+            }
+            if (state.value.following.none { it.storyId == storyId }) toggleFollowing()
+            accepted(traceId)
+        }
+        .register("library", "unfollow") { _, payload, traceId ->
+            val storyId = payload.stringValue("storyId")?.trim().orEmpty()
+            if (storyId.isBlank()) return@register invalid(traceId, "SOURCE_HOST_LIBRARY_STORY_ID_REQUIRED")
+            unfollowStory(storyId)
+            accepted(traceId)
+        }
+        .register("library", "bookmark") { _, payload, traceId ->
+            val content = state.value.chapterContent
+                ?: return@register invalid(traceId, "SOURCE_HOST_LIBRARY_CHAPTER_CONTEXT_REQUIRED")
+            val requestedChapterId = payload.stringValue("chapterId")?.trim().orEmpty()
+            if (requestedChapterId.isNotBlank() && requestedChapterId != content.chapter.id) {
+                return@register invalid(traceId, "SOURCE_HOST_LIBRARY_CHAPTER_CONTEXT_MISMATCH")
+            }
+            val requestedParagraph = payload.intValue("paragraphIndex")
+            if (requestedParagraph != null && requestedParagraph != state.value.playback.paragraphIndex) {
+                return@register invalid(traceId, "SOURCE_HOST_LIBRARY_PARAGRAPH_CONTEXT_MISMATCH")
+            }
+            bookmarkCurrent()
+            accepted(traceId)
+        }
+        .register("library", "unbookmark") { _, payload, traceId ->
+            val bookmarkId = payload.stringValue("bookmarkId")?.trim().orEmpty()
+            if (bookmarkId.isBlank()) return@register invalid(traceId, "SOURCE_HOST_LIBRARY_BOOKMARK_ID_REQUIRED")
+            deleteBookmark(bookmarkId)
+            accepted(traceId)
+        }
         .register("tts", "play") { _, _, traceId ->
             ReaderPlaybackService.command(app, ReaderPlaybackService.ACTION_PLAY)
             accepted(traceId)

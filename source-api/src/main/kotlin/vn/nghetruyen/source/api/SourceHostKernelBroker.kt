@@ -1,5 +1,8 @@
 package vn.nghetruyen.source.api
 
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicReference
+
 /**
  * Runtime-neutral execution boundary for NgheTruyen host commands.
  *
@@ -30,6 +33,32 @@ fun interface SourceHostKernelBroker {
     }
 }
 
+/**
+ * Process-stable indirection owned by the host.
+ *
+ * Source runtimes may be constructed before an Activity/ViewModel exists. They keep this broker
+ * reference for their lifetime while the Android host is free to attach a new dispatcher whenever
+ * a UI session appears. This avoids rebuilding runtimes and avoids storing Android objects here.
+ */
+object SourceHostKernelBus : SourceHostKernelBroker {
+    private val delegate = AtomicReference<SourceHostKernelBroker>(SourceHostKernelBroker.UNAVAILABLE)
+
+    fun install(host: SourceHostKernelBroker) {
+        require(host !== this) { "SOURCE_HOST_KERNEL_RECURSIVE_INSTALL" }
+        delegate.set(host)
+    }
+
+    fun clear() {
+        delegate.set(SourceHostKernelBroker.UNAVAILABLE)
+    }
+
+    override fun execute(
+        sourceId: String,
+        command: SourceHostCommand,
+        traceId: String,
+    ): SourcePlatformResult<JsonValue> = delegate.get().execute(sourceId, command, traceId)
+}
+
 fun interface SourceHostCommandHandler {
     fun execute(
         sourceId: String,
@@ -45,7 +74,7 @@ fun interface SourceHostCommandHandler {
 class SourceHostKernelDispatcher(
     handlers: Map<Pair<String, String>, SourceHostCommandHandler> = emptyMap(),
 ) : SourceHostKernelBroker {
-    private val handlers = LinkedHashMap(handlers)
+    private val handlers = ConcurrentHashMap(handlers)
 
     fun register(domain: String, action: String, handler: SourceHostCommandHandler): SourceHostKernelDispatcher {
         SourceHostKernelContract.validate(SourceHostCommand(domain, action))

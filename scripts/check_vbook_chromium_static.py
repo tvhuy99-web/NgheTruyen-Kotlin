@@ -28,7 +28,12 @@ def main() -> None:
         runtime,
         "Chromium action runtime",
         'HandlerThread("NgheTruyen-VBook-Chromium")',
+        "private val main = Handler(Looper.getMainLooper())",
+        'unavailable("CHROMIUM_MAIN_THREAD_CALLER_UNSUPPORTED", request)',
+        "main.post {",
+        "engine.post {",
         "override fun onJsPrompt(",
+        "result.confirm(response)",
         "blockNetworkLoads = true",
         "allowFileAccess = false",
         "allowContentAccess = false",
@@ -82,6 +87,7 @@ def main() -> None:
         "side-effect-safe fallback",
         "PRE_EXECUTION_UNAVAILABLE_PREFIXES",
         '"CHROMIUM_WEBVIEW_UNAVAILABLE:"',
+        '"CHROMIUM_MAIN_THREAD_CALLER_UNSUPPORTED"',
         "result.error.code != SourceErrorCode.VBOOK_RUNTIME_UNAVAILABLE",
     )
     require(registry, "platform runtime registry", "AtomicReference<VBookActionRuntimeFactory?>(null)", "platformRuntime(")

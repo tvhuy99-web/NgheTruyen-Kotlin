@@ -313,4 +313,8 @@ data class SourceCapabilityBrokers(
     val cookies: SourceCookiePartition = SourceCookiePartition.NONE,
     /** vBook Qt.translate vp/hv path. Kept separate from generic AI/translate extensions. */
     val quickTranslation: SourceTranslationBroker = SourceTranslationBroker.DENY_ALL,
+    /** NgheTruyen-owned UI/reader/library/TTS host command boundary. */
+    val hostKernel: SourceHostKernelBroker = SourceHostKernelBroker.UNAVAILABLE,
+    /** Host-to-extension lifecycle/event delivery boundary. */
+    val hostEvents: SourceHostEventSink = SourceHostEventSink.NONE,
 )

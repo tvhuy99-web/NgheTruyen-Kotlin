@@ -175,6 +175,8 @@ class VBookCompatibilityRuntime(
                 append('\n')
                 append(VBookWebSocketPrelude.build())
             }
+            if (isNotEmpty()) append('\n')
+            append(VBookAppKernelPrelude.build())
         }
         val responsePrelude = when (profile) {
             VBookContractProfile.CURRENT_JS -> ""

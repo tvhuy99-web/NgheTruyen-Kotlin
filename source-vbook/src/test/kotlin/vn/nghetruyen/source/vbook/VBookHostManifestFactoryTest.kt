@@ -1,7 +1,6 @@
 package vn.nghetruyen.source.vbook
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import vn.nghetruyen.source.api.SourceRuntimeMode
@@ -9,30 +8,39 @@ import vn.nghetruyen.source.runtime.SourceResourceProvider
 
 class VBookHostManifestFactoryTest {
     @Test
-    fun legacyHttpExtensionGetsScopedCleartextWithoutChangingNativeContract() {
+    fun legacyHttpExtensionGetsFullAuthorityEnvelope() {
         val plugin = VBookManifestParser.parse(PLUGIN_HTTP)
         val manifest = VBookHostManifestFactory.create("repo\nlegacy.zip", plugin, resources(SCRIPTS_HTTP))
         assertEquals(SourceRuntimeMode.VBOOK_JS_COMPAT, manifest.runtime.mode)
         assertTrue(manifest.capabilities.network!!.publicInternet)
         assertTrue(manifest.capabilities.network!!.allowCleartext)
+        assertTrue(manifest.capabilities.browser.navigate)
+        assertTrue(manifest.capabilities.browser.pageJavaScript)
+        assertTrue(manifest.capabilities.browser.domSnapshot)
+        assertTrue(manifest.capabilities.browser.requestMetadata)
         assertTrue(manifest.origins.single().startsWith("http://"))
         manifest.validate()
     }
 
     @Test
-    fun httpsExtensionDoesNotReceiveCleartextCapability() {
+    fun httpsExtensionStillGetsHttpCompatibilityInSingleAuthorityMode() {
         val plugin = VBookManifestParser.parse(PLUGIN_HTTPS)
         val manifest = VBookHostManifestFactory.create("repo\nhttps.zip", plugin, resources(SCRIPTS_HTTPS))
         assertTrue(manifest.capabilities.network!!.publicInternet)
-        assertFalse(manifest.capabilities.network!!.allowCleartext)
+        assertTrue(manifest.capabilities.network!!.allowCleartext)
         assertEquals("https://x.example", manifest.origins.single())
+        assertTrue(manifest.capabilities.websocket.enabled)
+        assertTrue(manifest.capabilities.crypto.isNotEmpty())
     }
 
     @Test
-    fun scriptLiteralCanRequestLegacyCleartextEvenWhenMetadataIsHttps() {
+    fun staticScriptScanningNoLongerDecidesNetworkAuthority() {
         val plugin = VBookManifestParser.parse(PLUGIN_HTTPS)
-        val manifest = VBookHostManifestFactory.create("repo\nscript-http.zip", plugin, resources(SCRIPTS_HTTP))
-        assertTrue(manifest.capabilities.network!!.allowCleartext)
+        val withoutHttpLiteral = VBookHostManifestFactory.create("repo\nno-http-literal.zip", plugin, resources(SCRIPTS_HTTPS))
+        val withHttpLiteral = VBookHostManifestFactory.create("repo\nscript-http.zip", plugin, resources(SCRIPTS_HTTP))
+        assertTrue(withoutHttpLiteral.capabilities.network!!.allowCleartext)
+        assertTrue(withHttpLiteral.capabilities.network!!.allowCleartext)
+        assertEquals(withoutHttpLiteral.capabilities.network!!.publicInternet, withHttpLiteral.capabilities.network!!.publicInternet)
     }
 
     private fun resources(scripts: Map<String, String>): SourceResourceProvider = object : SourceResourceProvider {

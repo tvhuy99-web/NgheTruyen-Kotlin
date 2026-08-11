@@ -28,6 +28,7 @@ import vn.nghetruyen.app.core.model.AudioExportFormat
 import vn.nghetruyen.app.core.model.ReaderMode
 import vn.nghetruyen.app.following.FollowingUpdateWorker
 import vn.nghetruyen.app.playback.ReaderVolumeKeyPolicy
+import vn.nghetruyen.app.sourceplatform.installExtensionHostKernel
 import vn.nghetruyen.app.ui.AppViewModel
 import vn.nghetruyen.app.ui.Destination
 import vn.nghetruyen.app.ui.ReferenceNgheTruyenApp
@@ -62,6 +63,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        installExtensionHostKernel(viewModel)
         handleFollowingIntent(intent)
         setContent {
             val importLauncher = rememberLauncherForActivityResult(

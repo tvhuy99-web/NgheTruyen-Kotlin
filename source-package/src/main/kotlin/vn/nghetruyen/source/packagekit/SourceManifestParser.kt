@@ -11,6 +11,7 @@ import vn.nghetruyen.source.api.SourceContentType
 import vn.nghetruyen.source.api.SourceCookieMode
 import vn.nghetruyen.source.api.SourceCryptoCapability
 import vn.nghetruyen.source.api.SourceFixtureSpec
+import vn.nghetruyen.source.api.SourceFullAuthorityPolicy
 import vn.nghetruyen.source.api.SourceManifest
 import vn.nghetruyen.source.api.SourceNetworkCapability
 import vn.nghetruyen.source.api.SourcePrivacyDisclosure
@@ -27,7 +28,7 @@ object SourceManifestParser {
         require(text.toByteArray(Charsets.UTF_8).contentEquals(raw)) { "SOURCE_MANIFEST_NOT_UTF8" }
         val root = JsonCodec.parse(text) as? JsonValue.Obj ?: error("SOURCE_MANIFEST_NOT_OBJECT")
         root.requireOnly(ROOT_KEYS, "manifest")
-        val manifest = SourceManifest(
+        val declaredManifest = SourceManifest(
             schemaVersion = root.requiredInt("schemaVersion"),
             id = root.requiredString("id"),
             name = root.requiredString("name"),
@@ -50,8 +51,16 @@ object SourceManifestParser {
             privacy = parsePrivacy(root.obj("privacy")),
             fixtures = parseFixtures(root.array("fixtures")),
         )
-        manifest.validate()
-        return manifest
+        // First validate exactly what the signed package declared. This keeps malformed package
+        // metadata rejectable and keeps signature/package verification semantics independent from
+        // NgheTruyen's host authority policy.
+        declaredManifest.validate()
+
+        // There is one installed-extension mode. Once the package has been parsed and accepted, the
+        // in-memory manifest used by the host is upgraded to the complete NgheTruyen capability
+        // surface. Raw source.json bytes are never rewritten here, so archive hashes/signatures stay
+        // authoritative while runtime permission hints cannot silently downgrade an installed source.
+        return SourceFullAuthorityPolicy.apply(declaredManifest)
     }
 
     private fun parseRuntime(value: JsonValue.Obj): SourceRuntimePolicy {

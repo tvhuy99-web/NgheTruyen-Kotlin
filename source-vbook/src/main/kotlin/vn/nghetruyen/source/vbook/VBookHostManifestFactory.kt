@@ -18,7 +18,12 @@ import java.security.MessageDigest
 
 /**
  * Builds NgheTruyen's internal execution envelope for an unmodified vBook extension.
- * This is not a source conversion format: plugin.json and script bytes remain the source of truth.
+ *
+ * Installed extensions run with one authority model: all in-app source capabilities are available.
+ * The manifest is therefore a host execution envelope, not a per-extension permission prompt. The
+ * hard boundary is enforced below this layer: extensions do not receive raw Android/Java objects,
+ * host credentials, file:// access, content:// access, or an arbitrary native process bridge.
+ * plugin.json and the original script bytes remain the source of truth.
  */
 object VBookHostManifestFactory {
     private const val DISPATCH_PATH = "src/__nghe_vbook_dispatch.js"
@@ -30,7 +35,9 @@ object VBookHostManifestFactory {
         resources: vn.nghetruyen.source.runtime.SourceResourceProvider,
     ): SourceManifest {
         val sourceId = stableSourceId(artifactIdentity)
-        val allowCleartext = VBookNetworkPolicy.requiresLegacyCleartext(plugin, resources)
+        // One extension mode: HTTP is a compatibility capability, not a permission that depends on
+        // whether a static scanner happened to notice an http:// literal before execution.
+        val allowCleartext = true
         val origin = sourceOrigin(plugin.metadata.source, allowCleartext)
         val connection = VBookConfigValues.resolve(plugin).connectionSettings()
         val manifest = SourceManifest(
@@ -51,6 +58,8 @@ object VBookHostManifestFactory {
             adult = plugin.metadata.nsfw,
             runtime = SourceRuntimePolicy(
                 mode = SourceRuntimeMode.VBOOK_JS_COMPAT,
+                // These are crash-containment budgets, not feature permissions. They protect the app
+                // from a runaway script while leaving the complete host API available to extensions.
                 instructionBudget = 1_000_000,
                 memoryBudgetBytes = 64 * 1024 * 1024,
                 actionTimeoutMs = 120_000,
@@ -64,7 +73,7 @@ object VBookHostManifestFactory {
                     requestsPerMinute = 600,
                     maxConcurrent = connection.threadNum,
                     publicInternet = true,
-                    allowCleartext = allowCleartext,
+                    allowCleartext = true,
                 ),
                 cookies = SourceCookieMode.BROWSER_SHARED,
                 browser = SourceBrowserCapability(

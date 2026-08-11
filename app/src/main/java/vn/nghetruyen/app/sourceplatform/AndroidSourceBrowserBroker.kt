@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.os.Message
 import android.webkit.CookieManager
 import android.webkit.ConsoleMessage
 import android.webkit.JsPromptResult
@@ -20,7 +21,6 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
-import android.webkit.WebSettings
 import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -58,6 +58,8 @@ import java.util.concurrent.atomic.AtomicLong
  * Android WebView owns one CookieManager/profile per process, so this implementation exports/imports
  * a source-partitioned cookie jar and clears WebView state whenever the active SourcePack changes.
  * The response marks this fallback as degraded isolation. No Java object is exposed to page scripts.
+ * Browser feature defaults are centralized in [ExtensionWebViewAuthority] so installed extensions
+ * receive a capable browser without adding another per-feature permission maze.
  */
 class AndroidSourceBrowserBroker(
     context: Context,
@@ -261,30 +263,34 @@ class AndroidSourceBrowserBroker(
     private fun createSession(manifest: SourceManifest): Session {
         val sessionRef = AtomicReference<Session?>()
         val webView = WebView(appContext)
-        webView.settings.apply {
-            javaScriptEnabled = manifest.capabilities.browser.pageJavaScript
-            domStorageEnabled = manifest.capabilities.storageBytes > 0 || manifest.capabilities.browser.pageJavaScript
-            databaseEnabled = false
-            allowFileAccess = false
-            allowContentAccess = false
-            javaScriptCanOpenWindowsAutomatically = false
-            setSupportMultipleWindows(false)
-            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            mediaPlaybackRequiresUserGesture = true
-            loadsImagesAutomatically = true
-            blockNetworkImage = false
-            builtInZoomControls = false
-            displayZoomControls = false
-            userAgentString = "NgheTruyen-SourceBrowser/2 Android"
-            cacheMode = WebSettings.LOAD_DEFAULT
-            safeBrowsingEnabled = true
-        }
-        CookieManager.getInstance().apply {
-            setAcceptCookie(true)
-            setAcceptThirdPartyCookies(webView, false)
-        }
+        ExtensionWebViewAuthority.apply(appContext, webView)
         webView.webChromeClient = object : WebChromeClient() {
-            override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message?): Boolean = false
+            override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message?): Boolean {
+                val session = sessionRef.get() ?: return false
+                val transport = resultMsg?.obj as? WebView.WebViewTransport ?: return false
+                val popup = WebView(appContext)
+                ExtensionWebViewAuthority.apply(appContext, popup)
+                popup.webViewClient = object : WebViewClient() {
+                    override fun shouldOverrideUrlLoading(popupView: WebView, request: WebResourceRequest): Boolean {
+                        val url = request.url.toString()
+                        if (isAllowedRedirect(manifest, url)) {
+                            session.record(request, resourceType = "popup-navigation")
+                            session.webView.loadUrl(url)
+                        } else {
+                            session.record(request, resourceType = "popup-blocked")
+                        }
+                        popupView.destroy()
+                        return true
+                    }
+                }
+                transport.webView = popup
+                resultMsg.sendToTarget()
+                diagnostics.emit(sessionEvent(manifest, session, "BROWSER_POPUP_CREATED", attributes = mapOf(
+                    "dialog" to isDialog.toString(),
+                    "userGesture" to isUserGesture.toString(),
+                )))
+                return true
+            }
 
             override fun onConsoleMessage(consoleMessage: ConsoleMessage): Boolean {
                 val session = sessionRef.get() ?: return false
@@ -339,8 +345,14 @@ class AndroidSourceBrowserBroker(
                 return true
             }
         }
-        webView.setDownloadListener { _, _, _, _, _ ->
-            sessionRef.get()?.pendingError?.compareAndSet(null, "SOURCE_BROWSER_DOWNLOAD_BLOCKED")
+        webView.setDownloadListener { url, _, _, mimeType, contentLength ->
+            sessionRef.get()?.let { session ->
+                diagnostics.emit(sessionEvent(manifest, session, "BROWSER_DOWNLOAD_REQUESTED", attributes = mapOf(
+                    "url" to diagnosticUrl(url.orEmpty()),
+                    "mimeType" to mimeType.orEmpty(),
+                    "contentLength" to contentLength.toString(),
+                )))
+            }
         }
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {

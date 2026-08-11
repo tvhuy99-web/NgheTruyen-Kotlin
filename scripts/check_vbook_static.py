@@ -23,6 +23,11 @@ def require(text: str, label: str, *tokens: str) -> None:
 def main() -> None:
     runtime = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt")
     compatibility_runtime = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookCompatibilityRuntime.kt")
+    app_kernel = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookAppKernelPrelude.kt")
+    host_kernel_contract = read("source-api/src/main/kotlin/vn/nghetruyen/source/api/SourceHostKernelContract.kt")
+    host_kernel_broker = read("source-api/src/main/kotlin/vn/nghetruyen/source/api/SourceHostKernelBroker.kt")
+    host_manifest = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookHostManifestFactory.kt")
+    network_policy = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookNetworkPolicy.kt")
     feature_matrix = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookFeatureMatrix.kt")
     contract_model = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookContractModel.kt")
     corpus_analyzer = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookCorpusAnalyzer.kt")
@@ -30,6 +35,7 @@ def main() -> None:
     boundary = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookRhinoValues.kt")
     importer = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookPluginImporter.kt")
     browser = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidSourceBrowserBroker.kt")
+    webview_authority = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/ExtensionWebViewAuthority.kt")
     config_service = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookConfigService.kt")
     config_store = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidVBookConfigStore.kt")
     secret_store = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidVBookSecretStore.kt")
@@ -50,7 +56,7 @@ def main() -> None:
 
     require(
         sandbox,
-        "shared JS sandbox",
+        "shared JS crash containment",
         "class SafeRhinoExecutor",
         "setClassShutter(ClassShutter { false })",
         "instructionObserverThreshold",
@@ -73,6 +79,64 @@ def main() -> None:
         'putProperty(scope, "WebSocket"',
     )
     require(compatibility_runtime, "vBook diagnostic wiring", "diagnostics: DiagnosticSink", "diagnostics,")
+    require(
+        app_kernel,
+        "single vBook App kernel authority",
+        "global.App",
+        "apiVersion: 2",
+        "FULL_IN_APP",
+        "browser: browserApi",
+        "network: networkApi",
+        "storage: storageApi",
+        "ui: uiApi",
+        "reader: readerApi",
+        "library: libraryApi",
+        "tts: ttsApi",
+        "hooks: hooksApi",
+        "lifecycle: lifecycleApi",
+        "nghetruyen.host-command",
+        "rawAndroid: false",
+        "hostSecrets: false",
+    )
+    require(
+        host_kernel_contract,
+        "runtime-neutral host kernel contract",
+        'const val API_VERSION = 2',
+        'const val COMMAND_KIND = "nghetruyen.host-command"',
+        '"ui", "reader", "library", "tts", "hooks"',
+        '"reader.chapterChanged"',
+        "fun parseCommand",
+        "fun parseEvent",
+    )
+    require(
+        host_kernel_broker,
+        "runtime-neutral host kernel broker",
+        "fun interface SourceHostKernelBroker",
+        "SourceHostKernelContract.validate(command)",
+        "fun interface SourceHostEventSink",
+    )
+    for forbidden in ("addJavascriptInterface", "Class.forName", "Runtime.getRuntime", "ProcessBuilder", "android.content"):
+        assert forbidden not in app_kernel, f"App kernel must stay at the NgheTruyen host boundary: {forbidden}"
+    for forbidden in ("android.content", "android.app", "java.lang.reflect", "Class.forName", "Runtime.getRuntime"):
+        assert forbidden not in host_kernel_contract, f"Host kernel contract leaked platform implementation: {forbidden}"
+        assert forbidden not in host_kernel_broker, f"Host kernel broker leaked platform implementation: {forbidden}"
+    require(
+        host_manifest,
+        "full-authority vBook envelope",
+        "publicInternet = true",
+        "allowCleartext = true",
+        "pageJavaScript = true",
+        "serviceWorkerCapture = true",
+        "SourceCookieMode.BROWSER_SHARED",
+        "SourceCryptoCapability.entries.toSet()",
+    )
+    require(
+        network_policy,
+        "vBook network authority",
+        "publicInternet = true",
+        "allowCleartext = true",
+        "one full-authority in-app mode",
+    )
     require(
         feature_matrix,
         "vBook feature truth",
@@ -110,8 +174,24 @@ def main() -> None:
         "Android browser broker",
         "PublicAddressPolicy.requirePublic",
         "WebStorage.getInstance().deleteAllData()",
+        "ExtensionWebViewAuthority.apply(appContext, webView)",
+        "BROWSER_POPUP_CREATED",
+        "BROWSER_DOWNLOAD_REQUESTED",
+    )
+    require(
+        webview_authority,
+        "extension WebView authority",
+        "javaScriptEnabled = true",
+        "domStorageEnabled = true",
+        "databaseEnabled = true",
+        "javaScriptCanOpenWindowsAutomatically = true",
+        "setSupportMultipleWindows(true)",
+        "MIXED_CONTENT_COMPATIBILITY_MODE",
+        "mediaPlaybackRequiresUserGesture = false",
+        "setAcceptThirdPartyCookies(webView, true)",
         "allowFileAccess = false",
         "allowContentAccess = false",
+        "safeBrowsingEnabled = true",
     )
     require(
         config_service,

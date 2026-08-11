@@ -345,9 +345,7 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
         }
 
         override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
-            if (logLevel >= 1) {
-                record("HTTP", "HTTP_${errorResponse.statusCode}", "main=${request.isForMainFrame} url=${redactUrl(request.url.toString())}")
-            }
+            record("HTTP", "HTTP_${errorResponse.statusCode}", "main=${request.isForMainFrame} url=${redactUrl(request.url.toString())}")
         }
 
         override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {

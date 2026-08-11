@@ -106,6 +106,7 @@ checks = {
     "diagnostic browser global log independent of local level": all(token not in diagnostic_browser for token in (
         'if (logLevel >= 1) record("NAV"',
         'if (logLevel >= 1) record("PAGE"',
+        'if (logLevel >= 1) {\n                record("HTTP"',
         'if (logLevel >= 2) {\n                record(\n                    "REQUEST"',
     )) and "val keepLocal = when" in diagnostic_browser,
     "login renderer handled": "SOURCE_LOGIN_RENDERER_GONE" in login and "return true" in login and "diagnostics.advanced || requestCount" in login,

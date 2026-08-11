@@ -407,7 +407,13 @@ class ChapterDownloadWorker(
         sourceId: String,
         message: String,
     ): Result {
-        (applicationContext as? NgheTruyenApplication)?.container?.sourceDiagnostics?.mark(name = "DOWNLOAD_SOURCE_FAILURE", sourceId = sourceId, traceId = "download:$jobId", severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.ERROR, attributes = mapOf("storyId" to storyId, "code" to failure.code, "error" to failure.message.take(500), "completed" to completed.toString(), "total" to total.toString()))
+        (applicationContext as? NgheTruyenApplication)?.container?.sourceDiagnostics?.mark(
+    name = "DOWNLOAD_JOB_FAILED",
+    sourceId = sourceId,
+    traceId = "download:$jobId",
+    severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.ERROR,
+    attributes = mapOf("storyId" to storyId, "error" to message.take(500)),
+)
         repository.updateDownloadJob(
             id = jobId,
             storyId = storyId,

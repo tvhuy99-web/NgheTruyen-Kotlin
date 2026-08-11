@@ -43,9 +43,9 @@ data class SourceNetworkCapability(
     val maxRequestBytes: Int = 0,
     val requestsPerMinute: Int = 60,
     val maxConcurrent: Int = 2,
-    /** Allow arbitrary public Internet hosts instead of only declared origins. Restricted to VBOOK_JS_COMPAT. */
+    /** Allow arbitrary public Internet hosts instead of only declared origins. */
     val publicInternet: Boolean = false,
-    /** Allow public cleartext HTTP as a legacy compatibility escape hatch. Restricted to VBOOK_JS_COMPAT. */
+    /** Allow public cleartext HTTP for extension compatibility. Requires [publicInternet]. */
     val allowCleartext: Boolean = false,
 )
 
@@ -126,9 +126,9 @@ data class SourceManifest(
         require(LOCALE_PATTERN.matches(locale)) { "SOURCE_LOCALE_INVALID" }
         require(origins.isNotEmpty() && origins.size <= 32) { "SOURCE_ORIGINS_INVALID" }
         val network = capabilities.network
-        val vbookPublicInternet = runtime.mode == SourceRuntimeMode.VBOOK_JS_COMPAT && network?.publicInternet == true
-        val vbookCleartext = vbookPublicInternet && network?.allowCleartext == true
-        (origins + redirectOrigins).forEach { validateOrigin(it, allowCleartext = vbookCleartext) }
+        val extensionPublicInternet = network?.publicInternet == true
+        val extensionCleartext = extensionPublicInternet && network?.allowCleartext == true
+        (origins + redirectOrigins).forEach { validateOrigin(it, allowCleartext = extensionCleartext) }
         require(actions.keys.containsAll(REQUIRED_ACTIONS)) { "SOURCE_REQUIRED_ACTION_MISSING" }
         actions.values.forEach { action ->
             requireSafeRelativePath(action.entry)
@@ -156,9 +156,6 @@ data class SourceManifest(
             require(capability.maxRequestBytes in 0..4 * 1024 * 1024) { "SOURCE_REQUEST_LIMIT_INVALID" }
             require(capability.requestsPerMinute in 1..600) { "SOURCE_RATE_INVALID" }
             require(capability.maxConcurrent in 1..8) { "SOURCE_CONCURRENCY_INVALID" }
-            if (capability.publicInternet || capability.allowCleartext) {
-                require(runtime.mode == SourceRuntimeMode.VBOOK_JS_COMPAT) { "SOURCE_PUBLIC_INTERNET_MODE_DENIED" }
-            }
             require(!capability.allowCleartext || capability.publicInternet) { "SOURCE_CLEARTEXT_PUBLIC_INTERNET_REQUIRED" }
         }
         require(urlPatterns.size <= 32 && urlPatterns.all { it.length <= 500 }) { "SOURCE_URL_PATTERN_INVALID" }

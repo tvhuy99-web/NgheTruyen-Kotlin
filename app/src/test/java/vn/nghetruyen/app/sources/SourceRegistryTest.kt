@@ -10,6 +10,7 @@ import vn.nghetruyen.app.core.model.SourceHealth
 import vn.nghetruyen.app.core.model.ChapterContent
 import vn.nghetruyen.app.core.model.StoryDetail
 import vn.nghetruyen.app.core.model.StorySummary
+import java.util.concurrent.atomic.AtomicReference
 
 class SourceRegistryTest {
     @Test
@@ -30,6 +31,27 @@ class SourceRegistryTest {
         val registry = SourceRegistry(sources = listOf(builtIn), sourcePackSources = listOf(fullParityPack))
 
         assertSame(fullParityPack, registry.get("same-source"))
+    }
+
+    @Test
+    fun vBookSourceExecutionLeavesCallerThreadBeforeBlockingRuntimeWork() = runBlocking {
+        val callerThread = Thread.currentThread()
+        val executionThread = AtomicReference<Thread>()
+        val vBook = FakeSource(
+            id = "vbook-source",
+            selectionPriority = 120,
+            implementationKind = SourceImplementationKind.VBOOK,
+            onSearch = {
+                executionThread.set(Thread.currentThread())
+                check(Thread.currentThread() !== callerThread) { "NetworkOnMainThreadException" }
+            },
+        )
+        val registry = SourceRegistry(sources = emptyList(), sourcePackSources = listOf(vBook))
+
+        val result = requireNotNull(registry.get("vbook-source")).search("needle")
+
+        assertTrue(result is AppResult.Success)
+        assertTrue(executionThread.get() !== callerThread)
     }
 
     @Test
@@ -66,6 +88,7 @@ class SourceRegistryTest {
         id: String,
         override val selectionPriority: Int,
         implementationKind: SourceImplementationKind,
+        private val onSearch: () -> Unit = {},
     ) : StorySource {
         override val descriptor = SourceDescriptor(
             id = id,
@@ -75,7 +98,11 @@ class SourceRegistryTest {
             implementationKind = implementationKind,
         )
 
-        override suspend fun search(query: String, page: Int): AppResult<List<StorySummary>> = AppResult.Success(emptyList())
+        override suspend fun search(query: String, page: Int): AppResult<List<StorySummary>> {
+            onSearch()
+            return AppResult.Success(emptyList())
+        }
+
         override suspend fun category(category: String, page: Int): AppResult<List<StorySummary>> = AppResult.Success(emptyList())
         override suspend fun story(url: String): AppResult<StoryDetail> = AppResult.Failure("NOT_IMPLEMENTED", "test")
         override suspend fun chapter(url: String): AppResult<ChapterContent> = AppResult.Failure("NOT_IMPLEMENTED", "test")

@@ -120,17 +120,19 @@ fun interface SourceHostEventSink {
 }
 
 /**
- * Process-stable host-to-extension event router.
+ * Process-stable host-to-extension event router and bounded fallback inbox.
  *
- * The bus keeps only weak sink references. Replacing or removing a source therefore cannot keep an
- * old runtime alive. A new source instance may register the same source id and atomically replace
- * the previous sink. Events for inactive sources are validated and then dropped.
+ * A live runtime may register a weak sink and receive events immediately. If there is no live sink,
+ * the event is kept in a small per-source FIFO until the extension polls it through the host command
+ * boundary. This lets short-lived Rhino scopes receive lifecycle events without keeping a JS scope,
+ * Activity or runtime alive between actions.
  */
 object SourceHostEventBus : SourceHostEventSink {
     private val sinks = ConcurrentHashMap<String, WeakReference<SourceHostEventSink>>()
+    private val pending = ConcurrentHashMap<String, ArrayDeque<SourceHostEvent>>()
 
     fun register(sourceId: String, sink: SourceHostEventSink) {
-        require(sourceId.isNotBlank() && sourceId.length <= MAX_SOURCE_ID_CHARS) { "SOURCE_HOST_EVENT_SOURCE_ID_INVALID" }
+        validateSourceId(sourceId)
         require(sink !== this) { "SOURCE_HOST_EVENT_RECURSIVE_SINK" }
         sinks[sourceId] = WeakReference(sink)
     }
@@ -144,16 +146,63 @@ object SourceHostEventBus : SourceHostEventSink {
         if (current === sink || current == null) sinks.remove(sourceId)
     }
 
+    fun drain(sourceId: String, eventName: String? = null): List<SourceHostEvent> {
+        validateSourceId(sourceId)
+        val normalizedName = eventName?.trim()?.takeIf(String::isNotEmpty)
+        if (normalizedName != null) {
+            require(normalizedName in SourceHostKernelContract.lifecycleEvents) {
+                "SOURCE_HOST_EVENT_INVALID:$normalizedName"
+            }
+        }
+        val queue = pending[sourceId] ?: return emptyList()
+        val drained = mutableListOf<SourceHostEvent>()
+        synchronized(queue) {
+            if (normalizedName == null) {
+                while (queue.isNotEmpty()) drained += queue.removeFirst()
+            } else {
+                val keep = ArrayDeque<SourceHostEvent>()
+                while (queue.isNotEmpty()) {
+                    val event = queue.removeFirst()
+                    if (event.name == normalizedName) drained += event else keep.addLast(event)
+                }
+                while (keep.isNotEmpty()) queue.addLast(keep.removeFirst())
+            }
+            if (queue.isEmpty()) pending.remove(sourceId, queue)
+        }
+        return drained
+    }
+
     override fun emit(sourceId: String, event: SourceHostEvent, traceId: String) {
+        validateSourceId(sourceId)
         SourceHostKernelContract.validate(event)
-        val reference = sinks[sourceId] ?: return
-        val sink = reference.get()
-        if (sink == null) {
-            sinks.remove(sourceId, reference)
+        val reference = sinks[sourceId]
+        val sink = reference?.get()
+        if (sink != null) {
+            sink.emit(sourceId, event, traceId)
             return
         }
-        sink.emit(sourceId, event, traceId)
+        if (reference != null) sinks.remove(sourceId, reference)
+        enqueue(sourceId, event)
+    }
+
+    private fun enqueue(sourceId: String, event: SourceHostEvent) {
+        if (!pending.containsKey(sourceId) && pending.size >= MAX_SOURCE_QUEUES) {
+            pending.keys.firstOrNull()?.let(pending::remove)
+        }
+        val queue = pending.computeIfAbsent(sourceId) { ArrayDeque() }
+        synchronized(queue) {
+            while (queue.size >= MAX_EVENTS_PER_SOURCE) queue.removeFirst()
+            queue.addLast(event)
+        }
+    }
+
+    private fun validateSourceId(sourceId: String) {
+        require(sourceId.isNotBlank() && sourceId.length <= MAX_SOURCE_ID_CHARS) {
+            "SOURCE_HOST_EVENT_SOURCE_ID_INVALID"
+        }
     }
 
     private const val MAX_SOURCE_ID_CHARS = 512
+    private const val MAX_SOURCE_QUEUES = 256
+    private const val MAX_EVENTS_PER_SOURCE = 64
 }

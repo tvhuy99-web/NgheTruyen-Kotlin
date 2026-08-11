@@ -13,6 +13,7 @@ import vn.nghetruyen.app.NgheTruyenApplication
 import vn.nghetruyen.source.diagnostics.DiagnosticCategory
 import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 import vn.nghetruyen.app.core.common.AppResult
+import vn.nghetruyen.app.core.model.GLOBAL_VOICE_PROFILE_STORY_ID
 import vn.nghetruyen.app.data.local.VoiceRoleEntity
 import vn.nghetruyen.app.data.repository.LibraryRepository
 import vn.nghetruyen.app.data.settings.AiOnlineSettings
@@ -73,15 +74,20 @@ class XpkNarrationAiServices(
         if (rawText.isBlank()) return failure("AI_EMPTY_INPUT", "Chương không có nội dung để lập kế hoạch kể chuyện.")
         if (rawText.length > MAX_PLAN_CHARS) return failure("AI_INPUT_TOO_LARGE", "Chương quá dài để lập kế hoạch kể chuyện trong một lượt.")
         if (!request.includeVoiceCast && !request.includeSceneMusic) return failure("AI_PLAN_EMPTY", "Không có hạng mục kể chuyện nào được yêu cầu.")
+        if (!request.includeVoiceCast && request.includeSceneMusic) {
+            return failure("AI_SCENE_MUSIC_REQUIRES_VOICE_CAST", "Nhạc theo cảnh AI chỉ được lập cùng phân vai TTS.")
+        }
         if (request.includeSceneMusic && request.tracks.isEmpty()) return failure("AI_TRACKS_EMPTY", "Chưa có tệp nhạc cảnh đang bật.")
 
         val config = resolveConfiguration(request.storyId)
         validateConfiguration(config)?.let { return it }
+        val storyVoice = StoryVoiceCastReferenceCodec.decode(config.voiceCastNote)
         val profiles = if (request.includeVoiceCast) {
-            libraryRepository.listEffectiveVoiceRoles(
-                request.storyId,
-                settingsRepository.snapshot().autoVoiceCastEnabled,
-            ).filter(VoiceRoleEntity::enabled)
+            when (storyVoice.mode) {
+                StoryVoiceCastMode.OFF -> emptyList()
+                StoryVoiceCastMode.PRIVATE -> libraryRepository.listVoiceRoles(request.storyId).filter(VoiceRoleEntity::enabled)
+                StoryVoiceCastMode.GLOBAL -> libraryRepository.listVoiceRoles(GLOBAL_VOICE_PROFILE_STORY_ID).filter(VoiceRoleEntity::enabled)
+            }
         } else emptyList()
 
         if (request.includeVoiceCast) {
@@ -205,7 +211,7 @@ class XpkNarrationAiServices(
             model = profile?.model?.takeIf { profile.overrideProvider && it.isNotBlank() } ?: global.model,
             temperature = profile?.temperature?.takeIf { it in 0f..2f } ?: global.temperature,
             voiceCastNote = profile?.voiceCastNote.orEmpty(),
-            expressiveAdjustment = profile?.expressiveAdjustment ?: true,
+            expressiveAdjustment = profile?.expressiveAdjustment ?: false,
             expressionPrompt = profile?.expressionPrompt.orEmpty(),
             expressionSpeedLimitPct = profile?.expressionSpeedLimitPct?.coerceIn(0, 100) ?: 10,
             expressionPitchLimitPct = profile?.expressionPitchLimitPct?.coerceIn(0, 100) ?: 10,
@@ -238,6 +244,12 @@ class XpkNarrationAiServices(
             requestGovernor.finish(permit, 0, 0, "AI_CONFIGURATION_INVALID")
             return@withContext failure("AI_CONFIGURATION_INVALID", it.message ?: "Cấu hình AI không hợp lệ.", it)
         }
+        val timeoutMillis = config.global.timeoutMillis.coerceAtLeast(10_000)
+        val callClient = client.newBuilder()
+            .connectTimeout(minOf(30_000, timeoutMillis).toLong(), TimeUnit.MILLISECONDS)
+            .readTimeout(timeoutMillis.toLong(), TimeUnit.MILLISECONDS)
+            .writeTimeout(timeoutMillis.toLong(), TimeUnit.MILLISECONDS)
+            .build()
         var lastFailure: AppResult.Failure? = null
         requests.forEachIndexed { index, requestData ->
             try {
@@ -247,7 +259,7 @@ class XpkNarrationAiServices(
                     .apply { requestData.headers.forEach { (name, value) -> header(name, value) } }
                     .post(requestData.body.toRequestBody(JSON_MEDIA_TYPE))
                     .build()
-                val response = client.newCall(request).execute()
+                val response = callClient.newCall(request).execute()
                 response.use {
                     if (response.isRedirect) {
                         lastFailure = failure("AI_REDIRECT_BLOCKED", "Endpoint AI trả redirect; yêu cầu URL API trực tiếp.")
@@ -310,7 +322,6 @@ class XpkNarrationAiServices(
                     "generationConfig",
                     JSONObject()
                         .put("temperature", config.temperature.toDouble())
-                        .put("maxOutputTokens", MAX_OUTPUT_TOKENS)
                         .put("responseMimeType", "application/json"),
                 )
                 .toString()
@@ -464,7 +475,6 @@ class XpkNarrationAiServices(
         private const val MAX_PLAN_CHARS = 60_000
         private const val MAX_PROMPT_CHARS = 160_000
         private const val MAX_RESPONSE_CHARS = 2_000_000
-        private const val MAX_OUTPUT_TOKENS = 8_000
         private const val MAX_VOICE_PROFILES = 10
     }
 }

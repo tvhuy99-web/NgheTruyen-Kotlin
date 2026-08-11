@@ -24,6 +24,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
@@ -64,6 +65,8 @@ import kotlin.math.log10
 import kotlin.math.pow
 import java.util.UUID
 import vn.nghetruyen.app.NgheTruyenApplication
+import vn.nghetruyen.app.ai.StoryVoiceCastMode
+import vn.nghetruyen.app.ai.StoryVoiceCastReferenceCodec
 import vn.nghetruyen.app.ai.vietphrase.VietPhraseDiagnosticExport
 import vn.nghetruyen.app.ai.vietphrase.VietPhraseDiagnosticExporter
 import vn.nghetruyen.app.ai.vietphrase.VietPhraseDictionaryKind
@@ -174,6 +177,14 @@ fun ReaderScreen(
     val display = state.readerDisplay
     val textMode = state.readerMode == ReaderMode.TEXT
     val storyId = content.chapter.storyId
+    val storyAiProfile = state.storyAiProfiles[storyId]
+    val storyVoiceReference = storyAiProfile?.let { StoryVoiceCastReferenceCodec.decode(it.voiceCastNote) }
+    val effectiveAutoVoiceCastEnabled = state.autoVoiceCastEnabled && when {
+        storyAiProfile == null -> false
+        !StoryVoiceCastReferenceCodec.hasStoredSettings(storyAiProfile.voiceCastNote) -> false
+        storyVoiceReference?.mode == StoryVoiceCastMode.OFF -> false
+        else -> storyVoiceReference?.autoRunOnOpenTts == true
+    }
     val activeIndex = state.playback.paragraphIndex.coerceIn(0, content.paragraphs.lastIndex.coerceAtLeast(0))
     val storyDetail = state.storyDetail
     val sourceDescriptor = storyDetail?.story?.sourceId?.let { id -> state.sources.firstOrNull { it.id == id } }
@@ -319,6 +330,13 @@ fun ReaderScreen(
     LaunchedEffect(content.chapter.id, state.readerMode) {
         delay(120)
         view.announceForAccessibility("${content.chapter.title}. Chế độ ${if (textMode) "Văn bản" else "TTS"}. ${content.paragraphs.size} đoạn")
+    }
+    LaunchedEffect(state.playback.narrationStage, state.playback.narrationMessage) {
+        val announcement = state.playback.narrationMessage?.trim().orEmpty()
+        if (announcement.isNotBlank()) {
+            delay(80)
+            view.announceForAccessibility(announcement)
+        }
     }
 
     fun createVietPhraseDiagnostic() {
@@ -483,6 +501,21 @@ fun ReaderScreen(
                         ReaderButton(if (sourceDescriptor.id in state.sourceSessions) "MỞ LẠI PHIÊN" else "ĐĂNG NHẬP NGUỒN", { onOpenSourceLogin(sourceDescriptor.id) }, Modifier.weight(1f), normalColor = ReferenceGray)
                     }
                     ReaderButton(if (sourceDescriptor.id in state.sourceHealthChecking) "ĐANG KIỂM TRA" else "KIỂM TRA NGUỒN", { onCheckSource(sourceDescriptor.id) }, Modifier.weight(1f), enabled = sourceDescriptor.id !in state.sourceHealthChecking, normalColor = ReferenceGray)
+                }
+            }
+            if (effectiveAutoVoiceCastEnabled) {
+                val autoNarrationStatus = state.playback.narrationMessage ?: if (state.prefetchNarrationPlansEnabled) {
+                    "Tự phân vai đang bật. Từ 75% chương, ứng dụng sẽ tải và phân vai trước chương tiếp theo."
+                } else {
+                    "Tự phân vai đang bật. Tải/phân vai trước chương tiếp theo đang tắt trong cài đặt."
+                }
+                Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
+                    Text("TỰ PHÂN VAI", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
+                    LinearProgressIndicator(
+                        progress = { state.playback.narrationProgress.coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    )
+                    Text(autoNarrationStatus, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
                 }
             }
             Row(Modifier.fillMaxWidth()) {

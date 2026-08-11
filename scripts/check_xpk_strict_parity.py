@@ -81,11 +81,19 @@ require(
     "ReferenceVoiceRoleExtras.load(appContext, role.id)",
     "profileSettingsById = profileSettingsById",
     "dialogueGroupByUnitId = bundle.units",
+    "AI_SCENE_MUSIC_REQUIRES_VOICE_CAST",
+    "StoryVoiceCastMode.GLOBAL -> libraryRepository.listVoiceRoles(GLOBAL_VOICE_PROFILE_STORY_ID)",
+    "expressiveAdjustment = profile?.expressiveAdjustment ?: false",
+    "val timeoutMillis = config.global.timeoutMillis.coerceAtLeast(10_000)",
+    ".connectTimeout(minOf(30_000, timeoutMillis).toLong(), TimeUnit.MILLISECONDS)",
+    ".readTimeout(timeoutMillis.toLong(), TimeUnit.MILLISECONDS)",
 )
 forbid(
     "app/src/main/java/vn/nghetruyen/app/ai/XpkNarrationAiServices.kt",
     "customGuidance =",
     "MAX_VOICE_PROFILES = 40",
+    "maxOutputTokens",
+    "MAX_OUTPUT_TOKENS",
 )
 
 require(
@@ -113,6 +121,9 @@ require(
     "XpkPlaybackRuntime.resetCanonicalPlans()",
     "XpkPlaybackRuntime.canonicalLines(paragraphs)",
     "val dialogueGroupId: String? = null",
+    "enum class NarrationAutomationStage",
+    "val narrationProgress: Float = 0f",
+    "fun setNarrationAutomation(",
 )
 
 require(
@@ -143,6 +154,107 @@ require(
     'put("timeline_fingerprint_version", XpkPlaybackRuntime.TIMELINE_FINGERPRINT_VERSION)',
     "isCurrentTimelineTransform(previousTransform.transformedText, MUSIC_TRANSFORM_ENGINE, previous)",
     "XpkPlaybackRuntime.canonicalLines(content.paragraphs)",
+    "Nhạc theo cảnh AI chỉ được lập cùng phân vai TTS.",
+    "suspend fun voicePlanAssignmentCount(content: ChapterContent): Int",
+    "suspend fun shouldAutoVoiceCast(storyId: String): Boolean",
+    "val profile = library.getStoryAiProfile(storyId) ?: return false",
+    "if (!StoryVoiceCastReferenceCodec.hasStoredSettings(raw)) return false",
+    "return storyVoice.autoRunOnOpenTts",
+    "suspend fun expressiveAdjustmentEnabled(storyId: String): Boolean",
+    "suspend fun effectiveVoiceRoles(storyId: String): List<VoiceRoleEntity>",
+)
+forbid(
+    "app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt",
+    "includeVoiceCast = false",
+)
+
+require(
+    "app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt",
+    'private var narrationPreparedChapterId: String = ""',
+    'private var manualNarrationChapterId: String = ""',
+    "if (prepareCurrentNarrationBeforePlayback(snapshot)) return",
+    "if (!currentStoryAutoVoiceCastEnabled || snapshot.chapterId.isBlank()) return false",
+    "if (currentStoryExpressiveAdjustmentEnabled)",
+    "val aiRateMultiplier = 1f + speedAdjustPct / 100f",
+    "val aiPitchMultiplier = 1f + pitchAdjustPct / 100f",
+    "val aiVolumeMultiplier = 1f + volumeAdjustPct / 100f",
+    "volume = (track.volume * sceneVolume * normalizationGain).coerceIn(0f, 1f)",
+    "tts.setAudioAttributes(speechAudioAttributes())",
+    "private fun speechAudioAttributes(): AudioAttributes = AudioAttributes.Builder()",
+    ".setUsage(AudioAttributes.USAGE_MEDIA)",
+    "PREFETCH_THRESHOLD = 0.75f",
+    "NarrationAutomationStage.NEXT_LOADING",
+    "NarrationAutomationStage.NEXT_PLANNING",
+    "NarrationAutomationStage.NEXT_READY",
+    "shouldPlanAutoSceneMusic()",
+    "voicePlanAssignmentCount(content)",
+    "NARRATION_RETRY_DELAY_MS = 5_000L",
+    "ACTION_APPLY_NARRATION_AND_PLAY",
+    "manualNarrationChapterId = PlaybackQueueStore.state.value.chapterId",
+    "val voicePlanEnabled = currentStoryAutoVoiceCastEnabled || manualNarrationChapterId == chapterId",
+    "if (voicePlanEnabled && originalHash != null)",
+    "Phân vai chưa thành công. Sẽ tự thử lại sau 5 giây.",
+    "if (currentStoryAutoVoiceCastEnabled && prefetchNarrationPlansEnabled)",
+    "if (!PlaybackQueueStore.state.value.isPlaying) pendingPlay = false",
+)
+forbid(
+    "app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt",
+    "narrationReloadPending",
+    "maybeEnsureCurrentNarrationPlans()",
+    "val aiRateMultiplier = (1f + speedAdjustPct / 100f).coerceIn(0.5f, 1.5f)",
+    "volume = (track.volume * sceneVolume * normalizationGain).coerceIn(0f, 0.6f)",
+    "AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY",
+    "Phân vai tự động chưa thành công; đang đọc bằng cấu hình/phân vai hiện có.",
+    "if (autoVoiceCastEnabled && prefetchNarrationPlansEnabled)",
+)
+
+require(
+    "app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt",
+    "includeMusic = state.value.backgroundMusicEnabled && state.value.autoSceneMusicEnabled",
+    "val autoVoiceCastOnOpen = container.narrationPlanCoordinator.shouldAutoVoiceCast",
+    "val shouldAutoStartNarration = settings.readerMode == ReaderMode.TTS && autoVoiceCastOnOpen",
+    "NarrationAutomationStage.IDLE",
+    "ReaderPlaybackService.ACTION_PLAY",
+    "ACTION_APPLY_NARRATION_AND_PLAY",
+)
+forbid(
+    "app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt",
+    "Hãy thêm ít nhất một tệp nhạc cảnh đang bật.",
+    "existingVoicePlanCount > 0",
+)
+
+require(
+    "app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt",
+    "LinearProgressIndicator(",
+    "state.playback.narrationMessage",
+    "Từ 75% chương",
+    "if (effectiveAutoVoiceCastEnabled)",
+    "StoryVoiceCastReferenceCodec.hasStoredSettings",
+    "storyAiProfile == null -> false",
+    "!StoryVoiceCastReferenceCodec.hasStoredSettings(storyAiProfile.voiceCastNote) -> false",
+    "view.announceForAccessibility(announcement)",
+)
+
+require(
+    "app/src/main/java/vn/nghetruyen/app/data/settings/SettingsRepository.kt",
+    "prefs[Keys.backgroundMusicDuckFactor] ?: 0.63095734f",
+    "prefs[Keys.backgroundMusicAttackMillis] ?: 1850",
+    "prefs[Keys.backgroundMusicReleaseMillis] ?: 2050",
+    "prefs[Keys.sceneMusicTargetLufs] ?: -24.0f",
+)
+
+require(
+    "app/src/main/java/vn/nghetruyen/app/audio/AudioExportWorker.kt",
+    "container.narrationPlanCoordinator.effectiveVoiceRoles(job.storyId)",
+    "container.narrationPlanCoordinator.expressiveAdjustmentEnabled(job.storyId)",
+    "PcmLoudnessEstimator.gainDbToLinear(track.normalizationGainDb)",
+    "settings.backgroundMusicDuckFactor.coerceIn(0.05f, 1f)",
+    "volume = gain.coerceIn(0f, 1f)",
+)
+forbid(
+    "app/src/main/java/vn/nghetruyen/app/audio/AudioExportWorker.kt",
+    "settings.backgroundMusicVolume.coerceIn(0f, 1f) * settings.backgroundMusicDuckFactor",
+    "volume = gain.coerceIn(0f, 0.6f)",
 )
 
 require(

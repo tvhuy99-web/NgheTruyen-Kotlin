@@ -35,17 +35,20 @@ class NarrationPlanCoordinator(
         activeTrackId: String? = null,
     ): Result {
         if (!voice && !music) return Result(false, false, emptyList())
+        if (!voice) {
+            return Result(false, false, listOf("Nhạc theo cảnh AI chỉ được lập cùng phân vai TTS."))
+        }
         val storyVoice = storyVoiceSettings(content.chapter.storyId)
-        val voiceAllowed = voice && storyVoice.mode != StoryVoiceCastMode.OFF
-        if (!voiceAllowed && !music) {
+        val voiceAllowed = storyVoice.mode != StoryVoiceCastMode.OFF
+        if (!voiceAllowed) {
             return Result(false, false, listOf("Phân vai TTS đang tắt cho truyện này."))
         }
         val tracks = if (music) library.listEnabledSceneMusicTracks() else emptyList()
-        val voiceNeeded = voiceAllowed && needsVoicePlan(content, force)
+        val voiceNeeded = needsVoicePlan(content, force)
         val musicNeeded = music && needsMusicPlan(content, tracks, force)
         if (!voiceNeeded && !musicNeeded) return Result(false, false, emptyList())
 
-        if (voiceAllowed && music) {
+        if (music) {
             if (tracks.isEmpty()) {
                 val voiceOutcome = if (voiceNeeded) ensureVoicePlan(content, force) else AppResult.Success(false)
                 return when (voiceOutcome) {
@@ -85,36 +88,50 @@ class NarrationPlanCoordinator(
 
         val warnings = mutableListOf<String>()
         var voiceCreated = false
-        var musicCreated = false
         if (voiceNeeded) {
             when (val outcome = ensureVoicePlan(content, force)) {
                 is AppResult.Success -> voiceCreated = outcome.value
                 is AppResult.Failure -> warnings += outcome.message
             }
         }
-        if (musicNeeded) {
-            when (val outcome = ensureMusicPlan(content, tracks, force, activeTrackId)) {
-                is AppResult.Success -> musicCreated = outcome.value
-                is AppResult.Failure -> warnings += outcome.message
-            }
-        }
-        return Result(voiceCreated, musicCreated, warnings.distinct())
+        return Result(voiceCreated, false, warnings.distinct())
     }
+
+    suspend fun voicePlanAssignmentCount(content: ChapterContent): Int {
+        val sourceHash = ChapterAiWorkflow.sha256(content.paragraphs)
+        val cached = library.getChapterTransform(content.chapter.id, ChapterAiWorkflow.KIND_VOICE_CAST)
+            ?: return 0
+        if (cached.sourceSha256 != sourceHash) return 0
+        if (!isCurrentTimelineTransform(cached.transformedText, VOICE_TRANSFORM_ENGINE, content)) return 0
+        return runCatching {
+            JSONObject(cached.transformedText).optJSONArray("assignments")?.length() ?: 0
+        }.getOrDefault(0)
+    }
+
+    suspend fun shouldAutoVoiceCast(storyId: String): Boolean {
+        val appEnabled = settings.snapshot().autoVoiceCastEnabled
+        if (!appEnabled) return false
+        val profile = library.getStoryAiProfile(storyId) ?: return false
+        val raw = profile.voiceCastNote
+        if (!StoryVoiceCastReferenceCodec.hasStoredSettings(raw)) return false
+        val storyVoice = StoryVoiceCastReferenceCodec.decode(raw)
+        if (storyVoice.mode == StoryVoiceCastMode.OFF) return false
+        return storyVoice.autoRunOnOpenTts
+    }
+
+    suspend fun expressiveAdjustmentEnabled(storyId: String): Boolean =
+        library.getStoryAiProfile(storyId)?.expressiveAdjustment == true
 
     private suspend fun storyVoiceSettings(storyId: String): StoryVoiceCastReferenceSettings =
         library.getStoryAiProfile(storyId)?.let { StoryVoiceCastReferenceCodec.decode(it.voiceCastNote) }
             ?: StoryVoiceCastReferenceSettings()
 
-    private suspend fun effectiveRoles(storyId: String): List<VoiceRoleEntity> {
-        val appSettings = settings.snapshot()
-        return when (storyVoiceSettings(storyId).mode) {
+    suspend fun effectiveVoiceRoles(storyId: String): List<VoiceRoleEntity> =
+        when (storyVoiceSettings(storyId).mode) {
             StoryVoiceCastMode.OFF -> emptyList()
             StoryVoiceCastMode.PRIVATE -> library.listVoiceRoles(storyId).filter(VoiceRoleEntity::enabled)
-            StoryVoiceCastMode.GLOBAL -> if (appSettings.autoVoiceCastEnabled) {
-                library.listVoiceRoles(GLOBAL_VOICE_PROFILE_STORY_ID).filter(VoiceRoleEntity::enabled)
-            } else emptyList()
+            StoryVoiceCastMode.GLOBAL -> library.listVoiceRoles(GLOBAL_VOICE_PROFILE_STORY_ID).filter(VoiceRoleEntity::enabled)
         }
-    }
 
     private suspend fun needsVoicePlan(content: ChapterContent, force: Boolean): Boolean {
         if (storyVoiceSettings(content.chapter.storyId).mode == StoryVoiceCastMode.OFF) return false
@@ -157,39 +174,6 @@ class NarrationPlanCoordinator(
                     { AppResult.Success(true) },
                     { AppResult.Failure("VOICE_PLAN_SAVE_FAILED", it.message ?: "Không lưu được kế hoạch giọng.", it) },
                 )
-        }
-    }
-
-    private suspend fun ensureMusicPlan(
-        content: ChapterContent,
-        tracks: List<SceneMusicTrackEntity>,
-        force: Boolean,
-        activeTrackId: String?,
-    ): AppResult<Boolean> {
-        if (tracks.isEmpty()) return AppResult.Failure("AI_TRACKS_EMPTY", "Chưa có tệp nhạc cảnh đang bật.")
-        if (!needsMusicPlan(content, tracks, force)) return AppResult.Success(false)
-        val context = buildContinuityContext(content, activeTrackId, tracks)
-        return when (
-            val result = ai.planNarration(
-                NarrationPlanRequest(
-                    storyId = content.chapter.storyId,
-                    chapterId = content.chapter.id,
-                    chapterTitle = content.chapter.title,
-                    rawText = chapterBody(content),
-                    includeVoiceCast = false,
-                    includeSceneMusic = true,
-                    tracks = tracks.map { it.toOption() },
-                    context = context,
-                ),
-            )
-        ) {
-            is AppResult.Failure -> result
-            is AppResult.Success -> runCatching {
-                persistMusicPlan(content, tracks, result.value.musicCues, result.value.musicSceneError)
-            }.fold(
-                { AppResult.Success(true) },
-                { AppResult.Failure("MUSIC_PLAN_SAVE_FAILED", it.message ?: "Không lưu được kế hoạch nhạc.", it) },
-            )
         }
     }
 

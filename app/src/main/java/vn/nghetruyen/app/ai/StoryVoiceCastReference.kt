@@ -15,6 +15,9 @@ data class StoryVoiceCastReferenceSettings(
 object StoryVoiceCastReferenceCodec {
     private const val PREFIX = "@NGHETRUYEN_VOICE_CAST|"
 
+    fun hasStoredSettings(raw: String): Boolean =
+        raw.lineSequence().firstOrNull().orEmpty().startsWith(PREFIX)
+
     fun decode(raw: String): StoryVoiceCastReferenceSettings {
         val first = raw.lineSequence().firstOrNull().orEmpty()
         if (!first.startsWith(PREFIX)) return StoryVoiceCastReferenceSettings(note = raw)

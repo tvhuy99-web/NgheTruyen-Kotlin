@@ -45,12 +45,31 @@ class OnlineAiServices(
         endpoint: String,
         apiKeyOverride: String? = null,
     ): AppResult<List<String>> = withContext(Dispatchers.IO) {
+        val traceId = "ai-models:${UUID.randomUUID()}"
+        val startedAt = System.currentTimeMillis()
+        diagnostic(
+            traceId,
+            "AI_MODEL_DISCOVERY_STARTED",
+            DiagnosticSeverity.INFO,
+            attributes = mapOf("provider" to provider.name),
+        )
+        fun modelFailure(code: String, message: String, cause: Throwable? = null): AppResult.Failure {
+            diagnostic(
+                traceId,
+                "AI_MODEL_DISCOVERY_FAILED",
+                DiagnosticSeverity.WARN,
+                durationMs = System.currentTimeMillis() - startedAt,
+                attributes = mapOf("provider" to provider.name, "code" to code, "message" to message.take(500), "cause" to (cause?.javaClass?.simpleName ?: "")),
+            )
+            return failure(code, message, cause)
+        }
+
         val apiKey = apiKeyOverride?.trim()?.takeIf(String::isNotBlank)
             ?: credentialStore.apiKey(provider)?.trim()?.takeIf(String::isNotBlank)
         val request = when (provider) {
             AiProvider.GEMINI -> {
                 val geminiKey = apiKey
-                    ?: return@withContext failure("AI_KEY_MISSING", "Chưa lưu API key cho ${providerLabel(provider)}.")
+                    ?: return@withContext modelFailure("AI_KEY_MISSING", "Chưa lưu API key cho ${providerLabel(provider)}.")
                 Request.Builder()
                     .url("$GEMINI_API_BASE/models?pageSize=100")
                     .header("Accept", "application/json")
@@ -61,7 +80,7 @@ class OnlineAiServices(
             AiProvider.OPENAI_COMPATIBLE -> {
                 val chatEndpoint = endpoint.trim().ifBlank { settingsRepository.snapshot().aiOnline.endpoint }
                 AiEndpointPolicy.validate(chatEndpoint).exceptionOrNull()?.let {
-                    return@withContext failure("AI_ENDPOINT_INVALID", it.message ?: "Endpoint AI không hợp lệ.")
+                    return@withContext modelFailure("AI_ENDPOINT_INVALID", it.message ?: "Endpoint AI không hợp lệ.", it)
                 }
                 val base = chatEndpoint.trimEnd('/')
                     .removeSuffix("/chat/completions")
@@ -77,9 +96,16 @@ class OnlineAiServices(
                     .build()
             }
         }
+        val endpointForLog = diagnosticEndpoint(request.url.toString())
+        diagnostic(
+            traceId,
+            "AI_MODEL_DISCOVERY_HTTP_STARTED",
+            DiagnosticSeverity.INFO,
+            DiagnosticCategory.NETWORK,
+            attributes = mapOf("provider" to provider.name, "endpoint" to endpointForLog),
+        )
         try {
             client.newCall(request).execute().use { response ->
-                if (response.isRedirect) return@withContext failure("AI_REDIRECT_BLOCKED", "Models API trả redirect.")
                 val raw = response.body?.charStream()?.use { reader ->
                     buildString {
                         val buffer = CharArray(8_192)
@@ -90,11 +116,32 @@ class OnlineAiServices(
                         }
                     }
                 }.orEmpty()
+                diagnostic(
+                    traceId,
+                    "AI_MODEL_DISCOVERY_HTTP_RESPONSE",
+                    if (response.isSuccessful) DiagnosticSeverity.INFO else DiagnosticSeverity.WARN,
+                    DiagnosticCategory.NETWORK,
+                    durationMs = System.currentTimeMillis() - startedAt,
+                    attributes = mapOf(
+                        "provider" to provider.name,
+                        "endpoint" to endpointForLog,
+                        "status" to response.code.toString(),
+                        "responseChars" to raw.length.toString(),
+                    ),
+                )
+                captureAiEvidence(
+                    traceId,
+                    "model_discovery",
+                    "response-http${response.code}.json",
+                    raw,
+                    mapOf("provider" to provider.name, "endpoint" to endpointForLog, "status" to response.code.toString()),
+                )
+                if (response.isRedirect) return@withContext modelFailure("AI_REDIRECT_BLOCKED", "Models API trả redirect.")
                 if (raw.length > MAX_MODEL_LIST_CHARS) {
-                    return@withContext failure("AI_RESPONSE_TOO_LARGE", "Danh sách model vượt giới hạn an toàn.")
+                    return@withContext modelFailure("AI_RESPONSE_TOO_LARGE", "Danh sách model vượt giới hạn an toàn.")
                 }
                 if (!response.isSuccessful) {
-                    return@withContext failure(
+                    return@withContext modelFailure(
                         "AI_HTTP_${response.code}",
                         extractError(provider, raw)?.take(400) ?: "Models API trả lỗi HTTP ${response.code}.",
                     )
@@ -124,13 +171,23 @@ class OnlineAiServices(
                         }
                     }
                 }.distinct().sorted()
-                if (models.isEmpty()) failure("AI_MODELS_EMPTY", "API không trả model phù hợp.")
-                else AppResult.Success(models)
+                if (models.isEmpty()) {
+                    modelFailure("AI_MODELS_EMPTY", "API không trả model phù hợp.")
+                } else {
+                    diagnostic(
+                        traceId,
+                        "AI_MODEL_DISCOVERY_COMPLETED",
+                        DiagnosticSeverity.INFO,
+                        durationMs = System.currentTimeMillis() - startedAt,
+                        attributes = mapOf("provider" to provider.name, "models" to models.size.toString()),
+                    )
+                    AppResult.Success(models)
+                }
             }
         } catch (error: IOException) {
-            failure("AI_NETWORK_ERROR", error.message ?: "Không tải được danh sách model.", error)
+            modelFailure("AI_NETWORK_ERROR", error.message ?: "Không tải được danh sách model.", error)
         } catch (error: Exception) {
-            failure("AI_BAD_RESPONSE", error.message ?: "Không đọc được danh sách model.", error)
+            modelFailure("AI_BAD_RESPONSE", error.message ?: "Không đọc được danh sách model.", error)
         }
     }
 

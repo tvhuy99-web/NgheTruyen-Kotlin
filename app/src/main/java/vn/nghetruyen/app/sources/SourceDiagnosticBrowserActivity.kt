@@ -171,9 +171,7 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
                 }
 
                 override fun onConsoleMessage(message: ConsoleMessage): Boolean {
-                    if (logLevel >= 2) {
-                        record("CONSOLE", "${message.messageLevel()}@${message.lineNumber()}", sanitize(message.message(), 800))
-                    }
+                    record("CONSOLE", "${message.messageLevel()}@${message.lineNumber()}", sanitize(message.message(), 800))
                     return true
                 }
             }
@@ -312,42 +310,38 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
                 status.text = "Đã chặn điều hướng ra ngoài miền của nguồn."
                 return true
             }
-            if (logLevel >= 1) record("NAV", "NAVIGATION", redactUrl(target))
+            record("NAV", "NAVIGATION", redactUrl(target))
             return false
         }
 
         override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
             urlField.setText(url)
-            if (logLevel >= 1) record("PAGE", "START", redactUrl(url))
+            record("PAGE", "START", redactUrl(url))
         }
 
         override fun onPageFinished(view: WebView, url: String) {
             urlField.setText(url)
             captureSession()
-            if (logLevel >= 1) record("PAGE", "FINISH", redactUrl(url))
+            record("PAGE", "FINISH", redactUrl(url))
             status.text = "Trang đã tải. Có $requestCount request trong phiên chẩn đoán."
         }
 
         override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
             requestCount += 1
-            if (logLevel >= 2) {
-                record(
-                    "REQUEST",
-                    request.method,
-                    "${redactUrl(request.url.toString())} main=${request.isForMainFrame} headers=${request.requestHeaders.keys.sorted().joinToString()}",
-                )
-            }
+            record(
+                "REQUEST",
+                request.method,
+                "${redactUrl(request.url.toString())} main=${request.isForMainFrame} headers=${request.requestHeaders.keys.sorted().joinToString()}",
+            )
             return null
         }
 
         override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-            if (logLevel >= 1) {
-                record(
-                    "ERROR",
-                    "WEB_${error.errorCode}",
-                    "main=${request.isForMainFrame} url=${redactUrl(request.url.toString())} desc=${sanitize(error.description.toString(), 300)}",
-                )
-            }
+            record(
+                "ERROR",
+                "WEB_${error.errorCode}",
+                "main=${request.isForMainFrame} url=${redactUrl(request.url.toString())} desc=${sanitize(error.description.toString(), 300)}",
+            )
         }
 
         override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
@@ -369,7 +363,7 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
             record("SECURITY", "URL_REJECTED", redactUrl(target))
             return
         }
-        if (logLevel >= 1) record("NAV", "LOAD_URL", redactUrl(target))
+        record("NAV", "LOAD_URL", redactUrl(target))
         webView.loadUrl(target)
     }
 
@@ -406,7 +400,13 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
     private fun record(level: String, category: String, detail: String) {
         val safeDetail = sanitize(detail, 2_000)
         mirrorGlobal(level, category, safeDetail)
-        if (logLevel == 0 && level !in setOf("SECURITY", "PROBE")) return
+        val normalized = level.uppercase(Locale.ROOT)
+        val keepLocal = when (normalized) {
+            "SECURITY", "PROBE" -> true
+            "REQUEST", "CONSOLE" -> logLevel >= 2
+            else -> logLevel >= 1
+        }
+        if (!keepLocal) return
         entries.addLast(DiagnosticEntry(System.currentTimeMillis(), level, category, safeDetail))
         while (entries.size > MAX_LOG_ENTRIES) entries.removeFirst()
     }

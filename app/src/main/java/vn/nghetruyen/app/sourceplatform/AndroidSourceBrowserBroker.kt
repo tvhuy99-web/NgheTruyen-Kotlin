@@ -316,7 +316,7 @@ class AndroidSourceBrowserBroker(
                     category = DiagnosticCategory.BROWSER,
                     name = "browser-console-${clockMs()}.log",
                     contentType = "text/plain",
-                    data = "${consoleMessage.sourceId()}:${consoleMessage.lineNumber()} $message".toByteArray(Charsets.UTF_8),
+                    data = "${diagnosticUrl(consoleMessage.sourceId().orEmpty())}:${consoleMessage.lineNumber()} $message".toByteArray(Charsets.UTF_8),
                 ))
                 return true
             }

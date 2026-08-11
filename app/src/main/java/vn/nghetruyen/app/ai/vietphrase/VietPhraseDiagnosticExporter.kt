@@ -77,6 +77,9 @@ object VietPhraseDiagnosticExporter {
             appendLine("fallback_selections=${stats.fallbackSelections}")
             appendLine("unmatched_codepoints=${stats.unmatchedCodePoints}")
             appendLine("ai_replace_selections=${stats.aiReplaceSelections}")
+            appendLine("multi_meaning_selections=${stats.multiMeaningSelections}")
+            appendLine("rule_count=${rules.size}")
+            appendLine("rule_kinds=${rules.groupingBy { it.kind.fileName }.eachCount().toSortedMap().entries.joinToString(",") { "${it.key}:${it.value}" }}")
             appendLine()
             appendLine("THỐNG KÊ MATCH")
             VietPhraseDictionaryKind.entries.forEach { kind ->
@@ -109,6 +112,9 @@ object VietPhraseDiagnosticExporter {
             .put("fallbackSelections", stats.fallbackSelections)
             .put("unmatchedCodePoints", stats.unmatchedCodePoints)
             .put("aiReplaceSelections", stats.aiReplaceSelections)
+            .put("multiMeaningSelections", stats.multiMeaningSelections)
+            .put("ruleCount", rules.size)
+            .put("ruleKinds", JSONObject(rules.groupingBy { it.kind.fileName }.eachCount()))
             .put("probeCount", stats.probes.size)
             .put("probesTruncated", stats.probesTruncated)
             .toString(2)
@@ -151,6 +157,8 @@ object VietPhraseDiagnosticExporter {
                 "fallbackSelections" to stats.fallbackSelections.toString(),
                 "unmatchedCodePoints" to stats.unmatchedCodePoints.toString(),
                 "aiReplaceSelections" to stats.aiReplaceSelections.toString(),
+                "multiMeaningSelections" to stats.multiMeaningSelections.toString(),
+                "ruleCount" to rules.size.toString(),
             ),
         )
         diagnostics?.evidence?.takeIf { it.enabled }?.let { sink ->

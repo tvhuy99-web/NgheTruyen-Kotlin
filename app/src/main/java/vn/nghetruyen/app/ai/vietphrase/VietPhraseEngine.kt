@@ -42,6 +42,7 @@ class VietPhraseEngine(
         var fallbackSelections = 0
         var unmatchedCodePoints = 0
         var aiReplaceSelections = 0
+        var multiMeaningSelections = 0
         private val probes = ArrayList<VietPhraseProbeEntry>()
         private var probesTruncated = false
 
@@ -68,6 +69,7 @@ class VietPhraseEngine(
             fallbackSelections = fallbackSelections,
             unmatchedCodePoints = unmatchedCodePoints,
             aiReplaceSelections = aiReplaceSelections,
+            multiMeaningSelections = multiMeaningSelections,
             probes = probes.toList(),
             probesTruncated = probesTruncated,
         )
@@ -166,6 +168,7 @@ class VietPhraseEngine(
             } else if (direct != null) {
                 diagnostics.directSelections += 1
                 diagnostics.probe(cursor, "selection", direct.rule, "direct_selected", "end=${direct.end}")
+                if (meaningCount(direct.replacement, direct.rule.kind) > 1) diagnostics.multiMeaningSelections += 1
                 val replacement = resolveMeaning(direct.replacement, direct.rule.kind, options.oneMeaning)
                 appendSmart(base, replacement)
                 counts[direct.rule.kind] = (counts[direct.rule.kind] ?: 0) + 1
@@ -178,6 +181,7 @@ class VietPhraseEngine(
                 if (fallback != null) {
                     diagnostics.fallbackSelections += 1
                     diagnostics.probe(cursor, "selection", fallback.rule, "fallback_selected", "end=${fallback.end}")
+                    if (meaningCount(fallback.replacement, fallback.rule.kind) > 1) diagnostics.multiMeaningSelections += 1
                     val replacement = resolveMeaning(fallback.replacement, fallback.rule.kind, options.oneMeaning)
                     appendSmart(base, replacement)
                     counts[fallback.rule.kind] = (counts[fallback.rule.kind] ?: 0) + 1
@@ -393,21 +397,34 @@ class VietPhraseEngine(
     }
 
     private fun resolveMeaning(raw: String, kind: VietPhraseDictionaryKind, oneMeaning: Boolean): String {
-        val decoded = raw.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\r", "\n").replace("\\t", "\t")
-            .replace(Regex("<[bB][rR]\\s*/?>"), "\n").replace("&nbsp;", " ")
+        val meanings = meaningCandidates(raw, kind)
+        if (meanings.isEmpty()) return cleanMeaning(decodeMeaningText(raw))
+        return if (oneMeaning) meanings.first() else meanings.take(4).joinToString(" / ")
+    }
+
+    private fun meaningCount(raw: String, kind: VietPhraseDictionaryKind): Int = meaningCandidates(raw, kind).size
+
+    private fun meaningCandidates(raw: String, kind: VietPhraseDictionaryKind): List<String> {
+        val decoded = decodeMeaningText(raw)
         val hasDictionaryMetadata = decoded.contains("Hán Việt:") || decoded.contains("✚[")
         val numberedLines = decoded.lineSequence().mapNotNull { line ->
             NUMBERED_MEANING.matchEntire(line.trim())?.groupValues?.getOrNull(1)?.let(::cleanMeaning)
         }.filter(String::isNotBlank).toList()
-        val meanings = when {
+        return when {
             numberedLines.isNotEmpty() -> numberedLines
             hasDictionaryMetadata -> decoded.lineSequence().map { cleanMeaning(it) }.filter { it.isNotBlank() && !it.contains("Hán Việt:") && !it.contains("✚[") }.toList()
             kind == VietPhraseDictionaryKind.LAC_VIET && decoded.contains('\n') -> decoded.lineSequence().map(::cleanMeaning).filter(String::isNotBlank).toList()
             else -> decoded.split('/', '|').map(::cleanMeaning).filter(String::isNotBlank)
         }
-        if (meanings.isEmpty()) return cleanMeaning(decoded)
-        return if (oneMeaning) meanings.first() else meanings.take(4).joinToString(" / ")
     }
+
+    private fun decodeMeaningText(raw: String): String = raw
+        .replace("\\r\\n", "\n")
+        .replace("\\n", "\n")
+        .replace("\\r", "\n")
+        .replace("\\t", "\t")
+        .replace(Regex("<[bB][rR]\\s*/?>"), "\n")
+        .replace("&nbsp;", " ")
 
     private fun cleanMeaning(value: String): String = value.trim()
         .replace(Regex("^[\\-*•]+\\s*"), "")

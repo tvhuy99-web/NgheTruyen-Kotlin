@@ -102,6 +102,7 @@ data class VietPhraseEngineDiagnostics(
     val fallbackSelections: Int = 0,
     val unmatchedCodePoints: Int = 0,
     val aiReplaceSelections: Int = 0,
+    val multiMeaningSelections: Int = 0,
     val probes: List<VietPhraseProbeEntry> = emptyList(),
     val probesTruncated: Boolean = false,
 )

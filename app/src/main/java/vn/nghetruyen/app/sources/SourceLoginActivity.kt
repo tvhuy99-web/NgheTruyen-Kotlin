@@ -178,7 +178,7 @@ class SourceLoginActivity : ComponentActivity() {
 
                 override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                     requestCount += 1
-                    if (requestCount <= 20 || requestCount % 25 == 0) {
+                    if (diagnostics.advanced || requestCount <= 20 || requestCount % 25 == 0) {
                         diagnostic(
                             name = "SOURCE_LOGIN_REQUEST",
                             severity = DiagnosticSeverity.DEBUG,
@@ -238,7 +238,10 @@ class SourceLoginActivity : ComponentActivity() {
                         severity = DiagnosticSeverity.ERROR,
                         attributes = mapOf("didCrash" to detail.didCrash().toString(), "requestCount" to requestCount.toString()),
                     )
-                    return false
+                    status.text = "Tiến trình WebView đã dừng. Nhật ký đã ghi lại sự cố."
+                    runCatching { view.destroy() }
+                    finish()
+                    return true
                 }
             }
         }
@@ -390,10 +393,10 @@ class SourceLoginActivity : ComponentActivity() {
             )
         }
         if (::webView.isInitialized) {
-            webView.stopLoading()
-            webView.loadUrl("about:blank")
-            webView.removeAllViews()
-            webView.destroy()
+            runCatching { webView.stopLoading() }
+            runCatching { webView.loadUrl("about:blank") }
+            runCatching { webView.removeAllViews() }
+            runCatching { webView.destroy() }
         }
         super.onDestroy()
     }

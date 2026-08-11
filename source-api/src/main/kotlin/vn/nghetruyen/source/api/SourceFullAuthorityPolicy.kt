@@ -52,7 +52,7 @@ object SourceFullAuthorityPolicy {
                     serviceWorkerCapture = true,
                     pageJavaScript = true,
                 ),
-                storageBytes = maxOf(manifest.capabilities.storageBytes, 32 * 1024 * 1024),
+                storageBytes = maxOf(manifest.capabilities.storageBytes, 16 * 1024 * 1024),
                 crypto = SourceCryptoCapability.entries.toSet(),
                 websocket = websocket,
             ),

@@ -9,19 +9,32 @@ import vn.nghetruyen.source.diagnostics.DiagnosticEvidenceSink
 import vn.nghetruyen.source.diagnostics.DiagnosticSink
 import vn.nghetruyen.source.runtime.SourceResourceProvider
 
-/** Keeps Rhino as the portable JVM fallback while Android may choose a Chromium primary runtime. */
+/**
+ * Portable Rhino runtime and Android primary-engine selection point.
+ *
+ * When Android has installed a platform runtime factory, Chromium is tried first and Rhino is used
+ * only for explicit VBOOK_RUNTIME_UNAVAILABLE. Pure JVM consumers never install that factory and
+ * therefore keep the exact Rhino path used before M3.
+ */
 class RhinoVBookActionRuntime(
-    brokers: SourceCapabilityBrokers = SourceCapabilityBrokers(),
-    diagnostics: DiagnosticSink = DiagnosticSink.NONE,
+    private val brokers: SourceCapabilityBrokers = SourceCapabilityBrokers(),
+    private val diagnostics: DiagnosticSink = DiagnosticSink.NONE,
     evidence: DiagnosticEvidenceSink = DiagnosticEvidenceSink.NONE,
 ) : VBookActionRuntime {
     private val delegate = VBookJsRuntime(brokers, diagnostics, evidence = evidence)
+    private val fallback = VBookActionRuntime { manifest, resources, request ->
+        delegate.execute(manifest, resources, request)
+    }
+    private val selected: VBookActionRuntime = VBookActionRuntimeRegistry
+        .platformRuntime(brokers, diagnostics)
+        ?.let { primary -> PrimaryFallbackVBookActionRuntime(primary, fallback) }
+        ?: fallback
 
     override fun execute(
         manifest: SourceManifest,
         resources: SourceResourceProvider,
         request: SourceActionRequest,
-    ): SourcePlatformResult<SourceActionResponse> = delegate.execute(manifest, resources, request)
+    ): SourcePlatformResult<SourceActionResponse> = selected.execute(manifest, resources, request)
 
     fun validateScripts(manifest: SourceManifest, resources: SourceResourceProvider): VBookCompatibilityReport =
         delegate.validateScripts(manifest, resources)

@@ -21,7 +21,10 @@ class VBookAppKernelCompatibilityInjectionStaticTest {
         assertTrue(appInjection in compatibility)
         assertTrue("if (profile == VBookContractProfile.CURRENT_JS)" in compatibility)
         assertTrue("append(VBookWebSocketPrelude.build())" in compatibility)
-        assertFalse("App injection must not remain nested inside the current-only WebSocket prelude", appInjection in websocketPrelude)
+        assertFalse(
+            "App injection must not remain nested inside the current-only WebSocket prelude",
+            "VBookAppKernelPrelude.build()" in websocketPrelude,
+        )
 
         val currentOnlyIndex = compatibility.indexOf("if (profile == VBookContractProfile.CURRENT_JS)")
         val appIndex = compatibility.indexOf(appInjection)

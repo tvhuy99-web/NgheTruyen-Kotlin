@@ -29,6 +29,17 @@ jobs:
         run: |
           git fetch origin agent/xpk-six-parity-fixes
           git checkout -B agent/xpk-six-parity-fixes origin/agent/xpk-six-parity-fixes
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("scripts/apply_voice_cast_autoplay_accessibility.py")
+          source = path.read_text(encoding="utf-8")
+          marker = "# Restore the temporary workflow and remove this one-shot script before the generated commit.\n"
+          if marker not in source:
+              raise SystemExit("cleanup marker missing")
+          source = source.split(marker, 1)[0]
+          source += 'Path(__file__).unlink()\nprint("VOICE_CAST_AUTOPLAY_ACCESSIBILITY_PATCH=APPLIED")\n'
+          path.write_text(source, encoding="utf-8")
+          PY
           python3 scripts/apply_voice_cast_autoplay_accessibility.py
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

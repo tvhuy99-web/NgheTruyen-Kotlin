@@ -25,6 +25,34 @@ class ReaderChapterNavigationTest {
     }
 
     @Test
+    fun navigationMatchesXpkChapterNumbersEvenWhenCatalogPagesAreReversed() {
+        val reversed = listOf(
+            ChapterSummary("c53", "story", 50, "Chương 53", "https://example/chuong-53"),
+            ChapterSummary("c52", "story", 51, "Chương 52", "https://example/chuong-52"),
+            ChapterSummary("c51", "story", 52, "Chương 51", "https://example/chuong-51"),
+        )
+        val current = ChapterSummary("c50", "story", 49, "Chương 50", "https://example/chuong-50")
+
+        assertEquals("c51", ReaderChapterNavigation.next(current, reversed, null)?.id)
+    }
+
+    @Test
+    fun anOlderCatalogPageIsNotMistakenForTheSuccessorOfAStoredLaterChapter() {
+        val current = ChapterSummary("c100", "story", 99, "Chương 100", "https://example/chuong-100")
+        val olderPage = (51..99).map { number ->
+            ChapterSummary(
+                "c$number",
+                "story",
+                number - 1,
+                "Chương $number",
+                "https://example/chuong-$number",
+            )
+        }
+
+        assertNull(ReaderChapterNavigation.next(current, olderPage, null))
+    }
+
+    @Test
     fun fallbackUrlIsUsedOnlyWhenCatalogHasNoAdjacentChapter() {
         val next = ReaderChapterNavigation.next(chapters.last(), chapters, "https://example/32")
         assertEquals("https://example/32", next?.url)

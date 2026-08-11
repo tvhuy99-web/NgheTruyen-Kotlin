@@ -7,6 +7,7 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -39,6 +40,7 @@ import vn.nghetruyen.app.core.model.AudioExportFormat
 import vn.nghetruyen.app.core.model.AudioInterruptionMode
 import vn.nghetruyen.app.core.model.SceneMusicPlaybackMode
 import vn.nghetruyen.app.core.model.ChapterContent
+import vn.nghetruyen.app.core.model.ChapterPage
 import vn.nghetruyen.app.core.model.ChapterSummary
 import vn.nghetruyen.app.core.model.DownloadSelectionMode
 import vn.nghetruyen.app.core.model.DownloadState
@@ -57,6 +59,7 @@ import vn.nghetruyen.app.core.model.GLOBAL_VOICE_PROFILE_STORY_ID
 import vn.nghetruyen.app.data.local.AudioExportJobEntity
 import vn.nghetruyen.app.data.local.AiUsageDailyEntity
 import vn.nghetruyen.app.data.local.ChapterTransformEntity
+import vn.nghetruyen.app.data.local.ChapterEntity
 import vn.nghetruyen.app.data.local.ChapterNoteEntity
 import vn.nghetruyen.app.data.local.ChapterDownloadFailureEntity
 import vn.nghetruyen.app.data.local.ChapterVoiceAssignmentEntity
@@ -86,6 +89,7 @@ import vn.nghetruyen.app.playback.PlaybackPreparationState
 import vn.nghetruyen.app.playback.PlaybackSnapshot
 import vn.nghetruyen.app.playback.ReaderPlaybackService
 import vn.nghetruyen.app.playback.ReaderDocumentNormalizer
+import vn.nghetruyen.app.playback.ChapterCatalogMerger
 import vn.nghetruyen.app.ui.reference.ReferenceVoiceRolePersistence
 import vn.nghetruyen.app.ui.reference.ReferenceVoiceRoleExtra
 import vn.nghetruyen.app.ui.reference.ReferenceVoiceRoleExtras
@@ -164,9 +168,11 @@ data class MainUiState(
     val chapterTextMode: ChapterTextMode = ChapterTextMode.ORIGINAL,
     val aiBusy: Boolean = false,
     val loading: Boolean = false,
+    val chapterPageLoading: Boolean = false,
     val message: String? = null,
     val readingStories: List<StoryEntity> = emptyList(),
     val readingProgress: Map<String, ReadingProgressEntity> = emptyMap(),
+    val readingChapterTitles: Map<String, String> = emptyMap(),
     val readingHistory: List<ReadingHistoryEntity> = emptyList(),
     val downloadedStories: List<StoryEntity> = emptyList(),
     val bookmarks: List<BookmarkEntity> = emptyList(),
@@ -301,12 +307,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var suggestionJob: Job? = null
     private var storyLoadJob: Job? = null
     private var chapterLoadJob: Job? = null
+    private var chapterPageJob: Job? = null
     private var aiTranslationJob: Job? = null
     private var manualNarrationJob: Job? = null
     private var commentsLoadJob: Job? = null
     private val storyCommentCache = StoryCommentCache()
     private var sourceCheckAllJob: Job? = null
     private var readingPersistenceJob: Job? = null
+    private var chapterPageStoryId: String = ""
+    private val requestedChapterPageUrls = linkedSetOf<String>()
     private var lastPersistedReadingKey: String = ""
     private var pendingReadingPersistenceKey: String = ""
     private var chapterSleepRemaining: Int? = null
@@ -425,7 +434,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             container.libraryRepository.observeReadingProgress().collect { items ->
-                mutableState.update { it.copy(readingProgress = items.associateBy(ReadingProgressEntity::storyId)) }
+                val chapterTitles = mutableMapOf<String, String>()
+                for (progress in items) {
+                    chapterTitles[progress.storyId] = container.libraryRepository
+                        .getChapter(progress.chapterId)
+                        ?.title
+                        .orEmpty()
+                }
+                mutableState.update {
+                    it.copy(
+                        readingProgress = items.associateBy(ReadingProgressEntity::storyId),
+                        readingChapterTitles = chapterTitles,
+                    )
+                }
             }
         }
         viewModelScope.launch {
@@ -569,41 +590,58 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     mutableState.update { it.copy(playback = playback) }
                 }
                 if (currentChapterId.isNotBlank()) chapterSleepLastChapterId = currentChapterId
+                syncChapterContentFromPlayback(playback)
                 scheduleReadingPersistence(playback)
             }
         }
     }
 
+    private suspend fun syncChapterContentFromPlayback(playback: PlaybackSnapshot) {
+        if (playback.chapterId.isBlank() || state.value.chapterContent?.chapter?.id == playback.chapterId) return
+        val cached = container.libraryRepository.loadCachedChapter(playback.chapterId)
+            ?.let(ReaderDocumentNormalizer::normalize)
+            ?: return
+        if (PlaybackQueueStore.state.value.chapterId != playback.chapterId) return
+        val restoredNavigation = cached.copy(
+            nextChapterUrl = playback.nextChapterUrl ?: cached.nextChapterUrl,
+            previousChapterUrl = playback.previousChapterUrl ?: cached.previousChapterUrl,
+            nextChapterPageUrl = playback.nextChapterPageUrl,
+            nextChapterPageStartIndex = playback.nextChapterPageStartIndex,
+        )
+        mutableState.update { current ->
+            if (current.playback.chapterId != playback.chapterId) current
+            else current.copy(
+                destination = Destination.Reader,
+                chapterContent = restoredNavigation,
+                originalChapterContent = restoredNavigation,
+                chapterTextMode = ChapterTextMode.ORIGINAL,
+                continueAvailable = true,
+            )
+        }
+    }
+
     private fun scheduleReadingPersistence(playback: PlaybackSnapshot) {
-        val content = state.value.chapterContent ?: return
-        if (playback.chapterId.isBlank() || playback.chapterId != content.chapter.id) return
-        val paragraphIndex = playback.paragraphIndex.coerceIn(0, content.paragraphs.lastIndex.coerceAtLeast(0))
-        val persistenceKey = "${content.chapter.id}:$paragraphIndex"
+        if (playback.storyId.isBlank() || playback.chapterId.isBlank() || playback.paragraphs.isEmpty()) return
+        val paragraphIndex = playback.paragraphIndex.coerceIn(0, playback.paragraphs.lastIndex)
+        val persistenceKey = "${playback.chapterId}:$paragraphIndex"
         if (persistenceKey == lastPersistedReadingKey || persistenceKey == pendingReadingPersistenceKey) return
         readingPersistenceJob?.cancel()
         pendingReadingPersistenceKey = persistenceKey
         readingPersistenceJob = viewModelScope.launch {
             try {
                 delay(650)
-                val latestContent = state.value.chapterContent ?: return@launch
-                val latestPlayback = state.value.playback
-                if (latestContent.chapter.id != latestPlayback.chapterId) return@launch
-                val latestIndex = latestPlayback.paragraphIndex.coerceIn(0, latestContent.paragraphs.lastIndex.coerceAtLeast(0))
-                container.libraryRepository.saveProgress(
-                    storyId = latestContent.chapter.storyId,
-                    chapterId = latestContent.chapter.id,
-                    paragraphIndex = latestIndex,
-                    totalParagraphs = latestContent.paragraphs.size,
-                )
-                val story = state.value.storyDetail?.story
-                container.libraryRepository.recordReadingHistory(
+                val latestPlayback = PlaybackQueueStore.state.value
+                if (latestPlayback.chapterId != playback.chapterId || latestPlayback.paragraphs.isEmpty()) return@launch
+                val latestIndex = latestPlayback.paragraphIndex.coerceIn(0, latestPlayback.paragraphs.lastIndex)
+                val story = state.value.storyDetail?.story?.takeIf { it.id == latestPlayback.storyId }
+                container.libraryRepository.saveReadingPosition(
                     sourceId = latestPlayback.sourceId.ifBlank { story?.sourceId.orEmpty() },
                     storyTitle = story?.title.orEmpty(),
-                    chapter = latestContent.chapter,
+                    chapter = latestPlayback.toChapterSummary(),
                     paragraphIndex = latestIndex,
-                    totalParagraphs = latestContent.paragraphs.size,
+                    totalParagraphs = latestPlayback.paragraphs.size,
                 )
-                lastPersistedReadingKey = "${latestContent.chapter.id}:$latestIndex"
+                lastPersistedReadingKey = "${latestPlayback.chapterId}:$latestIndex"
             } finally {
                 if (pendingReadingPersistenceKey == persistenceKey) pendingReadingPersistenceKey = ""
             }
@@ -718,27 +756,35 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { container.settingsRepository.setChapterSortDescending(descending) }
     }
 
-    fun saveReadingPositionNow() {
-        val snapshot = state.value
-        val content = snapshot.chapterContent ?: return
+    fun saveReadingPositionNow() = persistCurrentReadingPosition(announce = true)
+
+    fun persistCurrentReadingPosition() = persistCurrentReadingPosition(announce = false)
+
+    private fun persistCurrentReadingPosition(announce: Boolean) {
+        val playback = PlaybackQueueStore.state.value
+        if (playback.storyId.isBlank() || playback.chapterId.isBlank() || playback.paragraphs.isEmpty()) return
+        val paragraphIndex = playback.paragraphIndex.coerceIn(0, playback.paragraphs.lastIndex)
+        val story = state.value.storyDetail?.story?.takeIf { it.id == playback.storyId }
         viewModelScope.launch {
-            container.libraryRepository.saveProgress(
-                content.chapter.storyId,
-                content.chapter.id,
-                snapshot.playback.paragraphIndex,
-                content.paragraphs.size,
-            )
-            val story = snapshot.storyDetail?.story
-            container.libraryRepository.recordReadingHistory(
-                sourceId = snapshot.playback.sourceId.ifBlank { story?.sourceId.orEmpty() },
+            container.libraryRepository.saveReadingPosition(
+                sourceId = playback.sourceId.ifBlank { story?.sourceId.orEmpty() },
                 storyTitle = story?.title.orEmpty(),
-                chapter = content.chapter,
-                paragraphIndex = snapshot.playback.paragraphIndex,
-                totalParagraphs = content.paragraphs.size,
+                chapter = playback.toChapterSummary(),
+                paragraphIndex = paragraphIndex,
+                totalParagraphs = playback.paragraphs.size,
             )
-            showMessage("Đã lưu vị trí đọc tại đoạn ${snapshot.playback.paragraphIndex + 1}.")
+            lastPersistedReadingKey = "${playback.chapterId}:$paragraphIndex"
+            if (announce) showMessage("Đã lưu vị trí đọc tại đoạn ${paragraphIndex + 1}.")
         }
     }
+
+    private fun PlaybackSnapshot.toChapterSummary() = ChapterSummary(
+        id = chapterId,
+        storyId = storyId,
+        index = chapterIndex,
+        title = chapterTitle,
+        url = chapterUrl,
+    )
 
     fun readerActionMessage(message: String) {
         showMessage(message)
@@ -1464,6 +1510,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun backToChapterList() {
+        persistCurrentReadingPosition()
         chapterLoadJob?.cancel()
         mutableState.update {
             it.copy(
@@ -1818,9 +1865,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    fun openStory(story: StorySummary) {
+    private fun resetChapterPagination(storyId: String) {
+        chapterPageJob?.cancel()
+        chapterPageJob = null
+        chapterPageStoryId = storyId
+        requestedChapterPageUrls.clear()
+        mutableState.update { it.copy(chapterPageLoading = false) }
+    }
+
+    fun openStory(story: StorySummary) = openRemoteStory(story)
+
+    private fun openRemoteStory(
+        story: StorySummary,
+        initialTab: String = "intro",
+        onLoaded: ((StoryDetail) -> Unit)? = null,
+    ) {
         storyLoadJob?.cancel()
         chapterLoadJob?.cancel()
+        resetChapterPagination(story.id)
         commentsLoadJob?.cancel()
         storyLoadJob = viewModelScope.launch {
             mutableState.update {
@@ -1844,6 +1906,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             when (val result = source.story(story.url.ifBlank { story.id })) {
                 is AppResult.Success -> {
+                    resetChapterPagination(result.value.story.id)
                     container.libraryRepository.rememberStory(result.value.story)
                     if (container.libraryRepository.getFollowing(result.value.story.id) != null) {
                         container.libraryRepository.markFollowingSeen(result.value.story.id)
@@ -1861,7 +1924,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             destination = Destination.Story,
                             loading = false,
                             storyDetail = result.value,
-                            storyDetailTab = "intro",
+                            storyDetailTab = initialTab,
                             storyAdvancedOptionsRequested = false,
                             storyComments = initialComments,
                             storyCommentsAvailable = source.descriptor.supportsComments || initialComments.isNotEmpty(),
@@ -1874,6 +1937,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             continueAvailable = progress != null,
                         )
                     }
+                    onLoaded?.invoke(result.value)
                 }
                 is AppResult.Failure -> mutableState.update { it.copy(loading = false, message = result.message) }
             }
@@ -1881,29 +1945,54 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun openLibraryStory(entity: StoryEntity) {
-        if (entity.isOffline) {
+        if (entity.sourceId == "offline") {
             openOfflineStory(entity)
         } else {
-            openStory(
-                StorySummary(
-                    id = entity.id,
-                    sourceId = entity.sourceId,
-                    title = entity.title,
-                    author = entity.author,
-                    coverUrl = entity.coverUrl,
-                    description = entity.description,
-                    url = entity.remoteUrl,
-                ),
-            )
+            openRemoteStory(entity.toStorySummary())
         }
     }
 
-    fun openOfflineStory(entity: StoryEntity) {
+    fun openReadingStoryFromLibrary(entity: StoryEntity) {
+        viewModelScope.launch {
+            val progress = container.libraryRepository.getProgress(entity.id)
+            val chapter = progress?.let { container.libraryRepository.getChapter(it.chapterId) }
+            val openSavedChapter: (StoryDetail) -> Unit = { detail ->
+                if (progress != null && chapter != null) {
+                    openChapterAt(detail.resolveStoredChapter(chapter), progress.paragraphIndex)
+                }
+            }
+            if (entity.sourceId == "offline") {
+                openOfflineStory(
+                    entity = entity,
+                    initialTab = if (chapter == null) "chapters" else "intro",
+                    onLoaded = openSavedChapter,
+                )
+            } else {
+                openRemoteStory(
+                    story = entity.toStorySummary(),
+                    initialTab = if (chapter == null) "chapters" else "intro",
+                    onLoaded = openSavedChapter,
+                )
+            }
+        }
+    }
+
+    fun openOfflineStory(entity: StoryEntity) = openOfflineStory(entity, "intro", null)
+
+    private fun openOfflineStory(
+        entity: StoryEntity,
+        initialTab: String,
+        onLoaded: ((StoryDetail) -> Unit)?,
+    ) {
         storyLoadJob?.cancel()
         chapterLoadJob?.cancel()
+        resetChapterPagination(entity.id)
         commentsLoadJob?.cancel()
         storyLoadJob = viewModelScope.launch {
-            val chapters = container.libraryRepository.listOfflineChapters(entity.id).map { chapter ->
+            val chapters = container.libraryRepository.listReadableOfflineChapters(
+                storyId = entity.id,
+                importedBook = entity.sourceId == "offline",
+            ).map { chapter ->
                 ChapterSummary(
                     id = chapter.id,
                     storyId = chapter.storyId,
@@ -1913,25 +2002,26 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
             val progress = container.libraryRepository.getProgress(entity.id)
+            val detail = StoryDetail(
+                story = StorySummary(
+                    id = entity.id,
+                    sourceId = "offline",
+                    title = entity.title,
+                    author = entity.author,
+                    description = entity.description,
+                    coverUrl = entity.coverUrl,
+                    url = entity.remoteUrl,
+                ),
+                status = "Ngoại tuyến",
+                chapters = chapters,
+            )
             mutableState.update {
                 it.copy(
                     destination = Destination.Story,
                     rootTab = RootTab.LIBRARY,
-                    storyDetailTab = "intro",
+                    storyDetailTab = initialTab,
                     storyAdvancedOptionsRequested = false,
-                    storyDetail = StoryDetail(
-                        story = StorySummary(
-                            id = entity.id,
-                            sourceId = "offline",
-                            title = entity.title,
-                            author = entity.author,
-                            description = entity.description,
-                            coverUrl = entity.coverUrl,
-                            url = entity.remoteUrl,
-                        ),
-                        status = "Ngoại tuyến",
-                        chapters = chapters,
-                    ),
+                    storyDetail = detail,
                     message = null,
                     storyComments = emptyList(),
                     storyCommentsAvailable = false,
@@ -1944,8 +2034,32 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     continueAvailable = progress != null,
                 )
             }
+            onLoaded?.invoke(detail)
         }
     }
+
+    private fun StoryEntity.toStorySummary() = StorySummary(
+        id = id,
+        sourceId = sourceId,
+        title = title,
+        author = author,
+        coverUrl = coverUrl,
+        description = description,
+        url = remoteUrl,
+    )
+
+    private fun StoryDetail.resolveStoredChapter(chapter: ChapterEntity): ChapterSummary =
+        chapters.firstOrNull { candidate ->
+            candidate.id == chapter.id ||
+                (chapter.remoteUrl.isNotBlank() && candidate.url == chapter.remoteUrl) ||
+                candidate.index == chapter.chapterIndex
+        } ?: ChapterSummary(
+            id = chapter.id,
+            storyId = chapter.storyId,
+            index = chapter.chapterIndex,
+            title = chapter.title,
+            url = chapter.remoteUrl,
+        )
 
     fun loadStoryComments(force: Boolean = false) {
         loadStoryCommentsPage(force = force, append = false)
@@ -2123,7 +2237,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             },
                         )
                     }
-                    container.libraryRepository.recordReadingHistory(
+                    container.libraryRepository.saveReadingPosition(
                         sourceId = sourceId,
                         storyTitle = detail?.story?.title.orEmpty(),
                         chapter = enriched.chapter,
@@ -2161,30 +2275,79 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun loadMoreChapters() {
         val detail = state.value.storyDetail ?: return
-        val nextPageUrl = detail.nextChapterPageUrl ?: return
+        val nextPageUrl = detail.nextChapterPageUrl?.trim()?.takeIf(String::isNotBlank) ?: return
+        if (state.value.chapterPageLoading || chapterPageJob?.isActive == true) return
+        if (chapterPageStoryId != detail.story.id) resetChapterPagination(detail.story.id)
         val source = container.sourceRegistry.get(detail.story.sourceId) ?: return
-        viewModelScope.launch {
-            mutableState.update { it.copy(loading = true, message = null) }
-            when (
-                val result = source.chapterPage(
+        if (!requestedChapterPageUrls.add(nextPageUrl)) {
+            mutableState.update { current ->
+                val currentDetail = current.storyDetail
+                if (currentDetail?.story?.id != detail.story.id) current else current.copy(
+                    chapterPageLoading = false,
+                    storyDetail = currentDetail.copy(nextChapterPageUrl = null),
+                    message = "Nguồn trả lại cùng một trang mục lục; đã dừng để tránh tải lặp.",
+                )
+            }
+            return
+        }
+        chapterPageJob = viewModelScope.launch {
+            mutableState.update { it.copy(chapterPageLoading = true, message = null) }
+            val result = try {
+                source.chapterPage(
                     storyId = detail.story.id,
                     url = nextPageUrl,
                     startIndex = detail.chapters.size,
                 )
-            ) {
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                AppResult.Failure(
+                    code = "CHAPTER_PAGE_LOAD_FAILED",
+                    message = error.message ?: "Không tải được trang mục lục tiếp theo.",
+                    cause = error,
+                )
+            }
+            when (result) {
                 is AppResult.Success -> {
-                    val merged = (detail.chapters + result.value.chapters).distinctBy { it.url.ifBlank { it.id } }
                     mutableState.update { current ->
-                        current.copy(
-                            loading = false,
-                            storyDetail = detail.copy(
-                                chapters = merged,
-                                nextChapterPageUrl = result.value.nextPageUrl,
-                            ),
-                        )
+                        val currentDetail = current.storyDetail
+                        if (
+                            currentDetail?.story?.id != detail.story.id ||
+                            currentDetail.nextChapterPageUrl?.trim() != nextPageUrl
+                        ) {
+                            current.copy(chapterPageLoading = false)
+                        } else {
+                            val normalizedPage = normalizeChapterPage(
+                                existing = currentDetail.chapters,
+                                page = result.value,
+                                storyId = currentDetail.story.id,
+                            )
+                            val merged = ChapterCatalogMerger.merge(
+                                existing = currentDetail.chapters,
+                                requestedPageUrl = nextPageUrl,
+                                page = normalizedPage,
+                                previouslyRequestedPages = requestedChapterPageUrls,
+                            )
+                            current.copy(
+                                chapterPageLoading = false,
+                                storyDetail = currentDetail.copy(
+                                    chapters = merged.chapters,
+                                    nextChapterPageUrl = merged.nextPageUrl,
+                                ),
+                                message = if (merged.repeatedCursor) {
+                                    "Nguồn lặp lại trang mục lục; ứng dụng đã dừng tải an toàn."
+                                } else current.message,
+                            )
+                        }
                     }
                 }
-                is AppResult.Failure -> mutableState.update { it.copy(loading = false, message = result.message) }
+                is AppResult.Failure -> {
+                    requestedChapterPageUrls.remove(nextPageUrl)
+                    mutableState.update { current ->
+                        if (current.storyDetail?.story?.id != detail.story.id) current
+                        else current.copy(chapterPageLoading = false, message = result.message)
+                    }
+                }
             }
         }
     }
@@ -2399,7 +2562,129 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             chapters = state.value.storyDetail?.chapters.orEmpty(),
             fallbackUrl = content.nextChapterUrl,
         )
-        if (next == null) showMessage("Đây là chương cuối.") else openChapter(next)
+        when {
+            next != null -> openChapter(next)
+            !content.nextChapterPageUrl.isNullOrBlank() -> loadNextCatalogPageAndOpen(content)
+            else -> showMessage("Đây là chương cuối.")
+        }
+    }
+
+    private fun loadNextCatalogPageAndOpen(content: ChapterContent) {
+        val runningPageLoad = chapterPageJob
+        if (runningPageLoad?.isActive == true) {
+            viewModelScope.launch {
+                runningPageLoad.join()
+                if (state.value.chapterContent?.chapter?.id == content.chapter.id) nextChapter()
+            }
+            return
+        }
+        val initialDetail = state.value.storyDetail ?: return
+        val source = container.sourceRegistry.get(initialDetail.story.sourceId) ?: return
+        var pageUrl = content.nextChapterPageUrl?.trim()?.takeIf(String::isNotBlank) ?: return
+        var startIndex = content.nextChapterPageStartIndex
+            ?.coerceAtLeast(0)
+            ?: initialDetail.chapters.size
+        if (chapterPageStoryId != initialDetail.story.id) resetChapterPagination(initialDetail.story.id)
+
+        chapterPageJob = viewModelScope.launch {
+            mutableState.update {
+                it.copy(chapterPageLoading = true, message = "Đang tải trang mục lục tiếp theo…")
+            }
+            val localVisited = linkedSetOf<String>()
+            repeat(MAX_READER_CATALOG_PAGE_HOPS) {
+                if (!localVisited.add(pageUrl)) {
+                    mutableState.update {
+                        it.copy(
+                            chapterPageLoading = false,
+                            message = "Nguồn lặp lại trang mục lục; không thể xác định chương tiếp theo.",
+                        )
+                    }
+                    return@launch
+                }
+                requestedChapterPageUrls += pageUrl
+                val result = try {
+                    source.chapterPage(initialDetail.story.id, pageUrl, startIndex)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    AppResult.Failure(
+                        "CHAPTER_PAGE_LOAD_FAILED",
+                        error.message ?: "Không tải được trang mục lục tiếp theo.",
+                        error,
+                    )
+                }
+                when (result) {
+                    is AppResult.Failure -> {
+                        requestedChapterPageUrls.remove(pageUrl)
+                        mutableState.update {
+                            it.copy(chapterPageLoading = false, message = result.message)
+                        }
+                        return@launch
+                    }
+                    is AppResult.Success -> {
+                        val currentDetail = state.value.storyDetail
+                        if (currentDetail?.story?.id != initialDetail.story.id) return@launch
+                        val baseChapters = if (currentDetail.chapters.any {
+                                ChapterCatalogMerger.sameChapter(it, content.chapter)
+                            }
+                        ) {
+                            currentDetail.chapters
+                        } else {
+                            currentDetail.chapters + content.chapter
+                        }
+                        val normalizedPage = normalizeChapterPage(
+                            existing = baseChapters,
+                            page = result.value,
+                            storyId = initialDetail.story.id,
+                            startIndex = (baseChapters.maxOfOrNull(ChapterSummary::index) ?: -1) + 1,
+                        )
+                        val merged = ChapterCatalogMerger.merge(
+                            existing = baseChapters,
+                            requestedPageUrl = pageUrl,
+                            page = normalizedPage,
+                            previouslyRequestedPages = requestedChapterPageUrls,
+                        )
+                        mutableState.update { current ->
+                            val detail = current.storyDetail
+                            if (detail?.story?.id != initialDetail.story.id) current else current.copy(
+                                storyDetail = detail.copy(
+                                    chapters = merged.chapters,
+                                    nextChapterPageUrl = merged.nextPageUrl,
+                                ),
+                            )
+                        }
+                        val successor = ReaderChapterNavigation.next(
+                            current = content.chapter,
+                            chapters = normalizedPage.chapters,
+                            fallbackUrl = null,
+                        ) ?: normalizedPage.chapters.firstOrNull { candidate ->
+                            ReaderChapterNavigation.sequenceNumber(content.chapter) == null &&
+                                !ChapterCatalogMerger.sameChapter(candidate, content.chapter)
+                        }
+                        if (successor != null) {
+                            mutableState.update { it.copy(chapterPageLoading = false, message = null) }
+                            openChapter(successor)
+                            return@launch
+                        }
+                        val continuation = merged.nextPageUrl
+                        if (continuation.isNullOrBlank()) {
+                            mutableState.update {
+                                it.copy(chapterPageLoading = false, message = "Đây là chương cuối.")
+                            }
+                            return@launch
+                        }
+                        startIndex += result.value.chapters.size
+                        pageUrl = continuation
+                    }
+                }
+            }
+            mutableState.update {
+                it.copy(
+                    chapterPageLoading = false,
+                    message = "Đã vượt quá số trang mục lục cho phép khi tìm chương tiếp theo.",
+                )
+            }
+        }
     }
 
     fun previousChapter() {
@@ -2951,35 +3236,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 showMessage("Ghi chú không còn liên kết tới nội dung đã lưu.")
                 return@launch
             }
-            val cachedChapters = container.libraryRepository.listOfflineChapters(story.id).map {
-                ChapterSummary(it.id, it.storyId, it.chapterIndex, it.title, it.remoteUrl)
-            }
-            mutableState.update {
-                it.copy(
-                    destination = Destination.Story,
-                    rootTab = RootTab.LIBRARY,
-                    storyDetailTab = "intro",
-                    storyAdvancedOptionsRequested = false,
-                    storyDetail = StoryDetail(
-                        story = StorySummary(
-                            id = story.id,
-                            sourceId = if (story.isOffline) "offline" else story.sourceId,
-                            title = story.title,
-                            author = story.author,
-                            coverUrl = story.coverUrl,
-                            description = story.description,
-                            url = story.remoteUrl,
-                        ),
-                        status = if (story.isOffline) "Ngoại tuyến" else "Bản đã lưu gần đây",
-                        chapters = cachedChapters,
-                    ),
-                    continueAvailable = true,
-                )
-            }
-            openChapterAt(
-                ChapterSummary(chapter.id, chapter.storyId, chapter.chapterIndex, chapter.title, chapter.remoteUrl),
-                note.paragraphIndex,
-            )
+            openStoredLibraryEntry(story, chapter, note.paragraphIndex, openChapter = true)
         }
     }
 
@@ -3039,44 +3296,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun openBookmark(bookmark: BookmarkEntity) {
         viewModelScope.launch {
             val story = container.libraryRepository.getStory(bookmark.storyId)
-            val chapter = container.libraryRepository.getChapter(bookmark.chapterId)
-            if (story == null || chapter == null) {
+            val storyOnly = bookmark.label.startsWith("Truyện:")
+            val chapter = if (storyOnly) null else container.libraryRepository.getChapter(bookmark.chapterId)
+            if (story == null || (!storyOnly && chapter == null)) {
                 showMessage("Đánh dấu không còn liên kết tới nội dung đã lưu.")
                 return@launch
             }
-            val summary = StorySummary(
-                id = story.id,
-                sourceId = if (story.isOffline) "offline" else story.sourceId,
-                title = story.title,
-                author = story.author,
-                coverUrl = story.coverUrl,
-                description = story.description,
-                url = story.remoteUrl,
-            )
-            val cachedChapters = container.libraryRepository.listOfflineChapters(story.id).map {
-                ChapterSummary(it.id, it.storyId, it.chapterIndex, it.title, it.remoteUrl)
-            }
-            val remoteDetail = if (!story.isOffline) {
-                when (val result = container.sourceRegistry.get(story.sourceId)?.story(story.remoteUrl)) {
-                    is AppResult.Success -> result.value
-                    else -> null
-                }
-            } else null
-            mutableState.update {
-                it.copy(
-                    destination = Destination.Story,
-                    rootTab = RootTab.LIBRARY,
-                    storyDetail = remoteDetail ?: StoryDetail(
-                        story = summary,
-                        status = if (story.isOffline) "Ngoại tuyến" else "Bản đã lưu gần đây",
-                        chapters = cachedChapters,
-                    ),
-                    continueAvailable = true,
-                )
-            }
-            openChapterAt(
-                ChapterSummary(chapter.id, chapter.storyId, chapter.chapterIndex, chapter.title, chapter.remoteUrl),
-                bookmark.paragraphIndex,
+            openStoredLibraryEntry(
+                story = story,
+                chapter = chapter,
+                paragraphIndex = bookmark.paragraphIndex,
+                openChapter = !storyOnly,
             )
         }
     }
@@ -3089,39 +3319,36 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 showMessage("Mục lịch sử không còn nội dung đã lưu để mở.")
                 return@launch
             }
-            val summary = StorySummary(
-                id = story.id,
-                sourceId = if (story.isOffline) "offline" else story.sourceId,
-                title = story.title,
-                author = story.author,
-                coverUrl = story.coverUrl,
-                description = story.description,
-                url = story.remoteUrl,
+            openStoredLibraryEntry(story, chapter, item.paragraphIndex, openChapter = true)
+        }
+    }
+
+    /**
+     * Replays the same story-detail load used by Home before optionally opening a stored chapter.
+     * Only a genuinely imported book (`sourceId == offline`) is allowed to take the cache-only path.
+     */
+    private fun openStoredLibraryEntry(
+        story: StoryEntity,
+        chapter: ChapterEntity?,
+        paragraphIndex: Int,
+        openChapter: Boolean,
+    ) {
+        val onLoaded: (StoryDetail) -> Unit = { detail ->
+            if (openChapter && chapter != null) {
+                openChapterAt(detail.resolveStoredChapter(chapter), paragraphIndex)
+            }
+        }
+        if (story.sourceId == "offline") {
+            openOfflineStory(
+                entity = story,
+                initialTab = if (openChapter) "chapters" else "intro",
+                onLoaded = onLoaded,
             )
-            val cachedChapters = container.libraryRepository.listOfflineChapters(story.id).map {
-                ChapterSummary(it.id, it.storyId, it.chapterIndex, it.title, it.remoteUrl)
-            }
-            val remoteDetail = if (!story.isOffline) {
-                when (val result = container.sourceRegistry.get(story.sourceId)?.story(story.remoteUrl)) {
-                    is AppResult.Success -> result.value
-                    else -> null
-                }
-            } else null
-            mutableState.update {
-                it.copy(
-                    destination = Destination.Story,
-                    rootTab = RootTab.LIBRARY,
-                    storyDetail = remoteDetail ?: StoryDetail(
-                        story = summary,
-                        status = if (story.isOffline) "Ngoại tuyến" else "Bản đã lưu gần đây",
-                        chapters = cachedChapters,
-                    ),
-                    continueAvailable = true,
-                )
-            }
-            openChapterAt(
-                ChapterSummary(chapter.id, chapter.storyId, chapter.chapterIndex, chapter.title, chapter.remoteUrl),
-                item.paragraphIndex,
+        } else {
+            openRemoteStory(
+                story = story.toStorySummary(),
+                initialTab = if (openChapter) "chapters" else "intro",
+                onLoaded = onLoaded,
             )
         }
     }
@@ -3986,6 +4213,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private companion object {
         const val MANUAL_NARRATION_RETRY_DELAY_MS = 5_000L
+        const val MAX_READER_CATALOG_PAGE_HOPS = 30
     }
 
     private fun providerLabel(provider: AiProvider): String = when (provider) {
@@ -4000,12 +4228,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun back() {
         when (state.value.destination) {
             Destination.Reader -> {
+                persistCurrentReadingPosition()
                 chapterLoadJob?.cancel()
                 manualNarrationJob?.cancel()
             }
             Destination.Story -> {
                 storyLoadJob?.cancel()
                 chapterLoadJob?.cancel()
+                chapterPageJob?.cancel()
+                requestedChapterPageUrls.clear()
                 commentsLoadJob?.cancel()
             }
             Destination.Root -> Unit
@@ -4015,6 +4246,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 Destination.Reader -> current.copy(
                     destination = Destination.Story,
                     loading = false,
+                    chapterPageLoading = false,
                     chapterContent = null,
                     originalChapterContent = null,
                     chapterTextMode = ChapterTextMode.ORIGINAL,
@@ -4022,6 +4254,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 Destination.Story -> current.copy(
                     destination = Destination.Root,
                     loading = false,
+                    chapterPageLoading = false,
                     storyDetail = null,
                     storyComments = emptyList(),
                     storyCommentsAvailable = false,
@@ -4032,7 +4265,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     storyCommentsFromCache = false,
                     storyCommentsMessage = null,
                 )
-                Destination.Root -> current.copy(loading = false)
+                Destination.Root -> current.copy(loading = false, chapterPageLoading = false)
             }
         }
     }
@@ -4047,13 +4280,39 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
 
     private fun enrichNavigation(content: ChapterContent): ChapterContent {
-        val chapters = mutableState.value.storyDetail?.chapters.orEmpty()
+        val detail = mutableState.value.storyDetail
+        val chapters = detail?.chapters.orEmpty()
         val position = chapters.indexOfFirst {
             it.id == content.chapter.id ||
                 (it.url.isNotBlank() && it.url == content.chapter.url)
         }
-        if (position < 0) return content
+        if (position < 0) {
+            val currentNumber = ReaderChapterNavigation.sequenceNumber(content.chapter)
+            val highestKnownNumber = chapters.mapNotNull(ReaderChapterNavigation::sequenceNumber).maxOrNull()
+            val highestKnownIndex = chapters.maxOfOrNull(ChapterSummary::index) ?: -1
+            val isBeyondLoadedCatalog = content.chapter.index > highestKnownIndex || (
+                currentNumber != null && highestKnownNumber != null && currentNumber > highestKnownNumber
+                )
+            val continuation = detail?.nextChapterPageUrl
+                ?.takeIf { isBeyondLoadedCatalog }
+                ?.takeIf(String::isNotBlank)
+            return content.copy(
+                nextChapterUrl = content.nextChapterUrl
+                    ?.takeUnless { sameNavigationUrl(it, continuation) },
+                nextChapterPageUrl = content.nextChapterPageUrl ?: continuation,
+                nextChapterPageStartIndex = content.nextChapterPageStartIndex
+                    ?: chapters.size.takeIf { !continuation.isNullOrBlank() },
+            )
+        }
         val resolved = chapters[position]
+        val previousInCatalog = ReaderChapterNavigation.previous(resolved, chapters, null)
+        val nextInCatalog = ReaderChapterNavigation.next(resolved, chapters, null)
+        val pageContinuation = detail?.nextChapterPageUrl
+            ?.takeIf { nextInCatalog == null }
+            ?.takeIf(String::isNotBlank)
+        val sourceNextChapter = content.nextChapterUrl
+            ?.takeIf(String::isNotBlank)
+            ?.takeUnless { candidate -> sameNavigationUrl(candidate, pageContinuation) }
         return content.copy(
             chapter = content.chapter.copy(
                 index = resolved.index,
@@ -4061,9 +4320,48 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 url = content.chapter.url.ifBlank { resolved.url },
             ),
             previousChapterUrl = content.previousChapterUrl
-                ?: chapters.getOrNull(position - 1)?.url?.takeIf(String::isNotBlank),
-            nextChapterUrl = content.nextChapterUrl
-                ?: chapters.getOrNull(position + 1)?.url?.takeIf(String::isNotBlank),
+                ?: previousInCatalog?.url?.takeIf(String::isNotBlank),
+            nextChapterUrl = sourceNextChapter
+                ?: nextInCatalog?.url?.takeIf(String::isNotBlank),
+            nextChapterPageUrl = content.nextChapterPageUrl
+                ?: pageContinuation,
+            nextChapterPageStartIndex = content.nextChapterPageStartIndex
+                ?: chapters.size.takeIf { !pageContinuation.isNullOrBlank() },
+        )
+    }
+
+    private fun sameNavigationUrl(left: String?, right: String?): Boolean {
+        if (left.isNullOrBlank() || right.isNullOrBlank()) return false
+        return left.trim().trimEnd('/') == right.trim().trimEnd('/')
+    }
+
+    private fun normalizeChapterPage(
+        existing: List<ChapterSummary>,
+        page: ChapterPage,
+        storyId: String,
+        startIndex: Int = existing.size,
+    ): ChapterPage {
+        val accepted = mutableListOf<ChapterSummary>()
+        ReaderChapterNavigation.readingOrder(page.chapters).forEach { candidate ->
+            if (
+                existing.none { ChapterCatalogMerger.sameChapter(it, candidate) } &&
+                accepted.none { ChapterCatalogMerger.sameChapter(it, candidate) }
+            ) {
+                accepted += candidate
+            }
+        }
+        return page.copy(
+            chapters = accepted.mapIndexed { offset, chapter ->
+                chapter.copy(
+                    storyId = storyId,
+                    index = ReaderChapterNavigation.sequenceNumber(chapter)
+                        ?.takeIf { it > 0L }
+                        ?.coerceAtMost(Int.MAX_VALUE.toLong())
+                        ?.toInt()
+                        ?.minus(1)
+                        ?: (startIndex.coerceAtLeast(0) + offset),
+                )
+            },
         )
     }
 

@@ -35,6 +35,7 @@ for marker in [
     "viewModel.openDownloadedStoryFromLibrary(story)",
     "viewModel.updateDownloadedStoryFromLibrary(story)",
     "fun AppViewModel.openDownloadedStoryFromLibrary(entity: StoryEntity)",
+    "openOfflineStory(entity)",
     "openChapter(",
     "ChapterSummary(",
     "fun AppViewModel.updateDownloadedStoryFromLibrary(entity: StoryEntity)",
@@ -47,9 +48,11 @@ for marker in [
 ]:
     assert marker in actions, f"Downloaded action parity missing: {marker}"
 
-assert "onStoryClick = { story -> DownloadedLibraryCallbacks.open(viewModel, story) }" in app, "app missing downloaded open adapter wiring"
+assert "onReadingStoryClick = viewModel::openReadingStoryFromLibrary" in app, "app missing online reading-shelf wiring"
+assert "onDownloadedStoryClick = { story -> DownloadedLibraryCallbacks.open(viewModel, story) }" in app, "app missing downloaded open adapter wiring"
 assert "onUpdateDownloadedStory = { story -> DownloadedLibraryCallbacks.update(viewModel, story) }" in app, "app missing downloaded update adapter wiring"
-assert "onStoryClick = viewModel::openDownloadedStoryFromLibrary" in reference, "reference missing direct downloaded open wiring"
+assert "onReadingStoryClick = viewModel::openReadingStoryFromLibrary" in reference, "reference missing online reading-shelf wiring"
+assert "onDownloadedStoryClick = viewModel::openDownloadedStoryFromLibrary" in reference, "reference missing direct downloaded open wiring"
 assert "onUpdateDownloadedStory = viewModel::updateDownloadedStoryFromLibrary" in reference, "reference missing direct downloaded update wiring"
 
 print("DOWNLOADED_XPK_PARITY=PASS")

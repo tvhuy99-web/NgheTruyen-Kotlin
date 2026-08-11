@@ -49,6 +49,9 @@ data class ChapterContent(
     val paragraphs: List<String>,
     val nextChapterUrl: String? = null,
     val previousChapterUrl: String? = null,
+    /** Catalog continuation used when this is the last chapter on the loaded TOC page. */
+    val nextChapterPageUrl: String? = null,
+    val nextChapterPageStartIndex: Int? = null,
 )
 
 data class ImportedBook(

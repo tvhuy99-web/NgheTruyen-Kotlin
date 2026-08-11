@@ -216,13 +216,27 @@ def main() -> int:
     require(
         "app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt",
         "scheduleReadingPersistence(playback)",
-        "recordReadingHistory(",
+        "syncChapterContentFromPlayback(playback)",
+        "saveReadingPosition(",
+        "fun openReadingStoryFromLibrary(",
+        "private fun openStoredLibraryEntry(",
         "fun openReadingHistory(",
         "fun clearReadingHistory()",
         "fun prioritizeDownload(",
         "fun updateVietPhrase(",
         "pendingVietPhraseImport = result.value",
         "Đã tiếp tục bằng bản gốc.",
+    )
+    forbid(
+        "app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt",
+        "if (entity.isOffline)",
+        "if (!story.isOffline)",
+        "sourceId = if (story.isOffline)",
+    )
+    require(
+        "app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt",
+        "private suspend fun persistReadingPosition(snapshot: PlaybackSnapshot)",
+        "persistReadingPosition(snapshot)",
     )
     require(
         "app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt",
@@ -259,6 +273,10 @@ def main() -> int:
     )
     require(
         "app/src/main/java/vn/nghetruyen/app/ui/screens/LibraryScreen.kt",
+        "onReadingStoryClick: (StoryEntity) -> Unit",
+        "onDownloadedStoryClick: (StoryEntity) -> Unit",
+        "state.readingProgress[story.id]?.updatedAt ?: story.updatedAt",
+        "chapterTitlesByStory",
         "LibrarySection.NOTES -> state.notes.size",
         "NoteList(visibleNotes",
         "state.readingHistory.filter",

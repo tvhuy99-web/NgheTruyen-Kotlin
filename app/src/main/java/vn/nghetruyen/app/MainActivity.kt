@@ -40,6 +40,11 @@ import java.util.Locale
 class MainActivity : ComponentActivity() {
     private val viewModel: AppViewModel by viewModels()
 
+    override fun onStop() {
+        viewModel.persistCurrentReadingPosition()
+        super.onStop()
+    }
+
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         val snapshot = viewModel.state.value
         val key = when (keyCode) {

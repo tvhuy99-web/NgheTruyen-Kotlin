@@ -30,10 +30,10 @@ object DownloadedLibraryCallbacks {
 
     /** Returns only chapter bodies that still exist locally, in canonical chapter order. */
     suspend fun chapters(app: NgheTruyenApplication, story: StoryEntity): List<ChapterEntity> =
-        app.container.libraryRepository.listExportableChapters(story.id)
-            .filter { chapter ->
-                !chapter.content.isNullOrBlank() && (story.sourceId == "offline" || chapter.downloadedAt != null)
-            }
+        app.container.libraryRepository.listReadableOfflineChapters(
+            storyId = story.id,
+            importedBook = story.sourceId == "offline",
+        )
             .sortedWith(compareBy<ChapterEntity> { it.chapterIndex }.thenBy { it.title })
 
     /** Hands one selected downloaded chapter to the existing story-open callback exactly once. */
@@ -48,10 +48,11 @@ object DownloadedLibraryCallbacks {
 /** XPK-style entry point for a story on the Downloaded shelf. */
 fun AppViewModel.openDownloadedStoryFromLibrary(entity: StoryEntity) {
     val chapter = DownloadedLibraryCallbacks.consumeSelectedChapter(entity.id)
-    openLibraryStory(entity)
-    // LibraryScreen shares this callback with the Reading shelf. Only a chapter
-    // explicitly selected from the Downloaded dialog should alter navigation.
-    if (!entity.isOffline || chapter == null) return
+    // This entry point belongs exclusively to the Downloaded shelf. A downloaded
+    // remote story intentionally stays cache-only here; other shelves use the
+    // canonical online story loader.
+    openOfflineStory(entity)
+    if (chapter == null) return
     viewModelScope.launch {
         state.filter { snapshot ->
             snapshot.destination == Destination.Story && snapshot.storyDetail?.story?.id == entity.id

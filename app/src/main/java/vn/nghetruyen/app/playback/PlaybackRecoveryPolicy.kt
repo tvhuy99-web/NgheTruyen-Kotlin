@@ -45,6 +45,8 @@ object PlaybackWatchdogPolicy {
     const val INIT_TIMEOUT_MILLIS = 12_000L
     const val MIN_SPEECH_TIMEOUT_MILLIS = 15_000L
     const val MAX_SPEECH_TIMEOUT_MILLIS = 240_000L
+    const val COMPLETION_POLL_MILLIS = 650L
+    const val QUIET_COMPLETION_CONFIRMATIONS = 2
 
     fun speechTimeoutMillis(textLength: Int, rate: Float, usesSonic: Boolean): Long {
         val safeRate = rate.coerceIn(0.5f, 2f)
@@ -54,6 +56,107 @@ object PlaybackWatchdogPolicy {
         return (estimatedSeconds * 1_000L + processingHeadroom)
             .coerceIn(MIN_SPEECH_TIMEOUT_MILLIS, MAX_SPEECH_TIMEOUT_MILLIS)
     }
+}
+
+enum class SpeechCompletionObservation {
+    WAITING,
+    COMPLETED,
+    TIMED_OUT,
+    STALE,
+}
+
+/**
+ * Recovers a speech completion when an Android TTS engine or MediaPlayer finishes output without
+ * delivering its final callback. This mirrors the XPK runtime: once output has started, two
+ * consecutive quiet observations count as completion, while a separate hard deadline still
+ * routes genuinely stuck output through the bounded recovery policy.
+ */
+class SpeechCompletionMonitor(
+    private val quietConfirmations: Int = PlaybackWatchdogPolicy.QUIET_COMPLETION_CONFIRMATIONS,
+) {
+    private data class Session(
+        val token: String,
+        val hardDeadlineMillis: Long,
+        var started: Boolean = false,
+        var observedOutput: Boolean = false,
+        var quietChecks: Int = 0,
+    )
+
+    private var session: Session? = null
+
+    init {
+        require(quietConfirmations > 0)
+    }
+
+    @Synchronized
+    fun begin(token: String, nowMillis: Long, timeoutMillis: Long) {
+        session = Session(
+            token = token,
+            hardDeadlineMillis = nowMillis + timeoutMillis.coerceAtLeast(1L),
+        )
+    }
+
+    @Synchronized
+    fun markStarted(token: String): Boolean {
+        val current = session ?: return false
+        if (current.token != token) return false
+        current.started = true
+        current.observedOutput = true
+        current.quietChecks = 0
+        return true
+    }
+
+    @Synchronized
+    fun observe(token: String, nowMillis: Long, outputActive: Boolean): SpeechCompletionObservation {
+        val current = session ?: return SpeechCompletionObservation.STALE
+        if (current.token != token) return SpeechCompletionObservation.STALE
+        if (outputActive) {
+            current.observedOutput = true
+            current.quietChecks = 0
+            if (nowMillis >= current.hardDeadlineMillis) {
+                session = null
+                return SpeechCompletionObservation.TIMED_OUT
+            }
+            return SpeechCompletionObservation.WAITING
+        }
+        if (current.started || current.observedOutput) {
+            current.quietChecks += 1
+            if (current.quietChecks >= quietConfirmations) {
+                session = null
+                return SpeechCompletionObservation.COMPLETED
+            }
+        }
+        if (nowMillis >= current.hardDeadlineMillis) {
+            session = null
+            return SpeechCompletionObservation.TIMED_OUT
+        }
+        return SpeechCompletionObservation.WAITING
+    }
+
+    @Synchronized
+    fun cancel() {
+        session = null
+    }
+}
+
+object NextChapterAdvancePolicy {
+    const val PREFETCH_WAIT_MILLIS = 15_000L
+    const val LOAD_ATTEMPTS = 3
+    const val LOAD_RETRY_DELAY_MILLIS = 800L
+
+    fun shouldAwaitPrefetch(
+        chapterId: String,
+        prefetchParentId: String,
+        prefetchActive: Boolean,
+    ): Boolean = chapterId.isNotBlank() && chapterId == prefetchParentId && prefetchActive
+
+    fun hasRemoteSuccessor(
+        sourceId: String,
+        nextChapterUrl: String?,
+        nextChapterPageUrl: String? = null,
+    ): Boolean = sourceId != "offline" && (
+        !nextChapterUrl.isNullOrBlank() || !nextChapterPageUrl.isNullOrBlank()
+        )
 }
 
 /** Rejects late callbacks from an engine instance that has already been replaced. */

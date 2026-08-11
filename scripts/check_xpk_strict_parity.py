@@ -124,6 +124,15 @@ require(
     "enum class NarrationAutomationStage",
     "val narrationProgress: Float = 0f",
     "fun setNarrationAutomation(",
+    "val nextChapterPageUrl: String? = null",
+)
+
+require(
+    "app/src/main/java/vn/nghetruyen/app/playback/ChapterPagination.kt",
+    "object ChapterPageCursorCodec",
+    "object ChapterCatalogMerger",
+    "class ChapterPageNavigationCache",
+    "nextChapterPageStartIndex",
 )
 
 require(
@@ -196,6 +205,14 @@ require(
     "Phân vai chưa thành công. Sẽ tự thử lại sau 5 giây.",
     "if (currentStoryAutoVoiceCastEnabled && prefetchNarrationPlansEnabled)",
     "if (!PlaybackQueueStore.state.value.isPlaying) pendingPlay = false",
+    "private val speechCompletionMonitor = SpeechCompletionMonitor()",
+    '"TTS_COMPLETION_WATCHDOG_RECOVERY"',
+    "loadNextChapterForAdvance(snapshot)",
+    '"TTS_CHAPTER_ADVANCE_WAIT_PREFETCH"',
+    "loadNextChapterFromCatalogPage(snapshot)",
+    '"TTS_CHAPTER_CATALOG_PAGE_LOAD"',
+    "ChapterPageCursorCodec.encode(",
+    "pendingPlay = false\n                        play()",
 )
 forbid(
     "app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt",
@@ -206,6 +223,28 @@ forbid(
     "AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY",
     "Phân vai tự động chưa thành công; đang đọc bằng cấu hình/phân vai hiện có.",
     "if (autoVoiceCastEnabled && prefetchNarrationPlansEnabled)",
+)
+
+require(
+    "app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt",
+    "snapshotFlow",
+    "CHAPTER_PAGE_PREFETCH_DISTANCE",
+    "state.chapterPageLoading",
+)
+forbid(
+    "app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt",
+    'Text("TẢI THÊM")',
+    'Text("NẠP TOÀN BỘ MỤC LỤC")',
+)
+
+require(
+    "app/src/main/java/vn/nghetruyen/app/playback/PlaybackRecoveryPolicy.kt",
+    "class SpeechCompletionMonitor(",
+    "PlaybackWatchdogPolicy.QUIET_COMPLETION_CONFIRMATIONS",
+    "SpeechCompletionObservation.COMPLETED",
+    "object NextChapterAdvancePolicy",
+    "PREFETCH_WAIT_MILLIS = 15_000L",
+    "LOAD_ATTEMPTS = 3",
 )
 
 require(

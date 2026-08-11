@@ -33,6 +33,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -45,6 +46,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import vn.nghetruyen.app.ai.StoryVoiceCastMode
 import vn.nghetruyen.app.ai.StoryVoiceCastReferenceCodec
 import vn.nghetruyen.app.audio.AudioExportPackaging
@@ -104,7 +107,6 @@ fun StoryDetailScreen(
     onClearAiProfile: () -> Unit,
     onChapterClick: (vn.nghetruyen.app.core.model.ChapterSummary) -> Unit,
     onLoadMoreChapters: () -> Unit,
-    onLoadAllChapters: () -> Unit,
     onLoadComments: (Boolean) -> Unit,
     onLoadMoreComments: () -> Unit,
     onOpenOriginal: (String) -> Unit,
@@ -237,7 +239,7 @@ fun StoryDetailScreen(
             onConsumeAdvancedOptionsRequest()
         }
     }
-    LaunchedEffect(selectedTab, visibleChapters, state.playback.chapterId, state.chapterSortDescending) {
+    LaunchedEffect(selectedTab, state.playback.chapterId, state.chapterSortDescending) {
         if (selectedTab == "chapters" && state.playback.chapterId.isNotBlank()) {
             val index = visibleChapters.indexOfFirst { it.id == state.playback.chapterId }
             if (index >= 0) {
@@ -245,6 +247,32 @@ fun StoryDetailScreen(
                 chapterListState.scrollToItem(index)
             }
         }
+    }
+    LaunchedEffect(
+        selectedTab,
+        detail.story.id,
+        detail.nextChapterPageUrl,
+        visibleChapters.size,
+        state.chapterPageLoading,
+    ) {
+        if (
+            selectedTab != "chapters" ||
+            detail.nextChapterPageUrl.isNullOrBlank() ||
+            state.chapterPageLoading
+        ) return@LaunchedEffect
+        snapshotFlow {
+            val layout = chapterListState.layoutInfo
+            val lastVisibleIndex = layout.visibleItemsInfo.lastOrNull()?.index ?: -1
+            val listFitsViewport = layout.totalItemsCount > 0 &&
+                layout.visibleItemsInfo.size >= layout.totalItemsCount
+            val nearEnd = visibleChapters.isEmpty() ||
+                lastVisibleIndex >= (visibleChapters.lastIndex - CHAPTER_PAGE_PREFETCH_DISTANCE)
+                    .coerceAtLeast(0)
+            nearEnd && (chapterListState.isScrollInProgress || listFitsViewport)
+        }
+            .distinctUntilChanged()
+            .filter { it }
+            .collect { onLoadMoreChapters() }
     }
     LaunchedEffect(selectedTab, state.storyCommentsLoading) {
         delay(120)
@@ -364,14 +392,7 @@ fun StoryDetailScreen(
                         )
                     }
                     if (visibleChapters.isEmpty()) item { Text("Không tìm thấy chương phù hợp.", modifier = Modifier.padding(16.dp)) }
-                    if (detail.nextChapterPageUrl != null) {
-                        item {
-                            Row(Modifier.fillMaxWidth().padding(8.dp)) {
-                                Button(onClick = onLoadMoreChapters, enabled = !state.loading, modifier = Modifier.weight(1f).padding(2.dp)) { Text("TẢI THÊM") }
-                                Button(onClick = onLoadAllChapters, enabled = !state.loading, modifier = Modifier.weight(1f).padding(2.dp)) { Text("NẠP TOÀN BỘ MỤC LỤC") }
-                            }
-                        }
-                    }
+                    if (state.chapterPageLoading) item(key = "chapter-page-loading") { LoadingRow() }
                 }
             }
 
@@ -960,6 +981,8 @@ fun StoryDetailScreen(
         )
     }
 }
+
+private const val CHAPTER_PAGE_PREFETCH_DISTANCE = 6
 
 private fun VoiceRoleEntity.toDraft(context: android.content.Context): VoiceRoleDraft {
     val extra = ReferenceVoiceRoleExtras.load(context, id)

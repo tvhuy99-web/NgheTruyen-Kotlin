@@ -134,7 +134,11 @@ class LibraryRepository(private val db: AppDatabase) {
             ReadingHistoryEntity(
                 id = id,
                 storyId = chapter.storyId,
-                sourceId = sourceId.ifBlank { storedStory?.sourceId.orEmpty() },
+                // A remotely sourced story may currently be read from its downloaded copy.
+                // Keep the canonical source in history so reopening it follows the same online
+                // story flow as Home instead of being permanently routed through offline mode.
+                sourceId = storedStory?.sourceId?.takeIf(String::isNotBlank)
+                    ?: sourceId,
                 storyTitle = storyTitle.ifBlank { storedStory?.title.orEmpty() }.ifBlank { "Truyện" },
                 chapterId = chapter.id,
                 chapterTitle = chapter.title.ifBlank { "Chương ${chapter.index + 1}" },
@@ -362,7 +366,38 @@ class LibraryRepository(private val db: AppDatabase) {
         )
     }
 
+    /** Persists the canonical current position and its history row as one Room transaction. */
+    suspend fun saveReadingPosition(
+        sourceId: String,
+        storyTitle: String,
+        chapter: ChapterSummary,
+        paragraphIndex: Int,
+        totalParagraphs: Int,
+    ) = db.withTransaction {
+        saveProgress(
+            storyId = chapter.storyId,
+            chapterId = chapter.id,
+            paragraphIndex = paragraphIndex,
+            totalParagraphs = totalParagraphs,
+        )
+        recordReadingHistory(
+            sourceId = sourceId,
+            storyTitle = storyTitle,
+            chapter = chapter,
+            paragraphIndex = paragraphIndex,
+            totalParagraphs = totalParagraphs,
+        )
+    }
+
     suspend fun listOfflineChapters(storyId: String): List<ChapterEntity> = db.chapterDao().listForStory(storyId)
+
+    /**
+     * Chapters that can actually be opened without network access. Imported books may use every
+     * stored body; remote stories expose only chapters explicitly marked as downloaded.
+     */
+    suspend fun listReadableOfflineChapters(storyId: String, importedBook: Boolean): List<ChapterEntity> =
+        db.chapterDao().listExportableForStory(storyId)
+            .filter { importedBook || it.downloadedAt != null }
 
     suspend fun removeOfflineContent(storyId: String) = db.withTransaction {
         val story = db.storyDao().get(storyId) ?: return@withTransaction

@@ -29,6 +29,7 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.view.KeyEvent
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -37,6 +38,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import vn.nghetruyen.app.MainActivity
 import vn.nghetruyen.app.ai.ChapterAiWorkflow
 import vn.nghetruyen.app.ai.XpkVoiceCastSplitter
@@ -47,6 +49,7 @@ import vn.nghetruyen.app.core.model.AudioInterruptionMode
 import vn.nghetruyen.app.core.model.SceneMusicPlaybackMode
 import vn.nghetruyen.app.core.model.VoiceRoleDraft
 import vn.nghetruyen.app.core.model.ChapterContent
+import vn.nghetruyen.app.core.model.ChapterSummary
 import vn.nghetruyen.app.data.local.PronunciationEntity
 import vn.nghetruyen.app.data.local.PlaybackCheckpointEntity
 import vn.nghetruyen.app.data.local.PlaybackQueueChapterEntity
@@ -97,7 +100,9 @@ class ReaderPlaybackService : Service() {
     private var mediaButtonMapping = MediaButtonMapping.DEFAULT
     private val ttsGenerationGuard = TtsGenerationGuard()
     private val completionGuard = PlaybackCompletionGuard()
+    private val speechCompletionMonitor = SpeechCompletionMonitor()
     private val playbackHealth = PlaybackHealthMonitor()
+    private val chapterPageNavigation = ChapterPageNavigationCache()
     private val playbackSessionId = UUID.randomUUID().toString()
     private var mediaButtonFlush: Runnable? = null
     private lateinit var sceneMusicController: SceneMusicController
@@ -495,16 +500,34 @@ class ReaderPlaybackService : Service() {
                 paragraphCount = content.paragraphs.size,
                 forcedParagraphIndex = checkpoint.paragraphIndex,
             )
+            val restoredNextNavigation = checkpoint.nextChapterUrl
+                ?: persistedCurrent?.nextChapterUrl
+                ?: content.nextChapterUrl
+            val restoredCursor = ChapterPageCursorCodec.decode(restoredNextNavigation)
             val restoredContent = content.copy(
-                nextChapterUrl = checkpoint.nextChapterUrl ?: persistedCurrent?.nextChapterUrl ?: content.nextChapterUrl,
+                nextChapterUrl = restoredCursor?.nextChapterUrl ?: restoredNextNavigation
+                    ?.takeUnless(ChapterPageCursorCodec::isEncoded),
                 previousChapterUrl = checkpoint.previousChapterUrl ?: persistedCurrent?.previousChapterUrl ?: content.previousChapterUrl,
+                nextChapterPageUrl = restoredCursor?.url,
+                nextChapterPageStartIndex = restoredCursor?.startIndex,
             )
-            val queuedNext = persistedQueue
+            val queuedNextRecord = persistedQueue
                 .dropWhile { it.chapterId != checkpoint.chapterId }
                 .drop(1)
                 .firstOrNull()
-                ?.let { container.libraryRepository.loadCachedChapter(it.chapterId) }
-                ?.let(ReaderDocumentNormalizer::normalize)
+            val queuedNext = queuedNextRecord
+                ?.let { record ->
+                    container.libraryRepository.loadCachedChapter(record.chapterId)?.let { cachedNext ->
+                        val persistedCursor = ChapterPageCursorCodec.decode(record.nextChapterUrl)
+                        ReaderDocumentNormalizer.normalize(cachedNext).copy(
+                            nextChapterUrl = persistedCursor?.nextChapterUrl ?: record.nextChapterUrl
+                                ?.takeUnless(ChapterPageCursorCodec::isEncoded),
+                            previousChapterUrl = record.previousChapterUrl ?: cachedNext.previousChapterUrl,
+                            nextChapterPageUrl = persistedCursor?.url,
+                            nextChapterPageStartIndex = persistedCursor?.startIndex,
+                        )
+                    }
+                }
             withContext(Dispatchers.Main) {
                 if (PlaybackQueueStore.state.value.chapterId.isBlank()) {
                     PlaybackQueueStore.loadContent(
@@ -514,7 +537,9 @@ class ReaderPlaybackService : Service() {
                         keepPlaying = false,
                     )
                     PlaybackQueueStore.restoreSpeechPosition(restoredIndex, checkpoint.speechChunkIndex)
-                    queuedNext?.let { NextChapterCache.put(restoredContent.chapter.id, it) }
+                    if (restoredContent.nextChapterPageUrl.isNullOrBlank()) {
+                        queuedNext?.let { NextChapterCache.put(restoredContent.chapter.id, it) }
+                    }
                     val sleepDeadline = (ReaderSleepTimerStore.get(this@ReaderPlaybackService)
                         ?: checkpoint.sleepTimerEndsAtMillis)
                         ?.takeIf { !SleepTimerPolicy.hasExpired(it, System.currentTimeMillis()) }
@@ -558,15 +583,59 @@ class ReaderPlaybackService : Service() {
                     speechChunkIndex = snapshot.speechChunkIndex,
                     wasPlaying = wasPlaying,
                     activeSceneTrackId = sceneMusicController.activeTrackId,
-                    nextChapterUrl = snapshot.nextChapterUrl,
+                    nextChapterUrl = persistedNextNavigation(snapshot),
                     previousChapterUrl = snapshot.previousChapterUrl,
                     sleepTimerEndsAtMillis = ReaderSleepTimerStore.get(this@ReaderPlaybackService),
                     sessionId = playbackSessionId,
                     updatedAt = System.currentTimeMillis(),
                 ),
             )
+            persistReadingPosition(snapshot)
             persistPlaybackQueue(snapshot)
         }
+    }
+
+    private fun persistedNextNavigation(snapshot: PlaybackSnapshot): String? = persistedNextNavigation(
+        nextChapterUrl = snapshot.nextChapterUrl,
+        nextChapterPageUrl = snapshot.nextChapterPageUrl,
+        nextChapterPageStartIndex = snapshot.nextChapterPageStartIndex,
+    )
+
+    private fun persistedNextNavigation(content: ChapterContent): String? = persistedNextNavigation(
+        nextChapterUrl = content.nextChapterUrl,
+        nextChapterPageUrl = content.nextChapterPageUrl,
+        nextChapterPageStartIndex = content.nextChapterPageStartIndex,
+    )
+
+    private fun persistedNextNavigation(
+        nextChapterUrl: String?,
+        nextChapterPageUrl: String?,
+        nextChapterPageStartIndex: Int?,
+    ): String? = nextChapterPageUrl?.trim()?.takeIf(String::isNotBlank)?.let { pageUrl ->
+            ChapterPageCursorCodec.encode(
+                pageUrl,
+                nextChapterPageStartIndex ?: 0,
+                nextChapterUrl,
+            )
+        }
+        ?: nextChapterUrl?.trim()?.takeIf(String::isNotBlank)
+
+    private suspend fun persistReadingPosition(snapshot: PlaybackSnapshot) {
+        if (snapshot.storyId.isBlank() || snapshot.chapterId.isBlank() || snapshot.paragraphs.isEmpty()) return
+        val paragraphIndex = snapshot.paragraphIndex.coerceIn(0, snapshot.paragraphs.lastIndex)
+        container.libraryRepository.saveReadingPosition(
+            sourceId = snapshot.sourceId,
+            storyTitle = "",
+            chapter = ChapterSummary(
+                id = snapshot.chapterId,
+                storyId = snapshot.storyId,
+                index = snapshot.chapterIndex,
+                title = snapshot.chapterTitle,
+                url = snapshot.chapterUrl,
+            ),
+            paragraphIndex = paragraphIndex,
+            totalParagraphs = snapshot.paragraphs.size,
+        )
     }
 
     private suspend fun persistPlaybackQueue(snapshot: PlaybackSnapshot) {
@@ -581,7 +650,7 @@ class ReaderPlaybackService : Service() {
                 chapterIndex = snapshot.chapterIndex,
                 chapterTitle = snapshot.chapterTitle,
                 chapterUrl = snapshot.chapterUrl,
-                nextChapterUrl = snapshot.nextChapterUrl,
+                nextChapterUrl = persistedNextNavigation(snapshot),
                 previousChapterUrl = snapshot.previousChapterUrl,
                 updatedAt = now,
             ),
@@ -599,7 +668,7 @@ class ReaderPlaybackService : Service() {
                 chapterIndex = next.chapter.index,
                 chapterTitle = next.chapter.title,
                 chapterUrl = next.chapter.url,
-                nextChapterUrl = next.nextChapterUrl,
+                nextChapterUrl = persistedNextNavigation(next),
                 previousChapterUrl = next.previousChapterUrl,
                 updatedAt = now,
             )
@@ -630,6 +699,9 @@ class ReaderPlaybackService : Service() {
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {
                     diagnostic("TTS_UTTERANCE_START", attributes = mapOf("utteranceId" to utteranceId.orEmpty()))
+                    if (!utteranceId.isNullOrBlank() && utteranceId == activeUtteranceId) {
+                        speechCompletionMonitor.markStarted(utteranceId)
+                    }
                 }
                 override fun onError(utteranceId: String?) {
                     diagnostic("TTS_UTTERANCE_ERROR", DiagnosticSeverity.ERROR, mapOf("utteranceId" to utteranceId.orEmpty()))
@@ -812,20 +884,64 @@ class ReaderPlaybackService : Service() {
         usesSonic: Boolean,
     ) {
         speechWatchdog?.let(mainHandler::removeCallbacks)
-        val watchdog = Runnable {
-            if (activeUtteranceId != utteranceId) return@Runnable
-            recoverActiveSpeech("TTS_SPEECH_TIMEOUT")
+        speechCompletionMonitor.begin(
+            token = utteranceId,
+            nowMillis = SystemClock.elapsedRealtime(),
+            timeoutMillis = PlaybackWatchdogPolicy.speechTimeoutMillis(text.length, config.rate, usesSonic),
+        )
+        val watchdog = object : Runnable {
+            override fun run() {
+                if (activeUtteranceId != utteranceId || !PlaybackQueueStore.state.value.isPlaying) {
+                    speechCompletionMonitor.cancel()
+                    if (speechWatchdog === this) speechWatchdog = null
+                    return
+                }
+                val outputActive = if (activeSonicPlaybackId == utteranceId) {
+                    sonicPlayer?.runCatching { isPlaying }?.getOrDefault(false) == true
+                } else {
+                    ::tts.isInitialized && runCatching { tts.isSpeaking }.getOrDefault(false)
+                }
+                when (
+                    speechCompletionMonitor.observe(
+                        token = utteranceId,
+                        nowMillis = SystemClock.elapsedRealtime(),
+                        outputActive = outputActive,
+                    )
+                ) {
+                    SpeechCompletionObservation.WAITING -> mainHandler.postDelayed(
+                        this,
+                        PlaybackWatchdogPolicy.COMPLETION_POLL_MILLIS,
+                    )
+                    SpeechCompletionObservation.COMPLETED -> {
+                        if (speechWatchdog === this) speechWatchdog = null
+                        diagnostic(
+                            "TTS_COMPLETION_WATCHDOG_RECOVERY",
+                            DiagnosticSeverity.WARN,
+                            mapOf("utteranceId" to utteranceId, "rendered" to usesSonic.toString()),
+                        )
+                        onSpeechCompleted(utteranceId, true)
+                    }
+                    SpeechCompletionObservation.TIMED_OUT -> {
+                        if (speechWatchdog === this) speechWatchdog = null
+                        recoverActiveSpeech("TTS_SPEECH_TIMEOUT")
+                    }
+                    SpeechCompletionObservation.STALE -> {
+                        if (speechWatchdog === this) speechWatchdog = null
+                    }
+                }
+            }
         }
         speechWatchdog = watchdog
         mainHandler.postDelayed(
             watchdog,
-            PlaybackWatchdogPolicy.speechTimeoutMillis(text.length, config.rate, usesSonic),
+            PlaybackWatchdogPolicy.COMPLETION_POLL_MILLIS,
         )
     }
 
     private fun cancelSpeechWatchdog() {
         speechWatchdog?.let(mainHandler::removeCallbacks)
         speechWatchdog = null
+        speechCompletionMonitor.cancel()
     }
 
     private fun recoverActiveSpeech(code: String) {
@@ -1025,6 +1141,7 @@ class ReaderPlaybackService : Service() {
                 }
                 prepare()
                 start()
+                speechCompletionMonitor.markStarted(playbackId)
             }
         }.getOrElse {
             transitionMessage = "Không phát được đoạn Sonic đã xử lý."
@@ -1282,7 +1399,11 @@ class ReaderPlaybackService : Service() {
         if (snapshot.progressFraction < PREFETCH_THRESHOLD) return
         if (snapshot.chapterId.isBlank() || NextChapterCache.has(snapshot.chapterId)) return
         if (prefetchParentId == snapshot.chapterId && prefetchJob?.isActive == true) return
-        if (snapshot.sourceId != "offline" && snapshot.nextChapterUrl.isNullOrBlank()) return
+        if (
+            snapshot.sourceId != "offline" &&
+            snapshot.nextChapterUrl.isNullOrBlank() &&
+            snapshot.nextChapterPageUrl.isNullOrBlank()
+        ) return
 
         if (currentStoryAutoVoiceCastEnabled && prefetchNarrationPlansEnabled) {
             PlaybackQueueStore.setNarrationAutomation(
@@ -1305,7 +1426,7 @@ class ReaderPlaybackService : Service() {
                 }
                 NextChapterCache.put(snapshot.chapterId, next)
                 persistPlaybackQueue(snapshot)
-                maybePrefetchNarrationPlans(next, snapshot.sourceId)
+                maybePrefetchNarrationPlans(next, snapshot.sourceId, snapshot.chapterId)
             } else if (currentStoryAutoVoiceCastEnabled && prefetchNarrationPlansEnabled &&
                 PlaybackQueueStore.state.value.chapterId == snapshot.chapterId
             ) {
@@ -1319,75 +1440,357 @@ class ReaderPlaybackService : Service() {
     }
 
     private fun advanceAfterChapter(snapshot: PlaybackSnapshot) {
-        if (advanceJob?.isActive == true) return
+        if (advanceJob?.isActive == true) {
+            diagnostic(
+                "TTS_CHAPTER_ADVANCE_ALREADY_RUNNING",
+                DiagnosticSeverity.WARN,
+                mapOf("fromChapterId" to snapshot.chapterId),
+            )
+            return
+        }
         advanceJob = serviceScope.launch {
-            val autoNext = container.settingsRepository.snapshot().autoPlayNextChapter
-            if (!autoNext) {
-                withContext(Dispatchers.Main) { stopPlayback() }
-                return@launch
-            }
-            withContext(Dispatchers.Main) {
-                transitionMessage = "Đang chuẩn bị chương tiếp theo…"
-                updateNotification()
-            }
-            val next = NextChapterCache.take(snapshot.chapterId) ?: loadNextChapter(snapshot)
-            if (next == null) {
-                withContext(Dispatchers.Main) {
-                    transitionMessage = "Đã đọc hết chương cuối."
-                    stopPlayback()
+            diagnostic(
+                "TTS_CHAPTER_ADVANCE_BEGIN",
+                DiagnosticSeverity.INFO,
+                mapOf("fromChapterId" to snapshot.chapterId),
+            )
+            try {
+                val autoNext = container.settingsRepository.snapshot().autoPlayNextChapter
+                if (!autoNext) {
+                    withContext(Dispatchers.Main) {
+                        transitionMessage = "Tự động chuyển chương đang tắt trong cài đặt."
+                        stopPlayback()
+                    }
+                    return@launch
                 }
-                return@launch
-            }
-            val existingVoicePlanCount = container.narrationPlanCoordinator.voicePlanAssignmentCount(next)
-            val shouldAutoStart = container.narrationPlanCoordinator.shouldAutoVoiceCast(next.chapter.storyId) ||
-                existingVoicePlanCount > 0
-            withContext(Dispatchers.Main) {
-                val currentVoice = PlaybackQueueStore.state.value
-                PlaybackQueueStore.loadContent(
-                    sourceId = snapshot.sourceId,
-                    content = next,
-                    rate = currentVoice.rate,
-                    pitch = currentVoice.pitch,
-                    volume = currentVoice.volume,
-                    keepPlaying = false,
-                )
-                prefetchParentId = ""
-                pendingPlay = shouldAutoStart
-                transitionMessage = if (shouldAutoStart) null
-                else "Chương mới chưa được phân vai; chưa tự động phát."
-                persistCheckpoint(wasPlaying = shouldAutoStart)
-            }
-            val configured = applyConfiguredVoice(useStoryProfile = true)
-            withContext(Dispatchers.Main) {
-                voiceSettingsReady = configured
-                if (configured && pendingPlay) {
-                    play()
-                } else {
-                    updateMediaState()
+                withContext(Dispatchers.Main) {
+                    transitionMessage = "Đang chuẩn bị chương tiếp theo…"
                     updateNotification()
+                }
+                val next = loadNextChapterForAdvance(snapshot)
+                if (next == null) {
+                    val hasSuccessor = NextChapterAdvancePolicy.hasRemoteSuccessor(
+                        snapshot.sourceId,
+                        snapshot.nextChapterUrl,
+                        snapshot.nextChapterPageUrl,
+                    )
+                    withContext(Dispatchers.Main) {
+                        if (PlaybackQueueStore.state.value.chapterId != snapshot.chapterId) return@withContext
+                        if (hasSuccessor) {
+                            transitionMessage = "Chưa tải được chương tiếp theo sau nhiều lần thử. Nhấn PHÁT để thử lại."
+                            pauseInternal(abandonFocus = true)
+                        } else {
+                            transitionMessage = "Đã đọc hết chương cuối."
+                            stopPlayback()
+                        }
+                    }
+                    diagnostic(
+                        if (hasSuccessor) "TTS_CHAPTER_ADVANCE_LOAD_FAILED" else "TTS_CHAPTER_ADVANCE_END_OF_STORY",
+                        if (hasSuccessor) DiagnosticSeverity.ERROR else DiagnosticSeverity.INFO,
+                        mapOf("fromChapterId" to snapshot.chapterId),
+                    )
+                    return@launch
+                }
+                withContext(Dispatchers.Main) {
+                    if (PlaybackQueueStore.state.value.chapterId != snapshot.chapterId) return@withContext
+                    val currentVoice = PlaybackQueueStore.state.value
+                    PlaybackQueueStore.loadContent(
+                        sourceId = snapshot.sourceId,
+                        content = next,
+                        rate = currentVoice.rate,
+                        pitch = currentVoice.pitch,
+                        volume = currentVoice.volume,
+                        keepPlaying = false,
+                    )
+                    prefetchParentId = ""
+                    pendingPlay = true
+                    transitionMessage = null
+                    persistCheckpoint(wasPlaying = true)
+                }
+                if (PlaybackQueueStore.state.value.chapterId != next.chapter.id) return@launch
+                val configured = applyConfiguredVoice(useStoryProfile = true)
+                withContext(Dispatchers.Main) {
+                    if (PlaybackQueueStore.state.value.chapterId != next.chapter.id) return@withContext
+                    voiceSettingsReady = configured
+                    if (configured && pendingPlay) {
+                        pendingPlay = false
+                        play()
+                    } else {
+                        updateMediaState()
+                        updateNotification()
+                    }
+                }
+                diagnostic(
+                    "TTS_CHAPTER_ADVANCE_READY",
+                    DiagnosticSeverity.INFO,
+                    mapOf("fromChapterId" to snapshot.chapterId, "toChapterId" to next.chapter.id),
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                diagnostic(
+                    "TTS_CHAPTER_ADVANCE_FAILED",
+                    DiagnosticSeverity.ERROR,
+                    mapOf(
+                        "fromChapterId" to snapshot.chapterId,
+                        "error" to (error.message ?: error::class.java.simpleName).take(240),
+                    ),
+                )
+                withContext(Dispatchers.Main) {
+                    val current = PlaybackQueueStore.state.value
+                    if (current.chapterId != snapshot.chapterId) {
+                        pendingPlay = true
+                        transitionMessage = "Đã mở chương tiếp theo; đang khôi phục giọng đọc…"
+                        refreshVoiceAndNotification(playAfterRefresh = true)
+                    } else {
+                        transitionMessage = "Không thể tự chuyển chương. Nhấn PHÁT để thử lại."
+                        pauseInternal(abandonFocus = true)
+                    }
                 }
             }
         }
     }
 
+    private suspend fun loadNextChapterForAdvance(snapshot: PlaybackSnapshot): ChapterContent? {
+        NextChapterCache.take(snapshot.chapterId)?.let { return it }
+        val inFlightPrefetch = prefetchJob
+        if (NextChapterAdvancePolicy.shouldAwaitPrefetch(
+                chapterId = snapshot.chapterId,
+                prefetchParentId = prefetchParentId,
+                prefetchActive = inFlightPrefetch?.isActive == true,
+            )
+        ) {
+            diagnostic(
+                "TTS_CHAPTER_ADVANCE_WAIT_PREFETCH",
+                DiagnosticSeverity.INFO,
+                mapOf("fromChapterId" to snapshot.chapterId),
+            )
+            withTimeoutOrNull(NextChapterAdvancePolicy.PREFETCH_WAIT_MILLIS) {
+                inFlightPrefetch?.join()
+            }
+            NextChapterCache.take(snapshot.chapterId)?.let { return it }
+        }
+
+        val attempts = if (NextChapterAdvancePolicy.hasRemoteSuccessor(
+                snapshot.sourceId,
+                snapshot.nextChapterUrl,
+                snapshot.nextChapterPageUrl,
+            )
+        ) {
+            NextChapterAdvancePolicy.LOAD_ATTEMPTS
+        } else {
+            1
+        }
+        repeat(attempts) { attempt ->
+            val loaded = try {
+                loadNextChapter(snapshot)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                diagnostic(
+                    "TTS_CHAPTER_ADVANCE_LOAD_ERROR",
+                    DiagnosticSeverity.WARN,
+                    mapOf(
+                        "attempt" to (attempt + 1).toString(),
+                        "error" to (error.message ?: error::class.java.simpleName).take(180),
+                    ),
+                )
+                null
+            }
+            if (loaded != null) return loaded
+            NextChapterCache.take(snapshot.chapterId)?.let { return it }
+            if (attempt + 1 < attempts) {
+                diagnostic(
+                    "TTS_CHAPTER_ADVANCE_LOAD_RETRY",
+                    DiagnosticSeverity.WARN,
+                    mapOf("attempt" to (attempt + 2).toString()),
+                )
+                delay(NextChapterAdvancePolicy.LOAD_RETRY_DELAY_MILLIS)
+            }
+        }
+        return NextChapterCache.take(snapshot.chapterId)
+    }
+
     private suspend fun loadNextChapter(snapshot: PlaybackSnapshot): ChapterContent? {
+        if (snapshot.sourceId != "offline" && !snapshot.nextChapterPageUrl.isNullOrBlank()) {
+            loadNextChapterFromCatalogPage(snapshot)?.let { return it }
+        }
+
         val cachedByIndex = container.libraryRepository.loadNextCachedChapter(
             storyId = snapshot.storyId,
             chapterIndex = snapshot.chapterIndex,
         )
-        if (cachedByIndex != null) return ReaderDocumentNormalizer.normalize(cachedByIndex)
+        if (cachedByIndex != null && isExpectedCachedSuccessor(snapshot, cachedByIndex)) {
+            return chapterPageNavigation.enrich(ReaderDocumentNormalizer.normalize(cachedByIndex))
+        }
         if (snapshot.sourceId == "offline") return null
 
         val nextUrl = snapshot.nextChapterUrl?.takeIf(String::isNotBlank) ?: return null
         val cachedByUrl = container.libraryRepository.loadCachedChapterByUrl(snapshot.storyId, nextUrl)
-        if (cachedByUrl != null) return ReaderDocumentNormalizer.normalize(cachedByUrl)
+        if (cachedByUrl != null) {
+            return chapterPageNavigation.enrich(
+                NextChapterNormalizer.normalize(snapshot, nextUrl, cachedByUrl),
+            )
+        }
         val source = container.sourceRegistry.get(snapshot.sourceId) ?: return null
         return when (val result = source.chapter(nextUrl)) {
-            is AppResult.Success -> NextChapterNormalizer
-                .normalize(snapshot, nextUrl, result.value)
+            is AppResult.Success -> chapterPageNavigation
+                .enrich(NextChapterNormalizer.normalize(snapshot, nextUrl, result.value))
                 .also { container.libraryRepository.cacheChapter(it) }
             is AppResult.Failure -> null
         }
+    }
+
+    private suspend fun loadNextChapterFromCatalogPage(snapshot: PlaybackSnapshot): ChapterContent? {
+        val source = container.sourceRegistry.get(snapshot.sourceId) ?: return null
+        var pageUrl = snapshot.nextChapterPageUrl?.trim()?.takeIf(String::isNotBlank) ?: return null
+        var startIndex = snapshot.nextChapterPageStartIndex
+            ?.coerceAtLeast(0)
+            ?: (snapshot.chapterIndex + 1).coerceAtLeast(0)
+        val visited = linkedSetOf<String>()
+
+        repeat(MAX_CATALOG_PAGE_HOPS) { hop ->
+            val pageIdentity = pageUrl.trim().trimEnd('/')
+            if (!visited.add(pageIdentity)) {
+                diagnostic(
+                    "TTS_CHAPTER_CATALOG_PAGE_LOOP",
+                    DiagnosticSeverity.ERROR,
+                    mapOf("pageUrl" to pageUrl.take(180)),
+                )
+                return null
+            }
+            diagnostic(
+                "TTS_CHAPTER_CATALOG_PAGE_LOAD",
+                DiagnosticSeverity.INFO,
+                mapOf("pageUrl" to pageUrl.take(180), "hop" to (hop + 1).toString()),
+            )
+            val pageResult = try {
+                source.chapterPage(snapshot.storyId, pageUrl, startIndex)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                diagnostic(
+                    "TTS_CHAPTER_CATALOG_PAGE_ERROR",
+                    DiagnosticSeverity.WARN,
+                    mapOf("error" to (error.message ?: error::class.java.simpleName).take(180)),
+                )
+                return null
+            }
+            val page = when (pageResult) {
+                is AppResult.Success -> pageResult.value
+                is AppResult.Failure -> {
+                    diagnostic(
+                        "TTS_CHAPTER_CATALOG_PAGE_FAILED",
+                        DiagnosticSeverity.WARN,
+                        mapOf("code" to pageResult.code, "message" to pageResult.message.take(180)),
+                    )
+                    return null
+                }
+            }
+            val nextStartIndex = startIndex + page.chapters.size
+            val candidates = ReaderChapterNavigation.readingOrder(
+                page.chapters
+                    .filterNot { candidate ->
+                        candidate.id == snapshot.chapterId || (
+                            candidate.url.isNotBlank() && snapshot.chapterUrl.isNotBlank() &&
+                                candidate.url.trim().trimEnd('/') == snapshot.chapterUrl.trim().trimEnd('/')
+                            )
+                    }
+                    .distinctBy { it.url.trim().trimEnd('/').ifBlank { it.id } },
+            ).mapIndexed { offset, chapter ->
+                chapter.copy(
+                    storyId = snapshot.storyId,
+                    index = ReaderChapterNavigation.sequenceNumber(chapter)
+                        ?.takeIf { it > 0L }
+                        ?.coerceAtMost(Int.MAX_VALUE.toLong())
+                        ?.toInt()
+                        ?.minus(1)
+                        ?: (snapshot.chapterIndex + offset + 1),
+                )
+            }
+            chapterPageNavigation.registerPage(
+                storyId = snapshot.storyId,
+                chapters = candidates,
+                previousChapterUrl = snapshot.chapterUrl,
+                nextPageUrl = page.nextPageUrl,
+                nextPageStartIndex = nextStartIndex,
+            )
+            val successor = ReaderChapterNavigation.next(
+                current = ChapterSummary(
+                    id = snapshot.chapterId,
+                    storyId = snapshot.storyId,
+                    index = snapshot.chapterIndex,
+                    title = snapshot.chapterTitle,
+                    url = snapshot.chapterUrl,
+                ),
+                chapters = candidates,
+                fallbackUrl = null,
+            ) ?: candidates.firstOrNull()
+                ?.takeIf { ReaderChapterNavigation.sequenceNumber(it) == null }
+            if (successor != null) {
+                val target = successor.url.ifBlank { successor.id }
+                val cached = successor.url.takeIf(String::isNotBlank)?.let { url ->
+                    container.libraryRepository.loadCachedChapterByUrl(snapshot.storyId, url)
+                } ?: container.libraryRepository.loadCachedChapter(successor.id)
+                val loaded = cached ?: when (val chapterResult = source.chapter(target)) {
+                    is AppResult.Success -> chapterResult.value
+                    is AppResult.Failure -> {
+                        diagnostic(
+                            "TTS_CHAPTER_AFTER_CATALOG_LOAD_FAILED",
+                            DiagnosticSeverity.WARN,
+                            mapOf("code" to chapterResult.code, "url" to target.take(180)),
+                        )
+                        return null
+                    }
+                }
+                return normalizeCatalogSuccessor(snapshot, successor, loaded)
+                    .also { container.libraryRepository.cacheChapter(it) }
+            }
+
+            val nextPage = page.nextPageUrl?.trim()?.takeIf(String::isNotBlank)
+                ?.takeUnless { it.trim().trimEnd('/') in visited }
+                ?: return null
+            pageUrl = nextPage
+            startIndex = nextStartIndex
+        }
+        diagnostic(
+            "TTS_CHAPTER_CATALOG_PAGE_HOP_LIMIT",
+            DiagnosticSeverity.ERROR,
+            mapOf("fromChapterId" to snapshot.chapterId),
+        )
+        return null
+    }
+
+    private fun normalizeCatalogSuccessor(
+        snapshot: PlaybackSnapshot,
+        summary: ChapterSummary,
+        content: ChapterContent,
+    ): ChapterContent {
+        val normalized = ReaderDocumentNormalizer.normalize(
+            content.copy(
+                chapter = content.chapter.copy(
+                    storyId = snapshot.storyId,
+                    index = summary.index,
+                    title = content.chapter.title.ifBlank { summary.title },
+                    url = content.chapter.url.ifBlank { summary.url },
+                ),
+                previousChapterUrl = content.previousChapterUrl
+                    ?: snapshot.chapterUrl.takeIf(String::isNotBlank),
+            ),
+        )
+        return chapterPageNavigation.enrich(normalized)
+    }
+
+    private fun isExpectedCachedSuccessor(
+        snapshot: PlaybackSnapshot,
+        candidate: ChapterContent,
+    ): Boolean {
+        val expectedUrl = snapshot.nextChapterUrl?.trim()?.trimEnd('/')
+        if (!expectedUrl.isNullOrBlank()) {
+            return candidate.chapter.url.trim().trimEnd('/') == expectedUrl ||
+                candidate.chapter.id == snapshot.nextChapterUrl
+        }
+        return candidate.chapter.index == snapshot.chapterIndex + 1
     }
 
     private fun shouldPlanAutoSceneMusic(): Boolean = backgroundMusicEnabled && autoSceneMusicEnabled
@@ -1512,7 +1915,11 @@ class ReaderPlaybackService : Service() {
         return true
     }
 
-    private fun maybePrefetchNarrationPlans(content: ChapterContent, sourceId: String) {
+    private fun maybePrefetchNarrationPlans(
+        content: ChapterContent,
+        sourceId: String,
+        parentChapterId: String,
+    ) {
         if (!prefetchNarrationPlansEnabled || !currentStoryAutoVoiceCastEnabled) return
         narrationPrefetchJob?.cancel()
         narrationPrefetchJob = serviceScope.launch {
@@ -1529,50 +1936,64 @@ class ReaderPlaybackService : Service() {
                 }
                 val result = attempt.getOrNull()
                 if (offset == 0) {
-                    val failed = result == null || (
+                    val assignmentCount = if (result == null) {
+                        0
+                    } else {
+                        try {
+                            container.narrationPlanCoordinator.voicePlanAssignmentCount(chapter)
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (error: Throwable) {
+                            diagnostic(
+                                "TTS_NEXT_NARRATION_VALIDATION_FAILED",
+                                DiagnosticSeverity.WARN,
+                                mapOf("error" to (error.message ?: error::class.java.simpleName).take(180)),
+                            )
+                            0
+                        }
+                    }
+                    val failed = result == null || assignmentCount <= 0 || (
                         result.warnings.isNotEmpty() && !result.voicePlanCreated && !result.musicPlanCreated
                     )
                     val musicLabel = if (shouldPlanAutoSceneMusic()) " + nhạc cảnh" else ""
                     val baseMessage = when {
                         result == null -> "Không phân vai trước được chương tiếp theo: ${chapter.chapter.title}."
+                        assignmentCount <= 0 -> "Phân vai trước chưa tạo được mục giọng hợp lệ: ${chapter.chapter.title}."
                         failed -> "Phân vai trước chương tiếp theo chưa thành công: ${chapter.chapter.title}."
                         result.voicePlanCreated || result.musicPlanCreated ->
-                            "Đã phân vai$musicLabel chương tiếp theo: ${chapter.chapter.title}."
-                        else -> "Chương tiếp theo đã có phân vai$musicLabel hợp lệ: ${chapter.chapter.title}."
+                            "Đã phân vai $assignmentCount mục$musicLabel cho chương tiếp theo: ${chapter.chapter.title}."
+                        else -> "Chương tiếp theo đã có $assignmentCount mục phân vai$musicLabel hợp lệ: ${chapter.chapter.title}."
                     }
                     val warning = result?.warnings?.firstOrNull()?.takeIf(String::isNotBlank)
                         ?: attempt.exceptionOrNull()?.message
-                    PlaybackQueueStore.setNarrationAutomation(
-                        stage = if (failed) NarrationAutomationStage.FAILED else NarrationAutomationStage.NEXT_READY,
-                        progress = 1f,
-                        message = baseMessage + warning?.let { " • ${it.take(120)}" }.orEmpty(),
-                    )
+                    // Do not let a late prefetch result overwrite CURRENT_PLANNING/READY after the
+                    // reader has already promoted this chapter into the foreground.
+                    if (PlaybackQueueStore.state.value.chapterId == parentChapterId) {
+                        PlaybackQueueStore.setNarrationAutomation(
+                            stage = if (failed) NarrationAutomationStage.FAILED else NarrationAutomationStage.NEXT_READY,
+                            progress = 1f,
+                            message = baseMessage + warning?.let { " • ${it.take(120)}" }.orEmpty(),
+                        )
+                    }
                     if (failed) return@launch
                 } else if (result == null) {
                     return@launch
                 }
-                val cached = container.libraryRepository.loadNextCachedChapter(
-                    storyId = chapter.chapter.storyId,
-                    chapterIndex = chapter.chapter.index,
+                current = loadNextChapter(
+                    PlaybackQueueStore.state.value.copy(
+                        sourceId = sourceId,
+                        storyId = chapter.chapter.storyId,
+                        chapterId = chapter.chapter.id,
+                        chapterIndex = chapter.chapter.index,
+                        chapterTitle = chapter.chapter.title,
+                        chapterUrl = chapter.chapter.url,
+                        paragraphs = chapter.paragraphs,
+                        nextChapterUrl = chapter.nextChapterUrl,
+                        previousChapterUrl = chapter.previousChapterUrl,
+                        nextChapterPageUrl = chapter.nextChapterPageUrl,
+                        nextChapterPageStartIndex = chapter.nextChapterPageStartIndex,
+                    ),
                 )
-                current = cached ?: run {
-                    val nextUrl = chapter.nextChapterUrl?.takeIf(String::isNotBlank) ?: return@run null
-                    if (sourceId == "offline") return@run null
-                    val source = container.sourceRegistry.get(sourceId) ?: return@run null
-                    when (val loaded = source.chapter(nextUrl)) {
-                        is AppResult.Success -> NextChapterNormalizer.normalize(
-                            PlaybackQueueStore.state.value.copy(
-                                chapterId = chapter.chapter.id,
-                                chapterIndex = chapter.chapter.index,
-                                storyId = chapter.chapter.storyId,
-                                sourceId = sourceId,
-                            ),
-                            nextUrl,
-                            loaded.value,
-                        ).also { container.libraryRepository.cacheChapter(it) }
-                        is AppResult.Failure -> null
-                    }
-                }
             }
         }
     }
@@ -1609,6 +2030,7 @@ class ReaderPlaybackService : Service() {
         advanceJob = null
         prefetchParentId = ""
         NextChapterCache.clear()
+        chapterPageNavigation.clear()
         clearSonicPlayback(deleteFiles = true)
         if (::tts.isInitialized) tts.stop()
         PlaybackQueueStore.setPlaying(false)
@@ -1634,13 +2056,14 @@ class ReaderPlaybackService : Service() {
                             speechChunkIndex = snapshot.speechChunkIndex,
                             wasPlaying = false,
                             activeSceneTrackId = sceneMusicController.activeTrackId,
-                            nextChapterUrl = snapshot.nextChapterUrl,
+                            nextChapterUrl = persistedNextNavigation(snapshot),
                             previousChapterUrl = snapshot.previousChapterUrl,
                             sleepTimerEndsAtMillis = ReaderSleepTimerStore.get(this@ReaderPlaybackService),
                             sessionId = playbackSessionId,
                             updatedAt = System.currentTimeMillis(),
                         ),
                     )
+                    persistReadingPosition(snapshot)
                     persistPlaybackQueue(snapshot)
                 }
                 withContext(Dispatchers.Main) {
@@ -2378,6 +2801,7 @@ class ReaderPlaybackService : Service() {
         restoreJob?.cancel()
         narrationPlanJob?.cancel()
         narrationPrefetchJob?.cancel()
+        chapterPageNavigation.clear()
         mediaButtonFlush?.let(mainHandler::removeCallbacks)
         mediaButtonGestures.reset()
         PlaybackQueueStore.setSleepTimer(ReaderSleepTimerStore.get(this))
@@ -2410,6 +2834,7 @@ class ReaderPlaybackService : Service() {
         private const val WAKE_LOCK_TIMEOUT_MS = 30 * 60 * 1000L
         private const val MAX_PREVIEW_TEXT_CHARS = 320
         private const val MAX_PERSISTED_QUEUE_CHAPTERS = 5
+        private const val MAX_CATALOG_PAGE_HOPS = 30
 
         const val ACTION_PLAY = "vn.nghetruyen.action.PLAY"
         const val ACTION_PAUSE = "vn.nghetruyen.action.PAUSE"

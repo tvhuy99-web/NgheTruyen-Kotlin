@@ -60,7 +60,8 @@ fun LibraryScreen(
     state: MainUiState,
     onSectionSelected: (LibrarySection) -> Unit,
     onImportFile: () -> Unit,
-    onStoryClick: (StoryEntity) -> Unit,
+    onReadingStoryClick: (StoryEntity) -> Unit,
+    onDownloadedStoryClick: (StoryEntity) -> Unit,
     onUpdateDownloadedStory: (StoryEntity) -> Unit,
     onRemoveFromReading: (String) -> Unit,
     onPauseDownload: (String) -> Unit,
@@ -132,7 +133,9 @@ fun LibraryScreen(
                         } ?: 0.0
                     }.thenByDescending { story -> state.readingProgress[story.id]?.updatedAt ?: 0L },
                 )
-                else -> stories.sortedByDescending { it.updatedAt }
+                else -> stories.sortedByDescending { story ->
+                    state.readingProgress[story.id]?.updatedAt ?: story.updatedAt
+                }
             }
         }
     val downloadedVisible = state.downloadedStories
@@ -211,7 +214,14 @@ fun LibraryScreen(
                 LibraryControl("HÀNG ĐỢI TẢI") { showDownloadQueue = true }
                 LibraryControl("LỊCH SỬ ĐỌC") { showReadingHistory = true }
                 LibraryControl("NHẬP TRUYỆN", onImportFile)
-                StoryEntityList(readingVisible, onStoryClick, onRemoveFromReading, "Chưa có truyện đang đọc.")
+                StoryEntityList(
+                    items = readingVisible,
+                    progressByStory = state.readingProgress,
+                    chapterTitlesByStory = state.readingChapterTitles,
+                    onStoryClick = onReadingStoryClick,
+                    onRemoveFromReading = onRemoveFromReading,
+                    emptyText = "Chưa có truyện đang đọc.",
+                )
             }
 
             LibrarySection.DOWNLOADED -> {
@@ -230,7 +240,7 @@ fun LibraryScreen(
                     jobs = emptyList(),
                     failures = emptyList(),
                     storage = state.offlineStorage,
-                    onStoryClick = onStoryClick,
+                    onStoryClick = onDownloadedStoryClick,
                     onUpdateDownloadedStory = onUpdateDownloadedStory,
                     onPauseDownload = onPauseDownload,
                     onResumeDownload = onResumeDownload,
@@ -598,16 +608,41 @@ private fun rankDownloadedChapters(chapters: List<ChapterEntity>, query: String)
 }
 
 @Composable
-private fun StoryEntityList(items: List<StoryEntity>, onStoryClick: (StoryEntity) -> Unit, onRemoveFromReading: (String) -> Unit, emptyText: String) {
+private fun StoryEntityList(
+    items: List<StoryEntity>,
+    progressByStory: Map<String, vn.nghetruyen.app.data.local.ReadingProgressEntity>,
+    chapterTitlesByStory: Map<String, String>,
+    onStoryClick: (StoryEntity) -> Unit,
+    onRemoveFromReading: (String) -> Unit,
+    emptyText: String,
+) {
     var selected by remember { mutableStateOf<StoryEntity?>(null) }; var removeConfirm by remember { mutableStateOf<StoryEntity?>(null) }
     selected?.let { story -> AlertDialog(onDismissRequest = { selected = null }, title = { Text(story.title) }, text = { Column {
         ReferenceActionButton("ĐỌC TIẾP", { selected = null; onStoryClick(story) }, modifier = Modifier.fillMaxWidth()); ReferenceActionButton("XÓA KHỎI ĐANG ĐỌC", { selected = null; removeConfirm = story }, modifier = Modifier.fillMaxWidth().padding(top = 2.dp))
     } }, confirmButton = { TextButton(onClick = { selected = null }) { Text("ĐÓNG") } }) }
     removeConfirm?.let { story -> AlertDialog(onDismissRequest = { removeConfirm = null }, title = { Text("XÓA KHỎI ĐANG ĐỌC") }, text = { Text("Xóa “${story.title}” khỏi Đang đọc? Truyện đã tải, dấu trang và lịch sử đọc vẫn được giữ.") }, confirmButton = { TextButton(onClick = { onRemoveFromReading(story.id); removeConfirm = null }) { Text("XÓA") } }, dismissButton = { TextButton(onClick = { removeConfirm = null }) { Text("HỦY") } }) }
     if (items.isEmpty()) { Text(emptyText, modifier = Modifier.padding(16.dp)); return }
-    LazyColumn(modifier = Modifier.fillMaxSize()) { items(items, key = { it.id }) { story -> Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).clickable { selected = story }) { Column(modifier = Modifier.padding(14.dp)) {
-        Text(story.title, fontWeight = FontWeight.SemiBold); if (story.author.isNotBlank()) Text(story.author); Text(if (story.isOffline) "Có thể đọc ngoại tuyến" else story.sourceId)
-    } } } }
+    LazyColumn(modifier = Modifier.fillMaxSize()) { items(items, key = { it.id }) { story ->
+        val progress = progressByStory[story.id]
+        val chapterTitle = chapterTitlesByStory[story.id].orEmpty()
+        val progressText = progress?.let { saved ->
+            if (saved.totalParagraphs > 0) {
+                val percent = (((saved.paragraphIndex + 1).toDouble() / saved.totalParagraphs) * 100)
+                    .toInt()
+                    .coerceIn(0, 100)
+                "Đoạn ${saved.paragraphIndex + 1}/${saved.totalParagraphs} • $percent%"
+            } else {
+                "Đoạn ${saved.paragraphIndex + 1}"
+            }
+        }.orEmpty()
+        Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).clickable { selected = story }) { Column(modifier = Modifier.padding(14.dp)) {
+            Text(story.title, fontWeight = FontWeight.SemiBold)
+            if (story.author.isNotBlank()) Text(story.author)
+            if (chapterTitle.isNotBlank()) Text(chapterTitle)
+            if (progressText.isNotBlank()) Text(progressText, style = MaterialTheme.typography.bodySmall)
+            Text(if (story.isOffline) "Có bản tải ngoại tuyến • ${story.sourceId}" else story.sourceId)
+        } }
+    } }
 }
 
 private fun formatStorageBytes(bytes: Long): String = when {

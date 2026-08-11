@@ -10,6 +10,7 @@ class VBookAppKernelPreludeTest {
         val script = VBookAppKernelPrelude.build()
         listOf(
             "global.App",
+            "apiVersion: 2",
             "FULL_IN_APP",
             "browser: browserApi",
             "network: networkApi",
@@ -20,7 +21,40 @@ class VBookAppKernelPreludeTest {
             "graphics:",
             "translation:",
             "script:",
+            "ui: uiApi",
+            "reader: readerApi",
+            "library: libraryApi",
+            "tts: ttsApi",
+            "hooks: hooksApi",
+            "lifecycle: lifecycleApi",
+            "hostCommandContract: true",
         ).forEach { token -> assertTrue("missing $token", token in script) }
+    }
+
+    @Test
+    fun exposesStableSerializableHostCommandEnvelope() {
+        val script = VBookAppKernelPrelude.build()
+        listOf(
+            "nghetruyen.host-command",
+            "domain: String(domain || '')",
+            "action: String(action || '')",
+            "nextChapter",
+            "moveParagraph",
+            "follow",
+            "bookmark",
+            "setRate",
+            "reader.chapterChanged",
+        ).forEach { token -> assertTrue("missing $token", token in script) }
+    }
+
+    @Test
+    fun uiHelpersMatchExistingUiActionResultContract() {
+        val script = VBookAppKernelPrelude.build()
+        assertTrue("message: input.message" in script)
+        assertTrue("openUrl: input.openUrl" in script)
+        assertTrue("refresh: !!input.refresh" in script)
+        assertTrue("notify: function(message)" in script)
+        assertTrue("refresh: function(message)" in script)
     }
 
     @Test
@@ -31,5 +65,6 @@ class VBookAppKernelPreludeTest {
         assertFalse("addJavascriptInterface" in script)
         assertFalse("Class.forName" in script)
         assertFalse("Runtime.getRuntime" in script)
+        assertFalse("android.content" in script)
     }
 }

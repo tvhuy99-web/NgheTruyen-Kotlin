@@ -10,7 +10,6 @@ import android.os.Bundle
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.getValue
@@ -28,6 +27,7 @@ import vn.nghetruyen.app.core.model.AudioExportFormat
 import vn.nghetruyen.app.core.model.ReaderMode
 import vn.nghetruyen.app.following.FollowingUpdateWorker
 import vn.nghetruyen.app.playback.ReaderVolumeKeyPolicy
+import vn.nghetruyen.app.sourceplatform.installExtensionHostKernel
 import vn.nghetruyen.app.ui.AppViewModel
 import vn.nghetruyen.app.ui.Destination
 import vn.nghetruyen.app.ui.ReferenceNgheTruyenApp
@@ -62,6 +62,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        viewModel.installExtensionHostKernel()
         handleFollowingIntent(intent)
         setContent {
             val importLauncher = rememberLauncherForActivityResult(

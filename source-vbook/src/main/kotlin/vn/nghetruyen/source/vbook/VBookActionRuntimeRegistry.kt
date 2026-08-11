@@ -12,12 +12,12 @@ fun interface VBookActionRuntimeFactory {
 }
 
 /**
- * Process-wide engine policy for compatibility vBook actions.
+ * Process-wide platform engine policy for compatibility vBook actions.
  *
- * Pure JVM consumers never install a platform factory and continue to receive Rhino. Android installs
- * a factory from Application.onCreate, using only application-lifetime state. The compatibility
- * broker wrappers are centralized here so Chromium and Rhino see exactly the same vBook network,
- * translation and WebSocket semantics.
+ * Pure JVM consumers never install a platform factory and continue to execute Rhino directly.
+ * Android installs a Chromium factory from Application.onCreate. The brokers passed here have
+ * already been wrapped by [VBookCompatibilityRuntime], so primary and fallback engines observe the
+ * exact same vBook network, translation and WebSocket semantics.
  */
 object VBookActionRuntimeRegistry {
     private val platformFactory = AtomicReference<VBookActionRuntimeFactory?>(null)
@@ -30,18 +30,8 @@ object VBookActionRuntimeRegistry {
         platformFactory.set(null)
     }
 
-    fun create(
-        brokers: SourceCapabilityBrokers,
-        diagnostics: DiagnosticSink = DiagnosticSink.NONE,
-    ): VBookActionRuntime {
-        val compatible = compatibleBrokers(brokers)
-        return platformFactory.get()?.create(compatible, diagnostics)
-            ?: RhinoVBookActionRuntime(compatible, diagnostics)
-    }
-
-    private fun compatibleBrokers(brokers: SourceCapabilityBrokers): SourceCapabilityBrokers = brokers.copy(
-        network = VBookRawNetworkBroker(brokers.network),
-        translation = VBookTranslationBrokerRouter(brokers.translation, brokers.quickTranslation),
-        websocket = VBookWebSocketBroker(brokers.websocket),
-    )
+    internal fun platformRuntime(
+        compatibleBrokers: SourceCapabilityBrokers,
+        diagnostics: DiagnosticSink,
+    ): VBookActionRuntime? = platformFactory.get()?.create(compatibleBrokers, diagnostics)
 }

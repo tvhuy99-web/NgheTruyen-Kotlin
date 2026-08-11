@@ -25,7 +25,7 @@ jobs:
           distribution: temurin
           java-version: '17'
       - name: Apply deterministic parity migration
-        run: python3 scripts/apply_lua_diagnostics_parity.py
+        run: python3 scripts/run_lua_diagnostics_migration.py
       - name: Persist migrated source
         shell: bash
         run: |

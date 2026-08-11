@@ -28,16 +28,21 @@ class VBookAppKernelPreludeTest {
             "hooks: hooksApi",
             "lifecycle: lifecycleApi",
             "hostCommandContract: true",
+            "hostCommandExecution: true",
+            "intent: hostCommandIntent",
+            "execute: executeHostCommand",
         ).forEach { token -> assertTrue("missing $token", token in script) }
     }
 
     @Test
-    fun exposesStableSerializableHostCommandEnvelope() {
+    fun exposesStableSerializableHostCommandEnvelopeAndBridge() {
         val script = VBookAppKernelPrelude.build()
         listOf(
             "nghetruyen.host-command",
             "domain: String(domain || '')",
             "action: String(action || '')",
+            "global.__bridge('host_command', command)",
+            "APP_HOST_COMMAND_BRIDGE_UNAVAILABLE",
             "nextChapter",
             "moveParagraph",
             "follow",

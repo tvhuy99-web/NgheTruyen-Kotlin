@@ -7,16 +7,29 @@ import com.nghetruyen.source.platform.SourceEcosystem
 import com.nghetruyen.source.platform.SourceTrustState
 import com.nghetruyen.source.store.SourceArtifactLifecycle
 import kotlinx.coroutines.test.runTest
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 import vn.nghetruyen.app.core.common.AppResult
 import vn.nghetruyen.source.api.SourceCapabilityBrokers
+import vn.nghetruyen.source.vbook.VBookActionRuntimeRegistry
 import java.io.ByteArrayOutputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 class VBookStorySourceTest {
+    @Before
+    fun usePortableVBookRuntime() {
+        VBookActionRuntimeRegistry.clear()
+    }
+
+    @After
+    fun clearPortableVBookRuntimePolicy() {
+        VBookActionRuntimeRegistry.clear()
+    }
+
     @Test
     fun novelAdapterPreservesOpaquePagingAndNormalizesReaderData() = runTest {
         val zip = packageZip()
@@ -34,34 +47,39 @@ class VBookStorySourceTest {
         assertTrue(source.descriptor.supportsComments)
         assertTrue(source.descriptor.supportsSuggestions)
 
-        val page1 = source.search("needle", 1) as AppResult.Success
-        val page2 = source.search("needle", 2) as AppResult.Success
+        val page1 = source.search("needle", 1).requireSuccess("search page 1")
+        val page2 = source.search("needle", 2).requireSuccess("search page 2")
         assertEquals("needle@", page1.value.single().title)
         assertEquals("needle@cursor-1", page2.value.single().title)
         assertEquals("https://x.example/story/needle", page1.value.single().url)
 
-        val home = source.home(1) as AppResult.Success
+        val home = source.home(1).requireSuccess("home")
         assertEquals("home@server-a", home.value.single().title)
 
-        val detail = source.story("https://x.example/story/needle") as AppResult.Success
+        val detail = source.story("https://x.example/story/needle").requireSuccess("story detail")
         assertEquals("Fixture needle", detail.value.story.title)
         assertEquals(listOf("Test"), detail.value.genres)
         assertEquals(listOf("Chapter 1", "Chapter 2"), detail.value.chapters.map { it.title })
 
-        val chapter = source.chapter("https://x.example/story/needle/chapter-1") as AppResult.Success
+        val chapter = source.chapter("https://x.example/story/needle/chapter-1").requireSuccess("chapter")
         assertEquals(listOf("First paragraph", "Second paragraph"), chapter.value.paragraphs)
         assertTrue(chapter.value.nextChapterUrl.orEmpty().endsWith("/chapter-2"))
 
-        val suggestions = source.suggestions("needle") as AppResult.Success
+        val suggestions = source.suggestions("needle").requireSuccess("suggestions")
         assertEquals(listOf("Related needle"), suggestions.value)
 
-        val comments1 = source.commentsPage("https://x.example/story/needle") as AppResult.Success
+        val comments1 = source.commentsPage("https://x.example/story/needle").requireSuccess("comments page 1")
         assertEquals("Reader", comments1.value.comments.single().user)
         assertEquals("comment@", comments1.value.comments.single().text)
         assertEquals("now", comments1.value.comments.single().time)
-        val comments2 = source.commentsPage(requireNotNull(comments1.value.nextPageUrl)) as AppResult.Success
+        val comments2 = source.commentsPage(requireNotNull(comments1.value.nextPageUrl)).requireSuccess("comments page 2")
         assertEquals("comment@cursor-2", comments2.value.comments.single().text)
         assertEquals(null, comments2.value.nextPageUrl)
+    }
+
+    private fun <T> AppResult<T>.requireSuccess(label: String): AppResult.Success<T> = when (this) {
+        is AppResult.Success -> this
+        is AppResult.Failure -> throw AssertionError("$label failed: $code: $message", cause)
     }
 
     private fun packageZip(): ByteArray {

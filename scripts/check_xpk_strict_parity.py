@@ -191,6 +191,10 @@ require(
     "app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt",
     "includeMusic = state.value.backgroundMusicEnabled && state.value.autoSceneMusicEnabled",
 )
+forbid(
+    "app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt",
+    "Hãy thêm ít nhất một tệp nhạc cảnh đang bật.",
+)
 
 require(
     "app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt",

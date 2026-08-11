@@ -34,6 +34,14 @@ class VBookChromiumRuntimeStaticTest {
             "Object.defineProperty(global,'__bridge'",
             "__rpc('network_fetch'",
             "__rpc('resource_read'",
+            "factory.call(global)",
+            "return String(Script.execute(\$entry,'execute',__payload));",
+            "global.Html=global.HTML=global.Document={",
+            "global.Engine={newBrowser:",
+            "global.Qt={translate:",
+            "out.waitRequest=function(pattern,timeoutMs)",
+            "out.loadHtml=function(baseUrl,html)",
+            "out.setCookies=function(cookies,url)",
         ).forEach { token -> assertTrue("missing Chromium prelude invariant: $token", token in prelude) }
 
         for (forbidden in listOf(
@@ -43,8 +51,11 @@ class VBookChromiumRuntimeStaticTest {
             "Class.forName(",
             "Runtime.getRuntime(",
             "ProcessBuilder(",
+            "global.Html=global.HTML=global.Document=Object.freeze(",
+            "global.Engine=Object.freeze(",
+            "global.Qt=Object.freeze(",
         )) {
-            assertFalse("Chromium action engine must not expose process/platform escape: $forbidden", forbidden in runtime || forbidden in prelude)
+            assertFalse("Chromium action engine must not expose process/platform escape or freeze compatibility decorators: $forbidden", forbidden in runtime || forbidden in prelude)
         }
     }
 

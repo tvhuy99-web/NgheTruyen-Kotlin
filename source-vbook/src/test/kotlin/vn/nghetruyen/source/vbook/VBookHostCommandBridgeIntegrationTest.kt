@@ -26,15 +26,11 @@ class VBookHostCommandBridgeIntegrationTest {
             capturedSourceId = sourceId
             capturedTraceId = traceId
             capturedCommand = command
-            SourcePlatformResult.Success(
-                JsonValue.Obj(linkedMapOf(
-                    "accepted" to JsonValue.Bool(true),
-                    "traceId" to JsonValue.Str(traceId),
-                )),
-            )
+            accepted(traceId)
         }
         val runtime = VBookCompatibilityRuntime(SourceCapabilityBrokers(hostKernel = host))
         val resources = resources(
+            CURRENT_PLUGIN,
             mapOf(
                 "src/search.js" to """
                     function execute(query, page) {
@@ -60,6 +56,7 @@ class VBookHostCommandBridgeIntegrationTest {
         assertTrue(result is SourcePlatformResult.Success)
         val success = result as SourcePlatformResult.Success
         val row = (success.value.data as JsonValue.Arr).values.first() as JsonValue.Obj
+        assertEquals(VBookContractProfile.CURRENT_JS, success.value.profile)
         assertEquals("true", row.string("accepted"))
         assertEquals("host-bridge-e2e", row.string("traceId"))
         assertEquals("test.vbook.host", capturedSourceId)
@@ -68,6 +65,54 @@ class VBookHostCommandBridgeIntegrationTest {
         assertEquals("nextChapter", capturedCommand?.action)
         assertTrue(capturedCommand?.payload?.values?.isEmpty() == true)
     }
+
+    @Test
+    fun legacyVBookGetsSameAppHostCommandSurface() {
+        var capturedCommand: SourceHostCommand? = null
+        val host = SourceHostKernelBroker { _, command, traceId ->
+            capturedCommand = command
+            accepted(traceId)
+        }
+        val runtime = VBookCompatibilityRuntime(SourceCapabilityBrokers(hostKernel = host))
+        val resources = resources(
+            LEGACY_PLUGIN,
+            mapOf(
+                "src/search.js" to """
+                    function execute(query, page) {
+                      var hostResult = App.tts.play();
+                      return Response.success([{
+                        accepted:String(hostResult.accepted),
+                        traceId:String(hostResult.traceId)
+                      }], '');
+                    }
+                """.trimIndent(),
+            ),
+        )
+
+        val result = runtime.executeDeclared(
+            sourceManifest = manifest(),
+            resources = resources,
+            role = VBookScriptRole.SEARCH,
+            input = "legacy-q",
+            traceId = "legacy-host-bridge-e2e",
+        )
+
+        assertTrue(result is SourcePlatformResult.Success)
+        val success = result as SourcePlatformResult.Success
+        val row = (success.value.data as JsonValue.Arr).values.first() as JsonValue.Obj
+        assertEquals(VBookContractProfile.LEGACY_JS, success.value.profile)
+        assertEquals("true", row.string("accepted"))
+        assertEquals("legacy-host-bridge-e2e", row.string("traceId"))
+        assertEquals("tts", capturedCommand?.domain)
+        assertEquals("play", capturedCommand?.action)
+    }
+
+    private fun accepted(traceId: String): SourcePlatformResult<JsonValue> = SourcePlatformResult.Success(
+        JsonValue.Obj(linkedMapOf(
+            "accepted" to JsonValue.Bool(true),
+            "traceId" to JsonValue.Str(traceId),
+        )),
+    )
 
     private fun manifest(): SourceManifest = SourceManifest(
         schemaVersion = 2,
@@ -82,9 +127,9 @@ class VBookHostCommandBridgeIntegrationTest {
         actions = emptyMap(),
     )
 
-    private fun resources(scripts: Map<String, String>): SourceResourceProvider {
+    private fun resources(plugin: String, scripts: Map<String, String>): SourceResourceProvider {
         val values = buildMap<String, ByteArray> {
-            put("plugin.json", CURRENT_PLUGIN.toByteArray())
+            put("plugin.json", plugin.toByteArray())
             scripts.forEach { (path, source) -> put(path, source.toByteArray()) }
         }
         return object : SourceResourceProvider {
@@ -99,6 +144,14 @@ class VBookHostCommandBridgeIntegrationTest {
               "metadata":{"name":"x","author":"a","version":1,"source":"https://x.example","description":"","locale":"vi","regexp":"x","type":"novel","encrypt":false},
               "script":{"explore":"explore.js","search":"search.js","detail":"search.js","toc":"search.js","chap":"search.js"},
               "config":{}
+            }
+        """.trimIndent()
+
+        private val LEGACY_PLUGIN = """
+            {
+              "metadata":{"name":"x","author":"a","version":1,"source":"https://x.example","description":"","locale":"vi_VN","regexp":"x","type":"novel","language":"javascript","encrypt":false},
+              "script":{"search":"search.js","detail":"search.js","toc":"search.js","chap":"search.js"},
+              "config":{"thread_num":1,"delay":0}
             }
         """.trimIndent()
     }

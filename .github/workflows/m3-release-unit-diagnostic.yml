@@ -1,0 +1,48 @@
+name: M3 Release Unit Diagnostic
+
+on:
+  push:
+    branches:
+      - agent/m3-chromium-js-engine
+    paths:
+      - '.github/workflows/m3-release-unit-diagnostic.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Run isolated release vBook story test
+        shell: bash
+        run: |
+          set +e
+          ./gradlew :app:testReleaseUnitTest --tests 'vn.nghetruyen.app.sourceplatform.VBookStorySourceTest.novelAdapterPreservesOpaquePagingAndNormalizesReaderData' --stacktrace
+          code=$?
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          root = Path('app/build/test-results/testReleaseUnitTest')
+          for path in sorted(root.glob('TEST-*.xml')):
+              tree = ET.parse(path).getroot()
+              for case in tree.findall('testcase'):
+                  failure = case.find('failure') or case.find('error')
+                  if failure is not None:
+                      print('=== FAILURE', case.get('classname'), case.get('name'), '===')
+                      print(failure.get('message', ''))
+                      print(failure.text or '')
+          PY
+          exit $code

@@ -34,7 +34,17 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main agent/xpk-six-parity-fixes
+          set +e
           git merge --squash origin/agent/xpk-six-parity-fixes
+          merge_status=$?
+          set -e
+          if [ "$merge_status" -ne 0 ]; then
+            echo "=== ReaderPlaybackService conflict markers ==="
+            grep -n -B 30 -A 60 -E '^(<<<<<<<|=======|>>>>>>>)' app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt || true
+            echo "=== Combined diff ==="
+            git diff --cc -- app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt || true
+            exit "$merge_status"
+          fi
           rm .github/workflows/temp-xpk-main-integration.yml
 
       - name: Set up JDK 17

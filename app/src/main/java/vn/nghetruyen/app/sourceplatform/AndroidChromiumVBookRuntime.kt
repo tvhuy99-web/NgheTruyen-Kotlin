@@ -182,6 +182,7 @@ class AndroidChromiumVBookRuntime(
         val outcome = AtomicReference<Result<String>>()
         val webViewRef = AtomicReference<WebView?>()
         val completed = AtomicBoolean(false)
+        val evaluationStarted = AtomicBoolean(false)
 
         fun destroyWebView() {
             val view = webViewRef.getAndSet(null) ?: return
@@ -258,21 +259,26 @@ class AndroidChromiumVBookRuntime(
                 webView.webViewClient = object : WebViewClient() {
                     override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse = blockedResponse()
 
+                    override fun onPageFinished(view: WebView, url: String?) {
+                        if (!evaluationStarted.compareAndSet(false, true) || completed.get()) return
+                        view.evaluateJavascript(program) { encoded ->
+                            runCatching {
+                                val decoded = JSONTokener(encoded ?: "null").nextValue()
+                                when (decoded) {
+                                    is String -> decoded
+                                    null -> error("CHROMIUM_RESULT_NULL")
+                                    else -> decoded.toString()
+                                }
+                            }.let(::finish)
+                        }
+                    }
+
                     override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
                         finish(Result.failure(IllegalStateException("CHROMIUM_RENDERER_GONE:${detail.didCrash()}")))
                         return true
                     }
                 }
-                webView.evaluateJavascript(program) { encoded ->
-                    runCatching {
-                        val decoded = JSONTokener(encoded ?: "null").nextValue()
-                        when (decoded) {
-                            is String -> decoded
-                            null -> error("CHROMIUM_RESULT_NULL")
-                            else -> decoded.toString()
-                        }
-                    }.let(::finish)
-                }
+                webView.loadUrl("about:blank")
             }.onFailure { finish(Result.failure(it)) }
         }
 

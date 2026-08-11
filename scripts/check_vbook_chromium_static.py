@@ -33,6 +33,8 @@ def main() -> None:
         "main.post {",
         "engine.post {",
         "override fun onJsPrompt(",
+        "override fun onPageFinished(view: WebView, url: String?)",
+        'webView.loadUrl("about:blank")',
         "result.confirm(response)",
         "blockNetworkLoads = true",
         "allowFileAccess = false",

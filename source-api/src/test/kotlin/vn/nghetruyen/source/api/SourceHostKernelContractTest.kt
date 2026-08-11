@@ -51,6 +51,19 @@ class SourceHostKernelContractTest {
     }
 
     @Test
+    fun rejectsPresentNonObjectPayloadInsteadOfSilentlyDroppingIt() {
+        val malformed = JsonValue.Obj(linkedMapOf(
+            "kind" to JsonValue.Str(SourceHostKernelContract.COMMAND_KIND),
+            "version" to JsonValue.Num(2.0, "2"),
+            "domain" to JsonValue.Str("tts"),
+            "action" to JsonValue.Str("play"),
+            "payload" to JsonValue.Str("not-an-object"),
+        ))
+        val failure = runCatching { SourceHostKernelContract.parseCommand(malformed) }.exceptionOrNull()
+        assertTrue(failure?.message.orEmpty().contains("SOURCE_HOST_COMMAND_PAYLOAD_OBJECT_REQUIRED"))
+    }
+
+    @Test
     fun validatesLifecycleEventsAndWireFormat() {
         val event = SourceHostKernelContract.event(
             "reader.enter",

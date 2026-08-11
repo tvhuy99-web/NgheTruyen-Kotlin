@@ -3,6 +3,7 @@ package vn.nghetruyen.app
 import android.app.Application
 import vn.nghetruyen.app.ai.vietphrase.ReferenceVietPhraseRuntime
 import vn.nghetruyen.app.sourceplatform.AndroidChromiumVBookRuntime
+import vn.nghetruyen.app.sourceplatform.ChromiumVBookNetworkProjectionBroker
 import vn.nghetruyen.source.vbook.VBookActionRuntimeRegistry
 import java.util.IdentityHashMap
 
@@ -17,7 +18,9 @@ class NgheTruyenApplication : Application() {
             synchronized(chromiumRuntimeLock) {
                 chromiumRuntimes[brokers.storage] ?: AndroidChromiumVBookRuntime(
                     context = this,
-                    brokers = brokers,
+                    brokers = brokers.copy(
+                        network = ChromiumVBookNetworkProjectionBroker(brokers.network),
+                    ),
                     diagnostics = diagnostics,
                 ).also { chromiumRuntimes[brokers.storage] = it }
             }

@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'app/src/main/java/vn/nghetruyen/app/sourceplatform/**'
+      - 'app/src/main/java/vn/nghetruyen/app/NgheTruyenApplication.kt'
       - 'app/src/main/java/vn/nghetruyen/app/AppContainer.kt'
       - 'app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt'
       - 'app/src/main/java/vn/nghetruyen/app/ui/NgheTruyenApp.kt'
@@ -42,6 +43,7 @@ on:
       - 'agent/vbook-*'
     paths:
       - 'app/src/main/java/vn/nghetruyen/app/sourceplatform/**'
+      - 'app/src/main/java/vn/nghetruyen/app/NgheTruyenApplication.kt'
       - 'app/src/main/java/vn/nghetruyen/app/AppContainer.kt'
       - 'app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt'
       - 'app/src/main/java/vn/nghetruyen/app/ui/NgheTruyenApp.kt'

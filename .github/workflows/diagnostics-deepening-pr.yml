@@ -1,6 +1,12 @@
 name: Diagnostics Deepening PR
 
 on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - scripts/apply_diagnostics_deepening.py
+      - .github/workflows/diagnostics-deepening-pr.yml
   push:
     branches:
       - agent/fix-lua-style-diagnostics-ui

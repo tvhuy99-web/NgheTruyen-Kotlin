@@ -63,10 +63,11 @@ import javax.crypto.spec.SecretKeySpec
 /**
  * Chromium-backed execution engine for canonical vBook compatibility actions.
  *
- * A fresh headless WebView is created on a dedicated HandlerThread for every action. Extension code
- * cannot navigate the action WebView and no Java object is installed with addJavascriptInterface.
- * Synchronous vBook host APIs cross one random-token prompt channel as bounded JSON, then re-enter
- * the same SourceCapabilityBrokers used by Rhino.
+ * A fresh headless WebView is created and driven on Android's main thread for every action, while
+ * synchronous host work is dispatched to a dedicated HandlerThread. Extension code cannot navigate
+ * the action WebView and no Java object is installed with addJavascriptInterface. Synchronous vBook
+ * host APIs cross one random-token prompt channel as bounded JSON, then re-enter the same
+ * SourceCapabilityBrokers used by Rhino without blocking the main thread.
  *
  * This engine deliberately handles only the compatibility dispatch action. Other SourcePack action
  * shapes report VBOOK_RUNTIME_UNAVAILABLE before any script executes so the selector may use Rhino
@@ -82,6 +83,7 @@ class AndroidChromiumVBookRuntime(
     private val appContext = context.applicationContext
     private val engineThread = HandlerThread("NgheTruyen-VBook-Chromium").apply { start() }
     private val engine = Handler(engineThread.looper)
+    private val main = Handler(Looper.getMainLooper())
     private val closed = AtomicBoolean(false)
 
     override fun execute(
@@ -90,6 +92,9 @@ class AndroidChromiumVBookRuntime(
         request: SourceActionRequest,
     ): SourcePlatformResult<SourceActionResponse> {
         if (closed.get()) return unavailable("CHROMIUM_RUNTIME_CLOSED", request)
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            return unavailable("CHROMIUM_MAIN_THREAD_CALLER_UNSUPPORTED", request)
+        }
         if (manifest.runtime.mode != SourceRuntimeMode.VBOOK_JS_COMPAT) {
             return unavailable("CHROMIUM_VBOOK_MODE_REQUIRED", request)
         }
@@ -178,14 +183,20 @@ class AndroidChromiumVBookRuntime(
         val webViewRef = AtomicReference<WebView?>()
         val completed = AtomicBoolean(false)
 
+        fun destroyWebView() {
+            val view = webViewRef.getAndSet(null) ?: return
+            val destroy = { runCatching { view.stopLoading(); view.destroy() }; Unit }
+            if (Looper.myLooper() == Looper.getMainLooper()) destroy() else main.post(destroy)
+        }
+
         fun finish(result: Result<String>) {
             if (!completed.compareAndSet(false, true)) return
             outcome.set(result)
-            webViewRef.getAndSet(null)?.let { view -> runCatching { view.stopLoading(); view.destroy() } }
+            destroyWebView()
             latch.countDown()
         }
 
-        engine.post {
+        main.post {
             runCatching {
                 val webView = WebView(appContext)
                 webViewRef.set(webView)
@@ -218,9 +229,14 @@ class AndroidChromiumVBookRuntime(
                             return true
                         }
                         val raw = defaultValue.orEmpty()
-                        val response = runCatching { bridge.handle(raw) }
-                            .getOrElse { error -> bridgeEnvelopeError(error.message ?: error.javaClass.simpleName) }
-                        result.confirm(response)
+                        engine.post {
+                            val response = runCatching { bridge.handle(raw) }
+                                .getOrElse { error -> bridgeEnvelopeError(error.message ?: error.javaClass.simpleName) }
+                            main.post {
+                                if (completed.get()) runCatching { result.cancel() }
+                                else runCatching { result.confirm(response) }
+                            }
+                        }
                         return true
                     }
 
@@ -261,8 +277,9 @@ class AndroidChromiumVBookRuntime(
         }
 
         if (!latch.await(timeoutMs + CALLBACK_GRACE_MS, TimeUnit.MILLISECONDS)) {
-            engine.post {
-                webViewRef.getAndSet(null)?.let { view -> runCatching { view.stopLoading(); view.destroy() } }
+            if (completed.compareAndSet(false, true)) {
+                destroyWebView()
+                latch.countDown()
             }
             return Result.failure(IllegalStateException("CHROMIUM_ACTION_TIMEOUT"))
         }

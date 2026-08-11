@@ -39,11 +39,33 @@ jobs:
           merge_status=$?
           set -e
           if [ "$merge_status" -ne 0 ]; then
-            echo "=== ReaderPlaybackService conflict markers ==="
-            grep -n -B 30 -A 60 -E '^(<<<<<<<|=======|>>>>>>>)' app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt || true
-            echo "=== Combined diff ==="
-            git diff --cc -- app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt || true
-            exit "$merge_status"
+            unresolved="$(git diff --name-only --diff-filter=U)"
+            expected="app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt"
+            if [ "$unresolved" != "$expected" ]; then
+              echo "Unexpected merge conflicts:"
+              printf '%s\n' "$unresolved"
+              exit "$merge_status"
+            fi
+            python3 - <<'PY'
+from pathlib import Path
+p = Path('app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt')
+s = p.read_text(encoding='utf-8')
+start_marker = '<<<<<<< HEAD\n'
+mid_marker = '=======\n'
+end_marker = '>>>>>>> origin/agent/xpk-six-parity-fixes\n'
+start = s.index(start_marker)
+mid = s.index(mid_marker, start)
+end = s.index(end_marker, mid)
+ours = s[start + len(start_marker):mid]
+theirs = s[mid + len(mid_marker):end]
+ours = ours.replace('    @Volatile private var narrationReloadPending = false\n\n', '')
+replacement = theirs.rstrip('\n') + '\n\n' + ours.lstrip('\n')
+s = s[:start] + replacement + s[end + len(end_marker):]
+if any(marker in s for marker in ('<<<<<<<', '=======', '>>>>>>>')):
+    raise SystemExit('Conflict marker remained after resolution')
+p.write_text(s, encoding='utf-8')
+PY
+            git add "$expected"
           fi
           rm .github/workflows/temp-xpk-main-integration.yml
 

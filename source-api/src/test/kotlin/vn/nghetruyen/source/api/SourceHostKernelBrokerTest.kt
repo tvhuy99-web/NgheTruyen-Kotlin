@@ -20,6 +20,35 @@ class SourceHostKernelBrokerTest {
     }
 
     @Test
+    fun dispatcherRoutesOnlyRegisteredHostCommands() {
+        val dispatcher = SourceHostKernelDispatcher()
+            .register("reader", "nextChapter") { sourceId, _, traceId ->
+                SourcePlatformResult.Success(JsonValue.Obj(linkedMapOf(
+                    "sourceId" to JsonValue.Str(sourceId),
+                    "traceId" to JsonValue.Str(traceId),
+                )))
+            }
+        val result = dispatcher.execute(
+            sourceId = "vn.nghetruyen.sources.test",
+            command = SourceHostKernelContract.command("reader", "nextChapter"),
+            traceId = "trace-next",
+        )
+        assertTrue(result is SourcePlatformResult.Success)
+        result as SourcePlatformResult.Success
+        val value = result.value as JsonValue.Obj
+        assertEquals("vn.nghetruyen.sources.test", (value.values["sourceId"] as JsonValue.Str).value)
+
+        val missing = dispatcher.execute(
+            sourceId = "vn.nghetruyen.sources.test",
+            command = SourceHostKernelContract.command("tts", "play"),
+            traceId = "trace-missing",
+        )
+        assertTrue(missing is SourcePlatformResult.Failure)
+        missing as SourcePlatformResult.Failure
+        assertTrue(missing.error.message.contains("SOURCE_HOST_COMMAND_HANDLER_UNAVAILABLE:tts:play"))
+    }
+
+    @Test
     fun eventSinkValidatesOnlySerializableHostEvents() {
         SourceHostEventSink.NONE.emit(
             "vn.nghetruyen.sources.test",

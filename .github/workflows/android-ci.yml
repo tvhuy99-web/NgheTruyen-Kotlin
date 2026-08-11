@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: android-ci-${{ github.ref }}
@@ -22,22 +22,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-
-      - name: Apply auto switch edge fix
-        shell: bash
-        run: |
-          git fetch origin agent/xpk-six-parity-fixes
-          git checkout -B agent/xpk-six-parity-fixes origin/agent/xpk-six-parity-fixes
-          python3 scripts/apply_auto_switch_edge_fix.py
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          if git diff --cached --quiet; then
-            echo "No source changes to commit."
-          else
-            git commit -m "fix: clear pending autoplay when auto-cast turns off"
-            git push origin HEAD:agent/xpk-six-parity-fixes
-          fi
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5

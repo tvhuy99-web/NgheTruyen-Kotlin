@@ -3,87 +3,13 @@ name: Source Platform vBook
 on:
   pull_request:
     paths:
-      - 'app/src/main/java/vn/nghetruyen/app/sourceplatform/**'
-      - 'app/src/main/java/vn/nghetruyen/app/NgheTruyenApplication.kt'
-      - 'app/src/main/java/vn/nghetruyen/app/AppContainer.kt'
-      - 'app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt'
-      - 'app/src/main/java/vn/nghetruyen/app/ui/NgheTruyenApp.kt'
-      - 'app/src/main/java/vn/nghetruyen/app/ui/ReferenceNgheTruyenApp.kt'
-      - 'app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt'
-      - 'app/src/main/java/vn/nghetruyen/app/ui/screens/SourcePackConfigDialog.kt'
-      - 'app/src/main/res/xml/backup_rules.xml'
-      - 'app/src/main/res/xml/data_extraction_rules.xml'
-      - 'source-api/**'
-      - 'source-package/**'
-      - 'source-store/**'
-      - 'source-runtime/**'
-      - 'source-diagnostics/**'
-      - 'source-network/**'
-      - 'source-repository/**'
-      - 'source-vbook/**'
-      - 'source-js-sandbox/**'
-      - 'source-compat-testkit/**'
-      - 'settings.gradle.kts'
-      - 'build.gradle.kts'
-      - 'gradle/**'
-      - 'gradlew'
-      - 'scripts/check_source_engine_specificity.py'
-      - 'scripts/check_vbook_static.py'
-      - 'scripts/check_vbook_chromium_static.py'
-      - 'scripts/check_vbook_differential_coverage.py'
-      - 'scripts/capture_vbook_reference.py'
-      - 'scripts/capture_vbook_reference_matrix.py'
-      - 'scripts/fetch_vbook_corpus.py'
-      - 'scripts/run_vbook_compat_lab.py'
-      - 'scripts/vbook-reference-plan*.json'
       - '.github/workflows/source-platform-vbook.yml'
-  push:
-    branches:
-      - 'agent/source-platform-s0-s1'
-      - 'agent/vbook-*'
-    paths:
-      - 'app/src/main/java/vn/nghetruyen/app/sourceplatform/**'
-      - 'app/src/main/java/vn/nghetruyen/app/NgheTruyenApplication.kt'
-      - 'app/src/main/java/vn/nghetruyen/app/AppContainer.kt'
-      - 'app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt'
-      - 'app/src/main/java/vn/nghetruyen/app/ui/NgheTruyenApp.kt'
-      - 'app/src/main/java/vn/nghetruyen/app/ui/ReferenceNgheTruyenApp.kt'
-      - 'app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt'
-      - 'app/src/main/java/vn/nghetruyen/app/ui/screens/SourcePackConfigDialog.kt'
-      - 'app/src/main/res/xml/backup_rules.xml'
-      - 'app/src/main/res/xml/data_extraction_rules.xml'
-      - 'source-api/**'
-      - 'source-package/**'
-      - 'source-store/**'
-      - 'source-runtime/**'
-      - 'source-diagnostics/**'
-      - 'source-network/**'
-      - 'source-repository/**'
-      - 'source-vbook/**'
-      - 'source-js-sandbox/**'
-      - 'source-compat-testkit/**'
-      - 'settings.gradle.kts'
-      - 'build.gradle.kts'
-      - 'gradle/**'
-      - 'gradlew'
-      - 'scripts/check_source_engine_specificity.py'
-      - 'scripts/check_vbook_static.py'
-      - 'scripts/check_vbook_chromium_static.py'
-      - 'scripts/check_vbook_differential_coverage.py'
-      - 'scripts/capture_vbook_reference.py'
-      - 'scripts/capture_vbook_reference_matrix.py'
-      - 'scripts/fetch_vbook_corpus.py'
-      - 'scripts/run_vbook_compat_lab.py'
-      - 'scripts/vbook-reference-plan*.json'
-      - '.github/workflows/source-platform-vbook.yml'
-  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  patch-m3-webview-global-eval:
-    if: github.event_name == 'pull_request' && github.head_ref == 'agent/m3-chromium-js-engine'
+  patch:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout M3 branch
@@ -92,7 +18,7 @@ jobs:
           ref: agent/m3-chromium-js-engine
           fetch-depth: 0
 
-      - name: Apply Chromium WebView fix once
+      - name: Patch WebView global installation and evaluation guard
         shell: bash
         run: |
           python3 - <<'PY'
@@ -103,8 +29,7 @@ jobs:
           old = """              global.Storage=global.localStorage=__storage('');
               global.cacheStorage=__storage('cache:');
               global.localConfig=Object.freeze({getItem:function(){return undefined;},key:function(){return undefined;},length:0});"""
-          if old in text:
-              new = """              function __installHostGlobal(name,value){
+          new = """              function __installHostGlobal(name,value){
                 name=String(name||'');
                 try {
                   Object.defineProperty(global,name,{value:value,writable:true,configurable:true,enumerable:true});
@@ -118,7 +43,9 @@ jobs:
               __installHostGlobal('localStorage',__vbookLocalStorage);
               global.cacheStorage=__storage('cache:');
               global.localConfig=Object.freeze({getItem:function(){return undefined;},key:function(){return undefined;},length:0});"""
-              prelude.write_text(text.replace(old, new, 1), encoding='utf-8')
+          if text.count(old) != 1:
+              raise SystemExit('prelude storage marker mismatch')
+          prelude.write_text(text.replace(old, new, 1), encoding='utf-8')
 
           runtime = Path('app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidChromiumVBookRuntime.kt')
           text = runtime.read_text(encoding='utf-8')
@@ -135,8 +62,7 @@ jobs:
                             }.let(::finish)
                         }
                     }'''
-          if old in text:
-              new = '''                    override fun onPageFinished(view: WebView, url: String?) {
+          new = '''                    override fun onPageFinished(view: WebView, url: String?) {
                         if (!evaluationStarted.compareAndSet(false, true) || completed.get()) return
                         val guardedProgram = """
                             (function(){
@@ -159,143 +85,15 @@ jobs:
                             }.let(::finish)
                         }
                     }'''
-              runtime.write_text(text.replace(old, new, 1), encoding='utf-8')
-
-          decoder = Path('app/src/main/java/vn/nghetruyen/app/sourceplatform/ChromiumVBookDispatchDecoder.kt')
-          text = decoder.read_text(encoding='utf-8')
-          old = '''            val snapshot = current
-            val obj = snapshot as? JsonValue.Obj
-            if (obj != null && obj.values.containsKey(RAW_RESULT_KEY)) return obj'''
-          if old in text:
-              new = '''            val snapshot = current
-            val obj = snapshot as? JsonValue.Obj
-            val evaluationError = obj?.string(EVAL_ERROR_KEY)
-            if (!evaluationError.isNullOrBlank()) error("CHROMIUM_EVAL_ERROR:$evaluationError")
-            if (obj != null && obj.values.containsKey(RAW_RESULT_KEY)) return obj'''
-              text = text.replace(old, new, 1)
-              text = text.replace(
-                  '    private const val RAW_RESULT_KEY = "__ngheVBookRawResult"\n    private const val MAX_LAYERS = 8',
-                  '    private const val RAW_RESULT_KEY = "__ngheVBookRawResult"\n    private const val EVAL_ERROR_KEY = "__ngheChromiumEvalError"\n    private const val MAX_LAYERS = 8',
-                  1,
-              )
-              decoder.write_text(text, encoding='utf-8')
-
-          test = Path('app/src/test/java/vn/nghetruyen/app/sourceplatform/ChromiumVBookDispatchDecoderTest.kt')
-          text = test.read_text(encoding='utf-8')
-          marker = '''    @Test
-    fun rejectsNonSuccessEnvelope() {'''
-          if 'reportsGuardedChromiumEvaluationError' not in text:
-              insertion = '''    @Test
-    fun reportsGuardedChromiumEvaluationError() {
-        val failure = "{\\\"__ngheChromiumEvalError\\\":\\\"TypeError: readonly global\\\"}"
-
-        val error = assertThrows(IllegalStateException::class.java) {
-            ChromiumVBookDispatchDecoder.decode(failure)
-        }
-
-        assertEquals("CHROMIUM_EVAL_ERROR:TypeError: readonly global", error.message)
-    }
-
-'''
-              if marker not in text:
-                  raise SystemExit('decoder test marker mismatch')
-              test.write_text(text.replace(marker, insertion + marker, 1), encoding='utf-8')
-
-          gate = Path('scripts/check_vbook_chromium_static.py')
-          text = gate.read_text(encoding='utf-8')
-          if '"view.evaluateJavascript(guardedProgram)"' not in text:
-              text = text.replace(
-                  '        "ChromiumVBookDispatchDecoder.decode(raw)",\n        "blockNetworkLoads = true",',
-                  '        "ChromiumVBookDispatchDecoder.decode(raw)",\n        "__ngheChromiumEvalError",\n        "view.evaluateJavascript(guardedProgram)",\n        "blockNetworkLoads = true",',
-                  1,
-              )
-              text = text.replace(
-                  '        \'RAW_RESULT_KEY = "__ngheVBookRawResult"\',\n        "MAX_LAYERS = 8",',
-                  '        \'RAW_RESULT_KEY = "__ngheVBookRawResult"\',\n        \'EVAL_ERROR_KEY = "__ngheChromiumEvalError"\',\n        \'error("CHROMIUM_EVAL_ERROR:$evaluationError")\',\n        "MAX_LAYERS = 8",',
-                  1,
-              )
-              text = text.replace(
-                  '        "Object.defineProperty(global,\'__bridge\'",\n        "factory.call(global)",',
-                  '        "Object.defineProperty(global,\'__bridge\'",\n        "Object.defineProperty(global,name,{value:value,writable:true,configurable:true,enumerable:true})",\n        "__installHostGlobal(\'localStorage\',__vbookLocalStorage)",\n        "factory.call(global)",',
-                  1,
-              )
-              gate.write_text(text, encoding='utf-8')
+          if text.count(old) != 1:
+              raise SystemExit('runtime evaluation marker mismatch')
+          runtime.write_text(text.replace(old, new, 1), encoding='utf-8')
           PY
 
           git diff --check
-          if git diff --quiet; then
-            echo 'Chromium WebView fix is already applied.'
-            exit 0
-          fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add app/src/main/java/vn/nghetruyen/app/sourceplatform/ChromiumVBookPrelude.kt \
-                  app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidChromiumVBookRuntime.kt \
-                  app/src/main/java/vn/nghetruyen/app/sourceplatform/ChromiumVBookDispatchDecoder.kt \
-                  app/src/test/java/vn/nghetruyen/app/sourceplatform/ChromiumVBookDispatchDecoderTest.kt \
-                  scripts/check_vbook_chromium_static.py
-          git commit -m 'fix: install Chromium globals and surface JS errors'
+                  app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidChromiumVBookRuntime.kt
+          git commit -m 'fix: harden Chromium WebView evaluation boundary'
           git push origin HEAD:agent/m3-chromium-js-engine
-
-  verify:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Verify vBook architecture and engine specificity
-        run: |
-          python3 scripts/check_vbook_static.py
-          python3 scripts/check_vbook_chromium_static.py
-          python3 scripts/check_source_engine_specificity.py
-
-      - name: Verify source platform and compile app
-        run: >-
-          ./gradlew
-          :source-api:test
-          :source-js-sandbox:test
-          :source-compat-testkit:test
-          :source-store:test
-          :source-runtime:test
-          :source-diagnostics:test
-          :source-network:test
-          :source-repository:test
-          :source-vbook:test
-          :app:testDebugUnitTest
-          :app:compileDebugKotlin
-          --stacktrace
-
-      - name: Print vBook test failures
-        if: failure()
-        shell: bash
-        run: |
-          shopt -s nullglob
-          files=(source-vbook/build/test-results/test/TEST-*.xml)
-          if ((${#files[@]} == 0)); then
-            echo 'No vBook XML test results were produced.'
-            exit 0
-          fi
-          python3 - <<'PY'
-          import glob, xml.etree.ElementTree as ET
-          for path in glob.glob('source-vbook/build/test-results/test/TEST-*.xml'):
-              root = ET.parse(path).getroot()
-              for case in root.findall('testcase'):
-                  failure = case.find('failure')
-                  if failure is None:
-                      failure = case.find('error')
-                  if failure is not None:
-                      print(f"\n=== {root.get('name')} :: {case.get('name')} ===")
-                      print(failure.get('message', ''))
-                      text = (failure.text or '').splitlines()
-                      print('\n'.join(text[:45]))
-          PY

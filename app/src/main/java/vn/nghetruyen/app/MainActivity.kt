@@ -63,7 +63,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        viewModel.installExtensionHostKernel()
+        installExtensionHostKernel(viewModel)
         handleFollowingIntent(intent)
         setContent {
             val importLauncher = rememberLauncherForActivityResult(

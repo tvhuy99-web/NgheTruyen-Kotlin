@@ -66,7 +66,7 @@ object SourceHostKernelContract {
         return command(
             domain = string(obj, "domain") ?: error("SOURCE_HOST_COMMAND_DOMAIN_REQUIRED"),
             action = string(obj, "action") ?: error("SOURCE_HOST_COMMAND_ACTION_REQUIRED"),
-            payload = obj.values["payload"] as? JsonValue.Obj ?: JsonValue.Obj(),
+            payload = payloadObject(obj, "SOURCE_HOST_COMMAND_PAYLOAD_OBJECT_REQUIRED"),
         )
     }
 
@@ -76,7 +76,7 @@ object SourceHostKernelContract {
         require(int(obj, "version") == API_VERSION) { "SOURCE_HOST_EVENT_VERSION_UNSUPPORTED" }
         return event(
             name = string(obj, "name") ?: error("SOURCE_HOST_EVENT_NAME_REQUIRED"),
-            payload = obj.values["payload"] as? JsonValue.Obj ?: JsonValue.Obj(),
+            payload = payloadObject(obj, "SOURCE_HOST_EVENT_PAYLOAD_OBJECT_REQUIRED"),
         )
     }
 
@@ -95,6 +95,11 @@ object SourceHostKernelContract {
         require(JsonCodec.stringify(event.payload).toByteArray(Charsets.UTF_8).size <= MAX_PAYLOAD_BYTES) {
             "SOURCE_HOST_EVENT_PAYLOAD_TOO_LARGE"
         }
+    }
+
+    private fun payloadObject(obj: JsonValue.Obj, errorCode: String): JsonValue.Obj {
+        val payload = obj.values["payload"] ?: return JsonValue.Obj()
+        return payload as? JsonValue.Obj ?: error(errorCode)
     }
 
     private fun string(obj: JsonValue.Obj, key: String): String? =

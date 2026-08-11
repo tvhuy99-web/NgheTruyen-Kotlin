@@ -4,6 +4,9 @@ import android.app.Application
 import vn.nghetruyen.app.core.model.ReaderMode
 import vn.nghetruyen.app.playback.ReaderPlaybackService
 import vn.nghetruyen.app.ui.AppViewModel
+import vn.nghetruyen.app.ui.ChapterTextMode
+import vn.nghetruyen.app.ui.Destination
+import vn.nghetruyen.app.ui.RootTab
 import vn.nghetruyen.source.api.JsonValue
 import vn.nghetruyen.source.api.SourceErrorCode
 import vn.nghetruyen.source.api.SourceHostKernelBus
@@ -43,6 +46,29 @@ object ExtensionHostKernelInstaller {
                 host.openExternalUrl(url)
                 accepted(traceId)
             }
+            .register("ui", "navigate") { _, payload, traceId ->
+                val host = host() ?: return@register uiUnavailable(traceId)
+                val route = payload.stringValue("route")?.trim().orEmpty().lowercase()
+                when (route) {
+                    "explore" -> host.setRootTab(RootTab.EXPLORE)
+                    "library" -> host.setRootTab(RootTab.LIBRARY)
+                    "personal" -> host.setRootTab(RootTab.PERSONAL)
+                    "story" -> {
+                        if (host.state.value.storyDetail == null) {
+                            return@register invalid(traceId, "SOURCE_HOST_UI_STORY_CONTEXT_REQUIRED")
+                        }
+                        host.backToChapterList()
+                    }
+                    "back" -> host.back()
+                    "reader" -> {
+                        if (host.state.value.destination != Destination.Reader) {
+                            return@register invalid(traceId, "SOURCE_HOST_UI_READER_CONTEXT_REQUIRED")
+                        }
+                    }
+                    else -> return@register invalid(traceId, "SOURCE_HOST_UI_ROUTE_INVALID:$route")
+                }
+                accepted(traceId)
+            }
             .register("reader", "refresh") { _, _, traceId ->
                 ReaderPlaybackService.command(app, ReaderPlaybackService.ACTION_REFRESH)
                 accepted(traceId)
@@ -70,6 +96,21 @@ object ExtensionHostKernelInstaller {
                 val mode = enumValues<ReaderMode>().firstOrNull { it.name.equals(raw, ignoreCase = true) }
                     ?: return@register invalid(traceId, "SOURCE_HOST_READER_MODE_INVALID:$raw")
                 host.setReaderMode(mode)
+                accepted(traceId)
+            }
+            .register("reader", "setTextMode") { _, payload, traceId ->
+                val host = host() ?: return@register uiUnavailable(traceId)
+                if (host.state.value.chapterContent == null && host.state.value.originalChapterContent == null) {
+                    return@register invalid(traceId, "SOURCE_HOST_READER_CHAPTER_CONTEXT_REQUIRED")
+                }
+                val raw = payload.stringValue("mode")?.trim().orEmpty()
+                val mode = enumValues<ChapterTextMode>().firstOrNull { it.name.equals(raw, ignoreCase = true) }
+                    ?: return@register invalid(traceId, "SOURCE_HOST_READER_TEXT_MODE_INVALID:$raw")
+                when (mode) {
+                    ChapterTextMode.ORIGINAL -> host.showOriginalChapter()
+                    ChapterTextMode.VIETPHRASE -> host.applyVietPhraseToCurrentChapter()
+                    ChapterTextMode.AI_TRANSLATION -> host.aiTranslate()
+                }
                 accepted(traceId)
             }
             .register("reader", "openChapter") { _, payload, traceId ->

@@ -59,6 +59,7 @@ def require_text(path: str, *tokens: str) -> None:
 
 def main() -> None:
     run_script("check_xpk_parity_v290.py")
+    run_script("check_lua_diagnostics_ui_parity.py")
     if "--wiring-only" not in sys.argv:
         run_script("check_clean_rewrite.py")
         run_script("check_truyenfull_fixtures.py")
@@ -371,7 +372,20 @@ def main() -> None:
         "VIETPHRASE",
         "DỊCH AI",
         "PHÂN VAI AI",
+    )
+    require_text(
+        "app/src/main/java/vn/nghetruyen/app/ui/components/ReferenceDiagnosticsChrome.kt",
+        'if (state.diagnosticsMode == "off") return',
+        "ĐANG GHI NHẬT KÝ...",
         "XEM NHẬT KÝ",
+        "CHƯA CÓ NHẬT KÝ",
+        "XUẤT HỘP ĐEN",
+        "NHẬT KÝ CHẨN ĐOÁN",
+    )
+    require_text(
+        "app/src/main/java/vn/nghetruyen/app/ui/ReferenceNgheTruyenApp.kt",
+        "ReferenceDiagnosticsChrome(",
+        "ReferencePrimaryBottomBar(",
     )
     require_text(
         "app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt",

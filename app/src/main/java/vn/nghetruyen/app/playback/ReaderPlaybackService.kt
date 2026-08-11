@@ -219,6 +219,27 @@ class ReaderPlaybackService : Service() {
             ),
         )
     }
+
+    private fun diagnostic(
+        name: String,
+        severity: DiagnosticSeverity = DiagnosticSeverity.DEBUG,
+        attributes: Map<String, String> = emptyMap(),
+    ) {
+        val snapshot = PlaybackQueueStore.state.value
+        container.sourceDiagnostics.mark(
+            name = name,
+            category = DiagnosticCategory.RUNTIME,
+            severity = severity,
+            sourceId = snapshot.sourceId.ifBlank { "tts" },
+            traceId = "tts:$playbackSessionId",
+            attributes = attributes + mapOf(
+                "storyId" to snapshot.storyId,
+                "chapterId" to snapshot.chapterId,
+                "unitId" to snapshot.currentUnitId.orEmpty(),
+                "speechChunkIndex" to snapshot.speechChunkIndex.toString(),
+            ),
+        )
+    }
     private var transitionMessage: String? = null
     private var currentEnginePackage: String? = null
     private var pendingRoleEnginePackage: String? = null

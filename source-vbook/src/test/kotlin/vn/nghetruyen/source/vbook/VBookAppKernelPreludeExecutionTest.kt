@@ -88,4 +88,40 @@ class VBookAppKernelPreludeExecutionTest {
             Context.exit()
         }
     }
+
+    @Test
+    fun lifecycleSubscriptionPollsThenReplaysQueuedHostEvents() {
+        val cx = Context.enter()
+        try {
+            cx.languageVersion = Context.VERSION_ES6
+            val scope = cx.initStandardObjects()
+            cx.evaluateString(
+                scope,
+                """
+                    var __pollCalls=[];
+                    function __bridge(op,command){
+                      if(op==='host_command' && command.domain==='hooks' && command.action==='poll'){
+                        __pollCalls.push(command.payload.name);
+                        return {events:[{kind:'nghetruyen.host-event',version:2,name:'reader.enter',payload:{chapterId:'chapter-7'}}]};
+                      }
+                      return {accepted:true};
+                    }
+                """.trimIndent(),
+                "app-lifecycle-bridge-stub",
+                1,
+                null,
+            )
+            cx.evaluateString(scope, VBookAppKernelPrelude.build(), "app-kernel-lifecycle", 1, null)
+            val result = Context.toString(cx.evaluateString(
+                scope,
+                "var seen=''; App.lifecycle.on('reader.enter',function(event){seen=String(event.chapterId||'');}); JSON.stringify({seen:seen,polls:__pollCalls});",
+                "app-lifecycle-replay",
+                1,
+                null,
+            ))
+            assertEquals("{\"seen\":\"chapter-7\",\"polls\":[\"reader.enter\"]}", result)
+        } finally {
+            Context.exit()
+        }
+    }
 }

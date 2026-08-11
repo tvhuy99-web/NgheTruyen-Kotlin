@@ -39,7 +39,7 @@ internal object ChromiumVBookPrelude {
               Object.defineProperty(global,'__bridge',{value:__bridge,writable:false,configurable:false});
 
               function __path(raw){
-                var clean=String(raw||'').replace(/\\\\/g,'/').replace(/^\/+/, '');
+                var clean=String(raw||'').replace(/\\/g,'/').replace(/^\/+/, '');
                 return clean.indexOf('src/')===0?clean:'src/'+clean;
               }
               var __loaded={};
@@ -222,6 +222,8 @@ internal object ChromiumVBookPrelude {
               function __cryptoWordCreate(words,sigBytes){if(words&&words.__base64!==undefined)return __cryptoWord({__base64:words.__base64,sigBytes:sigBytes});if(typeof words==='string')return __cryptoWord({__text:words,sigBytes:sigBytes});words=Array.isArray(words)?words:[];var needed=sigBytes==null?words.length*4:Number(sigBytes),hex='';for(var i=0;i<words.length&&hex.length/2<needed;i++){var w=Number(words[i])>>>0;for(var shift=24;shift>=0&&hex.length/2<needed;shift-=8)hex+=('0'+((w>>>shift)&255).toString(16)).slice(-2);}return __cryptoWord({__base64:Crypto.hexToBase64(hex),sigBytes:Math.min(needed,hex.length/2)});}
               function __cryptoCipherParams(b64){var p={ciphertext:__cryptoWord({__base64:String(b64||'')})};p.toString=function(format){if(format&&format.stringify)return format.stringify(p);return String(b64||'');};return p;}
               var CryptoJS=(function(){var enc={Utf8:{parse:function(s){return __cryptoWord({__text:String(s==null?'':s)});},stringify:function(w){return __cryptoRawText(w);}},Base64:{parse:function(s){return __cryptoWord({__base64:String(s||'')});},stringify:function(w){return __cryptoToBase64(w);}},Hex:{parse:function(s){return __cryptoWord({__hex:String(s||'').toLowerCase()});},stringify:function(w){return __cryptoToHex(w);}},Latin1:{parse:function(s){return __cryptoWord({__base64:Crypto.latin1ToBase64(String(s||''))});},stringify:function(w){return Crypto.base64ToLatin1(__cryptoToBase64(w));}}};function digest(alg,v){return __cryptoWord({__hex:Crypto.hashBase64(alg,__cryptoToBase64(v))});}function hmac(alg,m,k){return __cryptoWord({__hex:Crypto.hmacBase64(alg,__cryptoToBase64(m),__cryptoToBase64(k))});}var mode={CBC:{__name:'CBC'},ECB:{__name:'ECB'}};var pad={Pkcs7:{__name:'PKCS7'},NoPadding:{__name:'NoPadding'}};function modeName(opts){return opts&&opts.mode&&opts.mode.__name?opts.mode.__name:'CBC';}function paddingName(opts){return opts&&opts.padding&&opts.padding.__name?opts.padding.__name:'PKCS7';}function cipherBase64(v){if(v&&typeof v==='object'&&v.ciphertext)return __cryptoToBase64(v.ciphertext);if(typeof v==='string')return v.replace(/\s+/g,'');return __cryptoToBase64(v);}var format={OpenSSL:{stringify:function(params){return __cryptoToBase64(params&&params.ciphertext?params.ciphertext:params);},parse:function(text){return __cryptoCipherParams(String(text||''));}}};var AES={encrypt:function(message,key,opts){opts=opts||{};var pass=typeof key==='string';var out=Crypto.aes('encrypt',__cryptoToBase64(message),pass?'passphrase':'raw',pass?'':__cryptoToBase64(key),pass?String(key):'',opts.iv?__cryptoToBase64(opts.iv):'',modeName(opts),paddingName(opts));return __cryptoCipherParams(out);},decrypt:function(ciphertext,key,opts){opts=opts||{};var pass=typeof key==='string';var out=Crypto.aes('decrypt',cipherBase64(ciphertext),pass?'passphrase':'raw',pass?'':__cryptoToBase64(key),pass?String(key):'',opts.iv?__cryptoToBase64(opts.iv):'',modeName(opts),paddingName(opts));return __cryptoWord({__base64:out});}};return {lib:{WordArray:{create:__cryptoWordCreate,random:function(n){return __cryptoWord({__base64:Crypto.randomBase64(Math.max(0,Number(n)||0))});}}},enc:enc,mode:mode,pad:pad,format:format,MD5:function(v){return digest('MD5',v);},SHA1:function(v){return digest('SHA-1',v);},SHA256:function(v){return digest('SHA-256',v);},SHA512:function(v){return digest('SHA-512',v);},HmacMD5:function(m,k){return hmac('HmacMD5',m,k);},HmacSHA1:function(m,k){return hmac('HmacSHA1',m,k);},HmacSHA256:function(m,k){return hmac('HmacSHA256',m,k);},HmacSHA512:function(m,k){return hmac('HmacSHA512',m,k);},AES:AES};})();
+              global.Response=Response;
+              global.CryptoJS=CryptoJS;
 
               global.localCookie=Object.freeze({
                 getCookie:function(url){return String(__rpc('cookie_get',{url:String(url||'')})||'');},
@@ -301,7 +303,7 @@ internal object ChromiumVBookPrelude {
               load($entry);
               if(typeof global.execute!=='function') throw new Error('VBOOK_EXECUTE_FUNCTION_MISSING:'+$entry);
               var __payload=JSON.parse($input);
-              return JSON.stringify(global.execute(__payload));
+              return String(global.execute(__payload));
             })(this)
         """.trimIndent()
     }

@@ -3,69 +3,144 @@ name: Source Platform vBook
 on:
   pull_request:
     paths:
+      - 'app/src/main/java/vn/nghetruyen/app/sourceplatform/**'
+      - 'app/src/main/java/vn/nghetruyen/app/NgheTruyenApplication.kt'
+      - 'app/src/main/java/vn/nghetruyen/app/AppContainer.kt'
+      - 'app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt'
+      - 'app/src/main/java/vn/nghetruyen/app/ui/NgheTruyenApp.kt'
+      - 'app/src/main/java/vn/nghetruyen/app/ui/ReferenceNgheTruyenApp.kt'
+      - 'app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt'
+      - 'app/src/main/java/vn/nghetruyen/app/ui/screens/SourcePackConfigDialog.kt'
+      - 'app/src/main/res/xml/backup_rules.xml'
+      - 'app/src/main/res/xml/data_extraction_rules.xml'
+      - 'source-api/**'
+      - 'source-package/**'
+      - 'source-store/**'
+      - 'source-runtime/**'
+      - 'source-diagnostics/**'
+      - 'source-network/**'
+      - 'source-repository/**'
+      - 'source-vbook/**'
+      - 'source-js-sandbox/**'
+      - 'source-compat-testkit/**'
+      - 'settings.gradle.kts'
+      - 'build.gradle.kts'
+      - 'gradle/**'
+      - 'gradlew'
+      - 'scripts/check_source_engine_specificity.py'
+      - 'scripts/check_vbook_static.py'
+      - 'scripts/check_vbook_chromium_static.py'
+      - 'scripts/check_vbook_differential_coverage.py'
+      - 'scripts/capture_vbook_reference.py'
+      - 'scripts/capture_vbook_reference_matrix.py'
+      - 'scripts/fetch_vbook_corpus.py'
+      - 'scripts/run_vbook_compat_lab.py'
+      - 'scripts/vbook-reference-plan*.json'
       - '.github/workflows/source-platform-vbook.yml'
+  push:
+    branches:
+      - 'agent/source-platform-s0-s1'
+      - 'agent/vbook-*'
+    paths:
+      - 'app/src/main/java/vn/nghetruyen/app/sourceplatform/**'
+      - 'app/src/main/java/vn/nghetruyen/app/NgheTruyenApplication.kt'
+      - 'app/src/main/java/vn/nghetruyen/app/AppContainer.kt'
+      - 'app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt'
+      - 'app/src/main/java/vn/nghetruyen/app/ui/NgheTruyenApp.kt'
+      - 'app/src/main/java/vn/nghetruyen/app/ui/ReferenceNgheTruyenApp.kt'
+      - 'app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt'
+      - 'app/src/main/java/vn/nghetruyen/app/ui/screens/SourcePackConfigDialog.kt'
+      - 'app/src/main/res/xml/backup_rules.xml'
+      - 'app/src/main/res/xml/data_extraction_rules.xml'
+      - 'source-api/**'
+      - 'source-package/**'
+      - 'source-store/**'
+      - 'source-runtime/**'
+      - 'source-diagnostics/**'
+      - 'source-network/**'
+      - 'source-repository/**'
+      - 'source-vbook/**'
+      - 'source-js-sandbox/**'
+      - 'source-compat-testkit/**'
+      - 'settings.gradle.kts'
+      - 'build.gradle.kts'
+      - 'gradle/**'
+      - 'gradlew'
+      - 'scripts/check_source_engine_specificity.py'
+      - 'scripts/check_vbook_static.py'
+      - 'scripts/check_vbook_chromium_static.py'
+      - 'scripts/check_vbook_differential_coverage.py'
+      - 'scripts/capture_vbook_reference.py'
+      - 'scripts/capture_vbook_reference_matrix.py'
+      - 'scripts/fetch_vbook_corpus.py'
+      - 'scripts/run_vbook_compat_lab.py'
+      - 'scripts/vbook-reference-plan*.json'
+      - '.github/workflows/source-platform-vbook.yml'
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  patch:
+  verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - name: Checkout M3 branch
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: agent/m3-chromium-js-engine
-          fetch-depth: 0
 
-      - name: Patch WebView global installation and evaluation guard
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Verify vBook architecture and engine specificity
+        run: |
+          python3 scripts/check_vbook_static.py
+          python3 scripts/check_vbook_chromium_static.py
+          python3 scripts/check_source_engine_specificity.py
+
+      - name: Verify source platform and compile app
+        run: >-
+          ./gradlew
+          :source-api:test
+          :source-js-sandbox:test
+          :source-compat-testkit:test
+          :source-store:test
+          :source-runtime:test
+          :source-diagnostics:test
+          :source-network:test
+          :source-repository:test
+          :source-vbook:test
+          :app:testDebugUnitTest
+          :app:compileDebugKotlin
+          --stacktrace
+
+      - name: Print vBook test failures
+        if: failure()
         shell: bash
         run: |
+          shopt -s nullglob
+          files=(source-vbook/build/test-results/test/TEST-*.xml)
+          if ((${#files[@]} == 0)); then
+            echo 'No vBook XML test results were produced.'
+            exit 0
+          fi
           python3 - <<'PY'
-          from pathlib import Path
-
-          prelude = Path('app/src/main/java/vn/nghetruyen/app/sourceplatform/ChromiumVBookPrelude.kt')
-          text = prelude.read_text(encoding='utf-8')
-          target = "global.Storage=global.localStorage=__storage('');"
-          if text.count(target) != 1:
-              raise SystemExit(f'prelude storage marker count={text.count(target)}')
-          replacement = """function __installHostGlobal(name,value){
-                name=String(name||'');
-                try {
-                  Object.defineProperty(global,name,{value:value,writable:true,configurable:true,enumerable:true});
-                  return value;
-                } catch(error) {
-                  throw new Error('CHROMIUM_GLOBAL_INSTALL_FAILED:'+name+':'+String(error&&(error.message||error)||'unknown'));
-                }
-              }
-              var __vbookLocalStorage=__storage('');
-              __installHostGlobal('Storage',__vbookLocalStorage);
-              __installHostGlobal('localStorage',__vbookLocalStorage);"""
-          prelude.write_text(text.replace(target, replacement, 1), encoding='utf-8')
-
-          runtime = Path('app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidChromiumVBookRuntime.kt')
-          text = runtime.read_text(encoding='utf-8')
-          target = 'view.evaluateJavascript(program) { encoded ->'
-          if text.count(target) != 1:
-              raise SystemExit(f'runtime evaluation marker count={text.count(target)}')
-          replacement = '''val guardedProgram = """
-                            (function(){
-                              try {
-                                return ($program);
-                              } catch (error) {
-                                var message = String(error && (error.stack || error.message) || error || 'unknown');
-                                return JSON.stringify({__ngheChromiumEvalError:message});
-                              }
-                            })()
-                        """.trimIndent()
-                        view.evaluateJavascript(guardedProgram) { encoded ->'''
-          runtime.write_text(text.replace(target, replacement, 1), encoding='utf-8')
+          import glob, xml.etree.ElementTree as ET
+          for path in glob.glob('source-vbook/build/test-results/test/TEST-*.xml'):
+              root = ET.parse(path).getroot()
+              for case in root.findall('testcase'):
+                  failure = case.find('failure')
+                  if failure is None:
+                      failure = case.find('error')
+                  if failure is not None:
+                      print(f"\n=== {root.get('name')} :: {case.get('name')} ===")
+                      print(failure.get('message', ''))
+                      text = (failure.text or '').splitlines()
+                      print('\n'.join(text[:45]))
           PY
-
-          git diff --check
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add app/src/main/java/vn/nghetruyen/app/sourceplatform/ChromiumVBookPrelude.kt \
-                  app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidChromiumVBookRuntime.kt
-          git commit -m 'fix: harden Chromium WebView evaluation boundary'
-          git push origin HEAD:agent/m3-chromium-js-engine

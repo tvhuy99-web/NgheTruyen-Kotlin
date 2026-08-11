@@ -214,7 +214,6 @@ fun ReaderScreen(
     var showExportDialog by remember { mutableStateOf(false) }
     var showCopyDialog by remember { mutableStateOf(false) }
     var showChapterInfoDialog by remember { mutableStateOf(false) }
-    var showDiagnosticLogDialog by remember { mutableStateOf(false) }
     var vietPhraseDiagnosticBusy by remember(content.chapter.id) { mutableStateOf(false) }
     var vietPhraseDiagnosticResult by remember(content.chapter.id) { mutableStateOf<VietPhraseDiagnosticExport?>(null) }
     var showNoteDialog by remember { mutableStateOf(false) }
@@ -350,6 +349,15 @@ fun ReaderScreen(
             }.getOrNull()
         }
         vietPhraseDiagnosticBusy = true
+        val diagnosticTraceId = "vietphrase:${content.chapter.id}:${UUID.randomUUID()}"
+        val diagnosticSourceId = storyDetail?.story?.sourceId ?: "vietphrase"
+        app.container.sourceDiagnostics.mark(
+            name = "VIETPHRASE_DIAGNOSTIC_STARTED",
+            sourceId = diagnosticSourceId,
+            traceId = diagnosticTraceId,
+            severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.INFO,
+            attributes = mapOf("storyId" to storyId, "chapterId" to content.chapter.id, "rules" to rules.size.toString()),
+        )
         scope.launch {
             val exported = withContext(Dispatchers.IO) {
                 VietPhraseDiagnosticExporter.export(
@@ -359,11 +367,31 @@ fun ReaderScreen(
                     rules = rules,
                     storyId = storyId,
                     fallbackHanViet = state.vietPhraseFallbackHanViet,
+                    diagnostics = app.container.sourceDiagnostics,
+                    diagnosticTraceId = diagnosticTraceId,
+                    diagnosticSourceId = diagnosticSourceId,
                 )
             }
             vietPhraseDiagnosticBusy = false
-            exported.onSuccess { vietPhraseDiagnosticResult = it }
-                .onFailure { onMessage(it.message ?: "Lỗi tạo nhật ký VietPhrase.") }
+            exported.onSuccess {
+                vietPhraseDiagnosticResult = it
+                app.container.sourceDiagnostics.mark(
+                    name = "VIETPHRASE_DIAGNOSTIC_COMPLETED",
+                    sourceId = diagnosticSourceId,
+                    traceId = diagnosticTraceId,
+                    severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.INFO,
+                    attributes = mapOf("storyId" to storyId, "chapterId" to content.chapter.id, "traceCount" to it.traceCount.toString(), "probeCount" to it.probeCount.toString()),
+                )
+            }.onFailure { error ->
+                app.container.sourceDiagnostics.mark(
+                    name = "VIETPHRASE_DIAGNOSTIC_FAILED",
+                    severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.ERROR,
+                    sourceId = diagnosticSourceId,
+                    traceId = diagnosticTraceId,
+                    attributes = mapOf("storyId" to storyId, "chapterId" to content.chapter.id, "error" to (error.message ?: error.javaClass.simpleName)),
+                )
+                onMessage(error.message ?: "Lỗi tạo nhật ký VietPhrase.")
+            }
         }
     }
 
@@ -458,7 +486,6 @@ fun ReaderScreen(
                 }
             }
             Row(Modifier.fillMaxWidth()) {
-                ReaderButton("XEM NHẬT KÝ", { showDiagnosticLogDialog = true }, Modifier.weight(1f), normalColor = ReferenceGray)
                 ReaderButton(if (state.aiBusy) "AI ĐANG CHẠY…" else if (state.chapterTextMode == ChapterTextMode.AI_TRANSLATION) "DỊCH LẠI" else "DỊCH AI", onAiTranslate, Modifier.weight(1f), enabled = !state.aiBusy, normalColor = ReferencePurple)
                 ReaderButton("PHÂN VAI AI", onVoiceCast, Modifier.weight(1f), enabled = !state.aiBusy, normalColor = Color(0xFFAF52DE))
             }
@@ -1244,21 +1271,6 @@ fun ReaderScreen(
                 clipboard.setText(AnnotatedString(result.path))
                 onMessage("Đã sao chép đường dẫn file ZIP.")
             }) { Text("SAO CHÉP ĐƯỜNG DẪN") } },
-        )
-    }
-
-    if (showDiagnosticLogDialog) {
-        val sourceId = storyDetail?.story?.sourceId ?: storyId
-        val events = state.sourceDiagnostics.filter { it.sourceId == sourceId }.take(40)
-        AlertDialog(
-            onDismissRequest = { showDiagnosticLogDialog = false },
-            title = { Text("NHẬT KÝ CHẨN ĐOÁN") },
-            text = { Column(Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState())) {
-                Text("Mức: ${state.diagnosticsMode}", fontWeight = FontWeight.SemiBold)
-                events.forEach { event -> Text("${event.severity} • ${event.category}/${event.name}${event.detail.takeIf(String::isNotBlank)?.let { " • $it" }.orEmpty()}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 5.dp)) }
-                if (events.isEmpty()) Text("Chưa có sự kiện chẩn đoán cho nguồn hiện tại.")
-            } },
-            confirmButton = { TextButton(onClick = { showDiagnosticLogDialog = false }) { Text("ĐÓNG") } },
         )
     }
 

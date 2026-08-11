@@ -3,12 +3,18 @@ package vn.nghetruyen.app.sources
 import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.Uri
+import android.net.http.SslError
 import android.os.Bundle
 import android.view.ViewGroup
 import android.webkit.CookieManager
+import android.webkit.RenderProcessGoneDetail
+import android.webkit.SslErrorHandler
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -18,6 +24,10 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import vn.nghetruyen.app.NgheTruyenApplication
+import vn.nghetruyen.app.sourceplatform.SourceDiagnosticRuntime
+import vn.nghetruyen.source.diagnostics.DiagnosticCategory
+import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
+import java.util.UUID
 
 class SourceLoginActivity : ComponentActivity() {
     private lateinit var sourceId: String
@@ -27,11 +37,15 @@ class SourceLoginActivity : ComponentActivity() {
     private lateinit var webView: WebView
     private lateinit var status: TextView
     private lateinit var addressField: EditText
+    private lateinit var diagnostics: SourceDiagnosticRuntime
+    private lateinit var diagnosticTraceId: String
+    private var diagnosticStartedAt: Long = 0L
+    private var requestCount: Int = 0
 
     private val browserPrefs by lazy { getSharedPreferences(BROWSER_PREFS, MODE_PRIVATE) }
     private var desktopCompat = false
-    private var logLevel = 0
-    private var autoClearLogOnClose = false
+    private var logLevel = 1
+    private var autoClearLogOnClose = true
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -43,10 +57,24 @@ class SourceLoginActivity : ComponentActivity() {
             "Thiếu cấu hình đăng nhập nguồn."
         }
         require(isAllowed(loginUrl)) { "URL đăng nhập nằm ngoài allowlist." }
-        sessionStore = (application as NgheTruyenApplication).container.sourceSessionStore
+        val app = application as NgheTruyenApplication
+        sessionStore = app.container.sourceSessionStore
+        diagnostics = app.container.sourceDiagnostics
+        diagnosticTraceId = "login:$sourceId:${UUID.randomUUID()}"
+        diagnosticStartedAt = System.currentTimeMillis()
         desktopCompat = browserPrefs.getBoolean(KEY_CHROME_COMPAT, false)
-        logLevel = browserPrefs.getInt(KEY_LOG_LEVEL, 0).coerceIn(0, 2)
-        autoClearLogOnClose = browserPrefs.getBoolean(KEY_AUTO_CLEAR_LOG_ON_CLOSE, false)
+        logLevel = browserPrefs.getInt(KEY_LOG_LEVEL, 1).coerceIn(0, 2)
+        autoClearLogOnClose = browserPrefs.getBoolean(KEY_AUTO_CLEAR_LOG_ON_CLOSE, true)
+        diagnostic(
+            name = "SOURCE_LOGIN_STARTED",
+            severity = DiagnosticSeverity.INFO,
+            attributes = mapOf(
+                "url" to diagnosticUrl(loginUrl),
+                "allowedHosts" to allowedHosts.size.toString(),
+                "localLogLevel" to logLevelLabel(logLevel),
+                "autoClearLocalLog" to autoClearLogOnClose.toString(),
+            ),
+        )
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -103,20 +131,117 @@ class SourceLoginActivity : ComponentActivity() {
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     val target = request.url.toString()
                     if (!isAllowed(target)) {
+                        diagnostic(
+                            name = "SOURCE_LOGIN_NAVIGATION_BLOCKED",
+                            severity = DiagnosticSeverity.WARN,
+                            category = DiagnosticCategory.SECURITY,
+                            attributes = mapOf("url" to diagnosticUrl(target), "mainFrame" to request.isForMainFrame.toString()),
+                        )
                         status.text = "Đã chặn điều hướng ra ngoài miền của nguồn."
                         return true
                     }
+                    diagnostic(
+                        name = "SOURCE_LOGIN_NAVIGATION",
+                        severity = DiagnosticSeverity.DEBUG,
+                        attributes = mapOf("url" to diagnosticUrl(target), "mainFrame" to request.isForMainFrame.toString()),
+                    )
                     return false
+                }
+
+                override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+                    diagnostic(
+                        name = "SOURCE_LOGIN_PAGE_STARTED",
+                        severity = DiagnosticSeverity.INFO,
+                        attributes = mapOf("url" to diagnosticUrl(url), "requestCount" to requestCount.toString()),
+                    )
                 }
 
                 override fun onPageFinished(view: WebView, url: String) {
                     addressField.setText(url)
                     if (isAllowed(url)) captureSession()
-                    status.text = if (sessionStore.hasSession(sourceId)) {
+                    val stored = sessionStore.hasSession(sourceId)
+                    diagnostic(
+                        name = "SOURCE_LOGIN_PAGE_FINISHED",
+                        severity = DiagnosticSeverity.INFO,
+                        attributes = mapOf(
+                            "url" to diagnosticUrl(url),
+                            "requestCount" to requestCount.toString(),
+                            "storedSession" to stored.toString(),
+                        ),
+                    )
+                    status.text = if (stored) {
                         "Đã nhận cookie phiên. Bạn có thể đóng màn hình và thử mở lại chương."
                     } else {
                         "Trang đã tải. Hãy đăng nhập nếu nguồn yêu cầu."
                     }
+                }
+
+                override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                    requestCount += 1
+                    if (diagnostics.advanced || requestCount <= 20 || requestCount % 25 == 0) {
+                        diagnostic(
+                            name = "SOURCE_LOGIN_REQUEST",
+                            severity = DiagnosticSeverity.DEBUG,
+                            category = DiagnosticCategory.NETWORK,
+                            attributes = mapOf(
+                                "method" to request.method.take(16),
+                                "url" to diagnosticUrl(request.url.toString()),
+                                "mainFrame" to request.isForMainFrame.toString(),
+                                "headerNames" to request.requestHeaders.keys.sorted().take(64).joinToString(","),
+                                "requestCount" to requestCount.toString(),
+                            ),
+                        )
+                    }
+                    return null
+                }
+
+                override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+                    diagnostic(
+                        name = "SOURCE_LOGIN_WEB_ERROR",
+                        severity = if (request.isForMainFrame) DiagnosticSeverity.ERROR else DiagnosticSeverity.WARN,
+                        category = DiagnosticCategory.NETWORK,
+                        attributes = mapOf(
+                            "code" to error.errorCode.toString(),
+                            "description" to error.description.toString().take(400),
+                            "url" to diagnosticUrl(request.url.toString()),
+                            "mainFrame" to request.isForMainFrame.toString(),
+                        ),
+                    )
+                }
+
+                override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
+                    diagnostic(
+                        name = "SOURCE_LOGIN_HTTP_ERROR",
+                        severity = DiagnosticSeverity.WARN,
+                        category = DiagnosticCategory.NETWORK,
+                        attributes = mapOf(
+                            "status" to errorResponse.statusCode.toString(),
+                            "url" to diagnosticUrl(request.url.toString()),
+                            "mainFrame" to request.isForMainFrame.toString(),
+                        ),
+                    )
+                }
+
+                override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
+                    handler.cancel()
+                    diagnostic(
+                        name = "SOURCE_LOGIN_SSL_BLOCKED",
+                        severity = DiagnosticSeverity.ERROR,
+                        category = DiagnosticCategory.SECURITY,
+                        attributes = mapOf("primary" to error.primaryError.toString(), "url" to diagnosticUrl(error.url.orEmpty())),
+                    )
+                }
+
+                override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                    diagnostic(
+                        name = "SOURCE_LOGIN_RENDERER_GONE",
+                        severity = DiagnosticSeverity.ERROR,
+                        attributes = mapOf("didCrash" to detail.didCrash().toString(), "requestCount" to requestCount.toString()),
+                    )
+                    status.text = "Tiến trình WebView đã dừng. Nhật ký đã ghi lại sự cố."
+                    runCatching { view.destroy() }
+                    finish()
+                    return true
                 }
             }
         }
@@ -211,6 +336,12 @@ class SourceLoginActivity : ComponentActivity() {
             .setMessage("Xóa cookie và dữ liệu đăng nhập của $host?")
             .setPositiveButton("XÓA") { _, _ ->
                 clearSessionCookies()
+                diagnostic(
+                    name = "SOURCE_LOGIN_SESSION_CLEARED",
+                    severity = DiagnosticSeverity.INFO,
+                    category = DiagnosticCategory.SECURITY,
+                    attributes = mapOf("host" to host),
+                )
                 status.text = "Đã xóa dữ liệu đăng nhập của trang."
                 webView.reload()
             }
@@ -220,10 +351,16 @@ class SourceLoginActivity : ComponentActivity() {
 
     private fun openDiagnosticBrowser() {
         val target = webView.url?.takeIf(::isAllowed) ?: loginUrl
+        diagnostic(
+            name = "SOURCE_LOGIN_DIAGNOSTIC_BROWSER_OPENED",
+            severity = DiagnosticSeverity.INFO,
+            attributes = mapOf("url" to diagnosticUrl(target)),
+        )
         startActivity(Intent(this, SourceDiagnosticBrowserActivity::class.java).apply {
             putExtra(SourceDiagnosticBrowserActivity.EXTRA_SOURCE_ID, sourceId)
             putExtra(SourceDiagnosticBrowserActivity.EXTRA_INITIAL_URL, target)
             putExtra(SourceDiagnosticBrowserActivity.EXTRA_ALLOWED_HOSTS, allowedHosts.toTypedArray())
+            putExtra(SourceDiagnosticBrowserActivity.EXTRA_TRACE_ID, diagnosticTraceId)
         })
     }
 
@@ -244,11 +381,22 @@ class SourceLoginActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        if (::diagnostics.isInitialized) {
+            diagnostic(
+                name = "SOURCE_LOGIN_STOPPED",
+                severity = DiagnosticSeverity.INFO,
+                durationMs = (System.currentTimeMillis() - diagnosticStartedAt).coerceAtLeast(0L),
+                attributes = mapOf(
+                    "requestCount" to requestCount.toString(),
+                    "storedSession" to (::sessionStore.isInitialized && sessionStore.hasSession(sourceId)).toString(),
+                ),
+            )
+        }
         if (::webView.isInitialized) {
-            webView.stopLoading()
-            webView.loadUrl("about:blank")
-            webView.removeAllViews()
-            webView.destroy()
+            runCatching { webView.stopLoading() }
+            runCatching { webView.loadUrl("about:blank") }
+            runCatching { webView.removeAllViews() }
+            runCatching { webView.destroy() }
         }
         super.onDestroy()
     }
@@ -261,6 +409,19 @@ class SourceLoginActivity : ComponentActivity() {
             }
         sessionStore.replaceCookieHeader(sourceId, merged)
         manager.flush()
+        if (::diagnostics.isInitialized) {
+            val names = CookieHeaderCodec.cookieNames(merged).distinct().sorted()
+            diagnostic(
+                name = "SOURCE_LOGIN_SESSION_CAPTURED",
+                severity = DiagnosticSeverity.DEBUG,
+                category = DiagnosticCategory.SECURITY,
+                attributes = mapOf(
+                    "cookieCount" to names.size.toString(),
+                    "cookieNames" to names.take(64).joinToString(","),
+                    "storedSession" to sessionStore.hasSession(sourceId).toString(),
+                ),
+            )
+        }
     }
 
     private fun seedWebViewCookies() {
@@ -277,6 +438,31 @@ class SourceLoginActivity : ComponentActivity() {
     private fun clearSessionCookies() {
         clearStoredSession(sourceId, allowedHosts, sessionStore)
     }
+
+    private fun diagnostic(
+        name: String,
+        severity: DiagnosticSeverity = DiagnosticSeverity.DEBUG,
+        category: DiagnosticCategory = DiagnosticCategory.BROWSER,
+        durationMs: Long? = null,
+        attributes: Map<String, String> = emptyMap(),
+    ) {
+        if (!::diagnostics.isInitialized || !::diagnosticTraceId.isInitialized) return
+        diagnostics.mark(
+            name = name,
+            category = category,
+            severity = severity,
+            sourceId = sourceId,
+            traceId = diagnosticTraceId,
+            durationMs = durationMs,
+            attributes = attributes,
+        )
+    }
+
+    private fun diagnosticUrl(value: String): String = runCatching {
+        val uri = Uri.parse(value)
+        if (uri.scheme != "https" || uri.host.isNullOrBlank()) return@runCatching "[redacted-url]"
+        "https://${uri.host}${uri.encodedPath.orEmpty().take(300)}"
+    }.getOrDefault("[invalid-url]")
 
     private fun isAllowed(value: String): Boolean {
         val uri = runCatching { Uri.parse(value) }.getOrNull() ?: return false

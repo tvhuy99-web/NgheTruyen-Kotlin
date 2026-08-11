@@ -29,9 +29,13 @@ import androidx.activity.result.contract.ActivityResultContracts
 import org.json.JSONArray
 import org.json.JSONObject
 import vn.nghetruyen.app.NgheTruyenApplication
+import vn.nghetruyen.app.sourceplatform.SourceDiagnosticRuntime
+import vn.nghetruyen.source.diagnostics.DiagnosticCategory
+import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 
 /**
  * Source-scoped diagnostics browser matching the option hierarchy of the reference XPK.
@@ -47,6 +51,9 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
     private lateinit var urlField: EditText
     private lateinit var status: TextView
     private lateinit var progress: ProgressBar
+    private lateinit var diagnostics: SourceDiagnosticRuntime
+    private lateinit var diagnosticTraceId: String
+    private var diagnosticStartedAt = 0L
 
     private val entries = ArrayDeque<DiagnosticEntry>()
     private var requestCount = 0
@@ -54,8 +61,8 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
         getSharedPreferences(SourceLoginActivity.BROWSER_PREFS, MODE_PRIVATE)
     }
     private var desktopCompat = false
-    private var logLevel = 0
-    private var autoClearLogOnClose = false
+    private var logLevel = 1
+    private var autoClearLogOnClose = true
 
     private val exportLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri == null) return@registerForActivityResult
@@ -80,10 +87,22 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
             "Thiếu cấu hình chẩn đoán nguồn."
         }
         require(isAllowed(initialUrl)) { "URL chẩn đoán nằm ngoài allowlist." }
-        sessionStore = (application as NgheTruyenApplication).container.sourceSessionStore
+        val app = application as NgheTruyenApplication
+        sessionStore = app.container.sourceSessionStore
+        diagnostics = app.container.sourceDiagnostics
+        diagnosticTraceId = intent.getStringExtra(EXTRA_TRACE_ID).orEmpty().ifBlank { "diagnostic-browser:$sourceId:${UUID.randomUUID()}" }
+        diagnosticStartedAt = System.currentTimeMillis()
         desktopCompat = browserPrefs.getBoolean(SourceLoginActivity.KEY_CHROME_COMPAT, false)
-        logLevel = browserPrefs.getInt(SourceLoginActivity.KEY_LOG_LEVEL, 0).coerceIn(0, 2)
-        autoClearLogOnClose = browserPrefs.getBoolean(SourceLoginActivity.KEY_AUTO_CLEAR_LOG_ON_CLOSE, false)
+        logLevel = browserPrefs.getInt(SourceLoginActivity.KEY_LOG_LEVEL, 1).coerceIn(0, 2)
+        autoClearLogOnClose = browserPrefs.getBoolean(SourceLoginActivity.KEY_AUTO_CLEAR_LOG_ON_CLOSE, true)
+        diagnostics.mark(
+            name = "DIAGNOSTIC_BROWSER_STARTED",
+            category = DiagnosticCategory.BROWSER,
+            severity = DiagnosticSeverity.INFO,
+            sourceId = sourceId,
+            traceId = diagnosticTraceId,
+            attributes = mapOf("url" to redactUrl(initialUrl), "localLogLevel" to SourceLoginActivity.logLevelLabel(logLevel)),
+        )
 
         WebView.setWebContentsDebuggingEnabled(false)
         val root = LinearLayout(this).apply {
@@ -152,9 +171,7 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
                 }
 
                 override fun onConsoleMessage(message: ConsoleMessage): Boolean {
-                    if (logLevel >= 2) {
-                        record("CONSOLE", "${message.messageLevel()}@${message.lineNumber()}", sanitize(message.message(), 800))
-                    }
+                    record("CONSOLE", "${message.messageLevel()}@${message.lineNumber()}", sanitize(message.message(), 800))
                     return true
                 }
             }
@@ -293,48 +310,42 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
                 status.text = "Đã chặn điều hướng ra ngoài miền của nguồn."
                 return true
             }
-            if (logLevel >= 1) record("NAV", "NAVIGATION", redactUrl(target))
+            record("NAV", "NAVIGATION", redactUrl(target))
             return false
         }
 
         override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
             urlField.setText(url)
-            if (logLevel >= 1) record("PAGE", "START", redactUrl(url))
+            record("PAGE", "START", redactUrl(url))
         }
 
         override fun onPageFinished(view: WebView, url: String) {
             urlField.setText(url)
             captureSession()
-            if (logLevel >= 1) record("PAGE", "FINISH", redactUrl(url))
+            record("PAGE", "FINISH", redactUrl(url))
             status.text = "Trang đã tải. Có $requestCount request trong phiên chẩn đoán."
         }
 
         override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
             requestCount += 1
-            if (logLevel >= 2) {
-                record(
-                    "REQUEST",
-                    request.method,
-                    "${redactUrl(request.url.toString())} main=${request.isForMainFrame} headers=${request.requestHeaders.keys.sorted().joinToString()}",
-                )
-            }
+            record(
+                "REQUEST",
+                request.method,
+                "${redactUrl(request.url.toString())} main=${request.isForMainFrame} headers=${request.requestHeaders.keys.sorted().joinToString()}",
+            )
             return null
         }
 
         override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-            if (logLevel >= 1) {
-                record(
-                    "ERROR",
-                    "WEB_${error.errorCode}",
-                    "main=${request.isForMainFrame} url=${redactUrl(request.url.toString())} desc=${sanitize(error.description.toString(), 300)}",
-                )
-            }
+            record(
+                "ERROR",
+                "WEB_${error.errorCode}",
+                "main=${request.isForMainFrame} url=${redactUrl(request.url.toString())} desc=${sanitize(error.description.toString(), 300)}",
+            )
         }
 
         override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
-            if (logLevel >= 1) {
-                record("HTTP", "HTTP_${errorResponse.statusCode}", "main=${request.isForMainFrame} url=${redactUrl(request.url.toString())}")
-            }
+            record("HTTP", "HTTP_${errorResponse.statusCode}", "main=${request.isForMainFrame} url=${redactUrl(request.url.toString())}")
         }
 
         override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
@@ -350,7 +361,7 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
             record("SECURITY", "URL_REJECTED", redactUrl(target))
             return
         }
-        if (logLevel >= 1) record("NAV", "LOAD_URL", redactUrl(target))
+        record("NAV", "LOAD_URL", redactUrl(target))
         webView.loadUrl(target)
     }
 
@@ -385,9 +396,44 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
     }
 
     private fun record(level: String, category: String, detail: String) {
-        if (logLevel == 0 && level !in setOf("SECURITY", "PROBE")) return
-        entries.addLast(DiagnosticEntry(System.currentTimeMillis(), level, category, sanitize(detail, 2_000)))
+        val safeDetail = sanitize(detail, 2_000)
+        mirrorGlobal(level, category, safeDetail)
+        val normalized = level.uppercase(Locale.ROOT)
+        val keepLocal = when (normalized) {
+            "SECURITY", "PROBE" -> true
+            "REQUEST", "CONSOLE" -> logLevel >= 2
+            else -> logLevel >= 1
+        }
+        if (!keepLocal) return
+        entries.addLast(DiagnosticEntry(System.currentTimeMillis(), level, category, safeDetail))
         while (entries.size > MAX_LOG_ENTRIES) entries.removeFirst()
+    }
+
+    private fun mirrorGlobal(level: String, category: String, detail: String) {
+        if (!::diagnostics.isInitialized || !::diagnosticTraceId.isInitialized) return
+        val severity = when (level.uppercase(Locale.ROOT)) {
+            "ERROR" -> DiagnosticSeverity.ERROR
+            "SECURITY", "HTTP" -> DiagnosticSeverity.WARN
+            "REQUEST", "CONSOLE" -> DiagnosticSeverity.DEBUG
+            else -> DiagnosticSeverity.INFO
+        }
+        val diagnosticCategory = when (level.uppercase(Locale.ROOT)) {
+            "SECURITY" -> DiagnosticCategory.SECURITY
+            "REQUEST", "HTTP", "NAV" -> DiagnosticCategory.NETWORK
+            else -> DiagnosticCategory.BROWSER
+        }
+        val safeName = "DIAGNOSTIC_BROWSER_${level}_${category}"
+            .uppercase(Locale.ROOT)
+            .replace(Regex("[^A-Z0-9_]+"), "_")
+            .take(150)
+        diagnostics.mark(
+            name = safeName,
+            category = diagnosticCategory,
+            severity = severity,
+            sourceId = sourceId,
+            traceId = diagnosticTraceId,
+            attributes = mapOf("detail" to detail, "localLogLevel" to SourceLoginActivity.logLevelLabel(logLevel)),
+        )
     }
 
     private fun copyLog() {
@@ -400,6 +446,15 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
     private fun clearLog() {
         entries.clear()
         requestCount = 0
+        if (::diagnostics.isInitialized) {
+            diagnostics.mark(
+                name = "DIAGNOSTIC_BROWSER_LOCAL_LOG_CLEARED",
+                category = DiagnosticCategory.BROWSER,
+                severity = DiagnosticSeverity.INFO,
+                sourceId = sourceId,
+                traceId = diagnosticTraceId,
+            )
+        }
         status.text = "Đã xóa nhật ký chẩn đoán."
     }
 
@@ -465,6 +520,17 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        if (::diagnostics.isInitialized && ::diagnosticTraceId.isInitialized) {
+            diagnostics.mark(
+                name = "DIAGNOSTIC_BROWSER_STOPPED",
+                category = DiagnosticCategory.BROWSER,
+                severity = DiagnosticSeverity.INFO,
+                sourceId = sourceId,
+                traceId = diagnosticTraceId,
+                durationMs = (System.currentTimeMillis() - diagnosticStartedAt).coerceAtLeast(0L),
+                attributes = mapOf("requestCount" to requestCount.toString(), "storedSession" to sessionStore.hasSession(sourceId).toString()),
+            )
+        }
         if (autoClearLogOnClose) clearLog()
         if (::webView.isInitialized) {
             webView.stopLoading()
@@ -521,6 +587,7 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
         const val EXTRA_SOURCE_ID = "source_id"
         const val EXTRA_INITIAL_URL = "initial_url"
         const val EXTRA_ALLOWED_HOSTS = "allowed_hosts"
+        const val EXTRA_TRACE_ID = "diagnostic_trace_id"
         private const val MAX_LOG_ENTRIES = 400
     }
 }

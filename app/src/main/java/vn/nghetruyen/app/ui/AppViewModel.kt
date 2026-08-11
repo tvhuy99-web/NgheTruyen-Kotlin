@@ -244,6 +244,8 @@ data class MainUiState(
     val readerMode: ReaderMode = ReaderMode.TEXT,
     val chapterSortDescending: Boolean = false,
     val diagnosticsMode: String = "off",
+    val diagnosticActiveOperations: List<String> = emptyList(),
+    val diagnosticPersistentCriticalCount: Int = 0,
     val sleepTimerStatus: String = "Đang tắt",
     val readerDisplay: ReaderDisplaySettings = ReaderDisplaySettings(),
     val storyTtsProfiles: Map<String, StoryTtsProfileEntity> = emptyMap(),
@@ -279,9 +281,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             sourceRepositoryPackages = container.sourcePlatformManager.repositoryPackages(),
             sourceTrustKeys = container.sourcePlatformManager.trustKeys(),
             sourceDiagnosticCount = container.sourcePlatformManager.diagnosticsSnapshot().size,
-            sourceDiagnostics = container.sourcePlatformManager.diagnosticSummaries(),
-            sourceTraces = container.sourcePlatformManager.diagnosticTraces(),
+            sourceDiagnostics = container.sourcePlatformManager.diagnosticSummaries(200),
+            sourceTraces = container.sourcePlatformManager.diagnosticTraces(100),
             diagnosticsMode = container.sourceDiagnostics.mode,
+            diagnosticActiveOperations = container.sourceDiagnostics.activityLines(),
+            diagnosticPersistentCriticalCount = container.sourceDiagnostics.persistentCriticalCount(),
             backupHistory = container.backupHistoryStore.entries(),
             backupLogPath = container.backupHistoryStore.logPath(),
             backupLogText = container.backupHistoryStore.logText(),
@@ -399,9 +403,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 mutableState.update { current ->
                     current.copy(
                         diagnosticsMode = container.sourceDiagnostics.mode,
+                        diagnosticActiveOperations = container.sourceDiagnostics.activityLines(),
+                        diagnosticPersistentCriticalCount = container.sourceDiagnostics.persistentCriticalCount(),
                         sourceDiagnosticCount = events.size,
-                        sourceDiagnostics = container.sourcePlatformManager.diagnosticSummaries(),
-                        sourceTraces = container.sourcePlatformManager.diagnosticTraces(),
+                        sourceDiagnostics = container.sourcePlatformManager.diagnosticSummaries(200),
+                        sourceTraces = container.sourcePlatformManager.diagnosticTraces(100),
                     )
                 }
                 delay(if (container.sourceDiagnostics.mode == "off") 2_000 else 750)
@@ -1267,11 +1273,46 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 sourceRepositoryPackages = container.sourcePlatformManager.repositoryPackages(),
                 sourceTrustKeys = container.sourcePlatformManager.trustKeys(),
                 sourceDiagnosticCount = container.sourcePlatformManager.diagnosticsSnapshot().size,
-                sourceDiagnostics = container.sourcePlatformManager.diagnosticSummaries(),
-                sourceTraces = container.sourcePlatformManager.diagnosticTraces(),
+                sourceDiagnostics = container.sourcePlatformManager.diagnosticSummaries(200),
+                sourceTraces = container.sourcePlatformManager.diagnosticTraces(100),
+                diagnosticActiveOperations = container.sourceDiagnostics.activityLines(),
+                diagnosticPersistentCriticalCount = container.sourceDiagnostics.persistentCriticalCount(),
             )
         }
     }
+
+    private fun diagnosticsRuntimeSnapshot(): Map<String, String> {
+    val snapshot = state.value
+    val playback = snapshot.playback
+    return linkedMapOf(
+        "destination" to snapshot.destination.toString(),
+        "rootTab" to snapshot.rootTab.name,
+        "selectedSourceId" to snapshot.selectedSourceId,
+        "loading" to snapshot.loading.toString(),
+        "aiBusy" to snapshot.aiBusy.toString(),
+        "storyId" to playback.storyId,
+        "chapterId" to playback.chapterId,
+        "chapterIndex" to playback.chapterIndex.toString(),
+        "paragraphIndex" to playback.paragraphIndex.toString(),
+        "speechChunkIndex" to playback.speechChunkIndex.toString(),
+        "unitId" to playback.currentUnitId.orEmpty(),
+        "playbackPlaying" to playback.isPlaying.toString(),
+        "playbackPreparation" to playback.preparationState.name,
+        "ttsRate" to playback.rate.toString(),
+        "ttsPitch" to playback.pitch.toString(),
+        "ttsVolume" to playback.volume.toString(),
+        "sonicEnabled" to snapshot.sonicProcessingEnabled.toString(),
+        "downloadJobs" to snapshot.downloads.size.toString(),
+        "downloadFailures" to snapshot.downloadFailures.size.toString(),
+        "audioExportJobs" to snapshot.audioExports.size.toString(),
+        "vietPhraseRules" to snapshot.vietPhraseRules.size.toString(),
+        "vietPhraseDictionaries" to snapshot.vietPhraseDictionaryStates.size.toString(),
+        "sourceSessions" to snapshot.sourceSessions.size.toString(),
+        "sourcePacks" to snapshot.sourcePacks.size.toString(),
+        "diagnosticActiveOperations" to snapshot.diagnosticActiveOperations.size.toString(),
+        "diagnosticPersistentCriticalCount" to snapshot.diagnosticPersistentCriticalCount.toString(),
+    )
+}
 
     fun exportSourceDiagnostics(uri: Uri) {
         viewModelScope.launch {
@@ -1280,6 +1321,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 events = container.sourcePlatformManager.diagnosticsSnapshot(),
                 installed = container.sourcePlatformManager.installedPacks(),
                 repositories = container.sourcePlatformManager.repositories(),
+                runtimeState = diagnosticsRuntimeSnapshot(),
+                backupLogTail = state.value.backupLogText.takeLast(64_000),
             )
             getApplication<Application>().contentResolver.openOutputStream(uri, "w")?.use { output ->
                 output.write(payload)
@@ -1297,7 +1340,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         container.sourcePlatformManager.clearDiagnostics()
         container.sourceDiagnostics.clearBlackBox()
         refreshSourcePlatformState()
-        showMessage("Đã xóa nhật ký, bằng chứng Advanced và hộp đen crash-safe.")
+        showMessage("Đã xóa nhật ký, evidence RAM, critical breadcrumbs và hộp đen crash-safe.")
     }
 
     fun refreshSourceSessions() {

@@ -26,6 +26,20 @@ data class DiagnosticEvent(
     val attributes: Map<String, String> = emptyMap(),
 )
 
+/**
+ * Tiny always-on breadcrumb policy. Diagnostics OFF still hides the UI and suppresses normal
+ * telemetry, but fatal errors and install/trust/security warnings survive so a user can enable
+ * diagnostics after a failed extension install and still have something actionable to inspect.
+ */
+fun DiagnosticEvent.shouldRetainWhenDiagnosticsOff(): Boolean =
+    severity == DiagnosticSeverity.ERROR ||
+        (severity == DiagnosticSeverity.WARN && category in setOf(
+            DiagnosticCategory.PACKAGE,
+            DiagnosticCategory.TRUST,
+            DiagnosticCategory.STORE,
+            DiagnosticCategory.SECURITY,
+        ))
+
 fun interface DiagnosticSink {
     fun emit(event: DiagnosticEvent)
 
@@ -47,14 +61,24 @@ class BoundedDiagnosticRecorder(
     }
 
     override fun emit(event: DiagnosticEvent) {
-        if (level == DiagnosticLevel.OFF) return
-        if (level == DiagnosticLevel.BASIC && event.severity == DiagnosticSeverity.DEBUG) return
+        val critical = event.shouldRetainWhenDiagnosticsOff()
+        if (level == DiagnosticLevel.OFF && !critical) return
+        if (level == DiagnosticLevel.BASIC && event.severity == DiagnosticSeverity.DEBUG && !critical) return
         val safe = event.copy(attributes = DiagnosticRedactor.redact(event.attributes))
         lock.withLock {
             while (events.size >= maxEvents) events.removeFirst()
             events.addLast(safe)
         }
         runCatching { mirror.emit(safe) }
+    }
+
+    /** Restore already-redacted persisted breadcrumbs without mirroring them back to disk. */
+    fun restore(restored: List<DiagnosticEvent>) = lock.withLock {
+        restored.takeLast(maxEvents).forEach { event ->
+            val safe = event.copy(attributes = DiagnosticRedactor.redact(event.attributes))
+            while (events.size >= maxEvents) events.removeFirst()
+            events.addLast(safe)
+        }
     }
 
     fun snapshot(sourceId: String? = null, traceId: String? = null): List<DiagnosticEvent> = lock.withLock {

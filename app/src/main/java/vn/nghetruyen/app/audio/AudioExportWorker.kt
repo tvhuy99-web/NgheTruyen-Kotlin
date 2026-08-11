@@ -66,6 +66,7 @@ class AudioExportWorker(
         val jobId = inputData.getString(KEY_JOB_ID).orEmpty()
         if (jobId.isBlank()) return Result.failure()
         val job = container.libraryRepository.getAudioExportJob(jobId) ?: return Result.failure()
+        container.sourceDiagnostics.mark(name = "AUDIO_EXPORT_STARTED", sourceId = "audio-export", traceId = "audio-export:$jobId", severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.INFO, attributes = mapOf("storyId" to job.storyId, "format" to job.outputFormat, "scope" to job.scope, "packaging" to job.packaging))
         val outputFormat = runCatching { AudioExportFormat.valueOf(job.outputFormat) }.getOrDefault(AudioExportFormat.WAV)
         val packaging = runCatching { AudioExportPackaging.valueOf(job.packaging) }.getOrDefault(AudioExportPackaging.SINGLE_FILE)
         createNotificationChannel()
@@ -161,8 +162,10 @@ class AudioExportWorker(
                 jobId, chunks.size, chunks.size, DownloadState.COMPLETED, null,
             )
             completedSuccessfully = true
+            container.sourceDiagnostics.mark(name = "AUDIO_EXPORT_COMPLETED", sourceId = "audio-export", traceId = "audio-export:$jobId", severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.INFO, attributes = mapOf("storyId" to job.storyId, "segments" to chunks.size.toString(), "format" to outputFormat.name))
             Result.success(workDataOf(KEY_DESTINATION_URI to job.destinationUri))
         } catch (cancelled: CancellationException) {
+            container.sourceDiagnostics.mark(name = "AUDIO_EXPORT_CANCELLED", sourceId = "audio-export", traceId = "audio-export:$jobId", severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.WARN, attributes = mapOf("storyId" to job.storyId))
             withContext(NonCancellable) {
                 val latest = container.libraryRepository.getAudioExportJob(jobId)
                 container.libraryRepository.updateAudioExportProgress(
@@ -176,6 +179,7 @@ class AudioExportWorker(
             throw cancelled
         } catch (error: Throwable) {
             val message = error.message?.take(500) ?: "Không xuất được tệp âm thanh."
+            container.sourceDiagnostics.mark(name = "AUDIO_EXPORT_RUNTIME_ERROR", sourceId = "audio-export", traceId = "audio-export:$jobId", severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.ERROR, attributes = mapOf("storyId" to job.storyId, "error" to message, "type" to error.javaClass.simpleName, "attempt" to runAttemptCount.toString()))
             val latest = container.libraryRepository.getAudioExportJob(jobId)
             val retryable = runAttemptCount < MAX_RETRIES && error is IOException && !isStopped
             container.libraryRepository.updateAudioExportProgress(
@@ -291,6 +295,7 @@ class AudioExportWorker(
                 normalizedSegments += normalizedOutput
                 val completed = index + 1
                 container.libraryRepository.updateAudioExportProgress(job.id, completed, chunks.size, DownloadState.RUNNING, null)
+                container.sourceDiagnostics.mark(name = "AUDIO_EXPORT_SEGMENT_COMPLETED", sourceId = "audio-export", traceId = "audio-export:${job.id}", attributes = mapOf("segment" to completed.toString(), "total" to chunks.size.toString(), "reused" to reusable.toString()))
                 setProgress(workDataOf(KEY_COMPLETED to completed, KEY_TOTAL to chunks.size))
                 setForeground(
                     createForegroundInfo(

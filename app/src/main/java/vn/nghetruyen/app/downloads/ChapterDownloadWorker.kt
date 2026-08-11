@@ -54,6 +54,8 @@ class ChapterDownloadWorker(
         val application = applicationContext as? NgheTruyenApplication
             ?: return Result.failure(error("Application chưa khởi tạo AppContainer."))
         val repository = application.container.libraryRepository
+        val diagnostics = application.container.sourceDiagnostics
+        diagnostics.mark(name = "DOWNLOAD_JOB_STARTED", sourceId = sourceId, traceId = "download:$jobId", severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.INFO, attributes = mapOf("storyId" to storyId, "selectionMode" to selectionMode.name, "attempt" to runAttemptCount.toString()))
         val source = application.container.sourceRegistry.get(sourceId)
             ?: return failJob(repository, jobId, storyId, sourceId, "Nguồn truyện không tồn tại.")
         val storedStory = repository.getStory(storyId)
@@ -197,6 +199,7 @@ class ChapterDownloadWorker(
                     is AppResult.Success -> {
                         repository.saveDownloadedChapter(content.value.copy(chapter = chapter))
                         repository.clearDownloadFailure(jobId, chapter.index)
+                        diagnostics.mark(name = "DOWNLOAD_ITEM_COMPLETED", sourceId = sourceId, traceId = "download:$jobId", attributes = mapOf("storyId" to storyId, "chapterIndex" to chapter.index.toString(), "chapterTitle" to chapter.title.take(160)))
                     }
                     is AppResult.Failure -> {
                         repository.recordDownloadFailure(
@@ -270,6 +273,7 @@ class ChapterDownloadWorker(
                 currentChapterTitle = "",
             )
             publishProgress(100, "Hoàn tất")
+            diagnostics.mark(name = "DOWNLOAD_JOB_COMPLETED", sourceId = sourceId, traceId = "download:$jobId", severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.INFO, attributes = mapOf("storyId" to storyId, "chapters" to completed.toString()))
             Result.success(
                 Data.Builder()
                     .putString(KEY_STORY_ID, storyId)
@@ -293,6 +297,7 @@ class ChapterDownloadWorker(
             }
             throw cancelled
         } catch (error: Exception) {
+            diagnostics.mark(name = "DOWNLOAD_RUNTIME_ERROR", sourceId = sourceId, traceId = "download:$jobId", severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.ERROR, attributes = mapOf("storyId" to storyId, "error" to (error.message ?: error.javaClass.simpleName), "attempt" to runAttemptCount.toString()))
             repository.updateDownloadJob(
                 id = jobId,
                 storyId = storyId,
@@ -377,6 +382,7 @@ class ChapterDownloadWorker(
         completed: Int,
         total: Int,
     ): Result {
+        (applicationContext as? NgheTruyenApplication)?.container?.sourceDiagnostics?.mark(name = "DOWNLOAD_SOURCE_FAILURE", sourceId = sourceId, traceId = "download:$jobId", severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.ERROR, attributes = mapOf("storyId" to storyId, "code" to failure.code, "error" to failure.message.take(500), "completed" to completed.toString(), "total" to total.toString()))
         repository.updateDownloadJob(
             id = jobId,
             storyId = storyId,
@@ -401,6 +407,13 @@ class ChapterDownloadWorker(
         sourceId: String,
         message: String,
     ): Result {
+        (applicationContext as? NgheTruyenApplication)?.container?.sourceDiagnostics?.mark(
+    name = "DOWNLOAD_JOB_FAILED",
+    sourceId = sourceId,
+    traceId = "download:$jobId",
+    severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.ERROR,
+    attributes = mapOf("storyId" to storyId, "error" to message.take(500)),
+)
         repository.updateDownloadJob(
             id = jobId,
             storyId = storyId,

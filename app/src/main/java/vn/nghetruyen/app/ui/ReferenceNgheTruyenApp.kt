@@ -3,6 +3,7 @@ package vn.nghetruyen.app.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -19,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import vn.nghetruyen.app.audio.AudioExportRequest
 import vn.nghetruyen.app.sources.SourceUiSurface
+import vn.nghetruyen.app.ui.components.ReferenceDiagnosticsChrome
 import vn.nghetruyen.app.ui.components.ReferenceDivider
 import vn.nghetruyen.app.ui.components.ReferenceScreenBackground
 import vn.nghetruyen.app.ui.components.ReferenceTabButton
@@ -62,8 +64,15 @@ fun ReferenceNgheTruyenApp(
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
-            if (state.destination == Destination.Root) {
-                ReferencePrimaryBottomBar(selected = state.rootTab, onSelect = viewModel::setRootTab)
+            Column {
+                ReferenceDiagnosticsChrome(
+                    state = state,
+                    onExport = onExportSourceDiagnostics,
+                    onClear = viewModel::clearSourceDiagnostics,
+                )
+                if (state.destination == Destination.Root) {
+                    ReferencePrimaryBottomBar(selected = state.rootTab, onSelect = viewModel::setRootTab)
+                }
             }
         },
         containerColor = ReferenceScreenBackground,

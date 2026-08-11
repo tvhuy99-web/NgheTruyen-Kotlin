@@ -201,13 +201,22 @@ class AndroidSourceBrowserBroker(
                 data = html.toByteArray(Charsets.UTF_8),
                 attributes = mapOf(
                     "action" to request.action.name,
-                    "url" to (session.webView.url ?: request.url.orEmpty()),
+                    "url" to diagnosticUrl(session.webView.url ?: request.url.orEmpty()),
                     "title" to session.webView.title.orEmpty(),
                     "requests" to session.metadata.size.toString(),
                 ),
             ))
         }
-        val metadata = session.metadata.joinToString("\n") { it.toString() }
+        val metadata = session.metadata.joinToString("\n") { item ->
+            listOf(
+                "timestamp=${item.timestampEpochMs}",
+                "method=${item.method}",
+                "mainFrame=${item.mainFrame}",
+                "type=${item.resourceType.orEmpty()}",
+                "url=${diagnosticUrl(item.url)}",
+                "headerNames=${item.headerNames.sorted().joinToString(",")}",
+            ).joinToString(" | ")
+        }
         if (metadata.isNotBlank()) {
             evidence.capture(DiagnosticEvidence(
                 timestampEpochMs = clockMs(),
@@ -297,7 +306,7 @@ class AndroidSourceBrowserBroker(
                     attributes = mapOf(
                         "message" to message,
                         "line" to consoleMessage.lineNumber().toString(),
-                        "source" to consoleMessage.sourceId().orEmpty(),
+                        "source" to diagnosticUrl(consoleMessage.sourceId().orEmpty()),
                     ),
                 ))
                 evidence.capture(DiagnosticEvidence(
@@ -307,7 +316,7 @@ class AndroidSourceBrowserBroker(
                     category = DiagnosticCategory.BROWSER,
                     name = "browser-console-${clockMs()}.log",
                     contentType = "text/plain",
-                    data = "${consoleMessage.sourceId()}:${consoleMessage.lineNumber()} $message".toByteArray(Charsets.UTF_8),
+                    data = "${diagnosticUrl(consoleMessage.sourceId().orEmpty())}:${consoleMessage.lineNumber()} $message".toByteArray(Charsets.UTF_8),
                 ))
                 return true
             }
@@ -340,31 +349,64 @@ class AndroidSourceBrowserBroker(
                     pendingError.compareAndSet(null, "SOURCE_BROWSER_NAVIGATION_DENIED")
                     if (request.isForMainFrame) pageLatch?.countDown()
                     record(request, resourceType = "navigation-blocked")
+                    diagnostics.emit(sessionEvent(manifest, this, "BROWSER_NAVIGATION_BLOCKED", DiagnosticSeverity.WARN, DiagnosticCategory.SECURITY, mapOf(
+                        "url" to diagnosticUrl(request.url.toString()),
+                        "mainFrame" to request.isForMainFrame.toString(),
+                    )))
                 }
                 return true
             }
 
             override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
-                sessionRef.get()?.recordUrl(url)
+                sessionRef.get()?.apply {
+                    recordUrl(url)
+                    diagnostics.emit(sessionEvent(manifest, this, "BROWSER_PAGE_STARTED", DiagnosticSeverity.INFO, attributes = mapOf(
+                        "url" to diagnosticUrl(url),
+                        "requests" to metadata.size.toString(),
+                    )))
+                }
             }
 
             override fun onPageFinished(view: WebView, url: String) {
                 sessionRef.get()?.apply {
                     recordUrl(url)
+                    diagnostics.emit(sessionEvent(manifest, this, "BROWSER_PAGE_FINISHED", DiagnosticSeverity.INFO, attributes = mapOf(
+                        "url" to diagnosticUrl(url),
+                        "requests" to metadata.size.toString(),
+                    )))
                     pageLatch?.countDown()
                 }
             }
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-                if (request.isForMainFrame) sessionRef.get()?.apply {
-                    pendingError.compareAndSet(null, "SOURCE_BROWSER_LOAD_ERROR:${error.errorCode}")
-                    pageLatch?.countDown()
+                sessionRef.get()?.apply {
+                    diagnostics.emit(sessionEvent(
+                        manifest,
+                        this,
+                        "BROWSER_WEB_ERROR",
+                        if (request.isForMainFrame) DiagnosticSeverity.ERROR else DiagnosticSeverity.WARN,
+                        DiagnosticCategory.NETWORK,
+                        mapOf(
+                            "code" to error.errorCode.toString(),
+                            "description" to error.description.toString().take(400),
+                            "url" to diagnosticUrl(request.url.toString()),
+                            "mainFrame" to request.isForMainFrame.toString(),
+                        ),
+                    ))
+                    if (request.isForMainFrame) {
+                        pendingError.compareAndSet(null, "SOURCE_BROWSER_LOAD_ERROR:${error.errorCode}")
+                        pageLatch?.countDown()
+                    }
                 }
             }
 
             override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: android.net.http.SslError) {
                 handler.cancel()
                 sessionRef.get()?.apply {
+                    diagnostics.emit(sessionEvent(manifest, this, "BROWSER_SSL_ERROR", DiagnosticSeverity.ERROR, DiagnosticCategory.SECURITY, mapOf(
+                        "primary" to error.primaryError.toString(),
+                        "url" to diagnosticUrl(error.url.orEmpty()),
+                    )))
                     pendingError.compareAndSet(null, "SOURCE_BROWSER_SSL_ERROR")
                     pageLatch?.countDown()
                 }
@@ -374,6 +416,10 @@ class AndroidSourceBrowserBroker(
             override fun onSafeBrowsingHit(view: WebView, request: WebResourceRequest, threatType: Int, callback: SafeBrowsingResponse) {
                 callback.backToSafety(true)
                 sessionRef.get()?.apply {
+                    diagnostics.emit(sessionEvent(manifest, this, "BROWSER_SAFE_BROWSING_BLOCKED", DiagnosticSeverity.ERROR, DiagnosticCategory.SECURITY, mapOf(
+                        "threatType" to threatType.toString(),
+                        "url" to diagnosticUrl(request.url.toString()),
+                    )))
                     pendingError.compareAndSet(null, "SOURCE_BROWSER_SAFE_BROWSING_BLOCKED:$threatType")
                     pageLatch?.countDown()
                 }
@@ -383,10 +429,20 @@ class AndroidSourceBrowserBroker(
                 val session = sessionRef.get()
                 if (session?.isBlocked(request.url.toString()) == true) {
                     session.record(request, resourceType = "policy-blocked")
+                    diagnostics.emit(sessionEvent(manifest, session, "BROWSER_RESOURCE_POLICY_BLOCKED", DiagnosticSeverity.DEBUG, DiagnosticCategory.SECURITY, mapOf(
+                        "url" to diagnosticUrl(request.url.toString()),
+                        "mainFrame" to request.isForMainFrame.toString(),
+                    )))
                     return blockedResponse()
                 }
                 if (!isAllowedRedirect(manifest, request.url.toString())) {
                     session?.record(request, resourceType = "resource-blocked")
+                    if (session != null) {
+                        diagnostics.emit(sessionEvent(manifest, session, "BROWSER_RESOURCE_ORIGIN_BLOCKED", DiagnosticSeverity.WARN, DiagnosticCategory.SECURITY, mapOf(
+                            "url" to diagnosticUrl(request.url.toString()),
+                            "mainFrame" to request.isForMainFrame.toString(),
+                        )))
+                    }
                     if (request.isForMainFrame) {
                         session?.pendingError?.compareAndSet(null, "SOURCE_BROWSER_NAVIGATION_DENIED")
                         session?.pageLatch?.countDown()
@@ -399,6 +455,10 @@ class AndroidSourceBrowserBroker(
 
             override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
                 sessionRef.get()?.apply {
+                    diagnostics.emit(sessionEvent(manifest, this, "BROWSER_RENDERER_GONE", DiagnosticSeverity.ERROR, DiagnosticCategory.BROWSER, mapOf(
+                        "didCrash" to detail.didCrash().toString(),
+                        "requests" to metadata.size.toString(),
+                    )))
                     rendererGone = true
                     pendingError.compareAndSet(null, "SOURCE_BROWSER_RENDERER_GONE:${detail.didCrash()}")
                     pageLatch?.countDown()
@@ -522,11 +582,31 @@ class AndroidSourceBrowserBroker(
     private fun waitSelector(session: Session, request: SourceBrowserRequest): String {
         val selector = request.selector ?: error("SOURCE_BROWSER_SELECTOR_REQUIRED")
         val deadline = clockMs() + request.timeoutMs
+        var polls = 0
         do {
+            polls += 1
             val found = evaluate(session, "Boolean(document.querySelector(${jsString(selector)}))", 5_000) == "true"
-            if (found) return "true"
+            if (found) {
+                diagnostics.emit(event(manifest = session.manifest, request = request, name = "BROWSER_SELECTOR_FOUND", severity = DiagnosticSeverity.INFO, attributes = mapOf(
+                    "selector" to selector.take(1_000),
+                    "polls" to polls.toString(),
+                    "elapsedMs" to (request.timeoutMs - (deadline - clockMs()).coerceAtLeast(0L)).toString(),
+                )))
+                return "true"
+            }
+            if (polls == 1 || polls % 5 == 0) {
+                diagnostics.emit(event(manifest = session.manifest, request = request, name = "BROWSER_SELECTOR_PROBE", severity = DiagnosticSeverity.DEBUG, attributes = mapOf(
+                    "selector" to selector.take(1_000),
+                    "polls" to polls.toString(),
+                    "remainingMs" to (deadline - clockMs()).coerceAtLeast(0L).toString(),
+                )))
+            }
             Thread.sleep(100)
         } while (clockMs() < deadline && !session.rendererGone)
+        diagnostics.emit(event(manifest = session.manifest, request = request, name = "BROWSER_SELECTOR_TIMEOUT", severity = DiagnosticSeverity.WARN, attributes = mapOf(
+            "selector" to selector.take(1_000),
+            "polls" to polls.toString(),
+        )))
         error("SOURCE_BROWSER_SELECTOR_NOT_FOUND")
     }
 
@@ -574,7 +654,9 @@ class AndroidSourceBrowserBroker(
         """.trimIndent()
         evaluate(session, bootstrap, minOf(5_000L, request.timeoutMs))
         val deadline = clockMs() + request.timeoutMs
+        var polls = 0
         do {
+            polls += 1
             val state = evaluate(session, "JSON.stringify((window.__ngheAsyncResults||{})[${jsString(token)}]||null)", minOf(5_000L, (deadline - clockMs()).coerceAtLeast(100L)))
             if (state.isNotBlank() && state != "null") {
                 val parsed = runCatching { org.json.JSONObject(state) }.getOrNull()
@@ -589,12 +671,23 @@ class AndroidSourceBrowserBroker(
                         else -> value.toString()
                     }
                     require(encoded.toByteArray(Charsets.UTF_8).size <= request.maxOutputBytes) { "SOURCE_BROWSER_OUTPUT_TOO_LARGE" }
+                    diagnostics.emit(event(session.manifest, request, "BROWSER_ASYNC_SCRIPT_RESOLVED", DiagnosticSeverity.INFO, attributes = mapOf(
+                        "polls" to polls.toString(),
+                        "outputBytes" to encoded.toByteArray(Charsets.UTF_8).size.toString(),
+                    )))
                     return encoded
                 }
+            }
+            if (polls == 1 || polls % 10 == 0) {
+                diagnostics.emit(event(session.manifest, request, "BROWSER_ASYNC_SCRIPT_POLL", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                    "polls" to polls.toString(),
+                    "remainingMs" to (deadline - clockMs()).coerceAtLeast(0L).toString(),
+                )))
             }
             Thread.sleep(50)
         } while (clockMs() < deadline)
         runCatching { evaluate(session, "delete (window.__ngheAsyncResults||{})[${jsString(token)}]", 2_000L) }
+        diagnostics.emit(event(session.manifest, request, "BROWSER_ASYNC_SCRIPT_TIMEOUT", DiagnosticSeverity.WARN, attributes = mapOf("polls" to polls.toString())))
         error("SOURCE_BROWSER_TIMEOUT")
     }
 
@@ -699,6 +792,31 @@ class AndroidSourceBrowserBroker(
         durationMs: Long? = null,
         attributes: Map<String, String> = emptyMap(),
     ) = DiagnosticEvent(clockMs(), request.traceId, manifest.id, manifest.version.toString(), DiagnosticCategory.BROWSER, name, severity, durationMs, attributes)
+
+    private fun sessionEvent(
+        manifest: SourceManifest,
+        session: Session,
+        name: String,
+        severity: DiagnosticSeverity = DiagnosticSeverity.INFO,
+        category: DiagnosticCategory = DiagnosticCategory.BROWSER,
+        attributes: Map<String, String> = emptyMap(),
+    ) = DiagnosticEvent(
+        clockMs(),
+        session.currentTraceId.ifBlank { "browser-session:${manifest.id}" },
+        manifest.id,
+        manifest.version.toString(),
+        category,
+        name,
+        severity,
+        null,
+        attributes,
+    )
+
+    private fun diagnosticUrl(value: String): String = runCatching {
+        val uri = java.net.URI(value)
+        if (!uri.scheme.equals("https", ignoreCase = true) || uri.host.isNullOrBlank()) "[redacted-url]"
+        else "https://${uri.host}${uri.rawPath.orEmpty().take(300)}"
+    }.getOrDefault("[invalid-url]")
 
     private class Session(
         val manifest: SourceManifest,

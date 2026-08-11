@@ -106,7 +106,7 @@ class SourcePlatformManager(
         cryptoBroker = cryptoBroker,
         webSocketBroker = webSocketBroker,
     )
-    private val vBookRuntime = VBookJsRuntime(brokers, diagnostics)
+    private val vBookRuntime = VBookJsRuntime(brokers, diagnostics, evidence = evidence)
     private val executor = SourcePackActionExecutor { pack, resources, request ->
         when (pack.manifest.runtime.mode) {
             SourceRuntimeMode.DECLARATIVE -> declarativeRuntime.execute(pack.manifest, resources, request)
@@ -215,7 +215,7 @@ class SourcePlatformManager(
         }
         rememberRepository(normalized, raw, verified)
         repositories().first { it.id == verified.index.repositoryId }
-    }
+    }.onFailure { recordExtensionFailure("repository_refresh", null, it) }
 
     fun removeRepository(repositoryId: String): Result<Unit> = runCatching {
         require(REPOSITORY_ID.matches(repositoryId)) { "Repository ID không hợp lệ." }
@@ -246,7 +246,7 @@ class SourcePlatformManager(
         require(pack.manifest.version == entry.version) { "Repository và gói nguồn không cùng phiên bản." }
         require(pack.packageSha256 == entry.packageSha256) { "Hash gói nguồn không khớp repository." }
         preparePack(pack)
-    }
+    }.onFailure { recordExtensionFailure("repository_prepare_install", sourceId, it) }
 
     fun prepareInstall(input: InputStream): Result<SourceInstallPreview> = runCatching {
         val pack = when (val result = verifier.verify(input, trustRegistry.allKeys())) {
@@ -254,7 +254,7 @@ class SourcePlatformManager(
             is SourcePlatformResult.Failure -> error("${result.error.code}: ${result.error.message}")
         }
         preparePack(pack)
-    }
+    }.onFailure { recordExtensionFailure("sourcepack_prepare_install", null, it) }
 
     /**
      * Preview a raw vBook ZIP without converting it to SourcePack. The existing UI preview model is
@@ -307,13 +307,13 @@ class SourcePlatformManager(
             permissionSummary = permissionSummary(diff),
             fixtureCount = preview.validation.audit?.features?.size ?: 0,
         )
-    }
+    }.onFailure { recordExtensionFailure("vbook_prepare_import", "vbook-import", it) }
 
     fun prepareNativeLuaImport(input: InputStream): Result<SourceInstallPreview> = runCatching {
         val (pack, warnings) = NativeLuaArchiveImporter.import(input)
         pendingWarnings = warnings
         preparePack(pack)
-    }
+    }.onFailure { recordExtensionFailure("native_lua_prepare_import", "native-lua-import", it) }
 
     fun pendingInstallWarnings(): List<String> = pendingWarnings
 
@@ -367,6 +367,8 @@ class SourcePlatformManager(
         pendingPack = null
         pendingWarnings = emptyList()
         installedPacks().first { it.id == installed.sourceId }
+    }.onFailure {
+        recordExtensionFailure("confirm_install", pendingVBook?.sourceId ?: pendingPack?.manifest?.id, it)
     }
 
     fun cancelPendingInstall() {
@@ -631,6 +633,25 @@ class SourcePlatformManager(
         if (diff.addedCrypto.isNotEmpty()) add("Mật mã: ${diff.addedCrypto.joinToString()}")
         if (diff.websocketEnabled) add("WebSocket")
         if (isEmpty()) add("Không yêu cầu thêm quyền")
+    }
+
+    private fun recordExtensionFailure(stage: String, sourceId: String?, error: Throwable) {
+        diagnostics.emit(
+            DiagnosticEvent(
+                timestampEpochMs = System.currentTimeMillis(),
+                traceId = "extension-install:${UUID.randomUUID()}",
+                sourceId = sourceId?.takeIf(String::isNotBlank) ?: "source-platform",
+                category = DiagnosticCategory.PACKAGE,
+                name = "SOURCE_EXTENSION_INSTALL_FAILED",
+                severity = DiagnosticSeverity.ERROR,
+                attributes = mapOf(
+                    "stage" to stage,
+                    "message" to (error.message ?: error.javaClass.simpleName).take(1_000),
+                    "errorType" to error.javaClass.simpleName,
+                    "pendingWarnings" to pendingWarnings.take(20).joinToString(" | ").take(2_000),
+                ),
+            ),
+        )
     }
 
     private data class PendingVBookImport(

@@ -573,6 +573,7 @@ class ReaderPlaybackService : Service() {
             return
         }
         if (ttsReady) {
+            tts.setAudioAttributes(speechAudioAttributes())
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) = Unit
                 override fun onError(utteranceId: String?) {
@@ -945,12 +946,7 @@ class ReaderPlaybackService : Service() {
         sonicPlayer?.release()
         sonicPlayer = runCatching {
             MediaPlayer().apply {
-                setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                        .build(),
-                )
+                setAudioAttributes(speechAudioAttributes())
                 setDataSource(this@ReaderPlaybackService, Uri.fromFile(file))
                 setVolume(1f, 1f)
                 setOnCompletionListener {
@@ -1223,14 +1219,36 @@ class ReaderPlaybackService : Service() {
         if (prefetchParentId == snapshot.chapterId && prefetchJob?.isActive == true) return
         if (snapshot.sourceId != "offline" && snapshot.nextChapterUrl.isNullOrBlank()) return
 
+        if (autoVoiceCastEnabled && prefetchNarrationPlansEnabled) {
+            PlaybackQueueStore.setNarrationAutomation(
+                stage = NarrationAutomationStage.NEXT_LOADING,
+                progress = 0.15f,
+                message = "Đã tới 75% chương. Đang tải chương tiếp theo để phân vai trước…",
+            )
+        }
         prefetchJob?.cancel()
         prefetchParentId = snapshot.chapterId
         prefetchJob = serviceScope.launch {
             val next = loadNextChapter(snapshot)
             if (next != null && PlaybackQueueStore.state.value.chapterId == snapshot.chapterId) {
+                if (autoVoiceCastEnabled && prefetchNarrationPlansEnabled) {
+                    PlaybackQueueStore.setNarrationAutomation(
+                        stage = NarrationAutomationStage.NEXT_PLANNING,
+                        progress = 0.45f,
+                        message = "Đã tải ${next.chapter.title}. Đang phân vai chương tiếp theo…",
+                    )
+                }
                 NextChapterCache.put(snapshot.chapterId, next)
                 persistPlaybackQueue(snapshot)
                 maybePrefetchNarrationPlans(next, snapshot.sourceId)
+            } else if (autoVoiceCastEnabled && prefetchNarrationPlansEnabled &&
+                PlaybackQueueStore.state.value.chapterId == snapshot.chapterId
+            ) {
+                PlaybackQueueStore.setNarrationAutomation(
+                    stage = NarrationAutomationStage.FAILED,
+                    progress = 1f,
+                    message = "Không tải được chương tiếp theo để phân vai trước.",
+                )
             }
         }
     }
@@ -1297,11 +1315,18 @@ class ReaderPlaybackService : Service() {
         }
     }
 
+    private fun shouldPlanAutoSceneMusic(): Boolean = backgroundMusicEnabled && autoSceneMusicEnabled
+
     private fun prepareCurrentNarrationBeforePlayback(snapshot: PlaybackSnapshot): Boolean {
         if (!autoVoiceCastEnabled || snapshot.chapterId.isBlank()) return false
         if (narrationPreparedChapterId == snapshot.chapterId) return false
         pendingPlay = true
         PlaybackQueueStore.setPlaying(false)
+        PlaybackQueueStore.setNarrationAutomation(
+            stage = NarrationAutomationStage.CURRENT_PLANNING,
+            progress = 0.55f,
+            message = "Đang kiểm tra/phân vai chương hiện tại: ${snapshot.chapterTitle}",
+        )
         transitionMessage = "Đang phân vai và chuẩn bị nhạc nền…"
         updateMediaState()
         updateNotification()
@@ -1310,24 +1335,47 @@ class ReaderPlaybackService : Service() {
         narrationPlanningChapterId = snapshot.chapterId
         narrationPlanJob?.cancel()
         narrationPlanJob = serviceScope.launch {
-            val warnings = runCatching {
+            val planningAttempt = runCatching {
                 val content = container.libraryRepository.loadCachedChapter(snapshot.chapterId)
                     ?: error("Không tải được chương để chuẩn bị phân vai.")
                 container.narrationPlanCoordinator.ensurePlans(
                     content = content,
                     voice = true,
-                    music = autoSceneMusicEnabled,
+                    music = shouldPlanAutoSceneMusic(),
                     activeTrackId = sceneMusicController.activeTrackId,
-                ).warnings
-            }.getOrElse { error ->
-                listOf(error.message ?: "Không chuẩn bị được phân vai TTS.")
+                )
             }
+            val planResult = planningAttempt.getOrNull()
+            val warnings = planResult?.warnings ?: listOf(
+                planningAttempt.exceptionOrNull()?.message ?: "Không chuẩn bị được phân vai TTS.",
+            )
+            PlaybackQueueStore.setNarrationAutomation(
+                stage = NarrationAutomationStage.CURRENT_APPLYING,
+                progress = 0.85f,
+                message = if (planResult == null) {
+                    "Phân vai tự động gặp lỗi. Đang áp dụng cấu hình giọng hiện có…"
+                } else {
+                    "Đã nhận kế hoạch. Đang áp dụng giọng${if (shouldPlanAutoSceneMusic()) " và nhạc cảnh" else ""}…"
+                },
+            )
             val configured = applyConfiguredVoice(useStoryProfile = true)
             withContext(Dispatchers.Main) {
                 if (PlaybackQueueStore.state.value.chapterId != snapshot.chapterId) return@withContext
                 narrationPreparedChapterId = snapshot.chapterId
                 narrationPlanningChapterId = ""
                 voiceSettingsReady = configured
+                val created = planResult?.let { it.voicePlanCreated || it.musicPlanCreated } == true
+                val musicApplied = hasSceneMusicPlan()
+                val statusMessage = when {
+                    planResult == null -> "Phân vai tự động lỗi; đang đọc bằng cấu hình/phân vai hiện có."
+                    created -> "Đã áp dụng phân vai mới${if (musicApplied) " + nhạc cảnh" else ""} cho chương hiện tại."
+                    else -> "Đã áp dụng phân vai đã lưu${if (musicApplied) " + nhạc cảnh" else ""} cho chương hiện tại."
+                } + warnings.firstOrNull()?.takeIf(String::isNotBlank)?.let { " • ${it.take(120)}" }.orEmpty()
+                PlaybackQueueStore.setNarrationAutomation(
+                    stage = if (planResult == null) NarrationAutomationStage.FAILED else NarrationAutomationStage.CURRENT_READY,
+                    progress = 1f,
+                    message = statusMessage,
+                )
                 transitionMessage = warnings.firstOrNull()?.take(180)
                 if (configured && pendingPlay) {
                     pendingPlay = false
@@ -1346,14 +1394,40 @@ class ReaderPlaybackService : Service() {
         narrationPrefetchJob?.cancel()
         narrationPrefetchJob = serviceScope.launch {
             var current: ChapterContent? = content
-            repeat(narrationPrefetchWindowChapters.coerceIn(1, 5)) {
+            repeat(narrationPrefetchWindowChapters.coerceIn(1, 5)) { offset ->
                 val chapter = current ?: return@repeat
-                container.narrationPlanCoordinator.ensurePlans(
-                    content = chapter,
-                    voice = true,
-                    music = autoSceneMusicEnabled,
-                    activeTrackId = if (chapter.chapter.id == content.chapter.id) sceneMusicController.activeTrackId else null,
-                )
+                val attempt = runCatching {
+                    container.narrationPlanCoordinator.ensurePlans(
+                        content = chapter,
+                        voice = true,
+                        music = shouldPlanAutoSceneMusic(),
+                        activeTrackId = if (offset == 0) sceneMusicController.activeTrackId else null,
+                    )
+                }
+                val result = attempt.getOrNull()
+                if (offset == 0) {
+                    val failed = result == null || (
+                        result.warnings.isNotEmpty() && !result.voicePlanCreated && !result.musicPlanCreated
+                    )
+                    val musicLabel = if (shouldPlanAutoSceneMusic()) " + nhạc cảnh" else ""
+                    val baseMessage = when {
+                        result == null -> "Không phân vai trước được chương tiếp theo: ${chapter.chapter.title}."
+                        failed -> "Phân vai trước chương tiếp theo chưa thành công: ${chapter.chapter.title}."
+                        result.voicePlanCreated || result.musicPlanCreated ->
+                            "Đã phân vai$musicLabel chương tiếp theo: ${chapter.chapter.title}."
+                        else -> "Chương tiếp theo đã có phân vai$musicLabel hợp lệ: ${chapter.chapter.title}."
+                    }
+                    val warning = result?.warnings?.firstOrNull()?.takeIf(String::isNotBlank)
+                        ?: attempt.exceptionOrNull()?.message
+                    PlaybackQueueStore.setNarrationAutomation(
+                        stage = if (failed) NarrationAutomationStage.FAILED else NarrationAutomationStage.NEXT_READY,
+                        progress = 1f,
+                        message = baseMessage + warning?.let { " • ${it.take(120)}" }.orEmpty(),
+                    )
+                    if (failed) return@launch
+                } else if (result == null) {
+                    return@launch
+                }
                 val cached = container.libraryRepository.loadNextCachedChapter(
                     storyId = chapter.chapter.storyId,
                     chapterIndex = chapter.chapter.index,
@@ -1964,15 +2038,15 @@ class ReaderPlaybackService : Service() {
         updateNotification()
     }
 
+    private fun speechAudioAttributes(): AudioAttributes = AudioAttributes.Builder()
+        .setUsage(AudioAttributes.USAGE_MEDIA)
+        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+        .build()
+
     private fun requestAudioFocus(): Boolean {
         if (hasAudioFocus) return true
         val request = audioFocusRequest ?: AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                    .build(),
-            )
+            .setAudioAttributes(speechAudioAttributes())
             .setWillPauseWhenDucked(interruptionMode == AudioInterruptionMode.PAUSE)
             .setOnAudioFocusChangeListener { change ->
                 mainHandler.post { handleAudioFocusChange(change) }

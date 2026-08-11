@@ -24,6 +24,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
@@ -455,6 +456,21 @@ fun ReaderScreen(
                         ReaderButton(if (sourceDescriptor.id in state.sourceSessions) "MỞ LẠI PHIÊN" else "ĐĂNG NHẬP NGUỒN", { onOpenSourceLogin(sourceDescriptor.id) }, Modifier.weight(1f), normalColor = ReferenceGray)
                     }
                     ReaderButton(if (sourceDescriptor.id in state.sourceHealthChecking) "ĐANG KIỂM TRA" else "KIỂM TRA NGUỒN", { onCheckSource(sourceDescriptor.id) }, Modifier.weight(1f), enabled = sourceDescriptor.id !in state.sourceHealthChecking, normalColor = ReferenceGray)
+                }
+            }
+            if (state.autoVoiceCastEnabled) {
+                val autoNarrationStatus = state.playback.narrationMessage ?: if (state.prefetchNarrationPlansEnabled) {
+                    "Tự phân vai đang bật. Từ 75% chương, ứng dụng sẽ tải và phân vai trước chương tiếp theo."
+                } else {
+                    "Tự phân vai đang bật. Tải/phân vai trước chương tiếp theo đang tắt trong cài đặt."
+                }
+                Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
+                    Text("TỰ PHÂN VAI", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
+                    LinearProgressIndicator(
+                        progress = { state.playback.narrationProgress.coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    )
+                    Text(autoNarrationStatus, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
                 }
             }
             Row(Modifier.fillMaxWidth()) {

@@ -3549,7 +3549,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun voiceCast() = planNarrationForCurrentChapter(includeVoice = true, includeMusic = false)
+    fun voiceCast() = planNarrationForCurrentChapter(
+        includeVoice = true,
+        includeMusic = state.value.backgroundMusicEnabled && state.value.autoSceneMusicEnabled,
+    )
 
     fun planSceneMusic() = planNarrationForCurrentChapter(includeVoice = false, includeMusic = true)
 

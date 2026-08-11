@@ -27,6 +27,17 @@ enum class PlaybackPreparationState {
     FAILED,
 }
 
+enum class NarrationAutomationStage {
+    IDLE,
+    CURRENT_PLANNING,
+    CURRENT_APPLYING,
+    CURRENT_READY,
+    NEXT_LOADING,
+    NEXT_PLANNING,
+    NEXT_READY,
+    FAILED,
+}
+
 data class PlaybackSnapshot(
     val sourceId: String = "",
     val storyId: String = "",
@@ -47,6 +58,9 @@ data class PlaybackSnapshot(
     val sleepTimerEndsAtMillis: Long? = null,
     val preparationState: PlaybackPreparationState = PlaybackPreparationState.READY,
     val preparationMessage: String? = null,
+    val narrationStage: NarrationAutomationStage = NarrationAutomationStage.IDLE,
+    val narrationProgress: Float = 0f,
+    val narrationMessage: String? = null,
 ) {
     /** Full paragraph shown by the reader and referenced by persisted progress. */
     val currentParagraph: String?
@@ -166,6 +180,18 @@ object PlaybackQueueStore {
             preparationState = state,
             preparationMessage = message?.take(240),
             isPlaying = if (state == PlaybackPreparationState.READY) mutable.value.isPlaying else false,
+        )
+    }
+
+    fun setNarrationAutomation(
+        stage: NarrationAutomationStage,
+        progress: Float,
+        message: String?,
+    ) {
+        mutable.value = mutable.value.copy(
+            narrationStage = stage,
+            narrationProgress = progress.coerceIn(0f, 1f),
+            narrationMessage = message?.take(260),
         )
     }
 

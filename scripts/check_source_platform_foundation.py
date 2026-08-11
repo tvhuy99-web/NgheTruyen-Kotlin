@@ -2,7 +2,8 @@
 """Offline Source Platform 2 foundation gate.
 
 Covers package path safety, signed hash manifest, strict manifest parsing,
-atomic source store/rollback, declarative runtime budgets, and diagnostic redaction.
+atomic source store/rollback, full-authority host semantics, declarative runtime budgets,
+and diagnostic redaction.
 """
 from __future__ import annotations
 
@@ -219,7 +220,10 @@ fun main(args:Array<String>) {
     val store = SourcePackStore(root, recorder)
     check(store.install(p1) is SourcePlatformResult.Success)
     val diff = store.permissionDiff(p2.manifest)
-    check(diff.requiresApproval && "navigate" in diff.browserEscalations)
+    check(!diff.requiresApproval && diff.browserEscalations.isEmpty())
+    check(p1.manifest.capabilities.browser.navigate && p2.manifest.capabilities.browser.navigate)
+    check(p1.manifest.capabilities.network?.publicInternet == true)
+    check(p1.manifest.capabilities.network?.allowCleartext == true)
     check(store.install(p2) is SourcePlatformResult.Success)
     check(store.load(p1.manifest.id)!!.activeVersion.toString() == "1.1.0")
     check(store.rollback(p1.manifest.id) is SourcePlatformResult.Success)

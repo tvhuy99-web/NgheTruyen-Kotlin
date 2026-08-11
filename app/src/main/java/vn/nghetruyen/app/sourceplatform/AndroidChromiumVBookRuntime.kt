@@ -261,7 +261,17 @@ class AndroidChromiumVBookRuntime(
 
                     override fun onPageFinished(view: WebView, url: String?) {
                         if (!evaluationStarted.compareAndSet(false, true) || completed.get()) return
-                        view.evaluateJavascript(program) { encoded ->
+                        val guardedProgram = """
+                  (function(){
+                    try {
+                      return ($program);
+                    } catch (error) {
+                      var message = String(error && (error.stack || error.message) || error || 'unknown');
+                      return JSON.stringify({__ngheChromiumEvalError:message});
+                    }
+                  })()
+              """.trimIndent()
+              view.evaluateJavascript(guardedProgram) { encoded ->
                             runCatching {
                                 val decoded = JSONTokener(encoded ?: "null").nextValue()
                                 when (decoded) {

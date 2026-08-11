@@ -152,7 +152,18 @@ internal object ChromiumVBookPrelude {
                 Object.defineProperty(out,'length',{get:function(){return out.keys('').length;}});
                 return out;
               }
-              global.Storage=global.localStorage=__storage('');
+              function __installHostGlobal(name,value){
+      name=String(name||'');
+      try {
+        Object.defineProperty(global,name,{value:value,writable:true,configurable:true,enumerable:true});
+        return value;
+      } catch(error) {
+        throw new Error('CHROMIUM_GLOBAL_INSTALL_FAILED:'+name+':'+String(error&&(error.message||error)||'unknown'));
+      }
+    }
+    var __vbookLocalStorage=__storage('');
+    __installHostGlobal('Storage',__vbookLocalStorage);
+    __installHostGlobal('localStorage',__vbookLocalStorage);
               global.cacheStorage=__storage('cache:');
               global.localConfig=Object.freeze({getItem:function(){return undefined;},key:function(){return undefined;},length:0});
 

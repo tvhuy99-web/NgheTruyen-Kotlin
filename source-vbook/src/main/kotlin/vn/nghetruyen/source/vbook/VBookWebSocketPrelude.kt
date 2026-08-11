@@ -64,8 +64,6 @@ object VBookWebSocketPrelude {
             ${VBookFetchSafePrelude.build()}
 
             ${VBookBrowserPatternPrelude.build()}
-
-            ${VBookAppKernelPrelude.build()}
         """.trimIndent()
     }
 }

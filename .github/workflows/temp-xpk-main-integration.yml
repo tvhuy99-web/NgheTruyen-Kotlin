@@ -31,6 +31,8 @@ jobs:
       - name: Squash feature branch onto current main
         shell: bash
         run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main agent/xpk-six-parity-fixes
           git merge --squash origin/agent/xpk-six-parity-fixes
           rm .github/workflows/temp-xpk-main-integration.yml
@@ -63,8 +65,6 @@ jobs:
       - name: Commit integrated tree
         shell: bash
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "fix: integrate XPK narration and voice switch semantics"
           git push origin HEAD:agent/xpk-main-integration

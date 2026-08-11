@@ -16,6 +16,10 @@ fun interface SourceHostKernelBroker {
     companion object {
         val UNAVAILABLE = SourceHostKernelBroker { _, command, traceId ->
             SourceHostKernelContract.validate(command)
+            unavailable(command, traceId)
+        }
+
+        private fun unavailable(command: SourceHostCommand, traceId: String): SourcePlatformResult.Failure =
             SourcePlatformResult.Failure(
                 SourcePlatformFailure(
                     code = SourceErrorCode.INTERNAL_ERROR,
@@ -23,7 +27,47 @@ fun interface SourceHostKernelBroker {
                     traceId = traceId,
                 ),
             )
-        }
+    }
+}
+
+fun interface SourceHostCommandHandler {
+    fun execute(
+        sourceId: String,
+        payload: JsonValue.Obj,
+        traceId: String,
+    ): SourcePlatformResult<JsonValue>
+}
+
+/**
+ * Small deterministic router used by the NgheTruyen host to bind commands to app-owned handlers.
+ * Registering handlers is host wiring, not extension permission negotiation.
+ */
+class SourceHostKernelDispatcher(
+    handlers: Map<Pair<String, String>, SourceHostCommandHandler> = emptyMap(),
+) : SourceHostKernelBroker {
+    private val handlers = LinkedHashMap(handlers)
+
+    fun register(domain: String, action: String, handler: SourceHostCommandHandler): SourceHostKernelDispatcher {
+        SourceHostKernelContract.validate(SourceHostCommand(domain, action))
+        handlers[domain to action] = handler
+        return this
+    }
+
+    override fun execute(
+        sourceId: String,
+        command: SourceHostCommand,
+        traceId: String,
+    ): SourcePlatformResult<JsonValue> {
+        SourceHostKernelContract.validate(command)
+        val handler = handlers[command.domain to command.action]
+            ?: return SourcePlatformResult.Failure(
+                SourcePlatformFailure(
+                    code = SourceErrorCode.INTERNAL_ERROR,
+                    message = "SOURCE_HOST_COMMAND_HANDLER_UNAVAILABLE:${command.domain}:${command.action}",
+                    traceId = traceId,
+                ),
+            )
+        return handler.execute(sourceId, command.payload, traceId)
     }
 }
 

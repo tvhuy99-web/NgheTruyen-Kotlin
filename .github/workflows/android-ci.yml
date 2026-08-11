@@ -25,9 +25,10 @@ jobs:
 
       # BEGIN ONE_SHOT_VOICE_CAST_PATCH
       - name: Apply voice-cast autoplay and accessibility patch
-        if: github.event_name == 'push' && github.ref == 'refs/heads/agent/xpk-six-parity-fixes'
         shell: bash
         run: |
+          git fetch origin agent/xpk-six-parity-fixes
+          git checkout -B agent/xpk-six-parity-fixes origin/agent/xpk-six-parity-fixes
           python3 scripts/apply_voice_cast_autoplay_accessibility.py
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

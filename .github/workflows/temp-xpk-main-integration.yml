@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - agent/xpk-main-integration
+  pull_request:
+    branches:
+      - main
+    types: [opened, reopened, synchronize]
 
 permissions:
   contents: write
@@ -14,6 +18,7 @@ concurrency:
 
 jobs:
   integrate:
+    if: github.event_name == 'push' || github.event.pull_request.head.ref == 'agent/xpk-main-integration'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -27,7 +32,6 @@ jobs:
         shell: bash
         run: |
           git fetch origin main agent/xpk-six-parity-fixes
-          test "$(git rev-parse HEAD^)" = "$(git rev-parse origin/main)" || true
           git merge --squash origin/agent/xpk-six-parity-fixes
           rm .github/workflows/temp-xpk-main-integration.yml
 

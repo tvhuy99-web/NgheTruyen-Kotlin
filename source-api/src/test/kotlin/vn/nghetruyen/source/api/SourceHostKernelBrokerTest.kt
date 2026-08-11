@@ -86,4 +86,23 @@ class SourceHostKernelBrokerTest {
         }.exceptionOrNull()
         assertTrue(failure?.message.orEmpty().contains("SOURCE_HOST_EVENT_INVALID"))
     }
+
+    @Test
+    fun eventBusRoutesOnlyToRegisteredSourceAndSupportsReplacement() {
+        val sourceId = "vn.nghetruyen.sources.events"
+        val firstEvents = mutableListOf<String>()
+        val secondEvents = mutableListOf<String>()
+        val first = SourceHostEventSink { _, event, traceId -> firstEvents += "${event.name}:$traceId" }
+        val second = SourceHostEventSink { _, event, traceId -> secondEvents += "${event.name}:$traceId" }
+
+        SourceHostEventBus.register(sourceId, first)
+        SourceHostEventBus.emit(sourceId, SourceHostKernelContract.event("reader.enter"), "trace-first")
+        SourceHostEventBus.register(sourceId, second)
+        SourceHostEventBus.emit(sourceId, SourceHostKernelContract.event("playback.changed"), "trace-second")
+        SourceHostEventBus.unregister(sourceId, second)
+        SourceHostEventBus.emit(sourceId, SourceHostKernelContract.event("library.changed"), "trace-dropped")
+
+        assertEquals(listOf("reader.enter:trace-first"), firstEvents)
+        assertEquals(listOf("playback.changed:trace-second"), secondEvents)
+    }
 }

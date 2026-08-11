@@ -272,12 +272,12 @@ internal object ChromiumVBookPrelude {
                 function snapshot(){var response=updateUrl(action('DOM_SNAPSHOT',{}),lastUrl);return Html.parse(response.value||'',lastUrl);}
                 out.launch=function(url){var target=String(url||'');updateUrl(action('NAVIGATE',{url:target}),target);return snapshot();};
                 out.launchAsync=function(url){var target=String(url||'');updateUrl(action('NAVIGATE',{url:target}),target);return true;};
-                out.loadHtml=function(first,second){
-                  var a=String(first==null?'':first),b=String(second==null?'':second);
+                out.loadHtml=function(baseUrl,html){
+                  var a=String(baseUrl==null?'':baseUrl),b=String(html==null?'':html);
                   var aLooksHtml=/<[A-Za-z!/][^>]*>/.test(a),aLooksUrl=/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(a),bLooksUrl=/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(b);
                   var swap=(aLooksHtml&&(bLooksUrl||b.indexOf('/')===0))||(bLooksUrl&&!aLooksUrl);
-                  var baseUrl=swap?b:a,html=swap?a:b;
-                  updateUrl(action('LOAD_HTML',{url:baseUrl,value:html}),baseUrl);
+                  var resolvedBaseUrl=swap?b:a,resolvedHtml=swap?a:b;
+                  updateUrl(action('LOAD_HTML',{url:resolvedBaseUrl,value:resolvedHtml}),resolvedBaseUrl);
                   return out;
                 };
                 out.waitSelector=function(selector,timeoutMs){return action('WAIT_SELECTOR',{selector:String(selector||''),timeoutMs:Number(timeoutMs||0)}).value;};

@@ -18,6 +18,7 @@ def main() -> None:
     runtime = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidChromiumVBookRuntime.kt")
     prelude = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/ChromiumVBookPrelude.kt")
     projection = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/ChromiumVBookNetworkProjectionBroker.kt")
+    dispatch_decoder = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/ChromiumVBookDispatchDecoder.kt")
     browser_parity = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/ChromiumVBookDispatcherParityRuntime.kt")
     application = read("app/src/main/java/vn/nghetruyen/app/NgheTruyenApplication.kt")
     selector = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/PrimaryFallbackVBookActionRuntime.kt")
@@ -36,6 +37,7 @@ def main() -> None:
         "override fun onPageFinished(view: WebView, url: String?)",
         'webView.loadUrl("about:blank")',
         "result.confirm(response)",
+        "ChromiumVBookDispatchDecoder.decode(raw)",
         "blockNetworkLoads = true",
         "allowFileAccess = false",
         "allowContentAccess = false",
@@ -43,6 +45,15 @@ def main() -> None:
         "brokers.network.execute(",
         "brokers.browser.execute(",
         "MAX_BRIDGE_CALLS",
+    )
+    require(
+        dispatch_decoder,
+        "Chromium dispatcher ABI decoder",
+        "object ChromiumVBookDispatchDecoder",
+        'RAW_RESULT_KEY = "__ngheVBookRawResult"',
+        "MAX_LAYERS = 8",
+        "code == 0 -> obj.values[\"data\"] ?: JsonValue.Null",
+        'error("CHROMIUM_DISPATCH_RESULT_DEPTH_EXCEEDED")',
     )
     require(
         prelude,
@@ -95,7 +106,7 @@ def main() -> None:
     require(registry, "platform runtime registry", "AtomicReference<VBookActionRuntimeFactory?>(null)", "platformRuntime(")
     require(compatibility, "runtime-neutral compatibility facade", "private val runtime: VBookActionRuntime")
 
-    combined = "\n".join((runtime, prelude, browser_parity))
+    combined = "\n".join((runtime, prelude, dispatch_decoder, browser_parity))
     for forbidden in (
         "addJavascriptInterface(",
         "setAllowUniversalAccessFromFileURLs(",

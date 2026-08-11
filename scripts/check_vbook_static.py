@@ -24,6 +24,8 @@ def main() -> None:
     runtime = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt")
     compatibility_runtime = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookCompatibilityRuntime.kt")
     app_kernel = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookAppKernelPrelude.kt")
+    host_kernel_contract = read("source-api/src/main/kotlin/vn/nghetruyen/source/api/SourceHostKernelContract.kt")
+    host_kernel_broker = read("source-api/src/main/kotlin/vn/nghetruyen/source/api/SourceHostKernelBroker.kt")
     host_manifest = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookHostManifestFactory.kt")
     network_policy = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookNetworkPolicy.kt")
     feature_matrix = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookFeatureMatrix.kt")
@@ -81,15 +83,43 @@ def main() -> None:
         app_kernel,
         "single vBook App kernel authority",
         "global.App",
+        "apiVersion: 2",
         "FULL_IN_APP",
         "browser: browserApi",
         "network: networkApi",
         "storage: storageApi",
+        "ui: uiApi",
+        "reader: readerApi",
+        "library: libraryApi",
+        "tts: ttsApi",
+        "hooks: hooksApi",
+        "lifecycle: lifecycleApi",
+        "nghetruyen.host-command",
         "rawAndroid: false",
         "hostSecrets: false",
     )
-    for forbidden in ("addJavascriptInterface", "Class.forName", "Runtime.getRuntime", "ProcessBuilder"):
+    require(
+        host_kernel_contract,
+        "runtime-neutral host kernel contract",
+        'const val API_VERSION = 2',
+        'const val COMMAND_KIND = "nghetruyen.host-command"',
+        '"ui", "reader", "library", "tts", "hooks"',
+        '"reader.chapterChanged"',
+        "fun parseCommand",
+        "fun parseEvent",
+    )
+    require(
+        host_kernel_broker,
+        "runtime-neutral host kernel broker",
+        "fun interface SourceHostKernelBroker",
+        "SourceHostKernelContract.validate(command)",
+        "fun interface SourceHostEventSink",
+    )
+    for forbidden in ("addJavascriptInterface", "Class.forName", "Runtime.getRuntime", "ProcessBuilder", "android.content"):
         assert forbidden not in app_kernel, f"App kernel must stay at the NgheTruyen host boundary: {forbidden}"
+    for forbidden in ("android.content", "android.app", "java.lang.reflect", "Class.forName", "Runtime.getRuntime"):
+        assert forbidden not in host_kernel_contract, f"Host kernel contract leaked platform implementation: {forbidden}"
+        assert forbidden not in host_kernel_broker, f"Host kernel broker leaked platform implementation: {forbidden}"
     require(
         host_manifest,
         "full-authority vBook envelope",

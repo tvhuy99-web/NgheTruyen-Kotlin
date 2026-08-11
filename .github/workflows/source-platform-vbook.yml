@@ -33,6 +33,7 @@ on:
       - 'scripts/run_vbook_compat_lab.py'
       - 'scripts/vbook-reference-plan*.json'
       - 'scripts/apply_diagnostics_deepening.py'
+      - 'scripts/apply_diagnostics_stage_c.py'
       - '.github/workflows/source-platform-vbook.yml'
   push:
     branches:
@@ -109,8 +110,11 @@ jobs:
               raise SystemExit('VietPhrase exporter codegen anchor not found')
           PY
 
-      - name: Apply diagnostics migration
+      - name: Apply core AI and VietPhrase migration
         run: python3 scripts/apply_diagnostics_deepening.py
+
+      - name: Apply browser and vBook migration
+        run: python3 scripts/apply_diagnostics_stage_c.py
 
       - name: Verify vBook architecture and engine specificity
         run: |
@@ -169,6 +173,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "No diagnostics changes to commit"
           else
-            git commit -m "fix: deepen diagnostic black box"
+            git commit -m "fix: deepen browser and vBook diagnostics"
             git push origin HEAD:agent/fix-lua-style-diagnostics-ui
           fi

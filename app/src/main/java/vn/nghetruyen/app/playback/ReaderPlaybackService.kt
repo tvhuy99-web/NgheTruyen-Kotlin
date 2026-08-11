@@ -1365,14 +1365,17 @@ class ReaderPlaybackService : Service() {
                 narrationPlanningChapterId = ""
                 voiceSettingsReady = configured
                 val created = planResult?.let { it.voicePlanCreated || it.musicPlanCreated } == true
+                val planningFailed = planResult == null || (
+                    planResult.warnings.isNotEmpty() && !planResult.voicePlanCreated && !planResult.musicPlanCreated
+                )
                 val musicApplied = hasSceneMusicPlan()
                 val statusMessage = when {
-                    planResult == null -> "Phân vai tự động lỗi; đang đọc bằng cấu hình/phân vai hiện có."
+                    planningFailed -> "Phân vai tự động chưa thành công; đang đọc bằng cấu hình/phân vai hiện có."
                     created -> "Đã áp dụng phân vai mới${if (musicApplied) " + nhạc cảnh" else ""} cho chương hiện tại."
                     else -> "Đã áp dụng phân vai đã lưu${if (musicApplied) " + nhạc cảnh" else ""} cho chương hiện tại."
                 } + warnings.firstOrNull()?.takeIf(String::isNotBlank)?.let { " • ${it.take(120)}" }.orEmpty()
                 PlaybackQueueStore.setNarrationAutomation(
-                    stage = if (planResult == null) NarrationAutomationStage.FAILED else NarrationAutomationStage.CURRENT_READY,
+                    stage = if (planningFailed) NarrationAutomationStage.FAILED else NarrationAutomationStage.CURRENT_READY,
                     progress = 1f,
                     message = statusMessage,
                 )

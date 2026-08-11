@@ -17,12 +17,8 @@ fun interface SourceHostKernelBroker {
     ): SourcePlatformResult<JsonValue>
 
     companion object {
-        val UNAVAILABLE = SourceHostKernelBroker { _, command, traceId ->
+        internal val FAIL_CLOSED = SourceHostKernelBroker { _, command, traceId ->
             SourceHostKernelContract.validate(command)
-            unavailable(command, traceId)
-        }
-
-        private fun unavailable(command: SourceHostCommand, traceId: String): SourcePlatformResult.Failure =
             SourcePlatformResult.Failure(
                 SourcePlatformFailure(
                     code = SourceErrorCode.INTERNAL_ERROR,
@@ -30,6 +26,15 @@ fun interface SourceHostKernelBroker {
                     traceId = traceId,
                 ),
             )
+        }
+
+        /**
+         * Compatibility name retained for existing broker construction. The returned object is a
+         * lifecycle-stable bus that behaves exactly like FAIL_CLOSED until the NgheTruyen host
+         * installs a dispatcher. Existing runtimes therefore do not need to be reconstructed.
+         */
+        val UNAVAILABLE: SourceHostKernelBroker
+            get() = SourceHostKernelBus
     }
 }
 
@@ -41,7 +46,7 @@ fun interface SourceHostKernelBroker {
  * a UI session appears. This avoids rebuilding runtimes and avoids storing Android objects here.
  */
 object SourceHostKernelBus : SourceHostKernelBroker {
-    private val delegate = AtomicReference<SourceHostKernelBroker>(SourceHostKernelBroker.UNAVAILABLE)
+    private val delegate = AtomicReference(SourceHostKernelBroker.FAIL_CLOSED)
 
     fun install(host: SourceHostKernelBroker) {
         require(host !== this) { "SOURCE_HOST_KERNEL_RECURSIVE_INSTALL" }
@@ -49,7 +54,7 @@ object SourceHostKernelBus : SourceHostKernelBroker {
     }
 
     fun clear() {
-        delegate.set(SourceHostKernelBroker.UNAVAILABLE)
+        delegate.set(SourceHostKernelBroker.FAIL_CLOSED)
     }
 
     override fun execute(

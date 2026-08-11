@@ -7,6 +7,7 @@ import org.junit.Test
 class SourceHostKernelBrokerTest {
     @Test
     fun unavailableBrokerFailsAtHostBoundaryWithoutPlatformObject() {
+        SourceHostKernelBus.clear()
         val result = SourceHostKernelBroker.UNAVAILABLE.execute(
             sourceId = "vn.nghetruyen.sources.test",
             command = SourceHostKernelContract.command("tts", "play"),
@@ -17,6 +18,27 @@ class SourceHostKernelBrokerTest {
         assertEquals(SourceErrorCode.INTERNAL_ERROR, result.error.code)
         assertTrue(result.error.message.contains("SOURCE_HOST_KERNEL_UNAVAILABLE:tts:play"))
         assertEquals("trace-host-kernel", result.error.traceId)
+    }
+
+    @Test
+    fun lifecycleBusActivatesExistingBrokerReferenceAfterHostInstall() {
+        SourceHostKernelBus.clear()
+        val existingReference = SourceHostKernelBroker.UNAVAILABLE
+        val dispatcher = SourceHostKernelDispatcher()
+            .register("tts", "play") { _, _, _ -> SourcePlatformResult.Success(JsonValue.Str("played")) }
+        SourceHostKernelBus.install(dispatcher)
+        try {
+            val result = existingReference.execute(
+                sourceId = "vn.nghetruyen.sources.test",
+                command = SourceHostKernelContract.command("tts", "play"),
+                traceId = "trace-live-host",
+            )
+            assertTrue(result is SourcePlatformResult.Success)
+            result as SourcePlatformResult.Success
+            assertEquals("played", (result.value as JsonValue.Str).value)
+        } finally {
+            SourceHostKernelBus.clear()
+        }
     }
 
     @Test

@@ -27,6 +27,22 @@ object ExtensionHostKernelInstaller {
         fun host(): AppViewModel? = hostRef.get()
 
         val dispatcher = SourceHostKernelDispatcher()
+            .register("ui", "notify") { _, payload, traceId ->
+                val host = host() ?: return@register uiUnavailable(traceId)
+                val message = payload.stringValue("message")?.trim().orEmpty().take(MAX_UI_MESSAGE_CHARS)
+                if (message.isBlank()) return@register invalid(traceId, "SOURCE_HOST_UI_MESSAGE_REQUIRED")
+                host.readerActionMessage(message)
+                accepted(traceId)
+            }
+            .register("ui", "open") { _, payload, traceId ->
+                val host = host() ?: return@register uiUnavailable(traceId)
+                val url = payload.stringValue("url")?.trim().orEmpty()
+                if (!url.startsWith("https://", ignoreCase = true)) {
+                    return@register invalid(traceId, "SOURCE_HOST_UI_HTTPS_URL_REQUIRED")
+                }
+                host.openExternalUrl(url)
+                accepted(traceId)
+            }
             .register("reader", "refresh") { _, _, traceId ->
                 ReaderPlaybackService.command(app, ReaderPlaybackService.ACTION_REFRESH)
                 accepted(traceId)
@@ -107,6 +123,30 @@ object ExtensionHostKernelInstaller {
                 host.deleteBookmark(bookmarkId)
                 accepted(traceId)
             }
+            .register("library", "note") { _, payload, traceId ->
+                val host = host() ?: return@register uiUnavailable(traceId)
+                val content = host.state.value.chapterContent
+                    ?: return@register invalid(traceId, "SOURCE_HOST_LIBRARY_CHAPTER_CONTEXT_REQUIRED")
+                val requestedChapterId = payload.stringValue("chapterId")?.trim().orEmpty()
+                if (requestedChapterId.isNotBlank() && requestedChapterId != content.chapter.id) {
+                    return@register invalid(traceId, "SOURCE_HOST_LIBRARY_CHAPTER_CONTEXT_MISMATCH")
+                }
+                val requestedParagraph = payload.intValue("paragraphIndex")
+                if (requestedParagraph != null && requestedParagraph != host.state.value.playback.paragraphIndex) {
+                    return@register invalid(traceId, "SOURCE_HOST_LIBRARY_PARAGRAPH_CONTEXT_MISMATCH")
+                }
+                val text = payload.stringValue("text")?.trim().orEmpty().take(MAX_NOTE_CHARS)
+                if (text.isBlank()) return@register invalid(traceId, "SOURCE_HOST_LIBRARY_NOTE_TEXT_REQUIRED")
+                host.saveCurrentNote(text)
+                accepted(traceId)
+            }
+            .register("library", "removeNote") { _, payload, traceId ->
+                val host = host() ?: return@register uiUnavailable(traceId)
+                val noteId = payload.stringValue("noteId")?.trim().orEmpty()
+                if (noteId.isBlank()) return@register invalid(traceId, "SOURCE_HOST_LIBRARY_NOTE_ID_REQUIRED")
+                host.deleteNote(noteId)
+                accepted(traceId)
+            }
             .register("tts", "play") { _, _, traceId ->
                 ReaderPlaybackService.command(app, ReaderPlaybackService.ACTION_PLAY)
                 accepted(traceId)
@@ -139,6 +179,18 @@ object ExtensionHostKernelInstaller {
                 ReaderPlaybackService.command(app, ReaderPlaybackService.ACTION_REFRESH)
                 accepted(traceId)
             }
+            .register("tts", "setVoice") { _, payload, traceId ->
+                val host = host() ?: return@register uiUnavailable(traceId)
+                val voiceId = payload.stringValue("voiceId")?.trim().orEmpty()
+                if (voiceId.isBlank()) {
+                    host.selectTtsVoice(null)
+                    return@register accepted(traceId)
+                }
+                val voice = host.state.value.ttsVoices.firstOrNull { it.name == voiceId }
+                    ?: return@register invalid(traceId, "SOURCE_HOST_TTS_VOICE_NOT_FOUND:$voiceId")
+                host.selectTtsVoice(voice)
+                accepted(traceId)
+            }
         SourceHostKernelBus.install(dispatcher)
         return dispatcher
     }
@@ -169,3 +221,6 @@ private fun invalid(traceId: String, message: String): SourcePlatformResult<Json
 private fun JsonValue.Obj.stringValue(name: String): String? = (values[name] as? JsonValue.Str)?.value
 private fun JsonValue.Obj.intValue(name: String): Int? = (values[name] as? JsonValue.Num)?.raw?.toIntOrNull()
 private fun JsonValue.Obj.floatValue(name: String): Float? = (values[name] as? JsonValue.Num)?.raw?.toFloatOrNull()
+
+private const val MAX_UI_MESSAGE_CHARS = 2_000
+private const val MAX_NOTE_CHARS = 10_000

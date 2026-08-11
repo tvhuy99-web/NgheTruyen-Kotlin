@@ -1,9 +1,14 @@
 package vn.nghetruyen.app
 
 import android.app.Application
+import android.webkit.WebView
 import vn.nghetruyen.app.ai.vietphrase.ReferenceVietPhraseRuntime
 import vn.nghetruyen.app.sourceplatform.AndroidChromiumVBookRuntime
 import vn.nghetruyen.app.sourceplatform.ChromiumVBookNetworkProjectionBroker
+import vn.nghetruyen.source.api.SourceErrorCode
+import vn.nghetruyen.source.api.SourcePlatformFailure
+import vn.nghetruyen.source.api.SourcePlatformResult
+import vn.nghetruyen.source.vbook.VBookActionRuntime
 import vn.nghetruyen.source.vbook.VBookActionRuntimeRegistry
 import java.util.IdentityHashMap
 
@@ -15,7 +20,15 @@ class NgheTruyenApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         VBookActionRuntimeRegistry.install { brokers, diagnostics ->
-            synchronized(chromiumRuntimeLock) {
+            if (WebView.getCurrentWebViewPackage() == null) {
+                VBookActionRuntime { _, _, request ->
+                    SourcePlatformResult.Failure(SourcePlatformFailure(
+                        SourceErrorCode.VBOOK_RUNTIME_UNAVAILABLE,
+                        "CHROMIUM_WEBVIEW_UNAVAILABLE:provider-missing",
+                        request.traceId,
+                    ))
+                }
+            } else synchronized(chromiumRuntimeLock) {
                 chromiumRuntimes[brokers.storage] ?: AndroidChromiumVBookRuntime(
                     context = this,
                     brokers = brokers.copy(

@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def text(path: str) -> str:
+    return (ROOT / path).read_text(encoding="utf-8")
+
+
+app = text("app/src/main/java/vn/nghetruyen/app/ui/ReferenceNgheTruyenApp.kt")
+reader = text("app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt")
+personal = text("app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt")
+chrome = text("app/src/main/java/vn/nghetruyen/app/ui/components/ReferenceDiagnosticsChrome.kt")
+runtime = text("app/src/main/java/vn/nghetruyen/app/sourceplatform/SourceDiagnosticRuntime.kt")
+vm = text("app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt")
+tts = text("app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt")
+ai = text("app/src/main/java/vn/nghetruyen/app/ai/XpkNarrationAiServices.kt")
+download = text("app/src/main/java/vn/nghetruyen/app/downloads/ChapterDownloadWorker.kt")
+audio = text("app/src/main/java/vn/nghetruyen/app/audio/AudioExportWorker.kt")
+
+checks = {
+    "global bottom diagnostics chrome": (
+        "ReferenceDiagnosticsChrome(" in app
+        and "bottomBar = {" in app
+        and app.index("ReferenceDiagnosticsChrome(") < app.index("ReferencePrimaryBottomBar(")
+    ),
+    "OFF hides diagnostics completely": 'if (state.diagnosticsMode == "off") return' in chrome,
+    "Lua recording label": "ĐANG GHI NHẬT KÝ..." in chrome,
+    "Lua view label": "XEM NHẬT KÝ" in chrome,
+    "Lua empty label": "CHƯA CÓ NHẬT KÝ" in chrome,
+    "Reader has no private always-visible log button": 'ReaderButton("XEM NHẬT KÝ"' not in reader,
+    "Reader has no private diagnostic dialog": "showDiagnosticLogDialog" not in reader,
+    "settings log card hidden while OFF": 'if (state.diagnosticsMode != "off") {' in personal,
+    "settings diagnostics includes source diagnostics": (
+        '"settings_diagnostics" -> PersonalSubPage("CHẨN ĐOÁN")' in personal
+        and "SourceDiagnosticsSection(" in personal
+    ),
+    "large live event window": "diagnosticSummaries(200)" in vm,
+    "large live trace window": "diagnosticTraces(100)" in vm,
+    "shared app diagnostic mark API": "fun mark(" in runtime and "DIAGNOSTICS_MODE_CHANGED" in runtime,
+    "runtime snapshot exported": "report/app_runtime.json" in runtime,
+    "backup log tail exported": "report/backup_tail.log" in runtime,
+    "TTS lifecycle diagnostics": all(
+        marker in tts
+        for marker in (
+            "TTS_SERVICE_CREATED",
+            "TTS_COMMAND",
+            "TTS_ENGINE_READY",
+            "TTS_ENGINE_INIT_FAILED",
+            "TTS_UTTERANCE_START",
+            "TTS_UTTERANCE_ERROR",
+            "TTS_AUDIO_FOCUS_FAILED",
+            "TTS_VOICE_ENGINE_SWITCH",
+        )
+    ),
+    "AI narration diagnostics": all(
+        marker in ai
+        for marker in (
+            "AI_NARRATION_PLAN_START",
+            "AI_NARRATION_PLAN_COMPLETED",
+            "AI_NARRATION_FAILURE",
+        )
+    ),
+    "download diagnostics": all(
+        marker in download
+        for marker in (
+            "DOWNLOAD_JOB_STARTED",
+            "DOWNLOAD_ITEM_COMPLETED",
+            "DOWNLOAD_JOB_COMPLETED",
+            "DOWNLOAD_SOURCE_FAILURE",
+            "DOWNLOAD_RUNTIME_ERROR",
+        )
+    ),
+    "audio export diagnostics": all(
+        marker in audio
+        for marker in (
+            "AUDIO_EXPORT_STARTED",
+            "AUDIO_EXPORT_SEGMENT_COMPLETED",
+            "AUDIO_EXPORT_COMPLETED",
+            "AUDIO_EXPORT_CANCELLED",
+            "AUDIO_EXPORT_RUNTIME_ERROR",
+        )
+    ),
+    "VietPhrase diagnostics joined to black box": all(
+        marker in reader
+        for marker in (
+            "VIETPHRASE_DIAGNOSTIC_START",
+            "VIETPHRASE_DIAGNOSTIC_COMPLETED",
+            "VIETPHRASE_DIAGNOSTIC_FAILED",
+        )
+    ),
+}
+
+missing = [name for name, ok in checks.items() if not ok]
+if missing:
+    raise SystemExit("LUA_DIAGNOSTICS_UI_PARITY missing: " + "; ".join(missing))
+
+print("LUA_DIAGNOSTICS_UI_PARITY=PASS")

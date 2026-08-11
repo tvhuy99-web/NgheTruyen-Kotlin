@@ -27,7 +27,7 @@ jobs:
         shell: bash
         run: |
           python3 scripts/apply_story_switch_semantics_fix.py
-          git show HEAD^:.github/workflows/android-ci.yml > .github/workflows/android-ci.yml
+          git show a56a4c2861e679080d7f6b0ca2b2d82b767d7aa6:.github/workflows/android-ci.yml > .github/workflows/android-ci.yml
           rm scripts/apply_story_switch_semantics_fix.py
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

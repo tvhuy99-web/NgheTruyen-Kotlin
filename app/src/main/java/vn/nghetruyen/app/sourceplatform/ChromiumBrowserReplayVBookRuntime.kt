@@ -79,10 +79,11 @@ class ChromiumBrowserReplayVBookRuntime(
                 if (round >= MAX_BROWSER_REPLAY_ROUNDS) {
                     return@synchronized replayFailure("CHROMIUM_BROWSER_REPLAY_LIMIT", request)
                 }
-                if (deadlineMs - clockMs() < MIN_ACTION_TIMEOUT_MS) {
+                val browserBudgetMs = deadlineMs - clockMs()
+                if (browserBudgetMs < MIN_ACTION_TIMEOUT_MS) {
                     return@synchronized replayFailure("CHROMIUM_BROWSER_REPLAY_DEADLINE", request)
                 }
-                browser.resolve(pending, manifest)
+                browser.resolve(pending, manifest, browserBudgetMs)
             }
             replayFailure("CHROMIUM_BROWSER_REPLAY_LIMIT", request)
         } finally {
@@ -121,10 +122,13 @@ class ChromiumBrowserReplayVBookRuntime(
 
         fun takePending(): Pending? = pending
 
-        fun resolve(value: Pending, manifest: SourceManifest) {
+        fun resolve(value: Pending, manifest: SourceManifest, budgetMs: Long) {
             if (value.key in cache) return
             require(cache.size < MAX_REPLAY_CACHE_ENTRIES) { "CHROMIUM_BROWSER_REPLAY_CACHE_LIMIT" }
-            cache[value.key] = delegate.execute(manifest, value.request)
+            val bounded = value.request.copy(
+                timeoutMs = minOf(value.request.timeoutMs, budgetMs).coerceIn(MIN_ACTION_TIMEOUT_MS, MAX_ACTION_TIMEOUT_MS),
+            )
+            cache[value.key] = delegate.execute(manifest, bounded)
         }
 
         fun endAction() {
@@ -204,15 +208,22 @@ class ChromiumBrowserReplayVBookRuntime(
             sequence.toString(),
             request.method.uppercase(),
             request.url,
-            request.headers.entries
-                .filterNot { (name, _) -> name.startsWith(VBookRawNetworkBroker.INTERNAL_PREFIX, ignoreCase = true) }
-                .sortedBy { (name, _) -> name.lowercase() }
-                .joinToString("\u0001") { (name, value) -> "$name=$value" },
+            externalNetworkHeaders(request),
+            controlHeader(request, VBookRawNetworkBroker.INTERNAL_OPERATION)?.lowercase().orEmpty(),
+            controlHeader(request, VBookRawNetworkBroker.INTERNAL_DECODE_CHARSET).orEmpty(),
             request.contentType.orEmpty(),
             request.responseMode.name,
             request.allowHttpError.toString(),
             sha256(request.body),
         )
+
+        private fun externalNetworkHeaders(request: SourceNetworkRequest): String = request.headers.entries
+            .filterNot { (name, _) -> name.startsWith(VBookRawNetworkBroker.INTERNAL_PREFIX, ignoreCase = true) }
+            .sortedBy { (name, _) -> name.lowercase() }
+            .joinToString("\u0001") { (name, value) -> "$name=$value" }
+
+        private fun controlHeader(request: SourceNetworkRequest, name: String): String? =
+            request.headers.entries.firstOrNull { (key, _) -> key.equals(name, ignoreCase = true) }?.value
 
         private fun stableKey(vararg parts: String): String = sha256(
             parts.joinToString("\u0000").toByteArray(Charsets.UTF_8),

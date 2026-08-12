@@ -23,6 +23,7 @@ import vn.nghetruyen.source.api.SourceRuntimeMode
 import vn.nghetruyen.source.api.SourceRuntimePolicy
 import vn.nghetruyen.source.runtime.SourceResourceProvider
 import vn.nghetruyen.source.vbook.VBookCompatibilityRuntime
+import vn.nghetruyen.source.vbook.VBookRawNetworkBroker
 
 @RunWith(AndroidJUnit4::class)
 class ChromiumBrowserReplayVBookRuntimeTest {
@@ -75,7 +76,10 @@ class ChromiumBrowserReplayVBookRuntimeTest {
 
         ChromiumBrowserReplayVBookRuntime(
             context = context,
-            brokers = SourceCapabilityBrokers(network = network, browser = browser),
+            brokers = SourceCapabilityBrokers(
+                network = VBookRawNetworkBroker(network),
+                browser = browser,
+            ),
         ).use { chromium ->
             val runtime = VBookCompatibilityRuntime(chromium)
             val result = runtime.executeDynamic(

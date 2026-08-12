@@ -59,9 +59,11 @@ def main() -> None:
         "MAX_BROWSER_REPLAY_ROUNDS = 16",
         "CHROMIUM_BROWSER_REPLAY_REQUIRED:",
         "browser.resolve(pending, manifest)",
+        "private class ReplayNetworkBroker(",
+        "private class ReplayBrowserBroker(",
         "network.beginRound()",
         "browser.beginRound()",
-        "HTTP before a deferred Browser call are not repeated on replay",
+        "cache[key]?.let { return it }",
     )
     require(
         dispatch_decoder,

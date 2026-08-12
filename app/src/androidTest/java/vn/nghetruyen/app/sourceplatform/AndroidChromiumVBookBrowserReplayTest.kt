@@ -107,8 +107,8 @@ class AndroidChromiumVBookBrowserReplayTest {
                   var engine = ({name:'chromium'})?.name;
                   var browser = Engine.newBrowser();
                   browser.loadHtml(
-                    'https://x.example/base/',
-                    '<div class="row"><a href="next">Ready</a></div>'
+                    '<div class="row"><a href="next">Ready</a></div>',
+                    'https://x.example/base/'
                   );
                   var doc = browser.html();
                   var link = doc.selectFirst('div.row a');

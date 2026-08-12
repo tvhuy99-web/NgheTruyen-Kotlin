@@ -137,11 +137,13 @@ class AndroidSourceBrowserBroker(
                     }
                 }
                 if (session.rendererGone) error("SOURCE_BROWSER_RENDERER_GONE")
-                syncCookiesFromWebView(manifest, session.webView.url ?: request.url)
+                val webViewState = snapshotWebView(session)
+                val logicalUrl = reconcileLogicalPageUrl(session, webViewState)
+                syncCookiesFromWebView(manifest, logicalUrl ?: request.url)
                 val metadata = session.metadata.toList()
                 SourceBrowserResponse(
-                    finalUrl = session.webView.url,
-                    title = session.webView.title,
+                    finalUrl = logicalUrl,
+                    title = webViewState.title,
                     value = value,
                     requestMetadata = metadata,
                     dialogs = session.dialogs.toList(),
@@ -192,6 +194,8 @@ class AndroidSourceBrowserBroker(
                 request.timeoutMs.coerceIn(100L, 5_000L),
             )
         }.getOrNull()
+        val webViewState = runCatching { snapshotWebView(session, request.timeoutMs.coerceIn(100L, 5_000L)) }.getOrNull()
+        val logicalUrl = webViewState?.let { reconcileLogicalPageUrl(session, it) } ?: session.logicalPageUrl
         if (html != null) {
             evidence.capture(DiagnosticEvidence(
                 timestampEpochMs = clockMs(),
@@ -203,8 +207,8 @@ class AndroidSourceBrowserBroker(
                 data = html.toByteArray(Charsets.UTF_8),
                 attributes = mapOf(
                     "action" to request.action.name,
-                    "url" to diagnosticUrl(session.webView.url ?: request.url.orEmpty()),
-                    "title" to session.webView.title.orEmpty(),
+                    "url" to diagnosticUrl(logicalUrl ?: request.url.orEmpty()),
+                    "title" to webViewState?.title.orEmpty(),
                     "requests" to session.metadata.size.toString(),
                 ),
             ))
@@ -356,13 +360,16 @@ class AndroidSourceBrowserBroker(
         }
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                if (isAllowedRedirect(manifest, request.url.toString())) return false
-                sessionRef.get()?.apply {
+                val session = sessionRef.get()
+                val url = request.url.toString()
+                if (session?.allowsTrustedLoadHtmlInternalNavigation(url, request.isForMainFrame) == true) return false
+                if (isAllowedRedirect(manifest, url)) return false
+                session?.apply {
                     pendingError.compareAndSet(null, "SOURCE_BROWSER_NAVIGATION_DENIED")
                     if (request.isForMainFrame) pageLatch?.countDown()
                     record(request, resourceType = "navigation-blocked")
                     diagnostics.emit(sessionEvent(manifest, this, "BROWSER_NAVIGATION_BLOCKED", DiagnosticSeverity.WARN, DiagnosticCategory.SECURITY, mapOf(
-                        "url" to diagnosticUrl(request.url.toString()),
+                        "url" to diagnosticUrl(url),
                         "mainFrame" to request.isForMainFrame.toString(),
                     )))
                 }
@@ -371,6 +378,7 @@ class AndroidSourceBrowserBroker(
 
             override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
                 sessionRef.get()?.apply {
+                    updateLogicalPageUrlFromWebView(url)
                     recordUrl(url)
                     diagnostics.emit(sessionEvent(manifest, this, "BROWSER_PAGE_STARTED", DiagnosticSeverity.INFO, attributes = mapOf(
                         "url" to diagnosticUrl(url),
@@ -381,6 +389,7 @@ class AndroidSourceBrowserBroker(
 
             override fun onPageFinished(view: WebView, url: String) {
                 sessionRef.get()?.apply {
+                    updateLogicalPageUrlFromWebView(url)
                     recordUrl(url)
                     diagnostics.emit(sessionEvent(manifest, this, "BROWSER_PAGE_FINISHED", DiagnosticSeverity.INFO, attributes = mapOf(
                         "url" to diagnosticUrl(url),
@@ -439,19 +448,21 @@ class AndroidSourceBrowserBroker(
 
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                 val session = sessionRef.get()
-                if (session?.isBlocked(request.url.toString()) == true) {
+                val url = request.url.toString()
+                if (session?.isBlocked(url) == true) {
                     session.record(request, resourceType = "policy-blocked")
                     diagnostics.emit(sessionEvent(manifest, session, "BROWSER_RESOURCE_POLICY_BLOCKED", DiagnosticSeverity.DEBUG, DiagnosticCategory.SECURITY, mapOf(
-                        "url" to diagnosticUrl(request.url.toString()),
+                        "url" to diagnosticUrl(url),
                         "mainFrame" to request.isForMainFrame.toString(),
                     )))
                     return blockedResponse()
                 }
-                if (!isAllowedRedirect(manifest, request.url.toString())) {
+                if (session?.allowsTrustedLoadHtmlInternalNavigation(url, request.isForMainFrame) == true) return null
+                if (!isAllowedRedirect(manifest, url)) {
                     session?.record(request, resourceType = "resource-blocked")
                     if (session != null) {
                         diagnostics.emit(sessionEvent(manifest, session, "BROWSER_RESOURCE_ORIGIN_BLOCKED", DiagnosticSeverity.WARN, DiagnosticCategory.SECURITY, mapOf(
-                            "url" to diagnosticUrl(request.url.toString()),
+                            "url" to diagnosticUrl(url),
                             "mainFrame" to request.isForMainFrame.toString(),
                         )))
                     }
@@ -492,11 +503,12 @@ class AndroidSourceBrowserBroker(
         val latch = CountDownLatch(1)
         session.pageLatch = latch
         session.pendingError.set(null)
+        session.logicalPageUrl = url
         runOnMain(5_000) { session.webView.loadUrl(url) }
         if (!latch.await(request.timeoutMs, TimeUnit.MILLISECONDS)) error("SOURCE_BROWSER_TIMEOUT")
         session.pageLatch = null
         session.pendingError.get()?.let(::error)
-        return session.webView.url
+        return reconcileLogicalPageUrl(session, snapshotWebView(session))
     }
 
     private fun loadHtml(session: Session, manifest: SourceManifest, request: SourceBrowserRequest): String? {
@@ -507,11 +519,17 @@ class AndroidSourceBrowserBroker(
         val latch = CountDownLatch(1)
         session.pageLatch = latch
         session.pendingError.set(null)
-        runOnMain(5_000) { session.webView.loadDataWithBaseURL(baseUrl, html, "text/html", "utf-8", null) }
-        if (!latch.await(request.timeoutMs, TimeUnit.MILLISECONDS)) error("SOURCE_BROWSER_TIMEOUT")
-        session.pageLatch = null
-        session.pendingError.get()?.let(::error)
-        return session.webView.url ?: baseUrl
+        session.logicalPageUrl = baseUrl
+        session.trustedLoadHtmlInFlight = true
+        try {
+            runOnMain(5_000) { session.webView.loadDataWithBaseURL(baseUrl, html, "text/html", "utf-8", null) }
+            if (!latch.await(request.timeoutMs, TimeUnit.MILLISECONDS)) error("SOURCE_BROWSER_TIMEOUT")
+            session.pendingError.get()?.let(::error)
+            return baseUrl
+        } finally {
+            session.trustedLoadHtmlInFlight = false
+            session.pageLatch = null
+        }
     }
 
     private fun setUserAgent(session: Session, request: SourceBrowserRequest): String {
@@ -557,7 +575,7 @@ class AndroidSourceBrowserBroker(
     }
 
     private fun syncSession(session: Session, manifest: SourceManifest, request: SourceBrowserRequest): String {
-        val url = request.url ?: session.webView.url ?: manifest.origins.firstOrNull().orEmpty()
+        val url = request.url ?: session.logicalPageUrl ?: reconcileLogicalPageUrl(session, snapshotWebView(session)) ?: manifest.origins.firstOrNull().orEmpty()
         val direction = request.options["direction"]?.lowercase() ?: "both"
         require(direction in setOf("both", "browser_to_native", "native_to_browser")) { "SOURCE_BROWSER_SYNC_DIRECTION_INVALID" }
         if (direction == "both" || direction == "native_to_browser") importCookiesIntoWebView(manifest, url)
@@ -566,7 +584,7 @@ class AndroidSourceBrowserBroker(
     }
 
     private fun setCookies(session: Session, manifest: SourceManifest, request: SourceBrowserRequest): String {
-        val url = request.url ?: session.webView.url ?: manifest.origins.firstOrNull().orEmpty()
+        val url = request.url ?: session.logicalPageUrl ?: reconcileLogicalPageUrl(session, snapshotWebView(session)) ?: manifest.origins.firstOrNull().orEmpty()
         val cookies = (request.values + listOfNotNull(request.value)).map(String::trim).filter(String::isNotBlank).take(128)
         require(cookies.all { it.length <= 8_192 }) { "SOURCE_BROWSER_COOKIE_TOO_LARGE" }
         cookiePartition.mergeSetCookieHeaders(manifest.id, url, cookies)
@@ -575,7 +593,7 @@ class AndroidSourceBrowserBroker(
     }
 
     private fun clearCookies(session: Session, manifest: SourceManifest, request: SourceBrowserRequest): String {
-        val url = request.url ?: session.webView.url ?: manifest.origins.firstOrNull().orEmpty()
+        val url = request.url ?: session.logicalPageUrl ?: reconcileLogicalPageUrl(session, snapshotWebView(session)) ?: manifest.origins.firstOrNull().orEmpty()
         if (request.values.isEmpty()) {
             cookiePartition.clear(manifest.id)
             clearWebViewCookies()
@@ -616,9 +634,9 @@ class AndroidSourceBrowserBroker(
             Thread.sleep(100)
         } while (clockMs() < deadline && !session.rendererGone)
         diagnostics.emit(event(manifest = session.manifest, request = request, name = "BROWSER_SELECTOR_TIMEOUT", severity = DiagnosticSeverity.WARN, attributes = mapOf(
-            "selector" to selector.take(1_000),
-            "polls" to polls.toString(),
-        )))
+                    "selector" to selector.take(1_000),
+                    "polls" to polls.toString(),
+                )))
         error("SOURCE_BROWSER_SELECTOR_NOT_FOUND")
     }
 
@@ -723,6 +741,19 @@ class AndroidSourceBrowserBroker(
         return output.get().orEmpty()
     }
 
+    private fun snapshotWebView(session: Session, timeoutMs: Long = 5_000L): WebViewState =
+        runOnMain(timeoutMs) { WebViewState(session.webView.url, session.webView.title) }
+
+    private fun reconcileLogicalPageUrl(session: Session, state: WebViewState): String? {
+        val webUrl = state.url
+        if (webUrl != null && isHttpUrl(webUrl)) session.logicalPageUrl = webUrl
+        return session.logicalPageUrl ?: webUrl
+    }
+
+    private fun isHttpUrl(url: String): Boolean = runCatching {
+        Uri.parse(url).scheme?.lowercase() in setOf("http", "https")
+    }.getOrDefault(false)
+
     private fun isAllowedInitial(manifest: SourceManifest, url: String): Boolean = runCatching {
         val uri = SourceOriginPolicy.requireInitialUrl(manifest, url)
         PublicAddressPolicy.requirePublic(resolver(uri.host))
@@ -759,7 +790,8 @@ class AndroidSourceBrowserBroker(
 
     private fun destroyActive(clearCookies: Boolean) {
         val session = active ?: return
-        syncCookiesFromWebView(session.manifest, session.webView.url)
+        val currentUrl = session.logicalPageUrl ?: runCatching { reconcileLogicalPageUrl(session, snapshotWebView(session)) }.getOrNull()
+        syncCookiesFromWebView(session.manifest, currentUrl)
         runCatching { runOnMain(10_000) { session.webView.stopLoading(); session.webView.loadUrl("about:blank"); session.webView.clearHistory(); session.webView.clearCache(true); session.webView.removeAllViews(); session.webView.destroy() } }
         active = null
         if (clearCookies) cookiePartition.clear(session.manifest.id)
@@ -844,6 +876,8 @@ class AndroidSourceBrowserBroker(
         @Volatile var userAgent: String = ""
         @Volatile var blockPatterns: List<String> = emptyList()
         @Volatile var dialogPolicy: DialogPolicy = DialogPolicy("dismiss", "")
+        @Volatile var trustedLoadHtmlInFlight: Boolean = false
+        @Volatile var logicalPageUrl: String? = null
 
         fun record(request: WebResourceRequest, resourceType: String?) {
             if (!manifest.capabilities.browser.requestMetadata && resourceType == null) return
@@ -863,11 +897,29 @@ class AndroidSourceBrowserBroker(
             metadata.addLast(SourceBrowserRequestMetadata(url.take(4096), "GET", true, "navigation", emptySet(), System.currentTimeMillis()))
         }
 
+        fun updateLogicalPageUrlFromWebView(url: String) {
+            if (isHttpOrHttps(url)) logicalPageUrl = url
+        }
+
+        private fun isHttpOrHttps(url: String): Boolean = runCatching {
+            Uri.parse(url).scheme?.lowercase() in setOf("http", "https")
+        }.getOrDefault(false)
+
         fun isBlocked(url: String): Boolean = blockPatterns.any { pattern ->
             when {
                 pattern.startsWith("regex:") -> runCatching { Regex(pattern.removePrefix("regex:"), RegexOption.IGNORE_CASE).containsMatchIn(url) }.getOrDefault(false)
                 '*' in pattern -> runCatching { Regex(Regex.escape(pattern).replace("\\*", ".*"), RegexOption.IGNORE_CASE).matches(url) }.getOrDefault(false)
                 else -> url.contains(pattern, ignoreCase = true)
+            }
+        }
+
+        fun allowsTrustedLoadHtmlInternalNavigation(url: String, mainFrame: Boolean): Boolean {
+            if (!trustedLoadHtmlInFlight || !mainFrame) return false
+            val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return false
+            return when (uri.scheme?.lowercase()) {
+                "about" -> url.equals("about:blank", ignoreCase = true)
+                "data" -> url.startsWith("data:text/html", ignoreCase = true)
+                else -> false
             }
         }
 
@@ -891,6 +943,7 @@ class AndroidSourceBrowserBroker(
         }
     }
 
+    private data class WebViewState(val url: String?, val title: String?)
     private data class DialogPolicy(val defaultAction: String, val defaultValue: String)
     private data class DialogDecision(val accepted: Boolean, val value: String?)
 }

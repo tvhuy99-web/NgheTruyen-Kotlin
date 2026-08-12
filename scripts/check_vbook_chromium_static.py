@@ -16,6 +16,7 @@ def require(text: str, label: str, *tokens: str) -> None:
 
 def main() -> None:
     runtime = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidChromiumVBookRuntime.kt")
+    replay = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/ChromiumVBookBrowserReplayRuntime.kt")
     prelude = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/ChromiumVBookPrelude.kt")
     dispatch_decoder = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/ChromiumVBookDispatchDecoder.kt")
     browser_parity = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/ChromiumVBookDispatcherParityRuntime.kt")
@@ -48,6 +49,21 @@ def main() -> None:
         "brokers.network.execute(",
         "brokers.browser.execute(",
         "MAX_BRIDGE_CALLS",
+    )
+    require(
+        replay,
+        "Chromium Browser replay coordinator",
+        'CHROMIUM_BROWSER_REPLAY_REQUIRED = "SOURCE_BROWSER_REPLAY_REQUIRED"',
+        "ChromiumVBookBrowserReplayRuntime",
+        "ChromiumVBookReplayCoordinator",
+        "pendingBrowser",
+        "browserCache",
+        "networkCache",
+        "resolvePendingBrowser",
+        "networkReplayHits",
+        "MAX_BROWSER_REPLAYS",
+        "replayAwareChromiumDiagnostics",
+        "CHROMIUM_BROWSER_REPLAY_YIELDED",
     )
     require(
         dispatch_decoder,
@@ -108,7 +124,12 @@ def main() -> None:
         "VBookActionRuntimeRegistry.install",
         "WebView.getCurrentWebViewPackage() == null",
         '"CHROMIUM_WEBVIEW_UNAVAILABLE:provider-missing"',
-        "brokers = brokers,",
+        "ChromiumVBookReplayCoordinator(",
+        "brokers = brokers.copy(",
+        "browser = replay.browserBroker",
+        "network = replay.networkBroker",
+        "replayAwareChromiumDiagnostics(diagnostics)",
+        "ChromiumVBookBrowserReplayRuntime(",
         "ChromiumVBookDispatcherParityRuntime(",
         "IdentityHashMap<Any, VBookActionRuntime>()",
     )
@@ -121,10 +142,12 @@ def main() -> None:
         '"CHROMIUM_MAIN_THREAD_CALLER_UNSUPPORTED"',
         "result.error.code != SourceErrorCode.VBOOK_RUNTIME_UNAVAILABLE",
     )
+    assert "requiresPortableBrowserRuntime" not in selector, "Browser scripts must stay on Chromium and use broker replay"
+    assert "BROWSER_HOST_ACCESS" not in selector, "Static Browser routing must not bypass Chromium replay"
     require(registry, "platform runtime registry", "AtomicReference<VBookActionRuntimeFactory?>(null)", "platformRuntime(")
     require(compatibility, "runtime-neutral compatibility facade", "private val runtime: VBookActionRuntime")
 
-    combined = "\n".join((runtime, prelude, dispatch_decoder, browser_parity))
+    combined = "\n".join((runtime, replay, prelude, dispatch_decoder, browser_parity))
     for forbidden in (
         "addJavascriptInterface(",
         "setAllowUniversalAccessFromFileURLs(",

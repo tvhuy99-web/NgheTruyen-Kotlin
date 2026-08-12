@@ -177,6 +177,10 @@ def main() -> None:
         "ExtensionWebViewAuthority.apply(appContext, webView)",
         "BROWSER_POPUP_CREATED",
         "BROWSER_DOWNLOAD_REQUESTED",
+        "trustedLoadHtmlInFlight",
+        "allowsTrustedLoadHtmlInternalNavigation",
+        '"about" -> url.equals("about:blank", ignoreCase = true)',
+        '"data" -> url.startsWith("data:text/html", ignoreCase = true)',
     )
     require(
         webview_authority,
@@ -226,12 +230,13 @@ def main() -> None:
     require(
         source_ui,
         "unified source UI",
-        '${pack.version} • ${pack.ecosystem}',
-        'text = "KIỂM TRA"',
+        'Phiên bản: ${pack.version}',
+        'Loại: ${pack.ecosystem}',
+        'text = "KIỂM TRA NGUỒN"',
         'text = "CẤU HÌNH"',
-        'text = "ĐĂNG NHẬP"',
-        "onRollback(pack.id)",
-        'text = "NHẬT KÝ"',
+        'text = "CẬP NHẬT"',
+        'text = "XUẤT"',
+        "val retainedRuntimeActions = listOf(onRollback, onLogin)",
     )
     require(
         config_ui,

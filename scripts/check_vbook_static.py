@@ -177,6 +177,10 @@ def main() -> None:
         "ExtensionWebViewAuthority.apply(appContext, webView)",
         "BROWSER_POPUP_CREATED",
         "BROWSER_DOWNLOAD_REQUESTED",
+        "trustedLoadHtmlInFlight",
+        "allowsTrustedLoadHtmlInternalNavigation",
+        '"about" -> url.equals("about:blank", ignoreCase = true)',
+        '"data" -> url.startsWith("data:text/html", ignoreCase = true)',
     )
     require(
         webview_authority,

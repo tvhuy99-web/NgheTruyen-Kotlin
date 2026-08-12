@@ -32,14 +32,34 @@ import java.util.UUID
 /** Repository/catalog/package transport with automatic repository.json vs plugin.json recognition. */
 class VBookRepositoryClient(
     network: OkHttpSourceNetworkBroker? = null,
+    private val cache: VBookRepositoryCacheStore? = null,
     private val diagnostics: DiagnosticSink = DiagnosticSink.NONE,
     private val evidence: DiagnosticEvidenceSink = DiagnosticEvidenceSink.NONE,
 ) {
     private val traceContext = ThreadLocal<String>()
     private val network = network ?: OkHttpSourceNetworkBroker(diagnostics = diagnostics)
     private val fetcher = VBookRepositoryFetcher { url, maxBytes ->
-        val bytes = fetchBytes(url, maxBytes)
-        VBookRepositoryFetchResult(url, bytes.toString(Charsets.UTF_8), sha256(bytes))
+        runCatching {
+            val bytes = fetchBytes(url, maxBytes)
+            val body = bytes.toString(Charsets.UTF_8)
+            cache?.write(url, body)
+            VBookRepositoryFetchResult(url, body, sha256(bytes))
+        }.getOrElse { networkError ->
+            val cached = cache?.read(url, maxBytes) ?: throw networkError
+            val bytes = cached.body.toByteArray(Charsets.UTF_8)
+            val traceId = traceContext.get().orEmpty().ifBlank { "repository-cache:${UUID.randomUUID()}" }
+            emit(
+                traceId,
+                "VBOOK_REPOSITORY_CACHE_FALLBACK",
+                DiagnosticSeverity.WARN,
+                mapOf(
+                    "url" to url,
+                    "ageMs" to (System.currentTimeMillis() - cached.updatedAtEpochMs).coerceAtLeast(0L).toString(),
+                    "networkError" to (networkError.message ?: networkError.javaClass.simpleName).take(500),
+                ),
+            )
+            VBookRepositoryFetchResult(url, cached.body, sha256(bytes))
+        }
     }
     private val aggregator = VBookRepositoryAggregator(fetcher)
 
@@ -80,6 +100,10 @@ class VBookRepositoryClient(
             emit(traceId, "VBOOK_REPOSITORY_INPUT_FAILED", DiagnosticSeverity.ERROR, mapOf("url" to indexUrl, "error" to message))
             error(message.ifBlank { "VBOOK_REPOSITORY_INPUT_UNRECOGNIZED" })
         }
+
+    fun evictCachedDocument(url: String) {
+        cache?.remove(url)
+    }
 
     fun downloadPackage(item: VBookAggregatedItem): ByteArray = withTrace("package") { traceId ->
         emit(traceId, "VBOOK_PACKAGE_DOWNLOAD_STARTED", attributes = mapOf("url" to item.item.packageUrl, "name" to item.item.name))

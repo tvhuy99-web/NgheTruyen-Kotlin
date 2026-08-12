@@ -23,6 +23,7 @@ import vn.nghetruyen.app.sourceplatform.AndroidVBookQuickTranslationRegistry
 import vn.nghetruyen.app.sourceplatform.SourcePlatformManager
 import vn.nghetruyen.app.sourceplatform.SourceDiagnosticRuntime
 import vn.nghetruyen.app.sourceplatform.UnifiedSourcePlatformManager
+import vn.nghetruyen.app.sourceplatform.VBookRepositoryCacheStore
 import vn.nghetruyen.app.sourceplatform.VBookRepositoryClient
 import vn.nghetruyen.app.sourceplatform.VBookRepositorySubscriptionStore
 import vn.nghetruyen.app.sourceplatform.VBookSourcePlatform
@@ -61,8 +62,16 @@ class AppContainer(context: Context) {
         )
     }
 
+    val vBookRepositoryCacheStore: VBookRepositoryCacheStore by lazy {
+        VBookRepositoryCacheStore(appContext)
+    }
+
     val vBookRepositoryClient: VBookRepositoryClient by lazy {
-        VBookRepositoryClient(diagnostics = sourceDiagnostics.recorder, evidence = sourceDiagnostics.evidence)
+        VBookRepositoryClient(
+            cache = vBookRepositoryCacheStore,
+            diagnostics = sourceDiagnostics.recorder,
+            evidence = sourceDiagnostics.evidence,
+        )
     }
 
     val vBookRepositorySubscriptionStore: VBookRepositorySubscriptionStore by lazy {

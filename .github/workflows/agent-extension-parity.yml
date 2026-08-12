@@ -41,6 +41,7 @@ jobs:
         run: |
           gzip -dc .github/agent-extension-parity/apply.py.gz > /tmp/agent-extension-parity.py
           python3 /tmp/agent-extension-parity.py
+          sed -i 's/DiagnosticSeverity.WARNING/DiagnosticSeverity.WARN/g' app/src/main/java/vn/nghetruyen/app/sourceplatform/VBookRepositoryClient.kt
 
       - name: Compile and test app
         run: ./gradlew --no-daemon --stacktrace :app:compileDebugKotlin :app:testDebugUnitTest

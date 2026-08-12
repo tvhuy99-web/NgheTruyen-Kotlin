@@ -1,0 +1,37 @@
+name: Fix legacy diagnostics parity
+
+on:
+  push:
+    branches:
+      - agent/three-mode-lua-diagnostics
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/three-mode-lua-diagnostics
+      - name: Patch legacy app surface
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('app/src/main/java/vn/nghetruyen/app/ui/NgheTruyenApp.kt')
+          text = path.read_text()
+          old = '                        onDiagnosticsModeChange = viewModel::setDiagnosticsMode,\n                        onHeadsetMultiClickChange = viewModel::setHeadsetMultiClickEnabled,'
+          new = '                        onDiagnosticsModeChange = viewModel::setDiagnosticsMode,\n                        onDiagnosticScreenChanged = {},\n                        onHeadsetMultiClickChange = viewModel::setHeadsetMultiClickEnabled,'
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one PersonalScreen diagnostics callback anchor, found {text.count(old)}')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          rm .github/workflows/fix-legacy-diagnostics-parity.yml
+          git diff --check
+          git config user.name "OpenAI"
+          git config user.email "noreply@openai.com"
+          git add -A
+          git commit -m "Keep legacy app surface diagnostics-compatible"
+          git push origin HEAD:agent/three-mode-lua-diagnostics

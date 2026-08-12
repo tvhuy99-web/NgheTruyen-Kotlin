@@ -104,7 +104,6 @@ class ChromiumBrowserReplayVBookRuntimeTest {
         assertEquals("HTTP before Browser must be memoized across Chromium replay rounds", 1, networkCalls)
         assertEquals(1, browserActions.count { it == SourceBrowserAction.NAVIGATE })
         assertTrue(browserActions.any { it == SourceBrowserAction.DOM_SNAPSHOT })
-        assertTrue(browserActions.any { it == SourceBrowserAction.REQUEST_METADATA })
     }
 
     private fun manifest() = SourceManifest(

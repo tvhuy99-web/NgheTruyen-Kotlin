@@ -23,6 +23,31 @@ class VBookPackageReaderTest {
     }
 
     @Test
+    fun retainsLuaCompatibleMjsJsonAndTxtResources() {
+        val plugin = PLUGIN.replace("\"search\":\"search.js\"", "\"search\":\"search.mjs\"")
+        val zip = packageZip(mapOf(
+            "plugin.json" to plugin.toByteArray(),
+            "src/search.mjs" to "function execute(q,p){load('helper.mjs');return Response.success([],p);}".toByteArray(),
+            "src/helper.mjs" to "function helper(){return 1;}".toByteArray(),
+            "src/detail.js" to "function execute(u){return Response.success({name:'x',url:u});}".toByteArray(),
+            "src/toc.js" to "function execute(u){return Response.success([]);}".toByteArray(),
+            "src/chap.js" to "function execute(u){return Response.success('x');}".toByteArray(),
+            "src/rules.json" to "{\"selector\":\".chapter\"}".toByteArray(),
+            "src/template.txt" to "chapter-template".toByteArray(),
+        ))
+
+        val pkg = VBookPackageReader.read(zip)
+        val decoded = pkg.decodeScripts()
+        val resources = VBookPackageResourceProvider(pkg)
+
+        assertTrue("src/search.mjs" in decoded)
+        assertTrue("src/helper.mjs" in decoded)
+        assertEquals("{\"selector\":\".chapter\"}", resources.read("src/rules.json", 1024)?.toString(Charsets.UTF_8))
+        assertEquals("chapter-template", resources.read("template.txt", 1024)?.toString(Charsets.UTF_8))
+        assertEquals("src/search.mjs", VBookManifestParser.parse(pkg.pluginJson()).script(VBookScriptRole.SEARCH))
+    }
+
+    @Test
     fun rejectsZipTraversal() {
         val zip = packageZip(mapOf(
             "plugin.json" to PLUGIN.toByteArray(),

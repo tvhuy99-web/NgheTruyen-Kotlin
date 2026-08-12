@@ -166,15 +166,18 @@ object DiagnosticHumanFormatter {
         val attributes: Map<String, String>,
         val rawDetail: String = "",
     ) {
+        private val effectiveCode: String
+            get() = first(attributes, "code", "errorCode", "error_code")?.takeIf(String::isNotBlank) ?: code
+
         private val problem: Boolean
             get() = severity.equals("ERROR", true) || severity.equals("WARN", true) ||
-                code.contains("FAILED", true) || code.contains("ERROR", true)
+                effectiveCode.contains("FAILED", true) || effectiveCode.contains("ERROR", true)
 
         fun render(): String = buildString {
             val timestamp = TIME_FORMAT.get().format(Date(timestampEpochMs))
-            val action = actionLabel(code, category)
+            val action = actionLabel(effectiveCode, category)
             val prefix = when {
-                severity.equals("ERROR", true) || code.contains("FAILED", true) -> "LỖI"
+                severity.equals("ERROR", true) || effectiveCode.contains("FAILED", true) -> "LỖI"
                 severity.equals("WARN", true) -> "CẢNH BÁO"
                 else -> "MỐC"
             }
@@ -188,13 +191,13 @@ object DiagnosticHumanFormatter {
                 append(pieces.joinToString(" • "))
                 return@buildString
             }
-            appendLine("Mã lỗi: $code")
-            appendLine("Giai đoạn: ${stageLabel(code, category, attributes)}")
+            appendLine("Mã lỗi: $effectiveCode")
+            appendLine("Giai đoạn: ${stageLabel(effectiveCode, category, attributes)}")
             if (sourceId.isNotBlank()) appendLine("Nguồn: $sourceId")
             target(attributes)?.let { appendLine("Đối tượng: $it") }
             message(attributes, rawDetail)?.let { appendLine("Thông báo: $it") }
-            appendLine("Nguyên nhân: ${cause(code, category, attributes)}")
-            appendLine("Gợi ý: ${suggestion(code, category, attributes)}")
+            appendLine("Nguyên nhân: ${cause(effectiveCode, category, attributes)}")
+            appendLine("Gợi ý: ${suggestion(effectiveCode, category, attributes)}")
             if (traceId.isNotBlank()) appendLine("Trace: $traceId")
             technicalDetail(attributes, rawDetail)?.let { append("Chi tiết kỹ thuật: $it") }
         }.trimEnd()
@@ -236,6 +239,7 @@ object DiagnosticHumanFormatter {
     private fun cause(code: String, category: String, attributes: Map<String, String>): String {
         first(attributes, "cause", "error", "reason", "exception")?.let { return it.take(2_000) }
         val status = first(attributes, "status", "httpStatus", "statusCode")
+        exactLuaCause(code, attributes)?.let { return it }
         return when {
             code.contains("TIMEOUT", true) -> "Thao tác vượt quá thời gian chờ trước khi nhận được kết quả hợp lệ."
             code.contains("HTTP", true) && status != null -> "Máy chủ trả về trạng thái HTTP $status thay vì dữ liệu ứng dụng mong đợi."
@@ -253,8 +257,59 @@ object DiagnosticHumanFormatter {
         }
     }
 
+    private fun exactLuaCause(code: String, attributes: Map<String, String>): String? = when (code.uppercase(Locale.ROOT)) {
+        "NETWORK_API_MISSING" -> "Runtime của tiện ích không có API mạng cần thiết cho thao tác này."
+        "NETWORK_HTTP_STATUS" -> "Máy chủ trả về HTTP ${first(attributes, "status", "httpStatus", "statusCode") ?: "không mong đợi"} thay vì dữ liệu hợp lệ."
+        "NETWORK_EMPTY_RESPONSE" -> "Yêu cầu mạng hoàn tất nhưng nội dung phản hồi rỗng."
+        "NETWORK_TIMEOUT" -> "Yêu cầu mạng vượt quá thời gian chờ trước khi nhận đủ phản hồi."
+        "NETWORK_START_FAILED" -> "Yêu cầu không khởi động được ở lớp mạng hoặc bị từ chối trước khi gửi."
+        "NETWORK_RESPONSE_TOO_LARGE" -> "Phản hồi vượt giới hạn an toàn mà runtime cho phép giữ trong bộ nhớ."
+        "REPOSITORY_JSON_INVALID" -> "Nội dung repository không phải JSON hợp lệ."
+        "REPOSITORY_SCHEMA_INVALID" -> "JSON repository đọc được nhưng thiếu hoặc sai các trường bắt buộc."
+        "REPOSITORY_NO_NOVEL" -> "Repository hợp lệ nhưng không có gói nguồn truyện tương thích để cài."
+        "REPOSITORY_ENTRY_INVALID" -> "Một mục trong repository có URL, ID, phiên bản hoặc metadata không hợp lệ."
+        "REMOTE_URL_EMPTY" -> "Liên kết gói tiện ích bị rỗng."
+        "REMOTE_URL_INVALID" -> "Liên kết gói tiện ích không phải URL hợp lệ hoặc không đáp ứng chính sách an toàn."
+        "DIRECT_VBOOK_MANIFEST_ONLY" -> "Liên kết chỉ trỏ tới manifest vBook, chưa phải gói cài đặt đầy đủ mà APK có thể xác minh."
+        "ZIP_INVALID" -> "Dữ liệu tải về không phải ZIP hợp lệ hoặc cấu trúc ZIP bị hỏng."
+        "ZIP_MISSING_MANIFEST" -> "Gói ZIP không có manifest bắt buộc của tiện ích."
+        "ZIP_LIMIT" -> "Gói ZIP vượt giới hạn số file, kích thước entry hoặc tổng dung lượng giải nén."
+        "VBOOK_MANIFEST_INVALID" -> "Manifest vBook tồn tại nhưng không vượt qua bước phân tích hoặc kiểm tra tương thích."
+        "INSTALL_VALIDATION_FAILED" -> "Gói tiện ích thất bại ở bước kiểm tra trước khi ghi vào vùng cài đặt."
+        "INSTALL_IO_FAILED" -> "Không thể ghi, di chuyển hoặc hoàn tất file cài đặt trên bộ nhớ thiết bị."
+        "INSTALL_FINAL_VALIDATION_FAILED" -> "Gói đã được ghi tạm nhưng kiểm tra cuối sau cài đặt không đạt yêu cầu."
+        "UNKNOWN_INSTALL_ERROR" -> "Quá trình cài đặt kết thúc bằng lỗi chưa được phân loại cụ thể."
+        else -> null
+    }
+
+    private fun exactLuaSuggestion(code: String): String? = when (code.uppercase(Locale.ROOT)) {
+        "NETWORK_API_MISSING" -> "Cập nhật APK/runtime hoặc dùng nguồn tương thích; xuất tệp để kiểm tra capability và runtime mode."
+        "NETWORK_HTTP_STATUS" -> "Mở trang gốc, kiểm tra phiên đăng nhập và quyền truy cập. Nếu trang mở được, xuất tệp để đối chiếu HTTP, redirect và HTML phản hồi."
+        "NETWORK_EMPTY_RESPONSE" -> "Thử lại sau khi kiểm tra mạng và phiên nguồn; nếu lặp lại, xuất tệp để xem request, status và response metadata."
+        "NETWORK_TIMEOUT" -> "Kiểm tra mạng, thử lại và xuất tệp nếu tái diễn để xem deadline, polling, request và stage cuối cùng."
+        "NETWORK_START_FAILED" -> "Kiểm tra URL, kết nối, quyền mạng và cấu hình nguồn; xuất tệp để xác định lỗi xảy ra trước hay sau khi broker nhận yêu cầu."
+        "NETWORK_RESPONSE_TOO_LARGE" -> "Kiểm tra nguồn có trả nhầm trang hoặc dữ liệu bất thường; dùng file xuất để xem status, content type và kích thước phản hồi."
+        "REPOSITORY_JSON_INVALID" -> "Mở URL repository và xác nhận nội dung là JSON đúng định dạng, không phải HTML lỗi/chuyển hướng."
+        "REPOSITORY_SCHEMA_INVALID" -> "Đối chiếu repository với schema hỗ trợ và sửa các trường bắt buộc trước khi làm mới kho."
+        "REPOSITORY_NO_NOVEL" -> "Kiểm tra repository có khai báo ít nhất một gói NOVEL tương thích với phiên bản APK hiện tại."
+        "REPOSITORY_ENTRY_INVALID" -> "Kiểm tra từng entry của repository, nhất là ID, version, URL gói, checksum/chữ ký và content type."
+        "REMOTE_URL_EMPTY" -> "Bổ sung URL tải gói trong repository hoặc dùng một liên kết cài đặt đầy đủ."
+        "REMOTE_URL_INVALID" -> "Dùng URL HTTPS hợp lệ tới gói tiện ích và tránh liên kết chuyển hướng/host không được phép."
+        "DIRECT_VBOOK_MANIFEST_ONLY" -> "Đóng gói manifest cùng mã nguồn/tài nguyên thành ZIP tiện ích hợp lệ rồi cài lại."
+        "ZIP_INVALID" -> "Tải lại gói từ nguồn tin cậy; nếu vẫn lỗi, kiểm tra file có thực sự là ZIP và không bị trang web/CDN thay bằng HTML."
+        "ZIP_MISSING_MANIFEST" -> "Bổ sung manifest đúng vị trí trong ZIP và đóng gói lại tiện ích."
+        "ZIP_LIMIT" -> "Giảm số file/kích thước gói, loại file thừa hoặc chia dữ liệu lớn ra khỏi gói cài đặt."
+        "VBOOK_MANIFEST_INVALID" -> "Kiểm tra schema, runtime, action, permission và đường dẫn tài nguyên trong manifest; xuất tệp để xem lỗi validation cụ thể."
+        "INSTALL_VALIDATION_FAILED" -> "Không bỏ qua validation. Sửa gói theo lỗi chi tiết rồi cài lại từ đầu."
+        "INSTALL_IO_FAILED" -> "Kiểm tra dung lượng trống và quyền truy cập bộ nhớ ứng dụng, sau đó thử cài lại."
+        "INSTALL_FINAL_VALIDATION_FAILED" -> "Xóa gói lỗi, kiểm tra manifest/tài nguyên sau giải nén và cài lại từ nguồn sạch."
+        "UNKNOWN_INSTALL_ERROR" -> "Xuất tệp chẩn đoán để lấy stack/trace/stage cuối và dùng mã lỗi phụ trong Chi tiết kỹ thuật để phân loại."
+        else -> null
+    }
+
     private fun suggestion(code: String, category: String, attributes: Map<String, String>): String {
         first(attributes, "suggestion", "hint", "recovery")?.let { return it.take(2_000) }
+        exactLuaSuggestion(code)?.let { return it }
         return when {
             code.contains("401", true) || code.contains("403", true) || code.contains("LOGIN", true) || code.contains("SESSION", true) ->
                 "Mở lại phiên đăng nhập của nguồn rồi thực hiện lại thao tác. Nếu vẫn lỗi, xuất tệp để kiểm tra request, redirect và WebView."

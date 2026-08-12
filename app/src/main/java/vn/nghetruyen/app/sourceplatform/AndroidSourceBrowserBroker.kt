@@ -43,6 +43,7 @@ import vn.nghetruyen.source.diagnostics.DiagnosticSink
 import vn.nghetruyen.source.network.SourceOriginPolicy
 import vn.nghetruyen.source.network.PublicAddressPolicy
 import org.json.JSONTokener
+import org.json.JSONObject
 import vn.nghetruyen.source.api.SourceBrowserDialog
 import java.io.ByteArrayInputStream
 import java.net.InetAddress
@@ -108,7 +109,16 @@ class AndroidSourceBrowserBroker(
                 requireCapability(manifest, request.action)
                 val session = ensureSession(manifest, request.url)
                 session.currentTraceId = request.traceId
-                diagnostics.emit(event(manifest, request, "BROWSER_ACTION_STARTED", attributes = mapOf("action" to request.action.name)))
+                captureBrowserEnvironment(session, request)
+                diagnostics.emit(event(manifest, request, "BROWSER_ACTION_STARTED", attributes = mapOf(
+                    "action" to request.action.name,
+                    "flow" to "browser",
+                    "stage" to "action_start",
+                    "timeoutMs" to request.timeoutMs.toString(),
+                    "deadlineEpochMs" to (started + request.timeoutMs).toString(),
+                    "requestId" to request.traceId,
+                    "url" to diagnosticUrl(request.url.orEmpty()),
+                )))
                 val value = when (request.action) {
                     SourceBrowserAction.NAVIGATE -> navigate(session, manifest, request)
                     SourceBrowserAction.LOAD_HTML -> loadHtml(session, manifest, request)
@@ -155,6 +165,8 @@ class AndroidSourceBrowserBroker(
                 onSuccess = {
                     diagnostics.emit(event(manifest, request, "BROWSER_ACTION_COMPLETED", durationMs = clockMs() - started, attributes = mapOf(
                     "action" to request.action.name,
+                    "flow" to "browser",
+                    "stage" to "action_completed",
                     "requests" to it.requestMetadata.size.toString(),
                     "degradedIsolation" to it.degradedIsolation.toString(),
                 )))
@@ -173,6 +185,8 @@ class AndroidSourceBrowserBroker(
                     }
                     diagnostics.emit(event(manifest, request, "BROWSER_ACTION_FAILED", DiagnosticSeverity.ERROR, clockMs() - started, mapOf(
                     "action" to request.action.name,
+                    "flow" to "browser",
+                    "stage" to "action_failed",
                     "code" to code.name,
                     "error" to (error.message ?: error.javaClass.simpleName),
                 )))
@@ -196,6 +210,44 @@ class AndroidSourceBrowserBroker(
         }.getOrNull()
         val webViewState = runCatching { snapshotWebView(session, request.timeoutMs.coerceIn(100L, 5_000L)) }.getOrNull()
         val logicalUrl = webViewState?.let { reconcileLogicalPageUrl(session, it) } ?: session.logicalPageUrl
+        val readyState = runCatching { evaluate(session, "document.readyState || ''", request.timeoutMs.coerceIn(100L, 2_000L)) }.getOrNull().orEmpty()
+        val pageCookieCount = runCatching {
+            evaluate(session, "document.cookie ? document.cookie.split(';').filter(Boolean).length : 0", request.timeoutMs.coerceIn(100L, 2_000L)).toLongOrNull() ?: 0L
+        }.getOrDefault(0L)
+        val domStorageAvailable = runCatching {
+            evaluate(session, "(()=>{try{return typeof window.localStorage !== 'undefined'}catch(e){return false}})()", request.timeoutMs.coerceIn(100L, 2_000L)) == "true"
+        }.getOrDefault(false)
+        val stateAttributes = mapOf(
+            "action" to request.action.name,
+            "flow" to "browser",
+            "stage" to "page_probe",
+            "url" to diagnosticUrl(logicalUrl ?: request.url.orEmpty()),
+            "title" to webViewState?.title.orEmpty().take(500),
+            "progress" to (webViewState?.progress ?: 0).toString(),
+            "readyState" to readyState.take(100),
+            "pageJavaScript" to if (readyState.isNotBlank()) "ok" else "unknown",
+            "pageCookieCount" to pageCookieCount.toString(),
+            "pageDomStorage" to domStorageAvailable.toString(),
+            "requests" to session.metadata.size.toString(),
+            "mainFrameRequests" to session.metadata.count { it.mainFrame }.toString(),
+            "blockedRequests" to session.metadata.count { it.resourceType?.contains("blocked", true) == true }.toString(),
+            "lateCallbacks" to session.lateCallbacks.toString(),
+            "pageStartedCount" to session.pageStartedCount.toString(),
+            "pageFinishedCount" to session.pageFinishedCount.toString(),
+            "rendererGone" to session.rendererGone.toString(),
+            "pendingError" to session.pendingError.get().orEmpty().take(500),
+        )
+        diagnostics.emit(event(session.manifest, request, "BROWSER_STATE_SNAPSHOT", DiagnosticSeverity.DEBUG, attributes = stateAttributes))
+        evidence.capture(DiagnosticEvidence(
+            timestampEpochMs = clockMs(),
+            traceId = trace,
+            sourceId = request.sourceId,
+            category = DiagnosticCategory.BROWSER,
+            name = "browser-${reason}-state-${clockMs()}.json",
+            contentType = "application/json",
+            data = JSONObject(stateAttributes).toString(2).toByteArray(Charsets.UTF_8),
+            attributes = mapOf("flow" to "browser", "stage" to "page_probe"),
+        ))
         if (html != null) {
             evidence.capture(DiagnosticEvidence(
                 timestampEpochMs = clockMs(),
@@ -232,6 +284,58 @@ class AndroidSourceBrowserBroker(
                 name = "browser-${reason}-requests-${clockMs()}.log",
                 contentType = "text/plain",
                 data = metadata.toByteArray(Charsets.UTF_8),
+            ))
+        }
+    }
+
+    private fun captureBrowserEnvironment(session: Session, request: SourceBrowserRequest) {
+        if (session.environmentCaptured) return
+        session.environmentCaptured = true
+        val attributes = runCatching {
+            runOnMain(5_000L) {
+                val settings = session.webView.settings
+                val manager = CookieManager.getInstance()
+                val pkg = WebView.getCurrentWebViewPackage()
+                val pageUrl = request.url ?: session.logicalPageUrl.orEmpty()
+                val cookieHeader = if (pageUrl.isBlank()) "" else manager.getCookie(pageUrl).orEmpty()
+                mapOf(
+                    "flow" to "browser",
+                    "stage" to "environment_probe",
+                    "webViewPackage" to pkg?.packageName.orEmpty(),
+                    "webViewVersion" to pkg?.versionName.orEmpty(),
+                    "userAgent" to settings.userAgentString.orEmpty().take(1_000),
+                    "javaScriptEnabled" to settings.javaScriptEnabled.toString(),
+                    "domStorageEnabled" to settings.domStorageEnabled.toString(),
+                    "databaseEnabled" to settings.databaseEnabled.toString(),
+                    "allowFileAccess" to settings.allowFileAccess.toString(),
+                    "allowContentAccess" to settings.allowContentAccess.toString(),
+                    "mixedContentMode" to settings.mixedContentMode.toString(),
+                    "safeBrowsingEnabled" to settings.safeBrowsingEnabled.toString(),
+                    "loadsImagesAutomatically" to settings.loadsImagesAutomatically.toString(),
+                    "blockNetworkLoads" to settings.blockNetworkLoads.toString(),
+                    "acceptCookies" to manager.acceptCookie().toString(),
+                    "acceptThirdPartyCookies" to manager.acceptThirdPartyCookies(session.webView).toString(),
+                    "cookieCount" to cookieHeader.split(';').count { it.contains('=') }.toString(),
+                )
+            }
+        }.getOrElse { error ->
+            mapOf(
+                "flow" to "browser",
+                "stage" to "environment_probe",
+                "probeError" to (error.message ?: error.javaClass.simpleName).take(500),
+            )
+        }
+        diagnostics.emit(event(session.manifest, request, "BROWSER_ENVIRONMENT_SNAPSHOT", DiagnosticSeverity.DEBUG, attributes = attributes))
+        if (evidence.enabled) {
+            evidence.capture(DiagnosticEvidence(
+                timestampEpochMs = clockMs(),
+                traceId = request.traceId,
+                sourceId = request.sourceId,
+                category = DiagnosticCategory.BROWSER,
+                name = "browser-environment-${clockMs()}.json",
+                contentType = "application/json",
+                data = JSONObject(attributes).toString(2).toByteArray(Charsets.UTF_8),
+                attributes = mapOf("flow" to "browser", "stage" to "environment_probe"),
             ))
         }
     }
@@ -378,22 +482,38 @@ class AndroidSourceBrowserBroker(
 
             override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
                 sessionRef.get()?.apply {
+                    val late = pageLatch == null
+                    if (late) lateCallbacks += 1
+                    pageStartedCount += 1
                     updateLogicalPageUrlFromWebView(url)
                     recordUrl(url)
                     diagnostics.emit(sessionEvent(manifest, this, "BROWSER_PAGE_STARTED", DiagnosticSeverity.INFO, attributes = mapOf(
+                        "flow" to "browser",
+                        "stage" to "page_started",
                         "url" to diagnosticUrl(url),
                         "requests" to metadata.size.toString(),
+                        "late" to late.toString(),
+                        "lateCallbacks" to lateCallbacks.toString(),
+                        "pageStartedCount" to pageStartedCount.toString(),
                     )))
                 }
             }
 
             override fun onPageFinished(view: WebView, url: String) {
                 sessionRef.get()?.apply {
+                    val late = pageLatch == null
+                    if (late) lateCallbacks += 1
+                    pageFinishedCount += 1
                     updateLogicalPageUrlFromWebView(url)
                     recordUrl(url)
                     diagnostics.emit(sessionEvent(manifest, this, "BROWSER_PAGE_FINISHED", DiagnosticSeverity.INFO, attributes = mapOf(
+                        "flow" to "browser",
+                        "stage" to "page_finished",
                         "url" to diagnosticUrl(url),
                         "requests" to metadata.size.toString(),
+                        "late" to late.toString(),
+                        "lateCallbacks" to lateCallbacks.toString(),
+                        "pageFinishedCount" to pageFinishedCount.toString(),
                     )))
                     pageLatch?.countDown()
                 }
@@ -619,6 +739,8 @@ class AndroidSourceBrowserBroker(
             if (found) {
                 diagnostics.emit(event(manifest = session.manifest, request = request, name = "BROWSER_SELECTOR_FOUND", severity = DiagnosticSeverity.INFO, attributes = mapOf(
                     "selector" to selector.take(1_000),
+                    "flow" to "browser",
+                    "stage" to "selector_probe",
                     "polls" to polls.toString(),
                     "elapsedMs" to (request.timeoutMs - (deadline - clockMs()).coerceAtLeast(0L)).toString(),
                 )))
@@ -627,6 +749,8 @@ class AndroidSourceBrowserBroker(
             if (polls == 1 || polls % 5 == 0) {
                 diagnostics.emit(event(manifest = session.manifest, request = request, name = "BROWSER_SELECTOR_PROBE", severity = DiagnosticSeverity.DEBUG, attributes = mapOf(
                     "selector" to selector.take(1_000),
+                    "flow" to "browser",
+                    "stage" to "selector_probe",
                     "polls" to polls.toString(),
                     "remainingMs" to (deadline - clockMs()).coerceAtLeast(0L).toString(),
                 )))
@@ -635,6 +759,8 @@ class AndroidSourceBrowserBroker(
         } while (clockMs() < deadline && !session.rendererGone)
         diagnostics.emit(event(manifest = session.manifest, request = request, name = "BROWSER_SELECTOR_TIMEOUT", severity = DiagnosticSeverity.WARN, attributes = mapOf(
                     "selector" to selector.take(1_000),
+                    "flow" to "browser",
+                    "stage" to "selector_probe",
                     "polls" to polls.toString(),
                 )))
         error("SOURCE_BROWSER_SELECTOR_NOT_FOUND")
@@ -742,7 +868,7 @@ class AndroidSourceBrowserBroker(
     }
 
     private fun snapshotWebView(session: Session, timeoutMs: Long = 5_000L): WebViewState =
-        runOnMain(timeoutMs) { WebViewState(session.webView.url, session.webView.title) }
+        runOnMain(timeoutMs) { WebViewState(session.webView.url, session.webView.title, session.webView.progress) }
 
     private fun reconcileLogicalPageUrl(session: Session, state: WebViewState): String? {
         val webUrl = state.url
@@ -878,6 +1004,10 @@ class AndroidSourceBrowserBroker(
         @Volatile var dialogPolicy: DialogPolicy = DialogPolicy("dismiss", "")
         @Volatile var trustedLoadHtmlInFlight: Boolean = false
         @Volatile var logicalPageUrl: String? = null
+        @Volatile var environmentCaptured: Boolean = false
+        @Volatile var lateCallbacks: Int = 0
+        @Volatile var pageStartedCount: Int = 0
+        @Volatile var pageFinishedCount: Int = 0
 
         fun record(request: WebResourceRequest, resourceType: String?) {
             if (!manifest.capabilities.browser.requestMetadata && resourceType == null) return
@@ -943,7 +1073,7 @@ class AndroidSourceBrowserBroker(
         }
     }
 
-    private data class WebViewState(val url: String?, val title: String?)
+    private data class WebViewState(val url: String?, val title: String?, val progress: Int)
     private data class DialogPolicy(val defaultAction: String, val defaultValue: String)
     private data class DialogDecision(val accepted: Boolean, val value: String?)
 }

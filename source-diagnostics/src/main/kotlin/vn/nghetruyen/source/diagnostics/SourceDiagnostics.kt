@@ -47,6 +47,11 @@ fun interface DiagnosticSink {
     }
 }
 
+data class DiagnosticRecorderStats(
+    val itemCount: Int,
+    val evictedEvents: Long,
+)
+
 class BoundedDiagnosticRecorder(
     private val maxEvents: Int = 2_000,
     @Volatile var level: DiagnosticLevel = DiagnosticLevel.BASIC,
@@ -54,6 +59,7 @@ class BoundedDiagnosticRecorder(
 ) : DiagnosticSink {
     private val lock = ReentrantLock()
     private val events = ArrayDeque<DiagnosticEvent>(maxEvents.coerceAtLeast(1))
+    private var evictedEvents: Long = 0
 
     init {
         require(maxEvents in 1..100_000) { "DIAGNOSTIC_CAPACITY_INVALID" }
@@ -65,7 +71,10 @@ class BoundedDiagnosticRecorder(
         if (level == DiagnosticLevel.BASIC && event.severity == DiagnosticSeverity.DEBUG) return
         val safe = event.copy(attributes = DiagnosticRedactor.redact(event.attributes))
         lock.withLock {
-            while (events.size >= maxEvents) events.removeFirst()
+            while (events.size >= maxEvents) {
+                events.removeFirst()
+                evictedEvents += 1
+            }
             events.addLast(safe)
         }
         runCatching { mirror.emit(safe) }
@@ -75,9 +84,16 @@ class BoundedDiagnosticRecorder(
     fun restore(restored: List<DiagnosticEvent>) = lock.withLock {
         restored.takeLast(maxEvents).forEach { event ->
             val safe = event.copy(attributes = DiagnosticRedactor.redact(event.attributes))
-            while (events.size >= maxEvents) events.removeFirst()
+            while (events.size >= maxEvents) {
+                events.removeFirst()
+                evictedEvents += 1
+            }
             events.addLast(safe)
         }
+    }
+
+    fun stats(): DiagnosticRecorderStats = lock.withLock {
+        DiagnosticRecorderStats(events.size, evictedEvents)
     }
 
     fun snapshot(sourceId: String? = null, traceId: String? = null): List<DiagnosticEvent> = lock.withLock {
@@ -87,8 +103,10 @@ class BoundedDiagnosticRecorder(
     }
 
     fun clear(sourceId: String? = null) = lock.withLock {
-        if (sourceId == null) events.clear()
-        else {
+        if (sourceId == null) {
+            events.clear()
+            evictedEvents = 0
+        } else {
             val retained = events.filterNot { it.sourceId == sourceId }
             events.clear()
             retained.forEach(events::addLast)
@@ -123,6 +141,7 @@ data class DiagnosticEvidenceStats(
     val itemCount: Int,
     val retainedBytes: Long,
     val evictedItems: Long,
+    val truncatedItems: Long,
 )
 
 class BoundedDiagnosticEvidenceRecorder(
@@ -135,6 +154,7 @@ class BoundedDiagnosticEvidenceRecorder(
     private val items = ArrayDeque<DiagnosticEvidence>()
     private var retainedBytes: Long = 0
     private var evictedItems: Long = 0
+    private var truncatedItems: Long = 0
     @Volatile override var enabled: Boolean = false
 
     init {
@@ -153,6 +173,7 @@ class BoundedDiagnosticEvidenceRecorder(
             attributes = if (truncated) evidence.attributes + ("truncated" to "true") else evidence.attributes,
         )
         lock.withLock {
+            if (truncated) truncatedItems += 1
             while (items.isNotEmpty() && (items.size >= maxItems || retainedBytes + payload.size > maxBytes)) {
                 val removed = items.removeFirst()
                 retainedBytes -= removed.data.size.toLong()
@@ -174,10 +195,11 @@ class BoundedDiagnosticEvidenceRecorder(
         items.clear()
         retainedBytes = 0
         evictedItems = 0
+        truncatedItems = 0
     }
 
     fun stats(): DiagnosticEvidenceStats = lock.withLock {
-        DiagnosticEvidenceStats(items.size, retainedBytes, evictedItems)
+        DiagnosticEvidenceStats(items.size, retainedBytes, evictedItems, truncatedItems)
     }
 }
 

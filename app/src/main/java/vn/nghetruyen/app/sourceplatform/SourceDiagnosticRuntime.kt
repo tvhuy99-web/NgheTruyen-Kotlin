@@ -224,6 +224,12 @@ class SourceDiagnosticRuntime(private val context: Context) {
         backupLogTail: String = "",
     ): ByteArray {
         val safeEvents = events.sortedBy(DiagnosticEvent::timestampEpochMs)
+        val deepReport = DiagnosticDeepBlackBox.analyze(
+            events = safeEvents,
+            nowMs = System.currentTimeMillis(),
+            recorderStats = recorder.stats(),
+            evidenceStats = evidence.stats(),
+        )
         val output = ByteArrayOutputStream()
         ZipOutputStream(output).use { zip ->
             zip.addText("README.txt", readme())
@@ -235,6 +241,13 @@ class SourceDiagnosticRuntime(private val context: Context) {
             zip.addText("report/app_runtime.json", JSONObject(DiagnosticRedactor.redact(runtimeState)).toString(2))
             zip.addText("report/active_operations.json", activeOperationsJson().toString(2))
             zip.addText("report/traces.txt", traceReport(safeEvents))
+            zip.addText("report/operations.json", deepReport.operationsJson)
+            zip.addText("report/flows.json", deepReport.flowsJson)
+            zip.addText("report/browser_sessions.json", deepReport.browserSessionsJson)
+            zip.addText("report/data_loss.json", deepReport.dataLossJson)
+            deepReport.flowLogs.forEach { (flow, log) ->
+                zip.addText("flows/${safePath(flow)}.log", log)
+            }
             if (activeScreenKey.isNotBlank()) zip.addText("report/current_screen.txt", activeScreenKey)
             if (backupLogTail.isNotBlank()) {
                 zip.addText("report/backup_tail.log", DiagnosticRedactor.redactLongText(backupLogTail, 64_000))
@@ -305,10 +318,14 @@ class SourceDiagnosticRuntime(private val context: Context) {
         put("product", Build.PRODUCT)
         put("eventCount", events.size)
         put("activeOperationCount", activityTracker.snapshot().size)
+        val eventStats = recorder.stats()
         val stats = evidence.stats()
+        put("ramEventItems", eventStats.itemCount)
+        put("ramEventEvicted", eventStats.evictedEvents)
         put("ramEvidenceItems", stats.itemCount)
         put("ramEvidenceBytes", stats.retainedBytes)
         put("ramEvidenceEvictedItems", stats.evictedItems)
+        put("ramEvidenceTruncatedItems", stats.truncatedItems)
         put("continuousEventCount", continuousStore.eventCount)
         put("continuousEvidenceBytes", continuousStore.evidenceBytes)
         put("continuousEvidenceRejected", continuousStore.rejectedEvidenceCount)
@@ -403,6 +420,10 @@ class SourceDiagnosticRuntime(private val context: Context) {
         appendLine("Contents:")
         appendLine("- report/log.txt: Lua-style readable timeline with cause and suggestion for failures.")
         appendLine("- report/events.json + report/traces.txt: structured events and trace summaries.")
+        appendLine("- report/operations.json: reconstructed operations, deadlines, stages, polling and current/terminal state.")
+        appendLine("- report/flows.json + flows/*.log: latest state and raw timeline split by Lua-style diagnostic flow.")
+        appendLine("- report/browser_sessions.json: browser counters, safe capability probes, late callbacks and last error state.")
+        appendLine("- report/data_loss.json: explicit RAM eviction/truncation accounting so missing evidence is never silent.")
         appendLine("- evidence/current/: current browser/runtime/network/parser evidence captured in RAM.")
         appendLine("- evidence/sanitized/: sanitized HTML snapshots for inspection.")
         appendLine("- continuous/: append-only persisted events/evidence when continuous mode has been used.")

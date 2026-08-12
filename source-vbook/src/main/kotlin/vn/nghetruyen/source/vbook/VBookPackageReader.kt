@@ -57,11 +57,12 @@ object VBookPackageReader {
                 val entry = zip.nextEntry ?: break
                 entryCount++
                 require(entryCount <= limits.maxEntries) { "VBOOK_ZIP_ENTRY_LIMIT" }
-                val path = safeZipPath(entry.name)
+                val archivePath = safeZipPath(entry.name)
                 if (entry.isDirectory) {
                     zip.closeEntry()
                     continue
                 }
+                val path = logicalPackagePath(archivePath)
                 val output = ByteArrayOutputStream(minOf(limits.maxEntryBytes, 64 * 1024))
                 val buffer = ByteArray(16 * 1024)
                 var entrySize = 0
@@ -70,7 +71,7 @@ object VBookPackageReader {
                     if (read < 0) break
                     entrySize += read
                     expanded += read.toLong()
-                    require(entrySize <= limits.maxEntryBytes) { "VBOOK_ZIP_ENTRY_TOO_LARGE:$path" }
+                    require(entrySize <= limits.maxEntryBytes) { "VBOOK_ZIP_ENTRY_TOO_LARGE:$archivePath" }
                     require(expanded <= limits.maxExpandedBytes) { "VBOOK_ZIP_EXPANDED_LIMIT" }
                     output.write(buffer, 0, read)
                 }
@@ -82,7 +83,7 @@ object VBookPackageReader {
                     require(path !in files) { "VBOOK_ZIP_DUPLICATE_ENTRY:$path" }
                     files[path] = output.toByteArray()
                 } else {
-                    other += path
+                    other += archivePath
                 }
                 zip.closeEntry()
             }
@@ -98,6 +99,18 @@ object VBookPackageReader {
         require(scripts.isNotEmpty()) { "VBOOK_PACKAGE_SCRIPTS_MISSING" }
         strictUtf8(plugin, "plugin.json")
         return VBookPackage(plugin, icon, scripts, other, resources)
+    }
+
+    /**
+     * Lua/XPK accepts common GitHub-style archives wrapped in one or more top-level directories.
+     * Normalize the manifest and the final `src/...` suffix without ever extracting to disk.
+     */
+    private fun logicalPackagePath(archivePath: String): String {
+        val parts = archivePath.split('/')
+        if (parts.last().equals("plugin.json", ignoreCase = true)) return "plugin.json"
+        if (parts.last().equals("icon.png", ignoreCase = true)) return "icon.png"
+        val srcIndex = parts.indexOfLast { it == "src" }
+        return if (srcIndex >= 0 && srcIndex < parts.lastIndex) parts.drop(srcIndex).joinToString("/") else archivePath
     }
 
     private fun safeZipPath(raw: String): String {

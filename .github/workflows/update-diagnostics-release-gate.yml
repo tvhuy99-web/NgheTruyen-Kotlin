@@ -1,0 +1,38 @@
+name: Update diagnostics release gate
+
+on:
+  push:
+    branches:
+      - agent/three-mode-lua-diagnostics
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/three-mode-lua-diagnostics
+      - name: Update legacy diagnostics UI expectations
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/validate_release.py')
+          text = path.read_text()
+          old = '''        "XUẤT HỘP ĐEN",\n        "NHẬT KÝ CHẨN ĐOÁN",'''
+          new = '''        'title = { Text("NHẬT KÝ") }',\n        'Text("SAO CHÉP")',\n        'Text("XÓA")',\n        'Text("XUẤT TỆP")',\n        "DiagnosticHumanFormatter.formatUi",'''
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one legacy diagnostics validator block, found {text.count(old)}')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          rm .github/workflows/update-diagnostics-release-gate.yml
+          git diff --check
+          python3 scripts/check_lua_diagnostics_ui_parity.py
+          git config user.name "OpenAI"
+          git config user.email "noreply@openai.com"
+          git add -A
+          git commit -m "Align release gate with three-mode diagnostics UI"
+          git push origin HEAD:agent/three-mode-lua-diagnostics

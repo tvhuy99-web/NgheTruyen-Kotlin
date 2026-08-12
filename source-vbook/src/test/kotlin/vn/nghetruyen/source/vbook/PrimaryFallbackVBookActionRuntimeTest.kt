@@ -67,6 +67,33 @@ class PrimaryFallbackVBookActionRuntimeTest {
     }
 
     @Test
+    fun routesDynamicBrowserScriptFromDispatcherRequestInput() {
+        var primaryCalls = 0
+        var fallbackCalls = 0
+        val primary = VBookActionRuntime { _, _, _ ->
+            primaryCalls += 1
+            SourcePlatformResult.Success(SourceActionResponse(JsonValue.Str("chromium"), "trace", 1))
+        }
+        val expected = SourcePlatformResult.Success(SourceActionResponse(JsonValue.Str("rhino"), "trace", 7))
+        val fallback = VBookActionRuntime { _, _, _ -> fallbackCalls += 1; expected }
+        val manifest = manifest(mapOf(SourceActionName.UI_ACTION to SourceActionSpec("src/__nghe_vbook_dispatch.js")))
+        val resources = resources(mapOf(
+            "src/__nghe_vbook_dispatch.js" to "function execute(input){ return load(input.script); }",
+            "src/gen0.js" to "function execute(){ return Browser.navigate('https://my.qidian.com'); }",
+        ))
+        val input = JsonValue.Obj(linkedMapOf(
+            "script" to JsonValue.Str("gen0.js"),
+            "args" to JsonValue.Arr(emptyList()),
+        ))
+
+        val actual = PrimaryFallbackVBookActionRuntime(primary, fallback).execute(manifest, resources, request(input))
+
+        assertSame(expected, actual)
+        assertEquals(0, primaryCalls)
+        assertEquals(1, fallbackCalls)
+    }
+
+    @Test
     fun ignoresBrowserHostNamesInsideCommentsAndStrings() {
         var primaryCalls = 0
         var fallbackCalls = 0
@@ -150,9 +177,10 @@ class PrimaryFallbackVBookActionRuntimeTest {
         assertEquals(0, fallbackCalls)
     }
 
-    private fun request() = SourceActionRequest(
+    private fun request(input: JsonValue.Obj = JsonValue.Obj()) = SourceActionRequest(
         sourceId = "vn.nghetruyen.sources.chromiumtest",
         action = SourceActionName.UI_ACTION,
+        input = input,
         traceId = "trace",
     )
 

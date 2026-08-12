@@ -3,8 +3,7 @@ package vn.nghetruyen.app
 import android.app.Application
 import android.webkit.WebView
 import vn.nghetruyen.app.ai.vietphrase.ReferenceVietPhraseRuntime
-import vn.nghetruyen.app.sourceplatform.AndroidChromiumVBookRuntime
-import vn.nghetruyen.app.sourceplatform.ChromiumVBookDispatcherParityRuntime
+import vn.nghetruyen.app.sourceplatform.ChromiumBrowserReplayVBookRuntime
 import vn.nghetruyen.source.api.SourceErrorCode
 import vn.nghetruyen.source.api.SourcePlatformFailure
 import vn.nghetruyen.source.api.SourcePlatformResult
@@ -29,12 +28,10 @@ class NgheTruyenApplication : Application() {
                     ))
                 }
             } else synchronized(chromiumRuntimeLock) {
-                chromiumRuntimes[brokers.storage] ?: ChromiumVBookDispatcherParityRuntime(
-                    AndroidChromiumVBookRuntime(
-                        context = this,
-                        brokers = brokers,
-                        diagnostics = diagnostics,
-                    ),
+                chromiumRuntimes[brokers.storage] ?: ChromiumBrowserReplayVBookRuntime(
+                    context = this,
+                    brokers = brokers,
+                    diagnostics = diagnostics,
                 ).also { chromiumRuntimes[brokers.storage] = it }
             }
         }

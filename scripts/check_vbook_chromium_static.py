@@ -58,12 +58,16 @@ def main() -> None:
         "ChromiumVBookDispatcherParityRuntime(chromium)",
         "MAX_BROWSER_REPLAY_ROUNDS = 16",
         "CHROMIUM_BROWSER_REPLAY_REQUIRED:",
-        "browser.resolve(pending, manifest)",
+        "browser.resolve(pending, manifest, browserBudgetMs)",
+        "val browserBudgetMs = deadlineMs - clockMs()",
+        "timeoutMs = minOf(value.request.timeoutMs, budgetMs)",
         "private class ReplayNetworkBroker(",
         "private class ReplayBrowserBroker(",
         "network.beginRound()",
         "browser.beginRound()",
         "cache[key]?.let { return it }",
+        "VBookRawNetworkBroker.INTERNAL_PREFIX",
+        "VBookRawNetworkBroker.INTERNAL_OPERATION",
     )
     require(
         dispatch_decoder,

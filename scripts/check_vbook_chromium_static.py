@@ -16,6 +16,7 @@ def require(text: str, label: str, *tokens: str) -> None:
 
 def main() -> None:
     runtime = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidChromiumVBookRuntime.kt")
+    replay = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/ChromiumBrowserReplayVBookRuntime.kt")
     prelude = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/ChromiumVBookPrelude.kt")
     dispatch_decoder = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/ChromiumVBookDispatchDecoder.kt")
     browser_parity = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/ChromiumVBookDispatcherParityRuntime.kt")
@@ -48,6 +49,19 @@ def main() -> None:
         "brokers.network.execute(",
         "brokers.browser.execute(",
         "MAX_BRIDGE_CALLS",
+    )
+    require(
+        replay,
+        "Chromium cooperative Browser replay",
+        "class ChromiumBrowserReplayVBookRuntime(",
+        "brokers.copy(network = network, browser = browser)",
+        "ChromiumVBookDispatcherParityRuntime(chromium)",
+        "MAX_BROWSER_REPLAY_ROUNDS = 16",
+        "CHROMIUM_BROWSER_REPLAY_REQUIRED:",
+        "browser.resolve(pending, manifest)",
+        "network.beginRound()",
+        "browser.beginRound()",
+        "HTTP before a deferred Browser call are not repeated on replay",
     )
     require(
         dispatch_decoder,
@@ -109,7 +123,7 @@ def main() -> None:
         "WebView.getCurrentWebViewPackage() == null",
         '"CHROMIUM_WEBVIEW_UNAVAILABLE:provider-missing"',
         "brokers = brokers,",
-        "ChromiumVBookDispatcherParityRuntime(",
+        "ChromiumBrowserReplayVBookRuntime(",
         "IdentityHashMap<Any, VBookActionRuntime>()",
     )
     assert "ChromiumVBookNetworkProjectionBroker" not in application, "Chromium must preserve the raw vBook metadata envelope"
@@ -121,10 +135,11 @@ def main() -> None:
         '"CHROMIUM_MAIN_THREAD_CALLER_UNSUPPORTED"',
         "result.error.code != SourceErrorCode.VBOOK_RUNTIME_UNAVAILABLE",
     )
+    assert "BROWSER_HOST_ACCESS" not in selector, "Browser engine selection must not depend on source-text guessing"
     require(registry, "platform runtime registry", "AtomicReference<VBookActionRuntimeFactory?>(null)", "platformRuntime(")
     require(compatibility, "runtime-neutral compatibility facade", "private val runtime: VBookActionRuntime")
 
-    combined = "\n".join((runtime, prelude, dispatch_decoder, browser_parity))
+    combined = "\n".join((runtime, replay, prelude, dispatch_decoder, browser_parity))
     for forbidden in (
         "addJavascriptInterface(",
         "setAllowUniversalAccessFromFileURLs(",

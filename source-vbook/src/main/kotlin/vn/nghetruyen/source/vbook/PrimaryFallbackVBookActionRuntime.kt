@@ -1,5 +1,6 @@
 package vn.nghetruyen.source.vbook
 
+import vn.nghetruyen.source.api.JsonValue
 import vn.nghetruyen.source.api.SourceActionRequest
 import vn.nghetruyen.source.api.SourceActionResponse
 import vn.nghetruyen.source.api.SourceErrorCode
@@ -49,8 +50,18 @@ class PrimaryFallbackVBookActionRuntime(
         val action = manifest.actions[request.action] ?: return false
         val pending = ArrayDeque<String>()
         pending.add(normalizeScriptPath(action.entry))
-        val visited = linkedSetOf<String>()
 
+        val dynamicScript = (request.input.values[DYNAMIC_SCRIPT_INPUT_KEY] as? JsonValue.Str)
+            ?.value
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
+        if (dynamicScript != null) {
+            runCatching { normalizeScriptPath(dynamicScript) }
+                .getOrNull()
+                ?.let(pending::addLast)
+        }
+
+        val visited = linkedSetOf<String>()
         while (pending.isNotEmpty() && visited.size < MAX_ROUTING_SCRIPTS) {
             val path = pending.removeFirst()
             if (!visited.add(path)) continue
@@ -85,6 +96,7 @@ class PrimaryFallbackVBookActionRuntime(
     }
 
     companion object {
+        private const val DYNAMIC_SCRIPT_INPUT_KEY = "script"
         private const val MAX_ROUTING_SCRIPT_BYTES = 2 * 1024 * 1024
         private const val MAX_ROUTING_SCRIPTS = 64
         private val BROWSER_HOST_ACCESS = Regex("""\bBrowser\s*(?:\.|\[)""")

@@ -21,6 +21,7 @@ on:
       - 'source-network/**'
       - 'source-repository/**'
       - 'source-vbook/**'
+      - 'source-lua/**'
       - 'source-js-sandbox/**'
       - 'source-compat-testkit/**'
       - 'settings.gradle.kts'
@@ -41,6 +42,7 @@ on:
     branches:
       - 'agent/source-platform-s0-s1'
       - 'agent/vbook-*'
+      - 'agent/native-*'
     paths:
       - 'app/src/main/java/vn/nghetruyen/app/sourceplatform/**'
       - 'app/src/main/java/vn/nghetruyen/app/NgheTruyenApplication.kt'
@@ -60,6 +62,7 @@ on:
       - 'source-network/**'
       - 'source-repository/**'
       - 'source-vbook/**'
+      - 'source-lua/**'
       - 'source-js-sandbox/**'
       - 'source-compat-testkit/**'
       - 'settings.gradle.kts'
@@ -116,23 +119,24 @@ jobs:
           :source-network:test
           :source-repository:test
           :source-vbook:test
+          :source-lua:test
           :app:testDebugUnitTest
           :app:compileDebugKotlin
           --stacktrace
 
-      - name: Print vBook test failures
+      - name: Print source platform test failures
         if: failure()
         shell: bash
         run: |
           shopt -s nullglob
-          files=(source-vbook/build/test-results/test/TEST-*.xml)
+          files=(source-vbook/build/test-results/test/TEST-*.xml source-lua/build/test-results/test/TEST-*.xml)
           if ((${#files[@]} == 0)); then
-            echo 'No vBook XML test results were produced.'
+            echo 'No source-vbook/source-lua XML test results were produced.'
             exit 0
           fi
           python3 - <<'PY'
           import glob, xml.etree.ElementTree as ET
-          for path in glob.glob('source-vbook/build/test-results/test/TEST-*.xml'):
+          for path in glob.glob('source-vbook/build/test-results/test/TEST-*.xml') + glob.glob('source-lua/build/test-results/test/TEST-*.xml'):
               root = ET.parse(path).getroot()
               for case in root.findall('testcase'):
                   failure = case.find('failure')

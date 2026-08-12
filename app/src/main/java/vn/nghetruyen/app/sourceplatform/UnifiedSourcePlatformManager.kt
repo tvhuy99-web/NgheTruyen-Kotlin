@@ -128,7 +128,10 @@ class UnifiedSourcePlatformManager(
         val persistedUrl = snapshot?.indexUrl ?: vBookRepositorySubscriptions.urls()
             .firstOrNull { vBookIndexUiId(it) == repositoryId }
         if (persistedUrl != null) {
-            return runCatching { vBookRepositorySubscriptions.remove(persistedUrl) }
+            return runCatching {
+                vBookRepositories.evictCachedDocument(persistedUrl)
+                vBookRepositorySubscriptions.remove(persistedUrl)
+            }
         }
         return legacy.removeRepository(repositoryId)
     }

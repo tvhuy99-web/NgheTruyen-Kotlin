@@ -911,16 +911,129 @@ private fun extensionSearchNormalize(value: String): String = Normalizer
     .trim()
 
 private fun extensionSearchScore(value: String, query: String): Int? {
-    val tokens = extensionSearchNormalize(query).split(' ').filter(String::isNotBlank)
-    if (tokens.isEmpty()) return 0
+    val normalizedQuery = extensionSearchNormalize(query)
+    if (normalizedQuery.isBlank()) return 0
+
     val searchable = extensionSearchNormalize(value)
+    if (searchable.isBlank()) return null
+    val words = searchable.split(' ').filter(String::isNotBlank)
+    val compact = words.joinToString("")
+    val acronym = words.mapNotNull { it.firstOrNull()?.toString() }.joinToString("")
+    val tokens = normalizedQuery.split(' ').filter(String::isNotBlank)
+
     var score = 0
     tokens.forEach { token ->
-        val index = searchable.indexOf(token)
-        if (index < 0) return null
-        score += index
+        val tokenScore = extensionTokenSearchScore(token, searchable, words, compact, acronym) ?: return null
+        score += tokenScore
     }
-    return score
+
+    val phraseIndex = searchable.indexOf(normalizedQuery)
+    if (phraseIndex >= 0) {
+        score -= minOf(40, 20 + normalizedQuery.length)
+    }
+    return score.coerceAtLeast(0)
+}
+
+private fun extensionTokenSearchScore(
+    token: String,
+    searchable: String,
+    words: List<String>,
+    compact: String,
+    acronym: String,
+): Int? {
+    val exactWord = words.indexOf(token)
+    if (exactWord >= 0) return exactWord
+
+    val prefixWord = words.indexOfFirst { it.startsWith(token) }
+    if (prefixWord >= 0) return 10 + prefixWord
+
+    val substring = searchable.indexOf(token)
+    if (substring >= 0) return 20 + substring
+
+    if (token.length >= 2) {
+        if (acronym.startsWith(token)) return 40 + (acronym.length - token.length)
+        extensionSubsequenceScore(token, acronym)?.let { return 50 + it }
+    }
+
+    if (token.length >= 3) {
+        extensionSubsequenceScore(token, compact)?.let { gaps ->
+            if (gaps <= token.length * 2 + 8) return 70 + gaps
+        }
+    }
+
+    val editLimit = when {
+        token.length >= 7 -> 2
+        token.length >= 4 -> 1
+        else -> 0
+    }
+    if (editLimit > 0) {
+        var bestDistance: Int? = null
+        words.forEach { word ->
+            if (kotlin.math.abs(word.length - token.length) <= editLimit) {
+                extensionEditDistance(token, word, editLimit)?.let { distance ->
+                    bestDistance = minOf(bestDistance ?: distance, distance)
+                }
+            }
+        }
+        bestDistance?.let { return 100 + it * 10 }
+    }
+
+    return null
+}
+
+private fun extensionSubsequenceScore(needle: String, haystack: String): Int? {
+    if (needle.isEmpty()) return 0
+    var needleIndex = 0
+    var firstMatch = -1
+    var lastMatch = -1
+    haystack.forEachIndexed { index, char ->
+        if (needleIndex < needle.length && char == needle[needleIndex]) {
+            if (firstMatch < 0) firstMatch = index
+            lastMatch = index
+            needleIndex += 1
+        }
+    }
+    if (needleIndex != needle.length) return null
+    return (lastMatch - firstMatch + 1 - needle.length).coerceAtLeast(0) + firstMatch.coerceAtLeast(0)
+}
+
+private fun extensionEditDistance(left: String, right: String, limit: Int): Int? {
+    if (kotlin.math.abs(left.length - right.length) > limit) return null
+    var previous = IntArray(right.length + 1) { it }
+    left.forEachIndexed { leftIndex, leftChar ->
+        val current = IntArray(right.length + 1)
+        current[0] = leftIndex + 1
+        var rowMinimum = current[0]
+        right.forEachIndexed { rightIndex, rightChar ->
+            val insert = current[rightIndex] + 1
+            val delete = previous[rightIndex + 1] + 1
+            val replace = previous[rightIndex] + if (leftChar == rightChar) 0 else 1
+            current[rightIndex + 1] = minOf(insert, delete, replace)
+            rowMinimum = minOf(rowMinimum, current[rightIndex + 1])
+        }
+        if (rowMinimum > limit) return null
+        previous = current
+    }
+    return previous[right.length].takeIf { it <= limit }
+}
+
+private fun extensionDiagnosticLabel(name: String, severity: String): String {
+    val action = when {
+        name.contains("INSTALL", ignoreCase = true) -> "Cài đặt tiện ích"
+        name.contains("PACKAGE", ignoreCase = true) || name.contains("FETCH", ignoreCase = true) -> "Tải dữ liệu"
+        name.contains("NETWORK", ignoreCase = true) || name.contains("HTTP", ignoreCase = true) -> "Kết nối mạng"
+        name.contains("PARSE", ignoreCase = true) || name.contains("PARSER", ignoreCase = true) -> "Phân tích dữ liệu"
+        name.contains("BROWSER", ignoreCase = true) || name.contains("WEBVIEW", ignoreCase = true) -> "Trình duyệt"
+        name.contains("LOGIN", ignoreCase = true) || name.contains("SESSION", ignoreCase = true) -> "Phiên đăng nhập"
+        name.contains("ACTION", ignoreCase = true) || name.contains("RUNTIME", ignoreCase = true) -> "Chạy tiện ích"
+        else -> name.replace('_', ' ').lowercase(Locale.ROOT).replaceFirstChar { it.titlecase(Locale.ROOT) }
+    }
+    return when {
+        severity.equals("ERROR", ignoreCase = true) || name.contains("FAILED", ignoreCase = true) -> "$action thất bại"
+        name.contains("STARTED", ignoreCase = true) -> "Bắt đầu $action"
+        name.contains("COMPLETED", ignoreCase = true) || name.contains("SUCCEEDED", ignoreCase = true) -> "$action hoàn tất"
+        else -> action
+    }
 }
 
 private fun repositoryUpdatedLabel(epochMs: Long): String = if (epochMs > 0L) {
@@ -947,6 +1060,8 @@ private fun InstalledSourcesSection(
     var compatibilityPackId by remember { mutableStateOf<String?>(null) }
     var nativeReportPackId by remember { mutableStateOf<String?>(null) }
     var removePackId by remember { mutableStateOf<String?>(null) }
+    var logPackId by remember { mutableStateOf<String?>(null) }
+    var logTechnicalDetailsVisible by remember { mutableStateOf(false) }
     var installedQuery by remember { mutableStateOf("") }
 
     // Kept in the signature because the runtime still supports them, but the primary action
@@ -1067,6 +1182,17 @@ private fun InstalledSourcesSection(
                             modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
                         )
                         ReferenceActionButton(
+                            text = "NHẬT KÝ",
+                            onClick = {
+                                logPackId = pack.id
+                                logTechnicalDetailsVisible = false
+                                selectedPackId = null
+                            },
+                            normalColor = ReferencePanelBackground,
+                            normalContentColor = ReferenceText,
+                            modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                        )
+                        ReferenceActionButton(
                             text = "CẬP NHẬT",
                             onClick = {
                                 onUpdate(pack.id)
@@ -1163,6 +1289,83 @@ private fun InstalledSourcesSection(
                     )
                 },
                 confirmButton = { TextButton(onClick = { nativeReportPackId = null }) { Text("ĐÓNG") } },
+            )
+        }
+    }
+
+    logPackId?.let { packId ->
+        val pack = state.sourcePacks.firstOrNull { it.id == packId }
+        if (pack != null) {
+            val events = state.sourceDiagnostics.filter { it.sourceId == packId }.take(80)
+            val traces = state.sourceTraces.filter { it.sourceId == packId }.take(30)
+            AlertDialog(
+                onDismissRequest = {
+                    logPackId = null
+                    logTechnicalDetailsVisible = false
+                },
+                title = { Text("NHẬT KÝ TIỆN ÍCH") },
+                text = {
+                    Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
+                        Text(pack.name, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "${events.size} sự kiện gần nhất",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(bottom = 8.dp),
+                        )
+                        if (events.isEmpty()) {
+                            Text(
+                                "Chưa có nhật ký cho tiện ích này. Hãy dùng hoặc kiểm tra nguồn rồi mở lại nhật ký.",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        } else {
+                            events.forEach { event ->
+                                val timestamp = SimpleDateFormat(
+                                    "HH:mm:ss dd/MM/yyyy",
+                                    Locale.getDefault(),
+                                ).format(Date(event.timestampEpochMs))
+                                Text(
+                                    "$timestamp • ${extensionDiagnosticLabel(event.name, event.severity)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = if (event.severity == "ERROR") FontWeight.SemiBold else FontWeight.Normal,
+                                )
+                                if (logTechnicalDetailsVisible) {
+                                    val duration = event.durationMs?.let { " • ${it} ms" }.orEmpty()
+                                    Text(
+                                        "${event.category}/${event.name}$duration",
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                    Text(
+                                        "trace ${event.traceId.take(24)}${event.detail.takeIf(String::isNotBlank)?.let { " • $it" }.orEmpty()}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
+                                HorizontalDivider(Modifier.padding(vertical = 5.dp))
+                            }
+                        }
+                        if (logTechnicalDetailsVisible && traces.isNotEmpty()) {
+                            Text("TRACE", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 6.dp))
+                            traces.forEach { trace ->
+                                Text(
+                                    "${if (trace.failed) "LỖI" else "OK"} • ${trace.eventCount} sự kiện • ${trace.endedAtEpochMs - trace.startedAtEpochMs} ms • ${trace.traceId.take(24)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        logPackId = null
+                        logTechnicalDetailsVisible = false
+                    }) { Text("ĐÓNG") }
+                },
+                dismissButton = {
+                    if (events.isNotEmpty()) {
+                        TextButton(onClick = { logTechnicalDetailsVisible = !logTechnicalDetailsVisible }) {
+                            Text(if (logTechnicalDetailsVisible) "ẨN CHI TIẾT" else "CHI TIẾT KỸ THUẬT")
+                        }
+                    }
+                },
             )
         }
     }

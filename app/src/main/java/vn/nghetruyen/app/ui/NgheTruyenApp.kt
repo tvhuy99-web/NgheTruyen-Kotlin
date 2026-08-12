@@ -205,7 +205,7 @@ fun NgheTruyenApp(
                         onRefreshSourceRepository = viewModel::refreshSourceRepository,
                         onRemoveSourceRepository = viewModel::removeSourceRepository,
                         onPrepareRepositorySourceInstall = viewModel::prepareRepositorySourceInstall,
-                        onConfirmSourcePackInstall = viewModel::confirmSourcePackInstall,
+                        onInstallRepositorySource = viewModel::installRepositorySource,
                         onCancelSourcePackInstall = viewModel::cancelSourcePackInstall,
                         onSourcePackEnabledChange = viewModel::setSourcePackEnabled,
                         onRollbackSourcePack = viewModel::rollbackSourcePack,

@@ -9,44 +9,19 @@ import vn.nghetruyen.source.api.JsonValue
 import vn.nghetruyen.source.api.SourceCookieMode
 import vn.nghetruyen.source.api.SourceCryptoCapability
 import vn.nghetruyen.source.api.SourceFullAuthorityPolicy
+import vn.nghetruyen.source.api.SourceNativeHookRequest
+import vn.nghetruyen.source.api.SourcePlatformResult
 
 class NativeLuaFullAuthorityTest {
     @Test
     fun permissionlessNativeSourceGetsFullInAppAuthority() {
-        val source = """
-            return {
-              api_version = 2,
-              metadata = {
-                id = "full-authority-test",
-                name = "Full Authority Test",
-                version = 1,
-                website = "https://example.com"
-              },
-              source = {
-                base_url = "https://example.com",
-                actions = {
-                  search = { steps = {}, result = { type = "items", fields = {} } },
-                  chapters = { steps = {}, result = { type = "items", fields = {} } },
-                  content = { steps = {}, result = { type = "content", fields = {} } }
-                },
-                pipelines = {
-                  power = {
-                    steps = {
-                      { browser = { op = "open" } },
-                      { browser = { op = "capture", patterns = { "/api" }, fetch = { response = "json" } } },
-                      { storage = { op = "set", key = "token", value = "ok" } }
-                    }
-                  }
-                }
-              }
-            }
-        """.trimIndent().toByteArray(Charsets.UTF_8)
+        val source = nativeSource()
 
         val result = NativeLuaSourceImporter.import(source)
         val capabilities = result.manifest.capabilities
         val network = requireNotNull(capabilities.network)
 
-        assertEquals(SourceFullAuthorityPolicy.AUTHORITY_ID, "FULL_IN_APP")
+        assertEquals("FULL_IN_APP", SourceFullAuthorityPolicy.AUTHORITY_ID)
         assertTrue(network.publicInternet)
         assertTrue(network.allowCleartext)
         assertEquals(setOf("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"), network.methods)
@@ -76,6 +51,34 @@ class NativeLuaFullAuthorityTest {
     }
 
     @Test
+    fun programmableLuaHookCanRunCustomLogicInsideSandbox() {
+        val source = nativeSource(withHook = true)
+        val imported = NativeLuaSourceImporter.import(source)
+        val input = JsonCodec.stringify(JsonValue.Obj(linkedMapOf(
+            "value" to JsonValue.Str("abc"),
+            "args" to JsonValue.Obj(linkedMapOf("suffix" to JsonValue.Str("ok"))),
+            "context" to JsonValue.Obj(),
+        )))
+
+        val result = LuaNativeHookBroker().execute(
+            imported.manifest,
+            SourceNativeHookRequest(
+                sourceId = imported.manifest.id,
+                sourceCode = source,
+                hookName = "decode",
+                inputJson = input,
+                instructionBudget = imported.manifest.runtime.instructionBudget,
+                timeoutMs = imported.manifest.runtime.actionTimeoutMs,
+                memoryBudgetBytes = imported.manifest.runtime.memoryBudgetBytes,
+            ),
+        )
+
+        assertTrue(result is SourcePlatformResult.Success)
+        val output = (result as SourcePlatformResult.Success).value
+        assertEquals("cba:ok", (JsonCodec.parse(output) as JsonValue.Str).value)
+    }
+
+    @Test
     fun fullAuthorityDoesNotOpenOutsideSandbox() {
         val sandbox = LuaSandbox(
             modules = emptyMap(),
@@ -102,5 +105,48 @@ class NativeLuaFullAuthorityTest {
         listOf("luajava", "io", "os", "debug", "package", "load", "loadfile", "dofile").forEach { key ->
             assertFalse("$key must stay outside the Native Source sandbox", (json[key] as JsonValue.Bool).value)
         }
+    }
+
+    private fun nativeSource(withHook: Boolean = false): ByteArray {
+        val hooks = if (withHook) {
+            """
+                hooks = {
+                  decode = function(context, value, args)
+                    return string.reverse(tostring(value or "")) .. ":" .. tostring(args.suffix or "")
+                  end
+                },
+            """.trimIndent()
+        } else {
+            ""
+        }
+        return """
+            return {
+              api_version = 2,
+              metadata = {
+                id = "full-authority-test",
+                name = "Full Authority Test",
+                version = 1,
+                website = "https://example.com"
+              },
+              source = {
+                base_url = "https://example.com",
+                $hooks
+                actions = {
+                  search = { steps = {}, result = { type = "items", fields = {} } },
+                  chapters = { steps = {}, result = { type = "items", fields = {} } },
+                  content = { steps = {}, result = { type = "content", fields = {} } }
+                },
+                pipelines = {
+                  power = {
+                    steps = {
+                      { browser = { op = "open" } },
+                      { browser = { op = "capture", patterns = { "/api" }, fetch = { response = "json" } } },
+                      { storage = { op = "set", key = "token", value = "ok" } }
+                    }
+                  }
+                }
+              }
+            }
+        """.trimIndent().toByteArray(Charsets.UTF_8)
     }
 }

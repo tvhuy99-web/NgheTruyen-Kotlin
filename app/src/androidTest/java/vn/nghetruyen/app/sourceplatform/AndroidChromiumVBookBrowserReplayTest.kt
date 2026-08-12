@@ -8,6 +8,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import vn.nghetruyen.source.api.JsonValue
 import vn.nghetruyen.source.api.SemanticVersion
+import vn.nghetruyen.source.api.SourceBrowserAction
+import vn.nghetruyen.source.api.SourceBrowserBroker
 import vn.nghetruyen.source.api.SourceBrowserCapability
 import vn.nghetruyen.source.api.SourceCapabilities
 import vn.nghetruyen.source.api.SourceCapabilityBrokers
@@ -29,11 +31,23 @@ class AndroidChromiumVBookBrowserReplayTest {
     fun productionBrowserWebViewRunsOutsideChromiumPromptAndReplaysIntoScript() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val publicFixtureAddress = InetAddress.getByAddress(byteArrayOf(93, 184.toByte(), 216.toByte(), 34))
-        val browser = AndroidSourceBrowserBroker(
+        val productionBrowser = AndroidSourceBrowserBroker(
             context = context,
             cookiePartition = SourceCookiePartition.NONE,
-            resolver = { listOf(publicFixtureAddress) },
+            resolver = { host ->
+                assertEquals("x.example", host)
+                listOf(publicFixtureAddress)
+            },
         )
+        val browser = SourceBrowserBroker { manifest, request ->
+            if (request.action == SourceBrowserAction.LOAD_HTML) {
+                assertEquals("https://x.example/base/", request.url)
+                assertTrue(request.value.orEmpty().contains("Ready"))
+                assertTrue("https://x.example" in manifest.origins)
+                assertTrue(manifest.capabilities.network?.publicInternet == true)
+            }
+            productionBrowser.execute(manifest, request)
+        }
         val replay = ChromiumVBookReplayCoordinator(
             browserDelegate = browser,
             networkDelegate = SourceNetworkBroker.DENY_ALL,

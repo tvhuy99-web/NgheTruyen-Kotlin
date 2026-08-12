@@ -1,0 +1,2 @@
+Temporary trigger for building the APK from main commit c6f514008facc03e5ecc730029cc847cefabcfe8.
+No application source changes in this branch.

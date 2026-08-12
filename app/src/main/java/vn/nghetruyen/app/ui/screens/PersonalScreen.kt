@@ -31,7 +31,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -55,6 +57,7 @@ import vn.nghetruyen.app.data.settings.SettingsRepository
 import vn.nghetruyen.app.data.settings.AiProvider
 import vn.nghetruyen.app.data.settings.AiOnlineSettings
 import vn.nghetruyen.app.sources.SourceCheckStatus
+import vn.nghetruyen.app.sourceplatform.DiagnosticHumanFormatter
 import vn.nghetruyen.app.transfer.BackupComponent
 import vn.nghetruyen.app.ui.MainUiState
 import vn.nghetruyen.app.ui.components.ReferenceActionButton
@@ -82,6 +85,7 @@ fun PersonalScreen(
     onOpenTtsSettings: () -> Unit,
     onInterruptionModeChange: (AudioInterruptionMode) -> Unit,
     onDiagnosticsModeChange: (String) -> Unit,
+    onDiagnosticScreenChanged: (String) -> Unit = {},
     onHeadsetMultiClickChange: (Boolean) -> Unit,
     onHeadsetSingleActionChange: (String) -> Unit,
     onHeadsetDoubleActionChange: (String) -> Unit,
@@ -247,6 +251,7 @@ fun PersonalScreen(
         else personalPage = parentPage(personalPage)
     }
     LaunchedEffect(personalPage) {
+        onDiagnosticScreenChanged(personalPage)
         view.announceForAccessibility(pageTitle(personalPage))
     }
 
@@ -465,6 +470,8 @@ fun PersonalScreen(
                 onSaveConfig = onSaveSourceConfig,
                 onResetConfig = onResetSourceConfig,
                 onLogin = onOpenSourceLogin,
+                onExportDiagnostics = onExportSourceDiagnostics,
+                onClearDiagnostics = onClearSourceDiagnostics,
             )
         }
         "extensions_repositories" -> PersonalSubPage("KHO TIỆN ÍCH") {
@@ -755,9 +762,8 @@ private fun ReferenceSettingsHomePage(
         )
         var diagnosticsExpanded by remember { mutableStateOf(false) }
         val diagnosticsLabel = when (diagnosticsMode) {
-            "basic" -> "Gỡ lỗi cơ bản"
-            "advanced_ram" -> "Gỡ lỗi nâng cao • RAM-only"
-            "advanced_crash", "advanced" -> "Gỡ lỗi nâng cao • crash-safe"
+            "basic" -> "Gỡ lỗi theo màn hình"
+            "advanced", "advanced_crash" -> "Gỡ lỗi nối liền"
             else -> "Tắt"
         }
         Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp)) {
@@ -767,9 +773,8 @@ private fun ReferenceSettingsHomePage(
             DropdownMenu(expanded = diagnosticsExpanded, onDismissRequest = { diagnosticsExpanded = false }) {
                 listOf(
                     "off" to "Tắt",
-                    "basic" to "Gỡ lỗi cơ bản",
-                    "advanced_ram" to "Gỡ lỗi nâng cao • RAM-only",
-                    "advanced_crash" to "Gỡ lỗi nâng cao • crash-safe",
+                    "basic" to "Gỡ lỗi theo màn hình",
+                    "advanced" to "Gỡ lỗi nối liền",
                 ).forEach { (value, label) ->
                     DropdownMenuItem(
                         text = { Text((if (diagnosticsMode == value) "✓ " else "") + label) },
@@ -781,6 +786,15 @@ private fun ReferenceSettingsHomePage(
                 }
             }
         }
+        Text(
+            when (diagnosticsMode) {
+                "basic" -> "Chỉ giữ nhật ký của màn hình/ngữ cảnh hiện tại. Chuyển màn hình sẽ bắt đầu một nhật ký mới."
+                "advanced", "advanced_crash" -> "Nối liền qua màn hình và lần mở ứng dụng. Chỉ nút XÓA mới xóa lịch sử đã lưu."
+                else -> "Tắt hoàn toàn: không ghi event, trace hoặc evidence ngầm."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(start = 10.dp, end = 10.dp, bottom = 8.dp),
+        )
         ReferenceActionButton(
             text = "SAO LƯU DỮ LIỆU",
             onClick = onExportBackup,
@@ -1054,6 +1068,8 @@ private fun InstalledSourcesSection(
     onSaveConfig: (String, Map<String, String>) -> Unit,
     onResetConfig: (String) -> Unit,
     onLogin: (String) -> Unit,
+    onExportDiagnostics: () -> Unit,
+    onClearDiagnostics: () -> Unit,
 ) {
     var selectedPackId by remember { mutableStateOf<String?>(null) }
     var configurePackId by remember { mutableStateOf<String?>(null) }
@@ -1061,7 +1077,6 @@ private fun InstalledSourcesSection(
     var nativeReportPackId by remember { mutableStateOf<String?>(null) }
     var removePackId by remember { mutableStateOf<String?>(null) }
     var logPackId by remember { mutableStateOf<String?>(null) }
-    var logTechnicalDetailsVisible by remember { mutableStateOf(false) }
     var installedQuery by remember { mutableStateOf("") }
 
     // Kept in the signature because the runtime still supports them, but the primary action
@@ -1185,7 +1200,6 @@ private fun InstalledSourcesSection(
                             text = "NHẬT KÝ",
                             onClick = {
                                 logPackId = pack.id
-                                logTechnicalDetailsVisible = false
                                 selectedPackId = null
                             },
                             normalColor = ReferencePanelBackground,
@@ -1296,74 +1310,37 @@ private fun InstalledSourcesSection(
     logPackId?.let { packId ->
         val pack = state.sourcePacks.firstOrNull { it.id == packId }
         if (pack != null) {
-            val events = state.sourceDiagnostics.filter { it.sourceId == packId }.take(80)
-            val traces = state.sourceTraces.filter { it.sourceId == packId }.take(30)
+            val clipboard = LocalClipboardManager.current
+            val events = state.sourceDiagnostics.filter { it.sourceId == packId }
+            val logText = DiagnosticHumanFormatter.formatUi(
+                events = events,
+                mode = state.diagnosticsMode,
+                title = "NHẬT KÝ TIỆN ÍCH • ${pack.name}",
+            )
             AlertDialog(
-                onDismissRequest = {
-                    logPackId = null
-                    logTechnicalDetailsVisible = false
-                },
+                onDismissRequest = { logPackId = null },
                 title = { Text("NHẬT KÝ TIỆN ÍCH") },
                 text = {
-                    Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
-                        Text(pack.name, fontWeight = FontWeight.SemiBold)
-                        Text(
-                            "${events.size} sự kiện gần nhất",
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(bottom = 8.dp),
-                        )
-                        if (events.isEmpty()) {
-                            Text(
-                                "Chưa có nhật ký cho tiện ích này. Hãy dùng hoặc kiểm tra nguồn rồi mở lại nhật ký.",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        } else {
-                            events.forEach { event ->
-                                val timestamp = SimpleDateFormat(
-                                    "HH:mm:ss dd/MM/yyyy",
-                                    Locale.getDefault(),
-                                ).format(Date(event.timestampEpochMs))
-                                Text(
-                                    "$timestamp • ${extensionDiagnosticLabel(event.name, event.severity)}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = if (event.severity == "ERROR") FontWeight.SemiBold else FontWeight.Normal,
-                                )
-                                if (logTechnicalDetailsVisible) {
-                                    val duration = event.durationMs?.let { " • ${it} ms" }.orEmpty()
-                                    Text(
-                                        "${event.category}/${event.name}$duration",
-                                        style = MaterialTheme.typography.bodySmall,
-                                    )
-                                    Text(
-                                        "trace ${event.traceId.take(24)}${event.detail.takeIf(String::isNotBlank)?.let { " • $it" }.orEmpty()}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                    )
-                                }
-                                HorizontalDivider(Modifier.padding(vertical = 5.dp))
-                            }
-                        }
-                        if (logTechnicalDetailsVisible && traces.isNotEmpty()) {
-                            Text("TRACE", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 6.dp))
-                            traces.forEach { trace ->
-                                Text(
-                                    "${if (trace.failed) "LỖI" else "OK"} • ${trace.eventCount} sự kiện • ${trace.endedAtEpochMs - trace.startedAtEpochMs} ms • ${trace.traceId.take(24)}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                            }
-                        }
-                    }
+                    Text(
+                        logText,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.heightIn(max = 540.dp).verticalScroll(rememberScrollState()),
+                    )
                 },
                 confirmButton = {
-                    TextButton(onClick = {
-                        logPackId = null
-                        logTechnicalDetailsVisible = false
-                    }) { Text("ĐÓNG") }
-                },
-                dismissButton = {
-                    if (events.isNotEmpty()) {
-                        TextButton(onClick = { logTechnicalDetailsVisible = !logTechnicalDetailsVisible }) {
-                            Text(if (logTechnicalDetailsVisible) "ẨN CHI TIẾT" else "CHI TIẾT KỸ THUẬT")
-                        }
+                    Row(Modifier.fillMaxWidth()) {
+                        TextButton(
+                            onClick = { clipboard.setText(AnnotatedString(logText)) },
+                            modifier = Modifier.weight(1f),
+                        ) { Text("SAO CHÉP") }
+                        TextButton(
+                            onClick = onClearDiagnostics,
+                            modifier = Modifier.weight(1f),
+                        ) { Text("XÓA") }
+                        TextButton(
+                            onClick = onExportDiagnostics,
+                            modifier = Modifier.weight(1f),
+                        ) { Text("XUẤT TỆP") }
                     }
                 },
             )
@@ -1676,27 +1653,36 @@ private fun SourceDiagnosticsSection(
     onClearSession: (String) -> Unit,
 ) {
     if (state.diagnosticsMode != "off") {
+        val clipboard = LocalClipboardManager.current
+        val logText = DiagnosticHumanFormatter.formatUi(
+            events = state.sourceDiagnostics,
+            mode = state.diagnosticsMode,
+        )
         Card(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
             Column(Modifier.padding(14.dp)) {
-                Text("NHẬT KÝ & TRACE", fontWeight = FontWeight.Bold)
+                Text("NHẬT KÝ", fontWeight = FontWeight.Bold)
                 Text(
-                    if (state.sourceDiagnosticCount == 0) "CHƯA CÓ NHẬT KÝ" else "XEM NHẬT KÝ • ${state.sourceDiagnosticCount} sự kiện",
+                    logText,
                     style = MaterialTheme.typography.bodySmall,
-                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState())
+                        .padding(top = 6.dp),
                 )
-                Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
-                    Button(onExportDiagnostics, Modifier.weight(1f).padding(2.dp)) {
-                        Text(if (state.diagnosticsMode.startsWith("advanced")) "XUẤT HỘP ĐEN" else "XUẤT CHẨN ĐOÁN")
-                    }
-                    Button(onClearDiagnostics, Modifier.weight(1f).padding(2.dp)) { Text("XÓA NHẬT KÝ") }
-                }
-                state.sourceDiagnostics.take(30).forEach { event ->
-                    val duration = event.durationMs?.let { " • ${it} ms" }.orEmpty()
-                    Text("${event.severity} ${event.category}/${event.name}$duration", style = MaterialTheme.typography.bodySmall, fontWeight = if (event.severity == "ERROR") FontWeight.SemiBold else FontWeight.Normal)
-                    Text("${event.sourceId} • trace ${event.traceId.take(16)}${event.detail.takeIf(String::isNotBlank)?.let { " • $it" }.orEmpty()}", style = MaterialTheme.typography.bodySmall)
-                }
-                state.sourceTraces.take(20).forEach { trace ->
-                    Text("${if (trace.failed) "LỖI" else "OK"} • ${trace.sourceId} • ${trace.eventCount} sự kiện • ${trace.endedAtEpochMs - trace.startedAtEpochMs} ms", style = MaterialTheme.typography.bodySmall)
+                Row(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                    Button(
+                        onClick = { clipboard.setText(AnnotatedString(logText)) },
+                        modifier = Modifier.weight(1f).padding(2.dp),
+                    ) { Text("SAO CHÉP") }
+                    Button(
+                        onClick = onClearDiagnostics,
+                        modifier = Modifier.weight(1f).padding(2.dp),
+                    ) { Text("XÓA") }
+                    Button(
+                        onClick = onExportDiagnostics,
+                        modifier = Modifier.weight(1f).padding(2.dp),
+                    ) { Text("XUẤT TỆP") }
                 }
             }
         }

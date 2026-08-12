@@ -257,10 +257,12 @@ class SourceDiagnosticRuntime(private val context: Context) {
 
             // In continuous mode this directory contains the append-only cross-process history.
             // Files are never rotated away automatically; only the explicit Clear action removes it.
-            continuousStore.filesForExport().forEach { (name, file) ->
-                zip.addFile("continuous/$name", file)
+            if (mode == MODE_CONTINUOUS) {
+                continuousStore.filesForExport().forEach { (name, file) ->
+                    zip.addFile("continuous/$name", file)
+                }
+                zip.addText("continuous/status.json", continuousStore.statusJson().toString(2))
             }
-            zip.addText("continuous/status.json", continuousStore.statusJson().toString(2))
         }
         return output.toByteArray()
     }

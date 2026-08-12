@@ -297,7 +297,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             sourceRepositoryPackages = container.sourcePlatformManager.repositoryPackages(),
             sourceTrustKeys = container.sourcePlatformManager.trustKeys(),
             sourceDiagnosticCount = container.sourcePlatformManager.diagnosticsSnapshot().size,
-            sourceDiagnostics = container.sourcePlatformManager.diagnosticSummaries(200),
+            sourceDiagnostics = container.sourcePlatformManager.diagnosticSummaries(2_000),
             sourceTraces = container.sourcePlatformManager.diagnosticTraces(100),
             diagnosticsMode = container.sourceDiagnostics.mode,
             diagnosticActiveOperations = container.sourceDiagnostics.activityLines(),
@@ -436,7 +436,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         diagnosticActiveOperations = container.sourceDiagnostics.activityLines(),
                         diagnosticPersistentCriticalCount = container.sourceDiagnostics.persistentCriticalCount(),
                         sourceDiagnosticCount = events.size,
-                        sourceDiagnostics = container.sourcePlatformManager.diagnosticSummaries(200),
+                        sourceDiagnostics = container.sourcePlatformManager.diagnosticSummaries(2_000),
                         sourceTraces = container.sourcePlatformManager.diagnosticTraces(100),
                     )
                 }
@@ -1493,7 +1493,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 sourceRepositoryPackages = container.sourcePlatformManager.repositoryPackages(),
                 sourceTrustKeys = container.sourcePlatformManager.trustKeys(),
                 sourceDiagnosticCount = container.sourcePlatformManager.diagnosticsSnapshot().size,
-                sourceDiagnostics = container.sourcePlatformManager.diagnosticSummaries(200),
+                sourceDiagnostics = container.sourcePlatformManager.diagnosticSummaries(2_000),
                 sourceTraces = container.sourcePlatformManager.diagnosticTraces(100),
                 diagnosticActiveOperations = container.sourceDiagnostics.activityLines(),
                 diagnosticPersistentCriticalCount = container.sourceDiagnostics.persistentCriticalCount(),
@@ -1560,7 +1560,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         container.sourcePlatformManager.clearDiagnostics()
         container.sourceDiagnostics.clearBlackBox()
         refreshSourcePlatformState()
-        showMessage("Đã xóa nhật ký, evidence RAM, critical breadcrumbs và hộp đen crash-safe.")
+        showMessage("Đã xóa toàn bộ nhật ký và dữ liệu chẩn đoán đã lưu.")
     }
 
     fun refreshSourceSessions() {
@@ -2708,9 +2708,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val normalized = container.sourceDiagnostics.setMode(mode)
         mutableState.update { it.copy(diagnosticsMode = normalized) }
         showMessage(when (normalized) {
-            "advanced" -> "Đã bật gỡ lỗi nâng cao: ghi trace, HTML/DOM, runtime, network và hộp đen chống mất log khi crash."
-            "basic" -> "Đã bật gỡ lỗi cơ bản."
-            else -> "Đã tắt ghi nhật ký chẩn đoán."
+            "advanced" -> "Đã bật gỡ lỗi nối liền. Nhật ký tiếp tục qua các màn hình và lần mở ứng dụng cho đến khi bạn chủ động xóa."
+            "basic" -> "Đã bật gỡ lỗi theo màn hình. Chuyển sang màn hình hoặc ngữ cảnh khác sẽ bắt đầu nhật ký mới."
+            else -> "Đã tắt hoàn toàn nhật ký chẩn đoán."
         })
     }
 

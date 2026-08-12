@@ -15,10 +15,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import vn.nghetruyen.app.NgheTruyenApplication
 import vn.nghetruyen.app.audio.AudioExportRequest
 import vn.nghetruyen.app.core.model.ReaderLayoutMode
 import vn.nghetruyen.app.core.model.ReaderMode
@@ -52,22 +50,11 @@ fun NgheTruyenApp(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
-    val app = LocalContext.current.applicationContext as NgheTruyenApplication
-    val diagnosticScreenKey = diagnosticNavigationKey(state)
 
     BackHandler(enabled = state.destination != Destination.Root) { viewModel.back() }
-
-    LaunchedEffect(state.diagnosticsMode, diagnosticScreenKey) {
-        val changed = app.container.sourceDiagnostics.onScreenChanged(diagnosticScreenKey)
-        if (changed && state.destination == Destination.Root && state.rootTab == RootTab.PERSONAL) {
-            // Re-read the diagnostic snapshot after an automatic screen-session reset.
-            viewModel.setRootTab(RootTab.PERSONAL)
-        }
-    }
-
     LaunchedEffect(state.message) {
         val message = state.message ?: return@LaunchedEffect
-        snackbarHostState.showSnackbar(remapDiagnosticMessage(message))
+        snackbarHostState.showSnackbar(message)
         viewModel.clearMessage()
     }
 
@@ -134,11 +121,6 @@ fun NgheTruyenApp(
                         onOpenTtsSettings = viewModel::openTtsSettings,
                         onInterruptionModeChange = viewModel::setAudioInterruptionMode,
                         onDiagnosticsModeChange = viewModel::setDiagnosticsMode,
-                        onDiagnosticScreenChanged = { key ->
-                            if (app.container.sourceDiagnostics.onScreenChanged("personal:$key")) {
-                                viewModel.setRootTab(RootTab.PERSONAL)
-                            }
-                        },
                         onHeadsetMultiClickChange = viewModel::setHeadsetMultiClickEnabled,
                         onHeadsetSingleActionChange = viewModel::setHeadsetSingleClickAction,
                         onHeadsetDoubleActionChange = viewModel::setHeadsetDoubleClickAction,
@@ -343,29 +325,6 @@ fun NgheTruyenApp(
             }
         }
     }
-}
-
-private fun diagnosticNavigationKey(state: MainUiState): String = when (state.destination) {
-    Destination.Root -> when (state.rootTab) {
-        RootTab.EXPLORE -> listOf(
-            "explore",
-            state.selectedSourceId.orEmpty(),
-            state.exploreMode.name,
-            state.activeCategory.orEmpty(),
-        ).joinToString(":")
-        RootTab.LIBRARY -> "library:${state.librarySection.name}"
-        RootTab.PERSONAL -> "personal:home"
-    }
-    Destination.Story -> "story:${state.storyDetail?.story?.id.orEmpty()}"
-    Destination.Reader -> "reader:${state.chapterContent?.chapter?.id.orEmpty()}"
-}
-
-private fun remapDiagnosticMessage(message: String): String = when (message) {
-    "Đã bật gỡ lỗi cơ bản." -> "Đã bật gỡ lỗi theo màn hình. Chuyển sang màn hình hoặc ngữ cảnh khác sẽ bắt đầu nhật ký mới."
-    "Đã bật gỡ lỗi nâng cao: ghi trace, HTML/DOM, runtime, network và hộp đen chống mất log khi crash." ->
-        "Đã bật gỡ lỗi nối liền. Nhật ký tiếp tục qua các màn hình và lần mở ứng dụng cho đến khi bạn chủ động xóa."
-    "Đã xóa nhật ký, evidence RAM, critical breadcrumbs và hộp đen crash-safe." -> "Đã xóa toàn bộ nhật ký và dữ liệu chẩn đoán đã lưu."
-    else -> message
 }
 
 private fun continuousReaderPresentationState(state: MainUiState): MainUiState {

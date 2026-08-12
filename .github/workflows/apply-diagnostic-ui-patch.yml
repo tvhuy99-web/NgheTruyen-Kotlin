@@ -1,0 +1,224 @@
+name: Apply diagnostic UI patch
+
+on:
+  push:
+    branches:
+      - agent/three-mode-lua-diagnostics
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/three-mode-lua-diagnostics
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Apply focused UI edits
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt')
+          s = path.read_text()
+
+          def replace_once(old, new, label):
+              global s
+              count = s.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected 1 occurrence, got {count}')
+              s = s.replace(old, new, 1)
+
+          replace_once(
+              'import androidx.compose.ui.platform.LocalView\n',
+              'import androidx.compose.ui.platform.LocalClipboardManager\nimport androidx.compose.ui.platform.LocalView\nimport androidx.compose.ui.text.AnnotatedString\n',
+              'clipboard imports',
+          )
+          replace_once(
+              'import vn.nghetruyen.app.sources.SourceCheckStatus\n',
+              'import vn.nghetruyen.app.sources.SourceCheckStatus\nimport vn.nghetruyen.app.sourceplatform.DiagnosticHumanFormatter\n',
+              'formatter import',
+          )
+          replace_once(
+              '    onDiagnosticsModeChange: (String) -> Unit,\n    onHeadsetMultiClickChange: (Boolean) -> Unit,',
+              '    onDiagnosticsModeChange: (String) -> Unit,\n    onDiagnosticScreenChanged: (String) -> Unit,\n    onHeadsetMultiClickChange: (Boolean) -> Unit,',
+              'screen callback signature',
+          )
+          replace_once(
+              '    LaunchedEffect(personalPage) {\n        view.announceForAccessibility(pageTitle(personalPage))\n    }',
+              '    LaunchedEffect(personalPage) {\n        onDiagnosticScreenChanged(personalPage)\n        view.announceForAccessibility(pageTitle(personalPage))\n    }',
+              'personal page lifecycle',
+          )
+          replace_once(
+              '                onResetConfig = onResetSourceConfig,\n                onLogin = onOpenSourceLogin,\n            )',
+              '                onResetConfig = onResetSourceConfig,\n                onLogin = onOpenSourceLogin,\n                onExportDiagnostics = onExportSourceDiagnostics,\n                onClearDiagnostics = onClearSourceDiagnostics,\n            )',
+              'installed source callbacks',
+          )
+
+          old_modes = '''        val diagnosticsLabel = when (diagnosticsMode) {
+            "basic" -> "Gỡ lỗi cơ bản"
+            "advanced_ram" -> "Gỡ lỗi nâng cao • RAM-only"
+            "advanced_crash", "advanced" -> "Gỡ lỗi nâng cao • crash-safe"
+            else -> "Tắt"
+        }
+        Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp)) {
+            Button(onClick = { diagnosticsExpanded = true }, modifier = Modifier.fillMaxWidth()) {
+                Text("$diagnosticsLabel ▼")
+            }
+            DropdownMenu(expanded = diagnosticsExpanded, onDismissRequest = { diagnosticsExpanded = false }) {
+                listOf(
+                    "off" to "Tắt",
+                    "basic" to "Gỡ lỗi cơ bản",
+                    "advanced_ram" to "Gỡ lỗi nâng cao • RAM-only",
+                    "advanced_crash" to "Gỡ lỗi nâng cao • crash-safe",
+                ).forEach { (value, label) ->
+                    DropdownMenuItem(
+                        text = { Text((if (diagnosticsMode == value) "✓ " else "") + label) },
+                        onClick = {
+                            diagnosticsExpanded = false
+                            onDiagnosticsModeChange(value)
+                        },
+                    )
+                }
+            }
+        }'''
+          new_modes = '''        val diagnosticsLabel = when (diagnosticsMode) {
+            "basic" -> "Gỡ lỗi theo màn hình"
+            "advanced", "advanced_crash" -> "Gỡ lỗi nối liền"
+            else -> "Tắt"
+        }
+        Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp)) {
+            Button(onClick = { diagnosticsExpanded = true }, modifier = Modifier.fillMaxWidth()) {
+                Text("$diagnosticsLabel ▼")
+            }
+            DropdownMenu(expanded = diagnosticsExpanded, onDismissRequest = { diagnosticsExpanded = false }) {
+                listOf(
+                    "off" to "Tắt",
+                    "basic" to "Gỡ lỗi theo màn hình",
+                    "advanced" to "Gỡ lỗi nối liền",
+                ).forEach { (value, label) ->
+                    DropdownMenuItem(
+                        text = { Text((if (diagnosticsMode == value) "✓ " else "") + label) },
+                        onClick = {
+                            diagnosticsExpanded = false
+                            onDiagnosticsModeChange(value)
+                        },
+                    )
+                }
+            }
+        }
+        Text(
+            when (diagnosticsMode) {
+                "basic" -> "Chỉ giữ nhật ký của màn hình/ngữ cảnh hiện tại. Chuyển màn hình sẽ bắt đầu lại từ đầu."
+                "advanced", "advanced_crash" -> "Nối liền qua màn hình và lần mở ứng dụng; chỉ nút XÓA mới xóa lịch sử đã lưu."
+                else -> "Không ghi sự kiện, trace hoặc evidence ngầm."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(horizontal = 10.dp, bottom = 8.dp),
+        )'''
+          replace_once(old_modes, new_modes, 'three mode selector')
+
+          replace_once(
+              '    onResetConfig: (String) -> Unit,\n    onLogin: (String) -> Unit,\n) {',
+              '    onResetConfig: (String) -> Unit,\n    onLogin: (String) -> Unit,\n    onExportDiagnostics: () -> Unit,\n    onClearDiagnostics: () -> Unit,\n) {',
+              'installed source signature',
+          )
+          replace_once(
+              '    var logTechnicalDetailsVisible by remember { mutableStateOf(false) }\n',
+              '',
+              'remove technical toggle state',
+          )
+          replace_once(
+              '                                logPackId = pack.id\n                                logTechnicalDetailsVisible = false\n                                selectedPackId = null',
+              '                                logPackId = pack.id\n                                selectedPackId = null',
+              'log open action',
+          )
+
+          start = s.index('    logPackId?.let { packId ->')
+          end = s.index('\n\n    removePackId?.let { packId ->', start)
+          new_log_dialog = '''    logPackId?.let { packId ->
+        val pack = state.sourcePacks.firstOrNull { it.id == packId }
+        if (pack != null) {
+            val clipboard = LocalClipboardManager.current
+            val events = state.sourceDiagnostics.filter { it.sourceId == packId }
+            val logText = DiagnosticHumanFormatter.formatUi(
+                events = events,
+                mode = state.diagnosticsMode,
+                title = "NHẬT KÝ TIỆN ÍCH • ${pack.name}",
+            )
+            AlertDialog(
+                onDismissRequest = { logPackId = null },
+                title = { Text("NHẬT KÝ TIỆN ÍCH") },
+                text = {
+                    Text(
+                        logText,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.heightIn(max = 540.dp).verticalScroll(rememberScrollState()),
+                    )
+                },
+                confirmButton = {
+                    Row {
+                        TextButton(onClick = { clipboard.setText(AnnotatedString(logText)) }) { Text("SAO CHÉP") }
+                        TextButton(onClick = { onClearDiagnostics() }) { Text("XÓA") }
+                        TextButton(onClick = { onExportDiagnostics() }) { Text("XUẤT TỆP") }
+                    }
+                },
+            )
+        }
+    }'''
+          s = s[:start] + new_log_dialog + s[end:]
+
+          source_fn = s.index('private fun SourceDiagnosticsSection(')
+          log_start = s.index('    if (state.diagnosticsMode != "off") {', source_fn)
+          selector_marker = '    Card(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {\n        Column(Modifier.padding(14.dp)) {\n            Text("SELECTOR INSPECTOR"'
+          selector_start = s.index(selector_marker, log_start)
+          new_global_log = '''    if (state.diagnosticsMode != "off") {
+        val clipboard = LocalClipboardManager.current
+        val logText = DiagnosticHumanFormatter.formatUi(
+            events = state.sourceDiagnostics,
+            mode = state.diagnosticsMode,
+        )
+        Card(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+            Column(Modifier.padding(14.dp)) {
+                Text("NHẬT KÝ", fontWeight = FontWeight.Bold)
+                Text(
+                    logText,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState()).padding(top = 6.dp),
+                )
+                Row(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                    Button(
+                        onClick = { clipboard.setText(AnnotatedString(logText)) },
+                        modifier = Modifier.weight(1f).padding(2.dp),
+                    ) { Text("SAO CHÉP") }
+                    Button(onClick = onClearDiagnostics, Modifier.weight(1f).padding(2.dp)) { Text("XÓA") }
+                    Button(onClick = onExportDiagnostics, Modifier.weight(1f).padding(2.dp)) { Text("XUẤT TỆP") }
+                }
+            }
+        }
+    }
+'''
+          s = s[:log_start] + new_global_log + s[selector_start:]
+
+          path.write_text(s)
+          PY
+
+          git diff --check
+      - name: Verify diagnostics build
+        run: ./gradlew :source-diagnostics:test :app:compileDebugKotlin --stacktrace
+      - name: Commit focused patch and remove temporary workflow
+        if: success()
+        shell: bash
+        run: |
+          rm .github/workflows/apply-diagnostic-ui-patch.yml
+          git config user.name "OpenAI"
+          git config user.email "noreply@openai.com"
+          git add -A
+          git commit -m "Simplify diagnostic log UI"
+          git push origin HEAD:agent/three-mode-lua-diagnostics

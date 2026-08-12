@@ -121,6 +121,7 @@ fun NgheTruyenApp(
                         onOpenTtsSettings = viewModel::openTtsSettings,
                         onInterruptionModeChange = viewModel::setAudioInterruptionMode,
                         onDiagnosticsModeChange = viewModel::setDiagnosticsMode,
+                        onDiagnosticScreenChanged = {},
                         onHeadsetMultiClickChange = viewModel::setHeadsetMultiClickEnabled,
                         onHeadsetSingleActionChange = viewModel::setHeadsetSingleClickAction,
                         onHeadsetDoubleActionChange = viewModel::setHeadsetDoubleClickAction,

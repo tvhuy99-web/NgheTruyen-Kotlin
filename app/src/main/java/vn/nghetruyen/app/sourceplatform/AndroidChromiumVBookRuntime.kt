@@ -324,6 +324,14 @@ class AndroidChromiumVBookRuntime(
             val operation = root.string("op")?.trim().orEmpty()
             val payload = root.obj("payload") ?: JsonValue.Obj()
             calls += 1
+            diagnostics.emit(event(manifest, request, "CHROMIUM_BRIDGE_CALL", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                "flow" to "bridge",
+                "stage" to operation.take(120),
+                "operation" to operation.take(120),
+                "bridgeCalls" to calls.toString(),
+                "remainingMs" to remainingMs().toString(),
+                "requestId" to request.traceId,
+            )))
             require(calls <= MAX_BRIDGE_CALLS) { "CHROMIUM_BRIDGE_CALL_LIMIT" }
             val value = when (operation) {
                 "resource_read" -> resourceRead(payload)

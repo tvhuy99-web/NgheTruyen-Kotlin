@@ -27,9 +27,8 @@ data class DiagnosticEvent(
 )
 
 /**
- * Tiny always-on breadcrumb policy. Diagnostics OFF still hides the UI and suppresses normal
- * telemetry, but fatal errors and install/trust/security warnings survive so a user can enable
- * diagnostics after a failed extension install and still have something actionable to inspect.
+ * Legacy classification helper kept for source compatibility. DiagnosticLevel.OFF is now a true
+ * off switch: recorders and the app diagnostic runtime do not retain any event while it is active.
  */
 fun DiagnosticEvent.shouldRetainWhenDiagnosticsOff(): Boolean =
     severity == DiagnosticSeverity.ERROR ||
@@ -48,6 +47,11 @@ fun interface DiagnosticSink {
     }
 }
 
+data class DiagnosticRecorderStats(
+    val itemCount: Int,
+    val evictedEvents: Long,
+)
+
 class BoundedDiagnosticRecorder(
     private val maxEvents: Int = 2_000,
     @Volatile var level: DiagnosticLevel = DiagnosticLevel.BASIC,
@@ -55,30 +59,41 @@ class BoundedDiagnosticRecorder(
 ) : DiagnosticSink {
     private val lock = ReentrantLock()
     private val events = ArrayDeque<DiagnosticEvent>(maxEvents.coerceAtLeast(1))
+    private var evictedEvents: Long = 0
 
     init {
         require(maxEvents in 1..100_000) { "DIAGNOSTIC_CAPACITY_INVALID" }
     }
 
     override fun emit(event: DiagnosticEvent) {
-        val critical = event.shouldRetainWhenDiagnosticsOff()
-        if (level == DiagnosticLevel.OFF && !critical) return
-        if (level == DiagnosticLevel.BASIC && event.severity == DiagnosticSeverity.DEBUG && !critical) return
+        // OFF is intentionally absolute. Do not keep hidden breadcrumbs behind an "off" UI.
+        if (level == DiagnosticLevel.OFF) return
+        if (level == DiagnosticLevel.BASIC && event.severity == DiagnosticSeverity.DEBUG) return
         val safe = event.copy(attributes = DiagnosticRedactor.redact(event.attributes))
         lock.withLock {
-            while (events.size >= maxEvents) events.removeFirst()
+            while (events.size >= maxEvents) {
+                events.removeFirst()
+                evictedEvents += 1
+            }
             events.addLast(safe)
         }
         runCatching { mirror.emit(safe) }
     }
 
-    /** Restore already-redacted persisted breadcrumbs without mirroring them back to disk. */
+    /** Restore already-redacted persisted events without mirroring them back to disk. */
     fun restore(restored: List<DiagnosticEvent>) = lock.withLock {
         restored.takeLast(maxEvents).forEach { event ->
             val safe = event.copy(attributes = DiagnosticRedactor.redact(event.attributes))
-            while (events.size >= maxEvents) events.removeFirst()
+            while (events.size >= maxEvents) {
+                events.removeFirst()
+                evictedEvents += 1
+            }
             events.addLast(safe)
         }
+    }
+
+    fun stats(): DiagnosticRecorderStats = lock.withLock {
+        DiagnosticRecorderStats(events.size, evictedEvents)
     }
 
     fun snapshot(sourceId: String? = null, traceId: String? = null): List<DiagnosticEvent> = lock.withLock {
@@ -88,8 +103,10 @@ class BoundedDiagnosticRecorder(
     }
 
     fun clear(sourceId: String? = null) = lock.withLock {
-        if (sourceId == null) events.clear()
-        else {
+        if (sourceId == null) {
+            events.clear()
+            evictedEvents = 0
+        } else {
             val retained = events.filterNot { it.sourceId == sourceId }
             events.clear()
             retained.forEach(events::addLast)
@@ -124,6 +141,7 @@ data class DiagnosticEvidenceStats(
     val itemCount: Int,
     val retainedBytes: Long,
     val evictedItems: Long,
+    val truncatedItems: Long,
 )
 
 class BoundedDiagnosticEvidenceRecorder(
@@ -136,6 +154,7 @@ class BoundedDiagnosticEvidenceRecorder(
     private val items = ArrayDeque<DiagnosticEvidence>()
     private var retainedBytes: Long = 0
     private var evictedItems: Long = 0
+    private var truncatedItems: Long = 0
     @Volatile override var enabled: Boolean = false
 
     init {
@@ -154,6 +173,7 @@ class BoundedDiagnosticEvidenceRecorder(
             attributes = if (truncated) evidence.attributes + ("truncated" to "true") else evidence.attributes,
         )
         lock.withLock {
+            if (truncated) truncatedItems += 1
             while (items.isNotEmpty() && (items.size >= maxItems || retainedBytes + payload.size > maxBytes)) {
                 val removed = items.removeFirst()
                 retainedBytes -= removed.data.size.toLong()
@@ -175,10 +195,11 @@ class BoundedDiagnosticEvidenceRecorder(
         items.clear()
         retainedBytes = 0
         evictedItems = 0
+        truncatedItems = 0
     }
 
     fun stats(): DiagnosticEvidenceStats = lock.withLock {
-        DiagnosticEvidenceStats(items.size, retainedBytes, evictedItems)
+        DiagnosticEvidenceStats(items.size, retainedBytes, evictedItems, truncatedItems)
     }
 }
 

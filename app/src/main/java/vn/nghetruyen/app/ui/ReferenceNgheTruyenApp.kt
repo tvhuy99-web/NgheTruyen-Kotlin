@@ -16,8 +16,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import vn.nghetruyen.app.NgheTruyenApplication
 import vn.nghetruyen.app.audio.AudioExportRequest
 import vn.nghetruyen.app.sources.SourceUiSurface
 import vn.nghetruyen.app.ui.components.ReferenceDiagnosticsChrome
@@ -50,6 +52,12 @@ fun ReferenceNgheTruyenApp(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    val app = LocalContext.current.applicationContext as NgheTruyenApplication
+    val diagnosticScreenKey = referenceDiagnosticScreenKey(state)
+
+    LaunchedEffect(state.diagnosticsMode, diagnosticScreenKey) {
+        app.container.sourceDiagnostics.onScreenChanged(diagnosticScreenKey)
+    }
 
     BackHandler(enabled = state.destination != Destination.Root) {
         viewModel.back()
@@ -141,6 +149,9 @@ fun ReferenceNgheTruyenApp(
                         onOpenTtsSettings = viewModel::openTtsSettings,
                         onInterruptionModeChange = viewModel::setAudioInterruptionMode,
                         onDiagnosticsModeChange = viewModel::setDiagnosticsMode,
+                        onDiagnosticScreenChanged = { key ->
+                            app.container.sourceDiagnostics.onScreenChanged("personal:$key")
+                        },
                         onHeadsetMultiClickChange = viewModel::setHeadsetMultiClickEnabled,
                         onHeadsetSingleActionChange = viewModel::setHeadsetSingleClickAction,
                         onHeadsetDoubleActionChange = viewModel::setHeadsetDoubleClickAction,
@@ -349,6 +360,22 @@ fun ReferenceNgheTruyenApp(
             }
         }
     }
+}
+
+
+private fun referenceDiagnosticScreenKey(state: MainUiState): String = when (state.destination) {
+    Destination.Root -> when (state.rootTab) {
+        RootTab.EXPLORE -> listOf(
+            "explore",
+            state.selectedSourceId.orEmpty(),
+            state.exploreMode.name,
+            state.activeCategory.orEmpty(),
+        ).joinToString(":")
+        RootTab.LIBRARY -> "library:${state.librarySection.name}"
+        RootTab.PERSONAL -> "personal:home"
+    }
+    Destination.Story -> "story:${state.storyDetail?.story?.id.orEmpty()}"
+    Destination.Reader -> "reader:${state.chapterContent?.chapter?.id.orEmpty()}"
 }
 
 @Composable

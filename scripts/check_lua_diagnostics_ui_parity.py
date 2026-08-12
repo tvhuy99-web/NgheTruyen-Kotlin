@@ -37,6 +37,15 @@ checks = {
     "Lua recording label": "ĐANG GHI NHẬT KÝ..." in chrome,
     "Lua view label": "XEM NHẬT KÝ" in chrome,
     "Lua empty label": "CHƯA CÓ NHẬT KÝ" in chrome,
+    "single readable log viewer": (
+        "DiagnosticHumanFormatter.formatUi" in chrome
+        and 'Text("SAO CHÉP")' in chrome
+        and 'Text("XÓA")' in chrome
+        and 'Text("XUẤT TỆP")' in chrome
+        and 'Text("TRACE (' not in chrome
+    ),
+    "screen scoped navigation reset": "referenceDiagnosticScreenKey" in app and "onScreenChanged" in app,
+    "continuous append-only store": "append-only" in runtime.lower() and "events.jsonl" in runtime,
     "Reader has no private always-visible log button": 'ReaderButton("XEM NHẬT KÝ"' not in reader,
     "Reader has no private diagnostic dialog": "showDiagnosticLogDialog" not in reader,
     "settings log card hidden while OFF": 'if (state.diagnosticsMode != "off") {' in personal,
@@ -44,12 +53,22 @@ checks = {
         '"settings_diagnostics" -> PersonalSubPage("CHẨN ĐOÁN")' in personal
         and "SourceDiagnosticsSection(" in personal
     ),
-    "large live event window": "diagnosticSummaries(200)" in vm,
+    "large live event window": "diagnosticSummaries(2_000)" in vm,
     "large live trace window": "diagnosticTraces(100)" in vm,
     "shared app diagnostic mark API": "fun mark(" in runtime and "DIAGNOSTICS_MODE_CHANGED" in runtime,
-    "dual Advanced profiles": all(token in runtime for token in ("advanced_ram", "advanced_crash", "crashSafe")),
-    "active operation tracker": "DiagnosticActivityTracker" in runtime and "diagnosticActiveOperations" in vm and "ĐANG HOẠT ĐỘNG" in chrome,
-    "critical breadcrumbs while OFF": "shouldRetainWhenDiagnosticsOff" in runtime and "MAX_CRITICAL_EVENTS = 100" in runtime,
+    "three diagnostic modes": all(token in runtime for token in (
+        'MODE_OFF = "off"',
+        'MODE_SCREEN = "basic"',
+        'MODE_CONTINUOUS = "advanced"',
+        "fun onScreenChanged",
+        "ContinuousDiagnosticStore",
+    )),
+    "active operation tracker": "DiagnosticActivityTracker" in runtime and "diagnosticActiveOperations" in vm and "diagnosticActiveOperations.isNotEmpty()" in chrome,
+    "OFF means no hidden recording": (
+        "if (mode == MODE_OFF) return" in runtime
+        and "restoreCriticalEvents" not in runtime
+        and "MAX_CRITICAL_EVENTS" not in runtime
+    ),
     "runtime snapshot exported": "report/app_runtime.json" in runtime,
     "backup log tail exported": "report/backup_tail.log" in runtime,
     "TTS lifecycle diagnostics": all(

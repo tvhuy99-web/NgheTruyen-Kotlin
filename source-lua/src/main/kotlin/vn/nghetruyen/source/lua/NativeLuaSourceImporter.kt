@@ -8,6 +8,7 @@ import vn.nghetruyen.source.api.SourceBrowserCapability
 import vn.nghetruyen.source.api.SourceCapabilities
 import vn.nghetruyen.source.api.SourceCookieMode
 import vn.nghetruyen.source.api.SourceCryptoCapability
+import vn.nghetruyen.source.api.SourceFullAuthorityPolicy
 import vn.nghetruyen.source.api.SourceManifest
 import vn.nghetruyen.source.api.SourceNetworkCapability
 import vn.nghetruyen.source.api.SourceRuntimeMode
@@ -56,6 +57,12 @@ object NativeLuaSourceImporter {
             "NATIVE_LUA_API_VERSION_UNSUPPORTED"
         }
 
+        // Installation itself is the authority grant. Legacy permission declarations remain readable
+        // for file compatibility, but they are not allowed to reduce what a Native Source can do
+        // inside NgheTruyen. The hard boundary stays below the Source API in the broker/sandbox layer.
+        val sourceTable = packageTable.get("source").checktable()
+        promoteFullInternalAuthority(sourceTable)
+
         // Validation and adapter generation use fresh globals. An extension cannot replace
         // require/type/pairs in its own environment and influence these trusted phases.
         val validationSandbox = LuaSandbox(
@@ -69,7 +76,7 @@ object NativeLuaSourceImporter {
             validation.arg(2).optjstring("NATIVE_LUA_PACKAGE_INVALID")
         }
         val metadata = packageTable.get("metadata").checktable()
-        val source = packageTable.get("source").checktable()
+        val source = sourceTable
         val adapterSandbox = LuaSandbox(
             modules = mapOf(NATIVE_API_MODULE to nativeApi),
             instructionBudget = 500_000,
@@ -105,9 +112,6 @@ object NativeLuaSourceImporter {
             addAll(stringList(permissions.get("hosts")))
         }.map(::normalizeHost).filter(String::isNotBlank).toSet()
         require(hosts.isNotEmpty() && hosts.size <= 64) { "NATIVE_LUA_ALLOWED_HOSTS_INVALID" }
-        val browserEnabled = permissions.get("browser").optboolean(false)
-        val captureEnabled = permissions.get("network_capture").optboolean(false)
-        val storageEnabled = permissions.get("storage").optboolean(false) || source.get("config").istable()
         val origins = hosts.mapTo(linkedSetOf()) { "https://$it" }
         val nativeId = normalizeNativeId(metadata.get("id").optjstring(plugin.metadata.id))
         val runtime = SourceRuntimePolicy(
@@ -117,45 +121,47 @@ object NativeLuaSourceImporter {
             memoryBudgetBytes = 32 * 1024 * 1024,
             actionTimeoutMs = 50_000,
         )
-        val manifest = vBook.manifest.copy(
-            id = nativeId,
-            runtime = runtime,
-            origins = origins,
-            redirectOrigins = origins,
-            capabilities = SourceCapabilities(
-                network = SourceNetworkCapability(
-                    methods = setOf("GET", "HEAD", "POST"),
-                    maxResponseBytes = 8 * 1024 * 1024,
-                    maxRequestBytes = 512 * 1024,
-                    requestsPerMinute = 90,
-                    maxConcurrent = 2,
+        val manifest = SourceFullAuthorityPolicy.apply(
+            vBook.manifest.copy(
+                id = nativeId,
+                runtime = runtime,
+                origins = origins,
+                redirectOrigins = origins,
+                capabilities = SourceCapabilities(
+                    network = SourceNetworkCapability(
+                        methods = setOf("GET", "HEAD", "POST"),
+                        maxResponseBytes = 8 * 1024 * 1024,
+                        maxRequestBytes = 512 * 1024,
+                        requestsPerMinute = 90,
+                        maxConcurrent = 2,
+                    ),
+                    cookies = SourceCookieMode.BROWSER_SHARED,
+                    browser = SourceBrowserCapability(
+                        navigate = true,
+                        domSnapshot = true,
+                        click = true,
+                        input = true,
+                        requestMetadata = true,
+                        serviceWorkerCapture = true,
+                        pageJavaScript = true,
+                    ),
+                    storageBytes = 2 * 1024 * 1024,
+                    crypto = setOf(
+                        SourceCryptoCapability.MD5,
+                        SourceCryptoCapability.SHA1,
+                        SourceCryptoCapability.SHA256,
+                        SourceCryptoCapability.SHA512,
+                        SourceCryptoCapability.HMAC_MD5,
+                        SourceCryptoCapability.HMAC_SHA1,
+                        SourceCryptoCapability.HMAC_SHA256,
+                        SourceCryptoCapability.HMAC_SHA512,
+                        SourceCryptoCapability.AES_COMPAT,
+                        SourceCryptoCapability.AES_GCM_SECRET,
+                    ),
+                    websocket = vn.nghetruyen.source.api.SourceWebSocketCapability(enabled = true),
                 ),
-                cookies = SourceCookieMode.BROWSER_SHARED,
-                browser = SourceBrowserCapability(
-                    navigate = browserEnabled,
-                    domSnapshot = browserEnabled,
-                    click = browserEnabled,
-                    input = browserEnabled,
-                    requestMetadata = captureEnabled,
-                    serviceWorkerCapture = captureEnabled,
-                    pageJavaScript = browserEnabled,
-                ),
-                storageBytes = if (storageEnabled) 2 * 1024 * 1024 else 256 * 1024,
-                crypto = setOf(
-                    SourceCryptoCapability.MD5,
-                    SourceCryptoCapability.SHA1,
-                    SourceCryptoCapability.SHA256,
-                    SourceCryptoCapability.SHA512,
-                    SourceCryptoCapability.HMAC_MD5,
-                    SourceCryptoCapability.HMAC_SHA1,
-                    SourceCryptoCapability.HMAC_SHA256,
-                    SourceCryptoCapability.HMAC_SHA512,
-                    SourceCryptoCapability.AES_COMPAT,
-                    SourceCryptoCapability.AES_GCM_SECRET,
-                ),
-                websocket = vn.nghetruyen.source.api.SourceWebSocketCapability(enabled = true),
             ),
-        ).also(SourceManifest::validate)
+        )
         val entries = LinkedHashMap(vBook.entries)
         entries["native/source.lua"] = sourceBytes
         archiveFiles.forEach { (path, bytes) ->
@@ -171,9 +177,12 @@ object NativeLuaSourceImporter {
         entries["data/native-source-info.json"] = JsonCodec.stringify(JsonValue.Obj(linkedMapOf(
             "nativeApiVersion" to JsonValue.Num(2.0, "2"),
             "engine" to JsonValue.Str(built.get("runtime").optjstring("native-api-2")),
+            "authority" to JsonValue.Str(SourceFullAuthorityPolicy.AUTHORITY_ID),
+            "fullInternalAuthority" to JsonValue.Bool(true),
             "allowedHosts" to JsonValue.Arr(hosts.sorted().map(JsonValue::Str)),
-            "browser" to JsonValue.Bool(browserEnabled),
-            "networkCapture" to JsonValue.Bool(captureEnabled),
+            "browser" to JsonValue.Bool(true),
+            "networkCapture" to JsonValue.Bool(true),
+            "storage" to JsonValue.Bool(true),
             "hasComments" to JsonValue.Bool(manifest.actions.keys.any { it.name == "COMMENTS" }),
             "archiveEntryCount" to JsonValue.Num(archiveFiles.size.toDouble(), archiveFiles.size.toString()),
             "moduleCount" to JsonValue.Num(moduleBundle.entryPaths.size.toDouble(), moduleBundle.entryPaths.size.toString()),
@@ -181,14 +190,22 @@ object NativeLuaSourceImporter {
         entries["source.json"] = SourceManifestWriter.write(manifest)
         val warnings = buildList {
             addAll(vBook.warnings)
-            add("Native Source API 2 chạy trong LuaJ sandbox; luajava, io, os, debug, package và bytecode bị vô hiệu hóa.")
+            add("Native Source API 2 chạy với FULL_IN_APP: toàn bộ Browser, network capture, Storage, Crypto, WebSocket và public Internet đều khả dụng bên trong sandbox.")
+            add("Biên an toàn vẫn nằm dưới Source API: luajava, io, os, debug, package, bytecode, raw Android/Java và file/content escape không được mở cho extension.")
             if (archiveFiles.size > 1) add("Đã giữ ${archiveFiles.size} tệp trong package và ánh xạ ${moduleBundle.entryPaths.size} alias require() an toàn.")
             if (source.get("hooks").istable()) add("Pure Lua hooks được chạy theo từng lần gọi với ngân sách lệnh, bộ nhớ và giới hạn đầu ra.")
-            if (browserEnabled) add("Dynamic Web dùng WebView tuần tự với origin allowlist và không cho truy cập file/content URI.")
+            add("Dynamic Web dùng WebView tuần tự; Source broker giữ hard boundary với Android/JVM trong khi extension được toàn quyền trong môi trường NgheTruyen.")
         }
         return NativeLuaImportResult(manifest, entries, warnings)
     }
 
+    private fun promoteFullInternalAuthority(source: LuaTable) {
+        val permissions = source.get("permissions").let { if (it.istable()) it.checktable() else LuaTable() }
+        permissions.set("browser", LuaValue.TRUE)
+        permissions.set("storage", LuaValue.TRUE)
+        permissions.set("network_capture", LuaValue.TRUE)
+        source.set("permissions", permissions)
+    }
 
     private data class ModuleBundle(
         val sources: Map<String, String>,
@@ -222,7 +239,6 @@ object NativeLuaSourceImporter {
         val parentAlias = if (path.endsWith("/init.lua", true)) path.substringBeforeLast('/').replace('/', '.') else ""
         return linkedSetOf(normalized, relative, basename, parentAlias).filter(String::isNotBlank)
     }
-
 
     private fun decodeUtf8(bytes: ByteArray): String = runCatching {
         Charsets.UTF_8.newDecoder()

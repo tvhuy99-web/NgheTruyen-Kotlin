@@ -24,6 +24,7 @@ import vn.nghetruyen.app.sourceplatform.SourcePlatformManager
 import vn.nghetruyen.app.sourceplatform.SourceDiagnosticRuntime
 import vn.nghetruyen.app.sourceplatform.UnifiedSourcePlatformManager
 import vn.nghetruyen.app.sourceplatform.VBookRepositoryClient
+import vn.nghetruyen.app.sourceplatform.VBookRepositorySubscriptionStore
 import vn.nghetruyen.app.sourceplatform.VBookSourcePlatform
 import vn.nghetruyen.app.sources.SourceHealthChecker
 import vn.nghetruyen.app.sources.SourceRegistry
@@ -64,6 +65,10 @@ class AppContainer(context: Context) {
         VBookRepositoryClient(diagnostics = sourceDiagnostics.recorder, evidence = sourceDiagnostics.evidence)
     }
 
+    val vBookRepositorySubscriptionStore: VBookRepositorySubscriptionStore by lazy {
+        VBookRepositorySubscriptionStore(appContext)
+    }
+
     private val legacySourcePlatformManager: SourcePlatformManager by lazy {
         vBookQuickTranslationInstalled
         SourcePlatformManager(
@@ -82,6 +87,7 @@ class AppContainer(context: Context) {
             legacy = legacySourcePlatformManager,
             vBook = vBookSourcePlatform,
             vBookRepositories = vBookRepositoryClient,
+            vBookRepositorySubscriptions = vBookRepositorySubscriptionStore,
             onExternalSourcesChanged = { refreshSourceRegistry() },
         )
     }

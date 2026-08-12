@@ -27,9 +27,8 @@ data class DiagnosticEvent(
 )
 
 /**
- * Tiny always-on breadcrumb policy. Diagnostics OFF still hides the UI and suppresses normal
- * telemetry, but fatal errors and install/trust/security warnings survive so a user can enable
- * diagnostics after a failed extension install and still have something actionable to inspect.
+ * Legacy classification helper kept for source compatibility. DiagnosticLevel.OFF is now a true
+ * off switch: recorders and the app diagnostic runtime do not retain any event while it is active.
  */
 fun DiagnosticEvent.shouldRetainWhenDiagnosticsOff(): Boolean =
     severity == DiagnosticSeverity.ERROR ||
@@ -61,9 +60,9 @@ class BoundedDiagnosticRecorder(
     }
 
     override fun emit(event: DiagnosticEvent) {
-        val critical = event.shouldRetainWhenDiagnosticsOff()
-        if (level == DiagnosticLevel.OFF && !critical) return
-        if (level == DiagnosticLevel.BASIC && event.severity == DiagnosticSeverity.DEBUG && !critical) return
+        // OFF is intentionally absolute. Do not keep hidden breadcrumbs behind an "off" UI.
+        if (level == DiagnosticLevel.OFF) return
+        if (level == DiagnosticLevel.BASIC && event.severity == DiagnosticSeverity.DEBUG) return
         val safe = event.copy(attributes = DiagnosticRedactor.redact(event.attributes))
         lock.withLock {
             while (events.size >= maxEvents) events.removeFirst()
@@ -72,7 +71,7 @@ class BoundedDiagnosticRecorder(
         runCatching { mirror.emit(safe) }
     }
 
-    /** Restore already-redacted persisted breadcrumbs without mirroring them back to disk. */
+    /** Restore already-redacted persisted events without mirroring them back to disk. */
     fun restore(restored: List<DiagnosticEvent>) = lock.withLock {
         restored.takeLast(maxEvents).forEach { event ->
             val safe = event.copy(attributes = DiagnosticRedactor.redact(event.attributes))

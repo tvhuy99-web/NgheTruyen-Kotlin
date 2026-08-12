@@ -52,7 +52,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git rm -f .github/workflows/agent-extension-parity.yml .github/agent-extension-parity/apply.py.gz
+          git rm -f .github/workflows/agent-extension-parity.yml .github/agent-extension-parity/apply.py.gz .github/agent-extension-parity/trigger.txt
           rmdir .github/agent-extension-parity 2>/dev/null || true
           git add app/src/main/java/vn/nghetruyen/app/AppContainer.kt
           git add app/src/main/java/vn/nghetruyen/app/sourceplatform/VBookRepositoryCacheStore.kt

@@ -12,8 +12,10 @@ class VBookPackageResourceProvider(
         val bytes = when (normalized) {
             "plugin.json" -> pkg.pluginJsonBytes
             "icon.png" -> pkg.iconBytes
-            else -> pkg.scripts[normalized] ?: pkg.resources[normalized]
+            else -> lookup(normalized) ?: normalized.takeUnless { it.startsWith("src/") }?.let { lookup("src/$it") }
         } ?: return null
         return bytes.takeIf { it.size <= maxBytes }?.copyOf()
     }
+
+    private fun lookup(path: String): ByteArray? = pkg.scripts[path] ?: pkg.resources[path]
 }

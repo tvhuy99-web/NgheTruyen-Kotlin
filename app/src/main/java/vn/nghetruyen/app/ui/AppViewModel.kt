@@ -133,6 +133,13 @@ sealed interface Destination {
     data object Reader : Destination
 }
 
+data class SourceInstallOutcomeUi(
+    val success: Boolean,
+    val name: String,
+    val version: String,
+    val reason: String = "",
+)
+
 data class MainUiState(
     val destination: Destination = Destination.Root,
     val rootTab: RootTab = RootTab.EXPLORE,
@@ -266,6 +273,8 @@ data class MainUiState(
     val sourceRepositories: List<SourceRepositoryUiInfo> = emptyList(),
     val sourceRepositoryPackages: List<SourceRepositoryPackageUiInfo> = emptyList(),
     val sourceRepositoryRefreshing: Boolean = false,
+    val sourceInstallBusy: Boolean = false,
+    val sourceInstallOutcome: SourceInstallOutcomeUi? = null,
     val pendingSourceInstall: SourceInstallPreview? = null,
     val pendingSourceInstallWarnings: List<String> = emptyList(),
     val sourceTrustKeys: List<SourceTrustKeyUi> = emptyList(),
@@ -1093,30 +1102,147 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun sourceInstallFailureReason(error: Throwable): String {
+        val messages = generateSequence<Throwable>(error) { it.cause }
+            .mapNotNull { it.message?.trim()?.takeIf(String::isNotBlank) }
+            .distinct()
+            .toList()
+        val detail = messages.joinToString(" | ").ifBlank {
+            error.javaClass.simpleName.ifBlank { "Lỗi cài đặt không xác định." }
+        }
+        return when {
+            detail.contains("VBOOK_REPOSITORY_PACKAGE_HTTPS_REQUIRED", ignoreCase = true) ->
+                "Gói tiện ích không dùng HTTPS an toàn. Chi tiết: $detail"
+            detail.contains("VBOOK_IMPORT_NOT_ACTIVATABLE", ignoreCase = true) ->
+                "Tiện ích không tương thích với runtime hiện tại. Chi tiết: $detail"
+            detail.contains("VBOOK_INSTALL_QUARANTINED", ignoreCase = true) ->
+                "Tiện ích bị cách ly vì không vượt qua kiểm tra kích hoạt. Chi tiết: $detail"
+            detail.contains("signature", ignoreCase = true) || detail.contains("chữ ký", ignoreCase = true) ->
+                "Kiểm tra chữ ký thất bại. Chi tiết: $detail"
+            detail.contains("trust", ignoreCase = true) || detail.contains("fingerprint", ignoreCase = true) ->
+                "Khóa tin cậy hoặc fingerprint không hợp lệ. Chi tiết: $detail"
+            detail.contains("checksum", ignoreCase = true) || detail.contains("sha256", ignoreCase = true) ->
+                "Mã kiểm tra của gói không khớp. Chi tiết: $detail"
+            detail.contains("manifest", ignoreCase = true) ->
+                "Manifest của tiện ích không hợp lệ. Chi tiết: $detail"
+            detail.contains("fixture", ignoreCase = true) || detail.contains("self-test", ignoreCase = true) ->
+                "Tự kiểm tra của tiện ích thất bại. Chi tiết: $detail"
+            else -> detail
+        }
+    }
+
+    private fun setSourceInstallOutcome(
+        success: Boolean,
+        name: String,
+        version: String,
+        reason: String = "",
+    ) {
+        mutableState.update {
+            it.copy(
+                sourceInstallBusy = false,
+                sourceRepositoryRefreshing = false,
+                pendingSourceInstall = null,
+                pendingSourceInstallWarnings = emptyList(),
+                sourceInstallOutcome = SourceInstallOutcomeUi(success, name, version, reason),
+            )
+        }
+    }
+
+    /** Runs the same prepare/verify path as installation, but never commits the staged package. */
     fun prepareRepositorySourceInstall(repositoryId: String, sourceId: String) {
+        if (state.value.sourceInstallBusy || state.value.sourceRepositoryRefreshing) return
         viewModelScope.launch {
-            mutableState.update { it.copy(sourceRepositoryRefreshing = true) }
+            mutableState.update {
+                it.copy(
+                    sourceRepositoryRefreshing = true,
+                    pendingSourceInstall = null,
+                    pendingSourceInstallWarnings = emptyList(),
+                    sourceInstallOutcome = null,
+                )
+            }
             val result = withContext(Dispatchers.IO) {
                 container.sourcePlatformManager.prepareRepositoryInstall(repositoryId, sourceId)
             }
+            val warnings = if (result.isSuccess) container.sourcePlatformManager.pendingInstallWarnings() else emptyList()
+            container.sourcePlatformManager.cancelPendingInstall()
             result.onSuccess { preview ->
                 mutableState.update {
                     it.copy(
                         pendingSourceInstall = preview,
-                        pendingSourceInstallWarnings = container.sourcePlatformManager.pendingInstallWarnings(),
+                        pendingSourceInstallWarnings = warnings,
                     )
                 }
-                showMessage("Đã tải và xác minh ${preview.name} ${preview.version}. Hãy duyệt quyền trước khi cài.")
             }.onFailure { error ->
-                showMessage(error.message ?: "Không tải được gói nguồn từ repository.")
+                showMessage("Chẩn đoán thất bại: ${sourceInstallFailureReason(error)}")
             }
             refreshSourcePlatformState()
             mutableState.update { it.copy(sourceRepositoryRefreshing = false) }
         }
     }
 
-    fun prepareSourcePack(uri: Uri) {
+    /** Prepare + verify + commit in one user action. Security checks remain mandatory. */
+    fun installRepositorySource(repositoryId: String, sourceId: String) {
+        if (state.value.sourceInstallBusy || state.value.sourceRepositoryRefreshing) return
+        val requested = state.value.sourceRepositoryPackages.firstOrNull {
+            it.repositoryId == repositoryId && it.sourceId == sourceId
+        }
+        val requestedName = requested?.name ?: sourceId
+        val requestedVersion = requested?.version.orEmpty()
         viewModelScope.launch {
+            mutableState.update {
+                it.copy(
+                    sourceInstallBusy = true,
+                    sourceRepositoryRefreshing = true,
+                    sourceInstallOutcome = null,
+                    pendingSourceInstall = null,
+                    pendingSourceInstallWarnings = emptyList(),
+                )
+            }
+            val prepared = withContext(Dispatchers.IO) {
+                container.sourcePlatformManager.prepareRepositoryInstall(repositoryId, sourceId)
+            }
+            if (prepared.isFailure) {
+                container.sourcePlatformManager.cancelPendingInstall()
+                val error = prepared.exceptionOrNull()
+                    ?: IllegalStateException("Không chuẩn bị được gói tiện ích.")
+                setSourceInstallOutcome(
+                    false,
+                    requestedName,
+                    requestedVersion,
+                    sourceInstallFailureReason(error),
+                )
+                return@launch
+            }
+            val preview = prepared.getOrThrow()
+            val installed = withContext(Dispatchers.IO) {
+                container.sourcePlatformManager.confirmPendingInstall()
+            }
+            installed.onSuccess { pack ->
+                refreshSourcePlatformState()
+                setSourceInstallOutcome(true, pack.name, pack.version)
+            }.onFailure { error ->
+                container.sourcePlatformManager.cancelPendingInstall()
+                setSourceInstallOutcome(
+                    false,
+                    preview.name,
+                    preview.version,
+                    sourceInstallFailureReason(error),
+                )
+            }
+        }
+    }
+
+    fun prepareSourcePack(uri: Uri) {
+        if (state.value.sourceInstallBusy) return
+        viewModelScope.launch {
+            mutableState.update {
+                it.copy(
+                    sourceInstallBusy = true,
+                    sourceInstallOutcome = null,
+                    pendingSourceInstall = null,
+                    pendingSourceInstallWarnings = emptyList(),
+                )
+            }
             val result = withContext(Dispatchers.IO) {
                 val resolver = getApplication<Application>().contentResolver
                 val signedAttempt = runCatching {
@@ -1143,36 +1269,64 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             }
-            result.onSuccess { preview ->
-                mutableState.update {
-                    it.copy(
-                        pendingSourceInstall = preview,
-                        pendingSourceInstallWarnings = container.sourcePlatformManager.pendingInstallWarnings(),
-                    )
-                }
-                showMessage("Đã kiểm tra ${preview.name} ${preview.version}. Hãy duyệt quyền và cảnh báo trước khi cài.")
-            }.onFailure { error ->
-                showMessage(error.message ?: "Gói nguồn không hợp lệ.")
+            if (result.isFailure) {
+                container.sourcePlatformManager.cancelPendingInstall()
+                val error = result.exceptionOrNull()
+                    ?: IllegalStateException("Gói nguồn không hợp lệ.")
+                setSourceInstallOutcome(false, "Gói tiện ích", "", sourceInstallFailureReason(error))
+                return@launch
             }
-            refreshSourcePlatformState()
+            val preview = result.getOrThrow()
+            val installed = withContext(Dispatchers.IO) {
+                container.sourcePlatformManager.confirmPendingInstall()
+            }
+            installed.onSuccess { pack ->
+                refreshSourcePlatformState()
+                setSourceInstallOutcome(true, pack.name, pack.version)
+            }.onFailure { error ->
+                container.sourcePlatformManager.cancelPendingInstall()
+                setSourceInstallOutcome(
+                    false,
+                    preview.name,
+                    preview.version,
+                    sourceInstallFailureReason(error),
+                )
+            }
         }
     }
 
     fun confirmSourcePackInstall() {
+        if (state.value.sourceInstallBusy) return
+        val preview = state.value.pendingSourceInstall ?: return
         viewModelScope.launch {
-            container.sourcePlatformManager.confirmPendingInstall()
+            mutableState.update { it.copy(sourceInstallBusy = true, sourceInstallOutcome = null) }
+            withContext(Dispatchers.IO) { container.sourcePlatformManager.confirmPendingInstall() }
                 .onSuccess { pack ->
-                    mutableState.update { it.copy(pendingSourceInstall = null, pendingSourceInstallWarnings = emptyList()) }
                     refreshSourcePlatformState()
-                    showMessage("Đã cài và kích hoạt ${pack.name} ${pack.version}.")
+                    setSourceInstallOutcome(true, pack.name, pack.version)
                 }
-                .onFailure { showMessage(it.message ?: "Không cài được gói nguồn.") }
+                .onFailure { error ->
+                    container.sourcePlatformManager.cancelPendingInstall()
+                    setSourceInstallOutcome(
+                        false,
+                        preview.name,
+                        preview.version,
+                        sourceInstallFailureReason(error),
+                    )
+                }
         }
     }
 
     fun cancelSourcePackInstall() {
         container.sourcePlatformManager.cancelPendingInstall()
-        mutableState.update { it.copy(pendingSourceInstall = null, pendingSourceInstallWarnings = emptyList()) }
+        mutableState.update {
+            it.copy(
+                pendingSourceInstall = null,
+                pendingSourceInstallWarnings = emptyList(),
+                sourceInstallOutcome = null,
+                sourceInstallBusy = false,
+            )
+        }
     }
 
     fun enrollSourceTrustKey(keyId: String, algorithm: String, publicKeyBase64: String, fingerprint: String) {
@@ -1288,7 +1442,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             showMessage("Không có bản cập nhật.")
             return
         }
-        prepareRepositorySourceInstall(update.repositoryId, update.sourceId)
+        installRepositorySource(update.repositoryId, update.sourceId)
     }
 
     fun exportSourcePack(sourceId: String, destination: Uri) {

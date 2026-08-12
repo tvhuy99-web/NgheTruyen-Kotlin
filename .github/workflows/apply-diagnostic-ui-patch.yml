@@ -22,6 +22,7 @@ jobs:
           git fetch origin main
           git checkout origin/main -- app/src/main/java/vn/nghetruyen/app/ui/NgheTruyenApp.kt
           python3 .github/patch_diagnostics.py
+          sed -i 's/Modifier.padding(horizontal = 10.dp, bottom = 8.dp)/Modifier.padding(start = 10.dp, end = 10.dp, bottom = 8.dp)/' app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt
           git diff --check
       - name: Verify diagnostics build
         run: |

@@ -22,79 +22,7 @@ import vn.nghetruyen.source.runtime.SourceResourceProvider
 
 class PrimaryFallbackVBookActionRuntimeTest {
     @Test
-    fun routesBrowserHostActionToPortableRuntimeBeforePrimaryRuns() {
-        var primaryCalls = 0
-        var fallbackCalls = 0
-        val primary = VBookActionRuntime { _, _, _ ->
-            primaryCalls += 1
-            SourcePlatformResult.Success(SourceActionResponse(JsonValue.Str("chromium"), "trace", 1))
-        }
-        val expected = SourcePlatformResult.Success(SourceActionResponse(JsonValue.Str("rhino"), "trace", 7))
-        val fallback = VBookActionRuntime { _, _, _ -> fallbackCalls += 1; expected }
-        val manifest = manifest(mapOf(SourceActionName.UI_ACTION to SourceActionSpec("src/action.js")))
-        val resources = resources(mapOf(
-            "src/action.js" to "function execute(){ return Browser.navigate('https://example.com'); }",
-        ))
-
-        val actual = PrimaryFallbackVBookActionRuntime(primary, fallback).execute(manifest, resources, request())
-
-        assertSame(expected, actual)
-        assertEquals(0, primaryCalls)
-        assertEquals(1, fallbackCalls)
-    }
-
-    @Test
-    fun routesBrowserHostActionFoundThroughLiteralLoadGraph() {
-        var primaryCalls = 0
-        var fallbackCalls = 0
-        val primary = VBookActionRuntime { _, _, _ ->
-            primaryCalls += 1
-            SourcePlatformResult.Success(SourceActionResponse(JsonValue.Str("chromium"), "trace", 1))
-        }
-        val expected = SourcePlatformResult.Success(SourceActionResponse(JsonValue.Str("rhino"), "trace", 7))
-        val fallback = VBookActionRuntime { _, _, _ -> fallbackCalls += 1; expected }
-        val manifest = manifest(mapOf(SourceActionName.UI_ACTION to SourceActionSpec("src/action.js")))
-        val resources = resources(mapOf(
-            "src/action.js" to "load('helper.js'); function execute(){ return helper(); }",
-            "src/helper.js" to "function helper(){ return Browser['navigate']('https://example.com'); }",
-        ))
-
-        val actual = PrimaryFallbackVBookActionRuntime(primary, fallback).execute(manifest, resources, request())
-
-        assertSame(expected, actual)
-        assertEquals(0, primaryCalls)
-        assertEquals(1, fallbackCalls)
-    }
-
-    @Test
-    fun routesDynamicBrowserScriptFromDispatcherRequestInput() {
-        var primaryCalls = 0
-        var fallbackCalls = 0
-        val primary = VBookActionRuntime { _, _, _ ->
-            primaryCalls += 1
-            SourcePlatformResult.Success(SourceActionResponse(JsonValue.Str("chromium"), "trace", 1))
-        }
-        val expected = SourcePlatformResult.Success(SourceActionResponse(JsonValue.Str("rhino"), "trace", 7))
-        val fallback = VBookActionRuntime { _, _, _ -> fallbackCalls += 1; expected }
-        val manifest = manifest(mapOf(SourceActionName.UI_ACTION to SourceActionSpec("src/__nghe_vbook_dispatch.js")))
-        val resources = resources(mapOf(
-            "src/__nghe_vbook_dispatch.js" to "function execute(input){ return load(input.script); }",
-            "src/gen0.js" to "function execute(){ return Browser.navigate('https://my.qidian.com'); }",
-        ))
-        val input = JsonValue.Obj(linkedMapOf(
-            "script" to JsonValue.Str("gen0.js"),
-            "args" to JsonValue.Arr(emptyList()),
-        ))
-
-        val actual = PrimaryFallbackVBookActionRuntime(primary, fallback).execute(manifest, resources, request(input))
-
-        assertSame(expected, actual)
-        assertEquals(0, primaryCalls)
-        assertEquals(1, fallbackCalls)
-    }
-
-    @Test
-    fun ignoresBrowserHostNamesInsideCommentsAndStrings() {
+    fun browserHostActionStaysOnPrimaryRuntime() {
         var primaryCalls = 0
         var fallbackCalls = 0
         val expected = SourcePlatformResult.Success(SourceActionResponse(JsonValue.Str("chromium"), "trace", 1))
@@ -105,10 +33,33 @@ class PrimaryFallbackVBookActionRuntimeTest {
         }
         val manifest = manifest(mapOf(SourceActionName.UI_ACTION to SourceActionSpec("src/action.js")))
         val resources = resources(mapOf(
-            "src/action.js" to "// Browser.navigate('ignored')\nfunction execute(){ var text='Browser.navigate'; return text; }",
+            "src/action.js" to "function execute(){ return Browser.navigate('https://example.com'); }",
         ))
 
         val actual = PrimaryFallbackVBookActionRuntime(primary, fallback).execute(manifest, resources, request())
+
+        assertSame(expected, actual)
+        assertEquals(1, primaryCalls)
+        assertEquals(0, fallbackCalls)
+    }
+
+    @Test
+    fun dynamicBrowserScriptStaysOnPrimaryRuntime() {
+        var primaryCalls = 0
+        var fallbackCalls = 0
+        val expected = SourcePlatformResult.Success(SourceActionResponse(JsonValue.Str("chromium"), "trace", 1))
+        val primary = VBookActionRuntime { _, _, _ -> primaryCalls += 1; expected }
+        val fallback = VBookActionRuntime { _, _, _ ->
+            fallbackCalls += 1
+            SourcePlatformResult.Success(SourceActionResponse(JsonValue.Str("rhino"), "trace", 7))
+        }
+        val manifest = manifest(mapOf(SourceActionName.UI_ACTION to SourceActionSpec("src/__nghe_vbook_dispatch.js")))
+        val input = JsonValue.Obj(linkedMapOf(
+            "script" to JsonValue.Str("gen0.js"),
+            "args" to JsonValue.Arr(emptyList()),
+        ))
+
+        val actual = PrimaryFallbackVBookActionRuntime(primary, fallback).execute(manifest, resources(), request(input))
 
         assertSame(expected, actual)
         assertEquals(1, primaryCalls)

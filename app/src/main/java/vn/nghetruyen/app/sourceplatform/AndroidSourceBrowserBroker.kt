@@ -137,11 +137,12 @@ class AndroidSourceBrowserBroker(
                     }
                 }
                 if (session.rendererGone) error("SOURCE_BROWSER_RENDERER_GONE")
-                syncCookiesFromWebView(manifest, session.webView.url ?: request.url)
+                val webViewState = snapshotWebView(session)
+                syncCookiesFromWebView(manifest, webViewState.url ?: request.url)
                 val metadata = session.metadata.toList()
                 SourceBrowserResponse(
-                    finalUrl = session.webView.url,
-                    title = session.webView.title,
+                    finalUrl = webViewState.url,
+                    title = webViewState.title,
                     value = value,
                     requestMetadata = metadata,
                     dialogs = session.dialogs.toList(),
@@ -192,6 +193,7 @@ class AndroidSourceBrowserBroker(
                 request.timeoutMs.coerceIn(100L, 5_000L),
             )
         }.getOrNull()
+        val webViewState = runCatching { snapshotWebView(session, request.timeoutMs.coerceIn(100L, 5_000L)) }.getOrNull()
         if (html != null) {
             evidence.capture(DiagnosticEvidence(
                 timestampEpochMs = clockMs(),
@@ -203,8 +205,8 @@ class AndroidSourceBrowserBroker(
                 data = html.toByteArray(Charsets.UTF_8),
                 attributes = mapOf(
                     "action" to request.action.name,
-                    "url" to diagnosticUrl(session.webView.url ?: request.url.orEmpty()),
-                    "title" to session.webView.title.orEmpty(),
+                    "url" to diagnosticUrl(webViewState?.url ?: request.url.orEmpty()),
+                    "title" to webViewState?.title.orEmpty(),
                     "requests" to session.metadata.size.toString(),
                 ),
             ))
@@ -501,7 +503,7 @@ class AndroidSourceBrowserBroker(
         if (!latch.await(request.timeoutMs, TimeUnit.MILLISECONDS)) error("SOURCE_BROWSER_TIMEOUT")
         session.pageLatch = null
         session.pendingError.get()?.let(::error)
-        return session.webView.url
+        return snapshotWebView(session).url
     }
 
     private fun loadHtml(session: Session, manifest: SourceManifest, request: SourceBrowserRequest): String? {
@@ -517,7 +519,7 @@ class AndroidSourceBrowserBroker(
             runOnMain(5_000) { session.webView.loadDataWithBaseURL(baseUrl, html, "text/html", "utf-8", null) }
             if (!latch.await(request.timeoutMs, TimeUnit.MILLISECONDS)) error("SOURCE_BROWSER_TIMEOUT")
             session.pendingError.get()?.let(::error)
-            return session.webView.url ?: baseUrl
+            return snapshotWebView(session).url ?: baseUrl
         } finally {
             session.trustedLoadHtmlInFlight = false
             session.pageLatch = null
@@ -567,7 +569,7 @@ class AndroidSourceBrowserBroker(
     }
 
     private fun syncSession(session: Session, manifest: SourceManifest, request: SourceBrowserRequest): String {
-        val url = request.url ?: session.webView.url ?: manifest.origins.firstOrNull().orEmpty()
+        val url = request.url ?: snapshotWebView(session).url ?: manifest.origins.firstOrNull().orEmpty()
         val direction = request.options["direction"]?.lowercase() ?: "both"
         require(direction in setOf("both", "browser_to_native", "native_to_browser")) { "SOURCE_BROWSER_SYNC_DIRECTION_INVALID" }
         if (direction == "both" || direction == "native_to_browser") importCookiesIntoWebView(manifest, url)
@@ -576,7 +578,7 @@ class AndroidSourceBrowserBroker(
     }
 
     private fun setCookies(session: Session, manifest: SourceManifest, request: SourceBrowserRequest): String {
-        val url = request.url ?: session.webView.url ?: manifest.origins.firstOrNull().orEmpty()
+        val url = request.url ?: snapshotWebView(session).url ?: manifest.origins.firstOrNull().orEmpty()
         val cookies = (request.values + listOfNotNull(request.value)).map(String::trim).filter(String::isNotBlank).take(128)
         require(cookies.all { it.length <= 8_192 }) { "SOURCE_BROWSER_COOKIE_TOO_LARGE" }
         cookiePartition.mergeSetCookieHeaders(manifest.id, url, cookies)
@@ -585,7 +587,7 @@ class AndroidSourceBrowserBroker(
     }
 
     private fun clearCookies(session: Session, manifest: SourceManifest, request: SourceBrowserRequest): String {
-        val url = request.url ?: session.webView.url ?: manifest.origins.firstOrNull().orEmpty()
+        val url = request.url ?: snapshotWebView(session).url ?: manifest.origins.firstOrNull().orEmpty()
         if (request.values.isEmpty()) {
             cookiePartition.clear(manifest.id)
             clearWebViewCookies()
@@ -733,6 +735,9 @@ class AndroidSourceBrowserBroker(
         return output.get().orEmpty()
     }
 
+    private fun snapshotWebView(session: Session, timeoutMs: Long = 5_000L): WebViewState =
+        runOnMain(timeoutMs) { WebViewState(session.webView.url, session.webView.title) }
+
     private fun isAllowedInitial(manifest: SourceManifest, url: String): Boolean = runCatching {
         val uri = SourceOriginPolicy.requireInitialUrl(manifest, url)
         PublicAddressPolicy.requirePublic(resolver(uri.host))
@@ -769,7 +774,8 @@ class AndroidSourceBrowserBroker(
 
     private fun destroyActive(clearCookies: Boolean) {
         val session = active ?: return
-        syncCookiesFromWebView(session.manifest, session.webView.url)
+        val currentUrl = runCatching { snapshotWebView(session).url }.getOrNull()
+        syncCookiesFromWebView(session.manifest, currentUrl)
         runCatching { runOnMain(10_000) { session.webView.stopLoading(); session.webView.loadUrl("about:blank"); session.webView.clearHistory(); session.webView.clearCache(true); session.webView.removeAllViews(); session.webView.destroy() } }
         active = null
         if (clearCookies) cookiePartition.clear(session.manifest.id)
@@ -912,6 +918,7 @@ class AndroidSourceBrowserBroker(
         }
     }
 
+    private data class WebViewState(val url: String?, val title: String?)
     private data class DialogPolicy(val defaultAction: String, val defaultValue: String)
     private data class DialogDecision(val accepted: Boolean, val value: String?)
 }

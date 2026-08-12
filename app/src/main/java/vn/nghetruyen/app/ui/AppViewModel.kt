@@ -338,9 +338,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         refreshTtsVoices()
         refreshSourceSessions()
         refreshSourcePlatformState()
+        restorePersistedSourceRepositories()
         refreshAiCredentialState()
         viewModelScope.launch { container.libraryRepository.ensureGlobalVoiceProfiles() }
         search("")
+    }
+
+    private fun restorePersistedSourceRepositories() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                container.sourcePlatformManager.restorePersistedRepositories()
+            }
+            refreshSourcePlatformState()
+        }
     }
 
     private fun observeSettings() {

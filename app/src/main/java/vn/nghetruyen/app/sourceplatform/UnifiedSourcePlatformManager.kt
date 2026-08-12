@@ -25,6 +25,7 @@ class UnifiedSourcePlatformManager(
     private val legacy: SourcePlatformManager,
     private val vBook: VBookSourcePlatform,
     private val vBookRepositories: VBookRepositoryClient,
+    private val vBookRepositorySubscriptions: VBookRepositorySubscriptionStore,
     private val onExternalSourcesChanged: () -> Unit,
 ) {
     private val vBookSnapshots = linkedMapOf<String, VBookRepositorySnapshot>()
@@ -51,6 +52,20 @@ class UnifiedSourcePlatformManager(
                 signerKeyId = if (snapshot.complete) "vbook-index-hash" else "vbook-index-partial",
             )
         })
+        vBookRepositorySubscriptions.urls().forEach { url ->
+            val uiId = vBookIndexUiId(url)
+            if (uiId !in vBookSnapshots) {
+                add(SourceRepositoryUiInfo(
+                    id = uiId,
+                    name = "vBook · Đã lưu",
+                    url = url,
+                    generatedAtEpochMs = 0L,
+                    expiresAtEpochMs = 0L,
+                    packageCount = 0,
+                    signerKeyId = "vbook-index-saved",
+                ))
+            }
+        }
     }.distinctBy(SourceRepositoryUiInfo::id)
 
     fun repositoryPackages(): List<SourceRepositoryPackageUiInfo> = buildList {
@@ -99,6 +114,7 @@ class UnifiedSourcePlatformManager(
             }
             val uiId = vBookIndexUiId(snapshot.indexUrl)
             vBookSnapshots[uiId] = snapshot
+            vBookRepositorySubscriptions.add(snapshot.indexUrl)
             repositories().first { it.id == uiId }
         }.recoverCatching { vBookError ->
             val nativeMessage = native.exceptionOrNull()?.message.orEmpty()
@@ -108,8 +124,35 @@ class UnifiedSourcePlatformManager(
 
     fun removeRepository(repositoryId: String): Result<Unit> {
         clearPendingCatalogInstall()
-        if (vBookSnapshots.remove(repositoryId) != null) return Result.success(Unit)
+        val snapshot = vBookSnapshots.remove(repositoryId)
+        val persistedUrl = snapshot?.indexUrl ?: vBookRepositorySubscriptions.urls()
+            .firstOrNull { vBookIndexUiId(it) == repositoryId }
+        if (persistedUrl != null) {
+            return runCatching { vBookRepositorySubscriptions.remove(persistedUrl) }
+        }
         return legacy.removeRepository(repositoryId)
+    }
+
+    /** Rehydrates saved vBook repositories. Failed/offline URLs stay subscribed and remain visible. */
+    fun restorePersistedRepositories(): Int {
+        clearPendingCatalogInstall()
+        var restored = 0
+        vBookRepositorySubscriptions.urls().forEach { url ->
+            runCatching { vBookRepositories.snapshot(url, strict = false) }
+                .onSuccess { snapshot ->
+                    if (snapshot.repositories.isNotEmpty()) {
+                        vBookSnapshots[vBookIndexUiId(snapshot.indexUrl)] = snapshot
+                        if (!snapshot.indexUrl.equals(url, ignoreCase = false)) {
+                            runCatching {
+                                vBookRepositorySubscriptions.remove(url)
+                                vBookRepositorySubscriptions.add(snapshot.indexUrl)
+                            }
+                        }
+                        restored += 1
+                    }
+                }
+        }
+        return restored
     }
 
     /**

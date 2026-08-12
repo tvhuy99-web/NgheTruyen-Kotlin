@@ -89,6 +89,53 @@ checks = {
         "acceptThirdPartyCookies",
         "cookieCount",
     )),
+    "Lua JS compatibility matrix and safe page forensics": all(token in (browser + text("app/src/main/java/vn/nghetruyen/app/sourceplatform/BrowserForensics.kt")) for token in (
+        "BROWSER_PAGE_FORENSICS",
+        "XMLHttpRequest",
+        "WebSocket",
+        "cryptoSubtle",
+        "TextEncoder",
+        "TextDecoder",
+        "URLSearchParams",
+        "IndexedDB",
+        "WebAssembly",
+        "MutationObserver",
+        "IntersectionObserver",
+        "ResizeObserver",
+        "AbortController",
+        "structuredClone",
+        "recentResources",
+        "mutationAgeMs",
+        "htmlLength",
+        "textLength",
+        "elementCount",
+    )),
+    "page forensics excludes resource URLs and storage values": (
+        'name:String(e.name' not in text("app/src/main/java/vn/nghetruyen/app/sourceplatform/BrowserForensics.kt")
+        and "localStorageKeys" not in text("app/src/main/java/vn/nghetruyen/app/sourceplatform/BrowserForensics.kt")
+        and "sessionStorageKeys" not in text("app/src/main/java/vn/nghetruyen/app/sourceplatform/BrowserForensics.kt")
+        and "cookieNames" not in text("app/src/main/java/vn/nghetruyen/app/sourceplatform/BrowserForensics.kt")
+    ),
+    "browser HTTP/progress/dialog timeline": all(token in browser for token in (
+        "BROWSER_HTTP_ERROR",
+        "onReceivedHttpError",
+        "BROWSER_PROGRESS",
+        "onProgressChanged",
+        "BROWSER_JS_DIALOG",
+    )),
+    "browser evaluate forensic timeline": all(token in browser for token in (
+        "BROWSER_EVAL_STARTED",
+        "BROWSER_EVAL_CALLBACK",
+        "BROWSER_EVAL_COMPLETED",
+        "BROWSER_EVAL_TIMEOUT",
+        "BROWSER_EVAL_ERROR",
+        "AtomicBoolean",
+    )),
+    "browser session generation metadata": all(token in browser for token in (
+        "sessionId",
+        "navigationGeneration",
+        "UUID.randomUUID",
+    )),
     "browser page state snapshot": all(token in browser for token in (
         "BROWSER_STATE_SNAPSHOT",
         "document.readyState",

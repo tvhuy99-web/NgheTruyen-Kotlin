@@ -48,9 +48,11 @@ import vn.nghetruyen.source.api.SourceBrowserDialog
 import java.io.ByteArrayInputStream
 import java.net.InetAddress
 import java.util.ArrayDeque
+import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -108,6 +110,9 @@ class AndroidSourceBrowserBroker(
                 require(request.maxOutputBytes in 1024..4 * 1024 * 1024) { "SOURCE_BROWSER_OUTPUT_LIMIT_INVALID" }
                 requireCapability(manifest, request.action)
                 val session = ensureSession(manifest, request.url)
+                if (request.action == SourceBrowserAction.NAVIGATE || request.action == SourceBrowserAction.LOAD_HTML) {
+                    session.navigationGeneration += 1
+                }
                 session.currentTraceId = request.traceId
                 captureBrowserEnvironment(session, request)
                 diagnostics.emit(event(manifest, request, "BROWSER_ACTION_STARTED", attributes = mapOf(
@@ -117,6 +122,8 @@ class AndroidSourceBrowserBroker(
                     "timeoutMs" to request.timeoutMs.toString(),
                     "deadlineEpochMs" to (started + request.timeoutMs).toString(),
                     "requestId" to request.traceId,
+                    "sessionId" to session.sessionId,
+                    "navigationGeneration" to session.navigationGeneration.toString(),
                     "url" to diagnosticUrl(request.url.orEmpty()),
                 )))
                 val value = when (request.action) {
@@ -248,6 +255,43 @@ class AndroidSourceBrowserBroker(
             data = JSONObject(stateAttributes).toString(2).toByteArray(Charsets.UTF_8),
             attributes = mapOf("flow" to "browser", "stage" to "page_probe"),
         ))
+        val pageForensicsText = runCatching {
+            evaluate(session, BrowserForensics.pageScript, request.timeoutMs.coerceIn(200L, 3_000L))
+        }.getOrNull().orEmpty()
+        BrowserForensics.parse(pageForensicsText)?.let { pageForensics ->
+            val forensicAttributes = BrowserForensics.summary(
+                pageForensics,
+                session.sessionId,
+                session.navigationGeneration,
+            ).toMutableMap()
+            request.selector?.takeIf(String::isNotBlank)?.let { selector ->
+                forensicAttributes["selector"] = selector.take(1_000)
+                forensicAttributes["selectorCount"] = runCatching {
+                    evaluate(
+                        session,
+                        "(()=>{try{return document.querySelectorAll(${jsString(selector)}).length}catch(e){return -2}})()",
+                        request.timeoutMs.coerceIn(100L, 1_500L),
+                    ).toLongOrNull() ?: -1L
+                }.getOrDefault(-1L).toString()
+            }
+            diagnostics.emit(event(
+                session.manifest,
+                request,
+                "BROWSER_PAGE_FORENSICS",
+                DiagnosticSeverity.DEBUG,
+                attributes = forensicAttributes,
+            ))
+            evidence.capture(DiagnosticEvidence(
+                timestampEpochMs = clockMs(),
+                traceId = trace,
+                sourceId = request.sourceId,
+                category = DiagnosticCategory.BROWSER,
+                name = "browser-${reason}-page-forensics-${clockMs()}.json",
+                contentType = "application/json",
+                data = pageForensics.toString(2).toByteArray(Charsets.UTF_8),
+                attributes = mapOf("flow" to "browser", "stage" to "page_forensics"),
+            ))
+        }
         if (html != null) {
             evidence.capture(DiagnosticEvidence(
                 timestampEpochMs = clockMs(),
@@ -435,20 +479,57 @@ class AndroidSourceBrowserBroker(
                 return true
             }
 
+            override fun onProgressChanged(view: WebView, newProgress: Int) {
+                val session = sessionRef.get() ?: return
+                val previous = session.lastProgressLogged
+                if (newProgress == 100 || previous < 0 || kotlin.math.abs(newProgress - previous) >= 10) {
+                    session.lastProgressLogged = newProgress
+                    diagnostics.emit(sessionEvent(manifest, session, "BROWSER_PROGRESS", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                        "stage" to "progress",
+                        "progress" to newProgress.toString(),
+                        "previousProgress" to previous.toString(),
+                    )))
+                }
+            }
+
             override fun onJsAlert(view: WebView, url: String, message: String, result: JsResult): Boolean {
-                val decision = sessionRef.get()?.recordDialog("alert", message, null, url) ?: DialogDecision(false, null)
+                val session = sessionRef.get()
+                val decision = session?.recordDialog("alert", message, null, url) ?: DialogDecision(false, null)
+                if (session != null) diagnostics.emit(sessionEvent(manifest, session, "BROWSER_JS_DIALOG", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                    "stage" to "js_dialog",
+                    "dialogType" to "alert",
+                    "accepted" to decision.accepted.toString(),
+                    "message" to vn.nghetruyen.source.diagnostics.DiagnosticRedactor.redactLongText(message, 500),
+                    "url" to diagnosticUrl(url),
+                )))
                 if (decision.accepted) result.confirm() else result.cancel()
                 return true
             }
 
             override fun onJsConfirm(view: WebView, url: String, message: String, result: JsResult): Boolean {
-                val decision = sessionRef.get()?.recordDialog("confirm", message, null, url) ?: DialogDecision(false, null)
+                val session = sessionRef.get()
+                val decision = session?.recordDialog("confirm", message, null, url) ?: DialogDecision(false, null)
+                if (session != null) diagnostics.emit(sessionEvent(manifest, session, "BROWSER_JS_DIALOG", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                    "stage" to "js_dialog",
+                    "dialogType" to "confirm",
+                    "accepted" to decision.accepted.toString(),
+                    "message" to vn.nghetruyen.source.diagnostics.DiagnosticRedactor.redactLongText(message, 500),
+                    "url" to diagnosticUrl(url),
+                )))
                 if (decision.accepted) result.confirm() else result.cancel()
                 return true
             }
 
             override fun onJsPrompt(view: WebView, url: String, message: String, defaultValue: String?, result: JsPromptResult): Boolean {
-                val decision = sessionRef.get()?.recordDialog("prompt", message, defaultValue, url) ?: DialogDecision(false, null)
+                val session = sessionRef.get()
+                val decision = session?.recordDialog("prompt", message, defaultValue, url) ?: DialogDecision(false, null)
+                if (session != null) diagnostics.emit(sessionEvent(manifest, session, "BROWSER_JS_DIALOG", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                    "stage" to "js_dialog",
+                    "dialogType" to "prompt",
+                    "accepted" to decision.accepted.toString(),
+                    "message" to vn.nghetruyen.source.diagnostics.DiagnosticRedactor.redactLongText(message, 500),
+                    "url" to diagnosticUrl(url),
+                )))
                 if (decision.accepted) result.confirm(decision.value ?: defaultValue.orEmpty()) else result.cancel()
                 return true
             }
@@ -538,6 +619,28 @@ class AndroidSourceBrowserBroker(
                         pendingError.compareAndSet(null, "SOURCE_BROWSER_LOAD_ERROR:${error.errorCode}")
                         pageLatch?.countDown()
                     }
+                }
+            }
+
+            override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
+                sessionRef.get()?.apply {
+                    diagnostics.emit(sessionEvent(
+                        manifest,
+                        this,
+                        "BROWSER_HTTP_ERROR",
+                        if (request.isForMainFrame) DiagnosticSeverity.ERROR else DiagnosticSeverity.WARN,
+                        DiagnosticCategory.NETWORK,
+                        mapOf(
+                            "stage" to "http_response",
+                            "statusCode" to errorResponse.statusCode.toString(),
+                            "reasonPhrase" to errorResponse.reasonPhrase.orEmpty().take(300),
+                            "mimeType" to errorResponse.mimeType.orEmpty().take(200),
+                            "encoding" to errorResponse.encoding.orEmpty().take(100),
+                            "responseHeaderNames" to errorResponse.responseHeaders?.keys?.sorted()?.take(64)?.joinToString(",").orEmpty(),
+                            "url" to diagnosticUrl(request.url.toString()),
+                            "mainFrame" to request.isForMainFrame.toString(),
+                        ),
+                    ))
                 }
             }
 
@@ -848,23 +951,59 @@ class AndroidSourceBrowserBroker(
     }
 
     private fun evaluate(session: Session, expression: String, timeoutMs: Long): String {
+        val startedAt = clockMs()
+        val boundedTimeout = timeoutMs.coerceAtMost(120_000)
         val latch = CountDownLatch(1)
         val output = AtomicReference<String?>()
         val error = AtomicReference<Throwable?>()
+        val timedOut = AtomicBoolean(false)
+        diagnostics.emit(sessionEvent(session.manifest, session, "BROWSER_EVAL_STARTED", DiagnosticSeverity.DEBUG, attributes = mapOf(
+            "stage" to "evaluate",
+            "timeoutMs" to boundedTimeout.toString(),
+        )))
         main.post {
             try {
                 session.webView.evaluateJavascript(expression, ValueCallback { raw ->
-                    output.set(decodeJavascriptResult(raw))
+                    val decoded = decodeJavascriptResult(raw)
+                    output.set(decoded)
+                    val late = timedOut.get()
+                    if (late) session.lateCallbacks += 1
+                    diagnostics.emit(sessionEvent(session.manifest, session, "BROWSER_EVAL_CALLBACK", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                        "stage" to "evaluate_callback",
+                        "late" to late.toString(),
+                        "lateCallbacks" to session.lateCallbacks.toString(),
+                        "outputBytes" to decoded.toByteArray(Charsets.UTF_8).size.toString(),
+                        "elapsedMs" to (clockMs() - startedAt).coerceAtLeast(0L).toString(),
+                    )))
                     latch.countDown()
                 })
             } catch (t: Throwable) {
                 error.set(t)
+                diagnostics.emit(sessionEvent(session.manifest, session, "BROWSER_EVAL_ERROR", DiagnosticSeverity.WARN, attributes = mapOf(
+                    "stage" to "evaluate",
+                    "error" to (t.message ?: t.javaClass.simpleName).take(500),
+                    "elapsedMs" to (clockMs() - startedAt).coerceAtLeast(0L).toString(),
+                )))
                 latch.countDown()
             }
         }
-        if (!latch.await(timeoutMs.coerceAtMost(120_000), TimeUnit.MILLISECONDS)) error("SOURCE_BROWSER_TIMEOUT")
+        if (!latch.await(boundedTimeout, TimeUnit.MILLISECONDS)) {
+            timedOut.set(true)
+            diagnostics.emit(sessionEvent(session.manifest, session, "BROWSER_EVAL_TIMEOUT", DiagnosticSeverity.WARN, attributes = mapOf(
+                "stage" to "evaluate",
+                "timeoutMs" to boundedTimeout.toString(),
+                "elapsedMs" to (clockMs() - startedAt).coerceAtLeast(0L).toString(),
+            )))
+            error("SOURCE_BROWSER_TIMEOUT")
+        }
         error.get()?.let { throw it }
-        return output.get().orEmpty()
+        return output.get().orEmpty().also { decoded ->
+            diagnostics.emit(sessionEvent(session.manifest, session, "BROWSER_EVAL_COMPLETED", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                "stage" to "evaluate",
+                "elapsedMs" to (clockMs() - startedAt).coerceAtLeast(0L).toString(),
+                "outputBytes" to decoded.toByteArray(Charsets.UTF_8).size.toString(),
+            )))
+        }
     }
 
     private fun snapshotWebView(session: Session, timeoutMs: Long = 5_000L): WebViewState =
@@ -970,17 +1109,26 @@ class AndroidSourceBrowserBroker(
         severity: DiagnosticSeverity = DiagnosticSeverity.INFO,
         category: DiagnosticCategory = DiagnosticCategory.BROWSER,
         attributes: Map<String, String> = emptyMap(),
-    ) = DiagnosticEvent(
-        clockMs(),
-        session.currentTraceId.ifBlank { "browser-session:${manifest.id}" },
-        manifest.id,
-        manifest.version.toString(),
-        category,
-        name,
-        severity,
-        null,
-        attributes,
-    )
+    ): DiagnosticEvent {
+        val base = mapOf(
+            "flow" to "browser",
+            "sessionId" to session.sessionId,
+            "navigationGeneration" to session.navigationGeneration.toString(),
+            "loaded" to (session.pageFinishedCount > 0 && session.pendingError.get().isNullOrBlank()).toString(),
+            "currentUrl" to diagnosticUrl(session.logicalPageUrl.orEmpty()),
+        )
+        return DiagnosticEvent(
+            clockMs(),
+            session.currentTraceId.ifBlank { "browser-session:${manifest.id}" },
+            manifest.id,
+            manifest.version.toString(),
+            category,
+            name,
+            severity,
+            null,
+            base + attributes,
+        )
+    }
 
     private fun diagnosticUrl(value: String): String = runCatching {
         val uri = java.net.URI(value)
@@ -992,6 +1140,7 @@ class AndroidSourceBrowserBroker(
         val manifest: SourceManifest,
         val webView: WebView,
     ) {
+        val sessionId: String = "browser:${manifest.id}:${UUID.randomUUID().toString().take(12)}"
         val metadata = ArrayDeque<SourceBrowserRequestMetadata>()
         val dialogs = ArrayDeque<SourceBrowserDialog>()
         @Volatile var currentTraceId: String = ""
@@ -1008,6 +1157,8 @@ class AndroidSourceBrowserBroker(
         @Volatile var lateCallbacks: Int = 0
         @Volatile var pageStartedCount: Int = 0
         @Volatile var pageFinishedCount: Int = 0
+        @Volatile var navigationGeneration: Long = 0
+        @Volatile var lastProgressLogged: Int = -1
 
         fun record(request: WebResourceRequest, resourceType: String?) {
             if (!manifest.capabilities.browser.requestMetadata && resourceType == null) return

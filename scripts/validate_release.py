@@ -379,8 +379,11 @@ def main() -> None:
         "ĐANG GHI NHẬT KÝ...",
         "XEM NHẬT KÝ",
         "CHƯA CÓ NHẬT KÝ",
-        "XUẤT HỘP ĐEN",
-        "NHẬT KÝ CHẨN ĐOÁN",
+        'title = { Text("NHẬT KÝ") }',
+        'Text("SAO CHÉP")',
+        'Text("XÓA")',
+        'Text("XUẤT TỆP")',
+        "DiagnosticHumanFormatter.formatUi",
     )
     require_text(
         "app/src/main/java/vn/nghetruyen/app/ui/ReferenceNgheTruyenApp.kt",

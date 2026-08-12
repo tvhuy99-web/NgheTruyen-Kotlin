@@ -8,7 +8,7 @@ import java.nio.charset.StandardCharsets
 import java.util.zip.ZipInputStream
 
 data class VBookPackageLimits(
-    val maxZipBytes: Int = 16 * 1024 * 1024,
+    val maxZipBytes: Int = 20 * 1024 * 1024,
     val maxEntries: Int = 1024,
     val maxEntryBytes: Int = 4 * 1024 * 1024,
     val maxExpandedBytes: Int = 48 * 1024 * 1024,
@@ -19,6 +19,8 @@ data class VBookPackage(
     val iconBytes: ByteArray?,
     val scripts: Map<String, ByteArray>,
     val otherFiles: Set<String>,
+    /** Lua/XPK-compatible non-script resources retained exactly as packaged. */
+    val resources: Map<String, ByteArray> = emptyMap(),
 ) {
     fun pluginJson(): String = strictUtf8(pluginJsonBytes, "plugin.json")
 
@@ -41,6 +43,9 @@ fun interface VBookScriptPayloadDecoder {
 }
 
 object VBookPackageReader {
+    private val executableExtensions = setOf("js", "mjs")
+    private val retainedResourceExtensions = setOf("json", "txt")
+
     fun read(bytes: ByteArray, limits: VBookPackageLimits = VBookPackageLimits()): VBookPackage {
         require(bytes.isNotEmpty() && bytes.size <= limits.maxZipBytes) { "VBOOK_ZIP_SIZE_INVALID" }
         val files = linkedMapOf<String, ByteArray>()
@@ -69,7 +74,10 @@ object VBookPackageReader {
                     require(expanded <= limits.maxExpandedBytes) { "VBOOK_ZIP_EXPANDED_LIMIT" }
                     output.write(buffer, 0, read)
                 }
-                val keep = path == "plugin.json" || path == "icon.png" || (path.startsWith("src/") && path.endsWith(".js", true))
+                val extension = path.substringAfterLast('.', "").lowercase()
+                val retainedSrc = path.startsWith("src/") &&
+                    (extension in executableExtensions || extension in retainedResourceExtensions)
+                val keep = path == "plugin.json" || path == "icon.png" || retainedSrc
                 if (keep) {
                     require(path !in files) { "VBOOK_ZIP_DUPLICATE_ENTRY:$path" }
                     files[path] = output.toByteArray()
@@ -81,10 +89,15 @@ object VBookPackageReader {
         }
         val plugin = files.remove("plugin.json") ?: error("VBOOK_PLUGIN_JSON_MISSING")
         val icon = files.remove("icon.png")
-        val scripts = files.filterKeys { it.startsWith("src/") && it.endsWith(".js", true) }
+        val scripts = files.filterKeys { path ->
+            path.startsWith("src/") && path.substringAfterLast('.', "").lowercase() in executableExtensions
+        }
+        val resources = files.filterKeys { path ->
+            path.startsWith("src/") && path.substringAfterLast('.', "").lowercase() in retainedResourceExtensions
+        }
         require(scripts.isNotEmpty()) { "VBOOK_PACKAGE_SCRIPTS_MISSING" }
         strictUtf8(plugin, "plugin.json")
-        return VBookPackage(plugin, icon, scripts, other)
+        return VBookPackage(plugin, icon, scripts, other, resources)
     }
 
     private fun safeZipPath(raw: String): String {

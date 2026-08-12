@@ -18,6 +18,18 @@ class VBookLoadGraphValidatorTest {
     }
 
     @Test
+    fun currentLiteralMjsLoadIsAccepted() {
+        val issues = VBookLoadGraphValidator.validate(
+            mapOf(
+                "src/search.js" to "load('helper.mjs');function execute(){return Response.success([]);}",
+                "src/helper.mjs" to "function helper(){return 1;}",
+            ),
+            VBookContractProfile.CURRENT_JS,
+        )
+        assertTrue(issues.isEmpty())
+    }
+
+    @Test
     fun currentRejectsNonLiteralMissingAndRecursiveLoad() {
         val nonLiteral = VBookLoadGraphValidator.validate(
             mapOf("src/search.js" to "var x='libs.js';load(x);function execute(){return Response.success([]);}"),

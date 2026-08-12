@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: agent/three-mode-lua-diagnostics
-          fetch-depth: 2
+          fetch-depth: 0
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -38,7 +38,7 @@ jobs:
           from pathlib import Path
 
           old = subprocess.check_output(
-              ["git", "show", "HEAD^:.github/workflows/apply-lua-deep-diagnostics.yml"],
+              ["git", "show", "01f2a7fc4fedb7a1dad9b968d0ffad6c78f55788:.github/workflows/apply-lua-deep-diagnostics.yml"],
               text=True,
           )
           start_marker = "          python3 - <<'PY'\n"
@@ -61,6 +61,14 @@ jobs:
           patch = Path("/tmp/apply_lua_deep_diagnostics_patch.py")
           patch.write_text("\n".join(output) + "\n", encoding="utf-8")
           subprocess.run(["python3", str(patch)], check=True)
+
+          test_path = Path("source-diagnostics/src/test/kotlin/vn/nghetruyen/source/diagnostics/DiagnosticRetentionStatsTest.kt")
+          test_text = test_path.read_text(encoding="utf-8")
+          test_text = test_text.replace(
+              "import kotlin.test.Test\nimport kotlin.test.assertEquals\n",
+              "import org.junit.Assert.assertEquals\nimport org.junit.Test\n",
+          )
+          test_path.write_text(test_text, encoding="utf-8")
           PY
       - name: Verify focused diagnostics
         run: |

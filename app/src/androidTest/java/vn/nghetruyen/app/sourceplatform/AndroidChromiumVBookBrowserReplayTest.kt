@@ -21,13 +21,19 @@ import vn.nghetruyen.source.api.SourceRuntimePolicy
 import vn.nghetruyen.source.runtime.SourceResourceProvider
 import vn.nghetruyen.source.vbook.VBookCompatibilityRuntime
 import vn.nghetruyen.source.vbook.VBookScriptRole
+import java.net.InetAddress
 
 @RunWith(AndroidJUnit4::class)
 class AndroidChromiumVBookBrowserReplayTest {
     @Test
     fun productionBrowserWebViewRunsOutsideChromiumPromptAndReplaysIntoScript() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val browser = AndroidSourceBrowserBroker(context, SourceCookiePartition.NONE)
+        val publicFixtureAddress = InetAddress.getByAddress(byteArrayOf(93, 184.toByte(), 216.toByte(), 34))
+        val browser = AndroidSourceBrowserBroker(
+            context = context,
+            cookiePartition = SourceCookiePartition.NONE,
+            resolver = { listOf(publicFixtureAddress) },
+        )
         val replay = ChromiumVBookReplayCoordinator(
             browserDelegate = browser,
             networkDelegate = SourceNetworkBroker.DENY_ALL,

@@ -48,6 +48,28 @@ class VBookPackageReaderTest {
     }
 
     @Test
+    fun acceptsGithubStyleWrappedPackageRoot() {
+        val prefix = "my-extension-main/"
+        val zip = packageZip(mapOf(
+            "${prefix}plugin.json" to PLUGIN.toByteArray(),
+            "${prefix}icon.png" to byteArrayOf(1, 2, 3),
+            "${prefix}src/search.js" to "function execute(q,p){return Response.success([],p);}".toByteArray(),
+            "${prefix}src/detail.js" to "function execute(u){return Response.success({name:'x',url:u});}".toByteArray(),
+            "${prefix}src/toc.js" to "function execute(u){return Response.success([]);}".toByteArray(),
+            "${prefix}src/chap.js" to "function execute(u){return Response.success('x');}".toByteArray(),
+            "${prefix}src/rules.json" to "{\"wrapped\":true}".toByteArray(),
+        ))
+
+        val pkg = VBookPackageReader.read(zip)
+        val resources = VBookPackageResourceProvider(pkg)
+
+        assertEquals("x", VBookManifestParser.parse(pkg.pluginJson()).metadata.name)
+        assertTrue("src/search.js" in pkg.scripts)
+        assertEquals("{\"wrapped\":true}", resources.read("rules.json", 1024)?.toString(Charsets.UTF_8))
+        assertEquals(3, pkg.iconBytes?.size)
+    }
+
+    @Test
     fun rejectsZipTraversal() {
         val zip = packageZip(mapOf(
             "plugin.json" to PLUGIN.toByteArray(),

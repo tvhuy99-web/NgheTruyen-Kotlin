@@ -1051,7 +1051,7 @@ private fun InstalledSourcesSection(
                                 normalContentColor = ReferenceText,
                                 modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
                             )
-                        } else {
+                        } else if (pack.runtimeMode == "NATIVE_LUA_COMPAT") {
                             ReferenceActionButton(
                                 text = "KIỂM TRA NATIVE",
                                 onClick = {
@@ -1302,7 +1302,6 @@ private fun SourceRepositorySection(
         Text(
             buildString {
                 append("KHO: ${selectedRepository.name}")
-                if (selectedRepository.generatedAtEpochMs <= 0L) append(" - BẢN LƯU")
                 if (repositoryDetailQuery.isNotBlank()) append("\nĐang lọc: ${repositoryDetailQuery.trim()}")
             },
             style = MaterialTheme.typography.titleMedium,
@@ -1321,21 +1320,21 @@ private fun SourceRepositorySection(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp),
         )
         ReferenceActionButton(
-            text = (if (repositoryFilter == "all") "✓ " else "") + "TẤT CẢ",
+            text = if (repositoryFilter == "all") "TẤT CẢ ✓" else "TẤT CẢ",
             onClick = { repositoryFilter = "all" },
             normalColor = ReferencePanelBackground,
             normalContentColor = ReferenceText,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp),
         )
         ReferenceActionButton(
-            text = (if (repositoryFilter == "installed") "✓ " else "") + "ĐÃ CÀI",
+            text = if (repositoryFilter == "installed") "ĐÃ CÀI ✓" else "ĐÃ CÀI",
             onClick = { repositoryFilter = "installed" },
             normalColor = ReferencePanelBackground,
             normalContentColor = ReferenceText,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp),
         )
         ReferenceActionButton(
-            text = (if (repositoryFilter == "updates") "✓ " else "") + "CẬP NHẬT",
+            text = if (repositoryFilter == "updates") "CẬP NHẬT ✓" else "CẬP NHẬT",
             onClick = { repositoryFilter = "updates" },
             normalColor = ReferencePanelBackground,
             normalContentColor = ReferenceText,

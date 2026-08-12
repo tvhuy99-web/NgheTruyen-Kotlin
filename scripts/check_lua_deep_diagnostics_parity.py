@@ -15,6 +15,7 @@ chromium = text("app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidChrom
 models = text("app/src/main/java/vn/nghetruyen/app/sourceplatform/SourcePlatformModels.kt")
 core = text("source-diagnostics/src/main/kotlin/vn/nghetruyen/source/diagnostics/SourceDiagnostics.kt")
 retention_test = text("source-diagnostics/src/test/kotlin/vn/nghetruyen/source/diagnostics/DiagnosticRetentionStatsTest.kt")
+forensics = text("app/src/main/java/vn/nghetruyen/app/sourceplatform/BrowserForensics.kt")
 
 lua_codes = (
     "NETWORK_API_MISSING",
@@ -89,7 +90,7 @@ checks = {
         "acceptThirdPartyCookies",
         "cookieCount",
     )),
-    "Lua JS compatibility matrix and safe page forensics": all(token in (browser + text("app/src/main/java/vn/nghetruyen/app/sourceplatform/BrowserForensics.kt")) for token in (
+    "Lua JS compatibility matrix and safe page forensics": all(token in (browser + forensics) for token in (
         "BROWSER_PAGE_FORENSICS",
         "XMLHttpRequest",
         "WebSocket",
@@ -111,10 +112,10 @@ checks = {
         "elementCount",
     )),
     "page forensics excludes resource URLs and storage values": (
-        'name:String(e.name' not in text("app/src/main/java/vn/nghetruyen/app/sourceplatform/BrowserForensics.kt")
-        and "localStorageKeys" not in text("app/src/main/java/vn/nghetruyen/app/sourceplatform/BrowserForensics.kt")
-        and "sessionStorageKeys" not in text("app/src/main/java/vn/nghetruyen/app/sourceplatform/BrowserForensics.kt")
-        and "cookieNames" not in text("app/src/main/java/vn/nghetruyen/app/sourceplatform/BrowserForensics.kt")
+        'name:String(e.name' not in forensics
+        and "localStorageKeys" not in forensics
+        and "sessionStorageKeys" not in forensics
+        and "cookieNames" not in forensics
     ),
     "browser HTTP/progress/dialog timeline": all(token in browser for token in (
         "BROWSER_HTTP_ERROR",
@@ -123,6 +124,19 @@ checks = {
         "onProgressChanged",
         "BROWSER_JS_DIALOG",
     )),
+    "HTTP diagnostics expose header names but never header values": (
+        '"responseHeaderNames"' in browser
+        and "responseHeaderValues" not in browser
+        and "responseHeaders?.entries" not in browser
+        and "responseHeaders?.values" not in browser
+    ),
+    "JS dialog diagnostics never record prompt values": (
+        '"dialogType"' in browser
+        and '"accepted"' in browser
+        and "dialogValue" not in browser
+        and "promptValue" not in browser
+        and "defaultPromptValue" not in browser
+    ),
     "browser evaluate forensic timeline": all(token in browser for token in (
         "BROWSER_EVAL_STARTED",
         "BROWSER_EVAL_CALLBACK",

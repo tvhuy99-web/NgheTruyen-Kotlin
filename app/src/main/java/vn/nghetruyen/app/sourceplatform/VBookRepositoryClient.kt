@@ -64,6 +64,7 @@ class VBookRepositoryClient(
         }
     }
     private val aggregator = VBookRepositoryAggregator(fetcher)
+    private val directPackageBytes = VBookDirectPackageByteCache()
 
     fun snapshot(indexUrl: String = OFFICIAL_INDEX, strict: Boolean = false): VBookRepositorySnapshot =
         withTrace("repository") { traceId ->
@@ -111,11 +112,20 @@ class VBookRepositoryClient(
                 }
                 if (directPackageAttempt.isSuccess) {
                     val snapshot = directPackageAttempt.getOrThrow()
+                    snapshot.items.singleOrNull()?.let { item ->
+                        directPackageBytes.put(
+                            installIdentity = item.installIdentity,
+                            packageUrl = item.item.packageUrl,
+                            sha256 = sha256(directBytes),
+                            bytes = directBytes,
+                        )
+                    }
                     emit(traceId, "VBOOK_REPOSITORY_INPUT_CLASSIFIED", attributes = mapOf(
                         "kind" to "direct-vbook-package",
                         "catalogs" to snapshot.repositories.size.toString(),
                         "items" to snapshot.items.size.toString(),
                         "sha256" to sha256(directBytes),
+                        "exactBytesPinned" to "true",
                     ))
                     return@withTrace snapshot
                 }
@@ -167,12 +177,29 @@ class VBookRepositoryClient(
 
     fun evictCachedDocument(url: String) {
         cache?.remove(url)
+        directPackageBytes.removeUrl(runCatching { canonicalUrl(url) }.getOrDefault(url.trim()))
     }
 
     fun downloadPackage(item: VBookAggregatedItem): ByteArray = withTrace("package") { traceId ->
         emit(traceId, "VBOOK_PACKAGE_DOWNLOAD_STARTED", attributes = mapOf("url" to item.item.packageUrl, "name" to item.item.name))
-        val bytes = fetchBytes(item.item.packageUrl, MAX_PACKAGE_BYTES)
-        emit(traceId, "VBOOK_PACKAGE_DOWNLOAD_COMPLETED", attributes = mapOf("bytes" to bytes.size.toString(), "sha256" to sha256(bytes)))
+        val reused = directPackageBytes.take(item.installIdentity, item.item.packageUrl)
+        val bytes = if (reused != null) {
+            val digest = sha256(reused.bytes)
+            require(digest == reused.sha256) { "VBOOK_DIRECT_PACKAGE_PIN_HASH_MISMATCH" }
+            emit(traceId, "VBOOK_PACKAGE_REUSED_CLASSIFIED_BYTES", attributes = mapOf(
+                "url" to item.item.packageUrl,
+                "bytes" to reused.bytes.size.toString(),
+                "sha256" to digest,
+            ))
+            reused.bytes
+        } else {
+            fetchBytes(item.item.packageUrl, MAX_PACKAGE_BYTES)
+        }
+        emit(traceId, "VBOOK_PACKAGE_DOWNLOAD_COMPLETED", attributes = mapOf(
+            "bytes" to bytes.size.toString(),
+            "sha256" to sha256(bytes),
+            "reusedClassifiedBytes" to (reused != null).toString(),
+        ))
         bytes
     }
 

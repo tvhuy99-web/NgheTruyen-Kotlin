@@ -356,13 +356,16 @@ class AndroidSourceBrowserBroker(
         }
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                if (isAllowedRedirect(manifest, request.url.toString())) return false
-                sessionRef.get()?.apply {
+                val session = sessionRef.get()
+                val url = request.url.toString()
+                if (session?.allowsTrustedLoadHtmlInternalNavigation(url, request.isForMainFrame) == true) return false
+                if (isAllowedRedirect(manifest, url)) return false
+                session?.apply {
                     pendingError.compareAndSet(null, "SOURCE_BROWSER_NAVIGATION_DENIED")
                     if (request.isForMainFrame) pageLatch?.countDown()
                     record(request, resourceType = "navigation-blocked")
                     diagnostics.emit(sessionEvent(manifest, this, "BROWSER_NAVIGATION_BLOCKED", DiagnosticSeverity.WARN, DiagnosticCategory.SECURITY, mapOf(
-                        "url" to diagnosticUrl(request.url.toString()),
+                        "url" to diagnosticUrl(url),
                         "mainFrame" to request.isForMainFrame.toString(),
                     )))
                 }
@@ -439,19 +442,21 @@ class AndroidSourceBrowserBroker(
 
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                 val session = sessionRef.get()
-                if (session?.isBlocked(request.url.toString()) == true) {
+                val url = request.url.toString()
+                if (session?.isBlocked(url) == true) {
                     session.record(request, resourceType = "policy-blocked")
                     diagnostics.emit(sessionEvent(manifest, session, "BROWSER_RESOURCE_POLICY_BLOCKED", DiagnosticSeverity.DEBUG, DiagnosticCategory.SECURITY, mapOf(
-                        "url" to diagnosticUrl(request.url.toString()),
+                        "url" to diagnosticUrl(url),
                         "mainFrame" to request.isForMainFrame.toString(),
                     )))
                     return blockedResponse()
                 }
-                if (!isAllowedRedirect(manifest, request.url.toString())) {
+                if (session?.allowsTrustedLoadHtmlInternalNavigation(url, request.isForMainFrame) == true) return null
+                if (!isAllowedRedirect(manifest, url)) {
                     session?.record(request, resourceType = "resource-blocked")
                     if (session != null) {
                         diagnostics.emit(sessionEvent(manifest, session, "BROWSER_RESOURCE_ORIGIN_BLOCKED", DiagnosticSeverity.WARN, DiagnosticCategory.SECURITY, mapOf(
-                            "url" to diagnosticUrl(request.url.toString()),
+                            "url" to diagnosticUrl(url),
                             "mainFrame" to request.isForMainFrame.toString(),
                         )))
                     }
@@ -507,11 +512,16 @@ class AndroidSourceBrowserBroker(
         val latch = CountDownLatch(1)
         session.pageLatch = latch
         session.pendingError.set(null)
-        runOnMain(5_000) { session.webView.loadDataWithBaseURL(baseUrl, html, "text/html", "utf-8", null) }
-        if (!latch.await(request.timeoutMs, TimeUnit.MILLISECONDS)) error("SOURCE_BROWSER_TIMEOUT")
-        session.pageLatch = null
-        session.pendingError.get()?.let(::error)
-        return session.webView.url ?: baseUrl
+        session.trustedLoadHtmlInFlight = true
+        try {
+            runOnMain(5_000) { session.webView.loadDataWithBaseURL(baseUrl, html, "text/html", "utf-8", null) }
+            if (!latch.await(request.timeoutMs, TimeUnit.MILLISECONDS)) error("SOURCE_BROWSER_TIMEOUT")
+            session.pendingError.get()?.let(::error)
+            return session.webView.url ?: baseUrl
+        } finally {
+            session.trustedLoadHtmlInFlight = false
+            session.pageLatch = null
+        }
     }
 
     private fun setUserAgent(session: Session, request: SourceBrowserRequest): String {
@@ -616,9 +626,9 @@ class AndroidSourceBrowserBroker(
             Thread.sleep(100)
         } while (clockMs() < deadline && !session.rendererGone)
         diagnostics.emit(event(manifest = session.manifest, request = request, name = "BROWSER_SELECTOR_TIMEOUT", severity = DiagnosticSeverity.WARN, attributes = mapOf(
-            "selector" to selector.take(1_000),
-            "polls" to polls.toString(),
-        )))
+                    "selector" to selector.take(1_000),
+                    "polls" to polls.toString(),
+                )))
         error("SOURCE_BROWSER_SELECTOR_NOT_FOUND")
     }
 
@@ -844,6 +854,7 @@ class AndroidSourceBrowserBroker(
         @Volatile var userAgent: String = ""
         @Volatile var blockPatterns: List<String> = emptyList()
         @Volatile var dialogPolicy: DialogPolicy = DialogPolicy("dismiss", "")
+        @Volatile var trustedLoadHtmlInFlight: Boolean = false
 
         fun record(request: WebResourceRequest, resourceType: String?) {
             if (!manifest.capabilities.browser.requestMetadata && resourceType == null) return
@@ -868,6 +879,16 @@ class AndroidSourceBrowserBroker(
                 pattern.startsWith("regex:") -> runCatching { Regex(pattern.removePrefix("regex:"), RegexOption.IGNORE_CASE).containsMatchIn(url) }.getOrDefault(false)
                 '*' in pattern -> runCatching { Regex(Regex.escape(pattern).replace("\\*", ".*"), RegexOption.IGNORE_CASE).matches(url) }.getOrDefault(false)
                 else -> url.contains(pattern, ignoreCase = true)
+            }
+        }
+
+        fun allowsTrustedLoadHtmlInternalNavigation(url: String, mainFrame: Boolean): Boolean {
+            if (!trustedLoadHtmlInFlight || !mainFrame) return false
+            val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return false
+            return when (uri.scheme?.lowercase()) {
+                "about" -> url.equals("about:blank", ignoreCase = true)
+                "data" -> url.startsWith("data:text/html", ignoreCase = true)
+                else -> false
             }
         }
 

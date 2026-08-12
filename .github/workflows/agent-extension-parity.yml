@@ -1,0 +1,63 @@
+name: Agent extension parity patch
+
+on:
+  push:
+    branches:
+      - agent/extension-cache-smartsearch-logs
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: agent/extension-cache-smartsearch-logs
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Apply extension parity patch
+        run: |
+          gzip -dc .github/agent-extension-parity/apply.py.gz > /tmp/agent-extension-parity.py
+          python3 /tmp/agent-extension-parity.py
+
+      - name: Compile and test app
+        run: ./gradlew --no-daemon --stacktrace :app:compileDebugKotlin :app:testDebugUnitTest
+
+      - name: Commit application changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -f .github/workflows/agent-extension-parity.yml .github/agent-extension-parity/apply.py.gz
+          rmdir .github/agent-extension-parity 2>/dev/null || true
+          git add app/src/main/java/vn/nghetruyen/app/AppContainer.kt
+          git add app/src/main/java/vn/nghetruyen/app/sourceplatform/VBookRepositoryCacheStore.kt
+          git add app/src/main/java/vn/nghetruyen/app/sourceplatform/VBookRepositoryClient.kt
+          git add app/src/main/java/vn/nghetruyen/app/sourceplatform/UnifiedSourcePlatformManager.kt
+          git add app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt
+          git diff --cached --check
+          git commit -m "Improve extension repository parity"
+          git push origin HEAD:agent/extension-cache-smartsearch-logs

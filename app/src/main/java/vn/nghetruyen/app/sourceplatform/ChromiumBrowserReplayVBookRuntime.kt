@@ -17,6 +17,7 @@ import vn.nghetruyen.source.api.SourcePlatformResult
 import vn.nghetruyen.source.diagnostics.DiagnosticSink
 import vn.nghetruyen.source.runtime.SourceResourceProvider
 import vn.nghetruyen.source.vbook.VBookActionRuntime
+import vn.nghetruyen.source.vbook.VBookRawNetworkBroker
 import java.security.MessageDigest
 
 /**
@@ -203,7 +204,10 @@ class ChromiumBrowserReplayVBookRuntime(
             sequence.toString(),
             request.method.uppercase(),
             request.url,
-            request.headers.toSortedMap().entries.joinToString("\u0001") { "${it.key}=${it.value}" },
+            request.headers.entries
+                .filterNot { (name, _) -> name.startsWith(VBookRawNetworkBroker.INTERNAL_PREFIX, ignoreCase = true) }
+                .sortedBy { (name, _) -> name.lowercase() }
+                .joinToString("\u0001") { (name, value) -> "$name=$value" },
             request.contentType.orEmpty(),
             request.responseMode.name,
             request.allowHttpError.toString(),

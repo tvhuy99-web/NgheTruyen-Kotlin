@@ -341,7 +341,9 @@ object VBookPaths {
         val clean = raw.trim().replace('\\', '/').removePrefix("/")
         val path = if (clean.startsWith("src/")) clean else "src/$clean"
         SourceManifest.requireSafeRelativePath(path)
-        require(path.endsWith(".js", ignoreCase = true)) { "VBOOK_SCRIPT_EXTENSION_REQUIRED" }
+        require(path.endsWith(".js", ignoreCase = true) || path.endsWith(".mjs", ignoreCase = true)) {
+            "VBOOK_SCRIPT_EXTENSION_REQUIRED"
+        }
         return path
     }
 

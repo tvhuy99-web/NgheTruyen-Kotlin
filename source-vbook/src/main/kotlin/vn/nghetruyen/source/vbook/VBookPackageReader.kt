@@ -8,7 +8,7 @@ import java.nio.charset.StandardCharsets
 import java.util.zip.ZipInputStream
 
 data class VBookPackageLimits(
-    val maxZipBytes: Int = 16 * 1024 * 1024,
+    val maxZipBytes: Int = 20 * 1024 * 1024,
     val maxEntries: Int = 1024,
     val maxEntryBytes: Int = 4 * 1024 * 1024,
     val maxExpandedBytes: Int = 48 * 1024 * 1024,
@@ -19,6 +19,8 @@ data class VBookPackage(
     val iconBytes: ByteArray?,
     val scripts: Map<String, ByteArray>,
     val otherFiles: Set<String>,
+    /** Lua/XPK-compatible non-script resources retained exactly as packaged. */
+    val resources: Map<String, ByteArray> = emptyMap(),
 ) {
     fun pluginJson(): String = strictUtf8(pluginJsonBytes, "plugin.json")
 
@@ -41,6 +43,9 @@ fun interface VBookScriptPayloadDecoder {
 }
 
 object VBookPackageReader {
+    private val executableExtensions = setOf("js", "mjs")
+    private val retainedResourceExtensions = setOf("json", "txt")
+
     fun read(bytes: ByteArray, limits: VBookPackageLimits = VBookPackageLimits()): VBookPackage {
         require(bytes.isNotEmpty() && bytes.size <= limits.maxZipBytes) { "VBOOK_ZIP_SIZE_INVALID" }
         val files = linkedMapOf<String, ByteArray>()
@@ -52,11 +57,12 @@ object VBookPackageReader {
                 val entry = zip.nextEntry ?: break
                 entryCount++
                 require(entryCount <= limits.maxEntries) { "VBOOK_ZIP_ENTRY_LIMIT" }
-                val path = safeZipPath(entry.name)
+                val archivePath = safeZipPath(entry.name)
                 if (entry.isDirectory) {
                     zip.closeEntry()
                     continue
                 }
+                val path = logicalPackagePath(archivePath)
                 val output = ByteArrayOutputStream(minOf(limits.maxEntryBytes, 64 * 1024))
                 val buffer = ByteArray(16 * 1024)
                 var entrySize = 0
@@ -65,26 +71,46 @@ object VBookPackageReader {
                     if (read < 0) break
                     entrySize += read
                     expanded += read.toLong()
-                    require(entrySize <= limits.maxEntryBytes) { "VBOOK_ZIP_ENTRY_TOO_LARGE:$path" }
+                    require(entrySize <= limits.maxEntryBytes) { "VBOOK_ZIP_ENTRY_TOO_LARGE:$archivePath" }
                     require(expanded <= limits.maxExpandedBytes) { "VBOOK_ZIP_EXPANDED_LIMIT" }
                     output.write(buffer, 0, read)
                 }
-                val keep = path == "plugin.json" || path == "icon.png" || (path.startsWith("src/") && path.endsWith(".js", true))
+                val extension = path.substringAfterLast('.', "").lowercase()
+                val retainedSrc = path.startsWith("src/") &&
+                    (extension in executableExtensions || extension in retainedResourceExtensions)
+                val keep = path == "plugin.json" || path == "icon.png" || retainedSrc
                 if (keep) {
                     require(path !in files) { "VBOOK_ZIP_DUPLICATE_ENTRY:$path" }
                     files[path] = output.toByteArray()
                 } else {
-                    other += path
+                    other += archivePath
                 }
                 zip.closeEntry()
             }
         }
         val plugin = files.remove("plugin.json") ?: error("VBOOK_PLUGIN_JSON_MISSING")
         val icon = files.remove("icon.png")
-        val scripts = files.filterKeys { it.startsWith("src/") && it.endsWith(".js", true) }
+        val scripts = files.filterKeys { path ->
+            path.startsWith("src/") && path.substringAfterLast('.', "").lowercase() in executableExtensions
+        }
+        val resources = files.filterKeys { path ->
+            path.startsWith("src/") && path.substringAfterLast('.', "").lowercase() in retainedResourceExtensions
+        }
         require(scripts.isNotEmpty()) { "VBOOK_PACKAGE_SCRIPTS_MISSING" }
         strictUtf8(plugin, "plugin.json")
-        return VBookPackage(plugin, icon, scripts, other)
+        return VBookPackage(plugin, icon, scripts, other, resources)
+    }
+
+    /**
+     * Lua/XPK accepts common GitHub-style archives wrapped in one or more top-level directories.
+     * Normalize the manifest and the final `src/...` suffix without ever extracting to disk.
+     */
+    private fun logicalPackagePath(archivePath: String): String {
+        val parts = archivePath.split('/')
+        if (parts.last().equals("plugin.json", ignoreCase = true)) return "plugin.json"
+        if (parts.last().equals("icon.png", ignoreCase = true)) return "icon.png"
+        val srcIndex = parts.indexOfLast { it == "src" }
+        return if (srcIndex >= 0 && srcIndex < parts.lastIndex) parts.drop(srcIndex).joinToString("/") else archivePath
     }
 
     private fun safeZipPath(raw: String): String {

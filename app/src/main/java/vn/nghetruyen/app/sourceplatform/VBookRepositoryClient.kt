@@ -21,6 +21,8 @@ import vn.nghetruyen.source.network.OkHttpSourceNetworkBroker
 import vn.nghetruyen.source.vbook.VBookAggregatedItem
 import vn.nghetruyen.source.vbook.VBookCatalog
 import vn.nghetruyen.source.vbook.VBookCatalogParser
+import vn.nghetruyen.source.vbook.VBookManifestParser
+import vn.nghetruyen.source.vbook.VBookPackageReader
 import vn.nghetruyen.source.vbook.VBookRepositoryAggregator
 import vn.nghetruyen.source.vbook.VBookRepositoryFetchResult
 import vn.nghetruyen.source.vbook.VBookRepositoryFetcher
@@ -29,7 +31,7 @@ import java.net.URI
 import java.security.MessageDigest
 import java.util.UUID
 
-/** Repository/catalog/package transport with automatic repository.json vs plugin.json recognition. */
+/** Repository/catalog/direct-package transport with Lua-style automatic HTTPS input recognition. */
 class VBookRepositoryClient(
     network: OkHttpSourceNetworkBroker? = null,
     private val cache: VBookRepositoryCacheStore? = null,
@@ -78,8 +80,67 @@ class VBookRepositoryClient(
             }
 
             val indexError = indexAttempt.exceptionOrNull()
+            val canonical = canonicalUrl(indexUrl)
+            val directBytesAttempt = runCatching { fetchBytes(canonical, MAX_PACKAGE_BYTES) }
+            if (directBytesAttempt.isSuccess) {
+                val directBytes = directBytesAttempt.getOrThrow()
+                val directBody = directBytes.toString(Charsets.UTF_8)
+                val directCatalogAttempt = runCatching {
+                    val fetched = VBookRepositoryFetchResult(canonical, directBody, sha256(directBytes))
+                    val catalog = VBookCatalogParser.parse(directBody)
+                    directCatalogSnapshot(fetched, catalog, strict)
+                }
+                if (directCatalogAttempt.isSuccess) {
+                    val snapshot = directCatalogAttempt.getOrThrow()
+                    emit(traceId, "VBOOK_REPOSITORY_INPUT_CLASSIFIED", attributes = mapOf(
+                        "kind" to "direct-vbook-catalog",
+                        "catalogs" to snapshot.repositories.size.toString(),
+                        "items" to snapshot.items.size.toString(),
+                        "indexFailure" to indexError?.message.orEmpty(),
+                    ))
+                    return@withTrace snapshot
+                }
+
+                val directPackageAttempt = runCatching {
+                    val pkg = VBookPackageReader.read(directBytes)
+                    val manifest = VBookManifestParser.parse(pkg.pluginJson())
+                    val syntheticBody = directPackageCatalogBody(canonical, manifest)
+                    val fetched = VBookRepositoryFetchResult(canonical, syntheticBody, sha256(directBytes))
+                    val catalog = VBookCatalogParser.parse(syntheticBody)
+                    directCatalogSnapshot(fetched, catalog, strict).copy(indexSha256 = sha256(directBytes))
+                }
+                if (directPackageAttempt.isSuccess) {
+                    val snapshot = directPackageAttempt.getOrThrow()
+                    emit(traceId, "VBOOK_REPOSITORY_INPUT_CLASSIFIED", attributes = mapOf(
+                        "kind" to "direct-vbook-package",
+                        "catalogs" to snapshot.repositories.size.toString(),
+                        "items" to snapshot.items.size.toString(),
+                        "sha256" to sha256(directBytes),
+                    ))
+                    return@withTrace snapshot
+                }
+
+                val cleanBody = directBody.trim()
+                if (runCatching { VBookManifestParser.parse(cleanBody) }.isSuccess) {
+                    error("DIRECT_VBOOK_MANIFEST_ONLY: URL này là plugin.json; hãy dùng liên kết plugin.zip để cài tiện ích.")
+                }
+                if (cleanBody.startsWith("<!doctype", ignoreCase = true) || cleanBody.startsWith("<html", ignoreCase = true)) {
+                    error("DIRECT_WEBPAGE_NOT_EXTENSION: URL trả về trang web HTML, không phải repository, catalog hoặc plugin.zip.")
+                }
+                if (cleanBody.startsWith("{") || cleanBody.startsWith("[")) {
+                    error("DIRECT_JSON_UNSUPPORTED: JSON không đúng định dạng repository/catalog vBook được hỗ trợ.")
+                }
+
+                val directError = directCatalogAttempt.exceptionOrNull()
+                val packageError = directPackageAttempt.exceptionOrNull()
+                val message = listOf(indexError?.message, directError?.message, packageError?.message)
+                    .filterNotNull().filter(String::isNotBlank).joinToString(" | ")
+                emit(traceId, "VBOOK_REPOSITORY_INPUT_FAILED", DiagnosticSeverity.ERROR, mapOf("url" to indexUrl, "error" to message))
+                error(message.ifBlank { "VBOOK_REPOSITORY_INPUT_UNRECOGNIZED" })
+            }
+
+            // Preserve the previous offline behavior for cached direct catalogs when the network is unavailable.
             val directAttempt = runCatching {
-                val canonical = canonicalUrl(indexUrl)
                 val fetched = fetcher.fetch(canonical, VBookRepositoryAggregator.MAX_CATALOG_BYTES)
                 val catalog = VBookCatalogParser.parse(fetched.body)
                 directCatalogSnapshot(fetched, catalog, strict)
@@ -87,7 +148,7 @@ class VBookRepositoryClient(
             if (directAttempt.isSuccess) {
                 val snapshot = directAttempt.getOrThrow()
                 emit(traceId, "VBOOK_REPOSITORY_INPUT_CLASSIFIED", attributes = mapOf(
-                    "kind" to "direct-vbook-catalog",
+                    "kind" to "direct-vbook-catalog-cache",
                     "catalogs" to snapshot.repositories.size.toString(),
                     "items" to snapshot.items.size.toString(),
                     "indexFailure" to indexError?.message.orEmpty(),
@@ -95,8 +156,11 @@ class VBookRepositoryClient(
                 return@withTrace snapshot
             }
 
-            val directError = directAttempt.exceptionOrNull()
-            val message = listOf(indexError?.message, directError?.message).filterNotNull().filter(String::isNotBlank).joinToString(" | ")
+            val message = listOf(
+                indexError?.message,
+                directBytesAttempt.exceptionOrNull()?.message,
+                directAttempt.exceptionOrNull()?.message,
+            ).filterNotNull().filter(String::isNotBlank).joinToString(" | ")
             emit(traceId, "VBOOK_REPOSITORY_INPUT_FAILED", DiagnosticSeverity.ERROR, mapOf("url" to indexUrl, "error" to message))
             error(message.ifBlank { "VBOOK_REPOSITORY_INPUT_UNRECOGNIZED" })
         }
@@ -135,6 +199,24 @@ class VBookRepositoryClient(
             .fetchIndex(wrapperUrl, strict)
             .copy(indexUrl = fetched.url, indexSha256 = fetched.sha256)
     }
+
+    private fun directPackageCatalogBody(url: String, manifest: vn.nghetruyen.source.vbook.VBookExtensionManifest): String =
+        JsonCodec.stringify(JsonValue.Obj(linkedMapOf(
+            "metadata" to JsonValue.Obj(linkedMapOf(
+                "author" to JsonValue.Str(manifest.metadata.author),
+                "description" to JsonValue.Str(manifest.metadata.description),
+            )),
+            "data" to JsonValue.Arr(listOf(JsonValue.Obj(linkedMapOf(
+                "name" to JsonValue.Str(manifest.metadata.name.ifBlank { "vBook extension" }),
+                "author" to JsonValue.Str(manifest.metadata.author),
+                "path" to JsonValue.Str(url),
+                "version" to JsonValue.Str(manifest.metadata.version.toString()),
+                "source" to JsonValue.Str(manifest.metadata.source),
+                "description" to JsonValue.Str(manifest.metadata.description),
+                "type" to JsonValue.Str(manifest.metadata.rawType?.takeIf(String::isNotBlank) ?: manifest.metadata.type.name.lowercase()),
+                "locale" to JsonValue.Str(manifest.metadata.locale),
+            )))),
+        )))
 
     private fun fetchBytes(url: String, maxBytes: Int): ByteArray {
         require(maxBytes in 1..MAX_PACKAGE_BYTES) { "VBOOK_REPOSITORY_FETCH_LIMIT_INVALID" }
@@ -238,7 +320,7 @@ class VBookRepositoryClient(
 
     companion object {
         const val OFFICIAL_INDEX = "https://raw.githubusercontent.com/Darkrai9x/vbook-extensions/master/repository.json"
-        const val MAX_PACKAGE_BYTES = 16 * 1024 * 1024
+        const val MAX_PACKAGE_BYTES = 20 * 1024 * 1024
         private const val FETCHER_SOURCE_ID = "vbook.repository.transport"
 
         private fun canonicalUrl(raw: String): String {

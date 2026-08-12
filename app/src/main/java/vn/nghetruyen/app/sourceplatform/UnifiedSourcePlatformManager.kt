@@ -96,7 +96,11 @@ class UnifiedSourcePlatformManager(
                     changelog = "",
                     packageBytes = 0,
                     status = if (packageIsHttps) state else "INSECURE_PACKAGE_URL",
-                    canInstall = packageIsHttps && state in setOf("NOT_INSTALLED", "UPDATE_AVAILABLE", "VERSION_UNKNOWN"),
+                    // Lua-style compatibility: let the user deliberately reinstall the same version
+                    // or install an older repository version. Exact-byte preview/validation still runs.
+                    canInstall = packageIsHttps && state in setOf(
+                        "NOT_INSTALLED", "UPDATE_AVAILABLE", "VERSION_UNKNOWN", "CURRENT", "REMOTE_OLDER",
+                    ),
                 ))
             }
         }

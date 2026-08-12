@@ -87,6 +87,7 @@ class AndroidChromiumVBookBrowserReplayTest {
             browser = SourceBrowserCapability(
                 navigate = true,
                 domSnapshot = true,
+                requestMetadata = true,
             ),
         ),
         actions = emptyMap(),

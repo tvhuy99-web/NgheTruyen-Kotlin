@@ -226,12 +226,13 @@ def main() -> None:
     require(
         source_ui,
         "unified source UI",
-        '${pack.version} • ${pack.ecosystem}',
-        'text = "KIỂM TRA"',
+        'Phiên bản: ${pack.version}',
+        'Loại: ${pack.ecosystem}',
+        'text = "KIỂM TRA NGUỒN"',
         'text = "CẤU HÌNH"',
-        'text = "ĐĂNG NHẬP"',
-        "onRollback(pack.id)",
-        'text = "NHẬT KÝ"',
+        'text = "CẬP NHẬT"',
+        'text = "XUẤT"',
+        "val retainedRuntimeActions = listOf(onRollback, onLogin)",
     )
     require(
         config_ui,

@@ -30,8 +30,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import org.json.JSONArray
 import org.json.JSONObject
 import vn.nghetruyen.app.NgheTruyenApplication
-import vn.nghetruyen.app.sourceplatform.SourceDiagnosticRuntime
+import vn.nghetruyen.app.sourceplatform.DiagnosticTransientScreenScope
 import vn.nghetruyen.app.sourceplatform.ExtensionWebViewAuthority
+import vn.nghetruyen.app.sourceplatform.SourceDiagnosticRuntime
 import vn.nghetruyen.source.diagnostics.DiagnosticCategory
 import vn.nghetruyen.source.diagnostics.DiagnosticOperationContract
 import vn.nghetruyen.source.diagnostics.DiagnosticOperationState
@@ -56,6 +57,7 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
     private lateinit var status: TextView
     private lateinit var progress: ProgressBar
     private lateinit var diagnostics: SourceDiagnosticRuntime
+    private lateinit var diagnosticScreenScope: DiagnosticTransientScreenScope
     private lateinit var diagnosticTraceId: String
     private var diagnosticStartedAt = 0L
 
@@ -94,6 +96,10 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
         val app = application as NgheTruyenApplication
         sessionStore = app.container.sourceSessionStore
         diagnostics = app.container.sourceDiagnostics
+        diagnosticScreenScope = DiagnosticTransientScreenScope.enter(
+            diagnostics = diagnostics,
+            screenKey = "diagnostic-browser:${sourceId.take(120)}",
+        )
         diagnosticTraceId = intent.getStringExtra(EXTRA_TRACE_ID).orEmpty().ifBlank { "diagnostic-browser:$sourceId:${UUID.randomUUID()}" }
         diagnosticStartedAt = System.currentTimeMillis()
         desktopCompat = browserPrefs.getBoolean(SourceLoginActivity.KEY_CHROME_COMPAT, false)
@@ -154,9 +160,6 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
         root.addView(addressRow, matchWrap())
 
         webView = WebView(this).apply browser@{
-            // Use the exact same browser authority as installed extensions. A diagnostic browser
-            // with stricter cookies/storage/mixed-content rules can otherwise manufacture a bug
-            // that the real source runtime never sees (or hide one that it does).
             ExtensionWebViewAuthority.apply(this@SourceDiagnosticBrowserActivity, this)
             settings.userAgentString = currentUserAgent()
             webChromeClient = object : WebChromeClient() {
@@ -185,11 +188,7 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
                     }
                     transport.webView = popup
                     resultMsg.sendToTarget()
-                    record(
-                        "PAGE",
-                        "POPUP_CREATED",
-                        "dialog=$isDialog | userGesture=$isUserGesture",
-                    )
+                    record("PAGE", "POPUP_CREATED", "dialog=$isDialog | userGesture=$isUserGesture")
                     return true
                 }
 
@@ -241,14 +240,7 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
     private fun showBrowserOptions() {
         AlertDialog.Builder(this)
             .setTitle("TÙY CHỌN TRÌNH DUYỆT")
-            .setItems(
-                arrayOf(
-                    "LÀM MỚI",
-                    "TÙY CHỌN KHÁC",
-                    "XÓA DỮ LIỆU ĐĂNG NHẬP CỦA TRANG",
-                    "ĐÓNG TRÌNH DUYỆT",
-                ),
-            ) { _, which ->
+            .setItems(arrayOf("LÀM MỚI", "TÙY CHỌN KHÁC", "XÓA DỮ LIỆU ĐĂNG NHẬP CỦA TRANG", "ĐÓNG TRÌNH DUYỆT")) { _, which ->
                 when (which) {
                     0 -> webView.reload()
                     1 -> showOtherOptions()
@@ -286,9 +278,7 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
                     2 -> showLogLevelDialog()
                     3 -> {
                         autoClearLogOnClose = !autoClearLogOnClose
-                        browserPrefs.edit()
-                            .putBoolean(SourceLoginActivity.KEY_AUTO_CLEAR_LOG_ON_CLOSE, autoClearLogOnClose)
-                            .apply()
+                        browserPrefs.edit().putBoolean(SourceLoginActivity.KEY_AUTO_CLEAR_LOG_ON_CLOSE, autoClearLogOnClose).apply()
                     }
                     4 -> {
                         val target = webView.url?.takeIf(::isHttps) ?: initialUrl
@@ -316,17 +306,7 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
     private fun showDiagnosticsDialog() {
         AlertDialog.Builder(this)
             .setTitle("CHẨN ĐOÁN TRÌNH DUYỆT")
-            .setItems(
-                arrayOf(
-                    "LÀM MỚI",
-                    "SAO CHÉP NHẬT KÝ",
-                    "XUẤT NHẬT KÝ",
-                    "KIỂM TRA JS",
-                    "KIỂM TRA COOKIE",
-                    "QUÉT TRANG",
-                    "XÓA NHẬT KÝ",
-                ),
-            ) { _, which ->
+            .setItems(arrayOf("LÀM MỚI", "SAO CHÉP NHẬT KÝ", "XUẤT NHẬT KÝ", "KIỂM TRA JS", "KIỂM TRA COOKIE", "QUÉT TRANG", "XÓA NHẬT KÝ")) { _, which ->
                 when (which) {
                     0 -> webView.reload()
                     1 -> copyLog()
@@ -382,20 +362,12 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
 
         override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
             requestCount += 1
-            record(
-                "REQUEST",
-                request.method,
-                "${redactUrl(request.url.toString())} main=${request.isForMainFrame} headers=${request.requestHeaders.keys.sorted().joinToString()}",
-            )
+            record("REQUEST", request.method, "${redactUrl(request.url.toString())} main=${request.isForMainFrame} headers=${request.requestHeaders.keys.sorted().joinToString()}")
             return null
         }
 
         override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-            record(
-                "ERROR",
-                "WEB_${error.errorCode}",
-                "main=${request.isForMainFrame} url=${redactUrl(request.url.toString())} desc=${sanitize(error.description.toString(), 300)}",
-            )
+            record("ERROR", "WEB_${error.errorCode}", "main=${request.isForMainFrame} url=${redactUrl(request.url.toString())} desc=${sanitize(error.description.toString(), 300)}")
         }
 
         override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
@@ -420,18 +392,14 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
     }
 
     private fun runJavaScriptProbe() {
-        webView.evaluateJavascript(
-            "JSON.stringify({href:location.href,title:document.title,readyState:document.readyState,links:document.links.length,forms:document.forms.length})",
-        ) { raw ->
+        webView.evaluateJavascript("JSON.stringify({href:location.href,title:document.title,readyState:document.readyState,links:document.links.length,forms:document.forms.length})") { raw ->
             record("PROBE", "JS", sanitize(decodeJs(raw), 1_500))
             status.text = "Đã kiểm tra JavaScript."
         }
     }
 
     private fun runDomProbe() {
-        webView.evaluateJavascript(
-            "JSON.stringify({title:document.title,textLength:(document.body&&document.body.innerText||'').length,links:document.links.length,forms:document.forms.length,scripts:document.scripts.length,iframes:document.querySelectorAll('iframe').length})",
-        ) { raw ->
+        webView.evaluateJavascript("JSON.stringify({title:document.title,textLength:(document.body&&document.body.innerText||'').length,links:document.links.length,forms:document.forms.length,scripts:document.scripts.length,iframes:document.querySelectorAll('iframe').length})") { raw ->
             record("PROBE", "DOM", sanitize(decodeJs(raw), 1_500))
             status.text = "Đã quét metadata trang."
         }
@@ -441,11 +409,7 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
         val url = webView.url ?: initialUrl
         val header = CookieManager.getInstance().getCookie(url).orEmpty()
         val names = CookieHeaderCodec.cookieNames(header).distinct().sorted()
-        record(
-            "PROBE",
-            "COOKIE",
-            "host=${Uri.parse(url).host.orEmpty()} count=${names.size} names=${names.joinToString()} storedSession=${sessionStore.hasSession(sourceId)}",
-        )
+        record("PROBE", "COOKIE", "host=${Uri.parse(url).host.orEmpty()} count=${names.size} names=${names.joinToString()} storedSession=${sessionStore.hasSession(sourceId)}")
         status.text = "Đã kiểm tra cookie theo tên, không ghi giá trị cookie."
     }
 
@@ -528,9 +492,7 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
         appendLine("Nguồn: $sourceId")
         appendLine("Mức ghi: ${SourceLoginActivity.logLevelLabel(logLevel)}")
         appendLine("Request: $requestCount")
-        entries.forEach { entry ->
-            appendLine("${formatTime(entry.timestamp)} ${entry.level} ${entry.category} ${entry.detail}")
-        }
+        entries.forEach { entry -> appendLine("${formatTime(entry.timestamp)} ${entry.level} ${entry.category} ${entry.detail}") }
     }
 
     private fun exportJson(): String = JSONObject()
@@ -541,13 +503,7 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
             "entries",
             JSONArray().apply {
                 entries.forEach { entry ->
-                    put(
-                        JSONObject()
-                            .put("timestamp", entry.timestamp)
-                            .put("level", entry.level)
-                            .put("category", entry.category)
-                            .put("detail", entry.detail),
-                    )
+                    put(JSONObject().put("timestamp", entry.timestamp).put("level", entry.level).put("category", entry.category).put("detail", entry.detail))
                 }
             },
         )
@@ -562,9 +518,7 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
     private fun captureSession() {
         val manager = CookieManager.getInstance()
         val merged = allowedHosts.mapNotNull { host -> manager.getCookie("https://$host/") }
-            .fold(sessionStore.cookieHeader(sourceId).orEmpty()) { current, header ->
-                CookieHeaderCodec.merge(current, header.split(';').map { "$it; Path=/" })
-            }
+            .fold(sessionStore.cookieHeader(sourceId).orEmpty()) { current, header -> CookieHeaderCodec.merge(current, header.split(';').map { "$it; Path=/" }) }
         sessionStore.replaceCookieHeader(sourceId, merged)
         manager.flush()
     }
@@ -601,6 +555,7 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
             )
         }
         if (autoClearLogOnClose) clearLog()
+        if (::diagnosticScreenScope.isInitialized) diagnosticScreenScope.close()
         if (::webView.isInitialized) {
             webView.stopLoading()
             webView.loadUrl("about:blank")

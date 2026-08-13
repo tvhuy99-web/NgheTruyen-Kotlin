@@ -64,23 +64,12 @@ class SourceLoginActivity : ComponentActivity() {
         diagnostics = app.container.sourceDiagnostics
         diagnosticScreenScope = DiagnosticTransientScreenScope.enter(
             diagnostics = diagnostics,
-            screenKey = "source-login:${sourceId.take(120)}",
+            screenKey = diagnosticScreenKey(),
         )
-        diagnosticTraceId = "login:$sourceId:${UUID.randomUUID()}"
-        diagnosticStartedAt = System.currentTimeMillis()
+        beginDiagnosticSession(resumed = false)
         desktopCompat = browserPrefs.getBoolean(KEY_CHROME_COMPAT, false)
         logLevel = browserPrefs.getInt(KEY_LOG_LEVEL, 1).coerceIn(0, 2)
         autoClearLogOnClose = browserPrefs.getBoolean(KEY_AUTO_CLEAR_LOG_ON_CLOSE, true)
-        diagnostic(
-            name = "SOURCE_LOGIN_STARTED",
-            severity = DiagnosticSeverity.INFO,
-            attributes = mapOf(
-                "url" to diagnosticUrl(loginUrl),
-                "allowedHosts" to allowedHosts.size.toString(),
-                "localLogLevel" to logLevelLabel(logLevel),
-                "autoClearLocalLog" to autoClearLogOnClose.toString(),
-            ),
-        )
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -260,6 +249,21 @@ class SourceLoginActivity : ComponentActivity() {
         webView.loadUrl(loginUrl)
     }
 
+    private fun beginDiagnosticSession(resumed: Boolean) {
+        diagnosticTraceId = "login:$sourceId:${UUID.randomUUID()}"
+        diagnosticStartedAt = System.currentTimeMillis()
+        requestCount = 0
+        diagnostic(
+            name = "SOURCE_LOGIN_STARTED",
+            severity = DiagnosticSeverity.INFO,
+            attributes = mapOf(
+                "url" to diagnosticUrl(loginUrl),
+                "allowedHosts" to allowedHosts.size.toString(),
+                "resumed" to resumed.toString(),
+            ),
+        )
+    }
+
     private fun showBrowserOptions() {
         AlertDialog.Builder(this)
             .setTitle("TÙY CHỌN TRÌNH DUYỆT")
@@ -381,8 +385,22 @@ class SourceLoginActivity : ComponentActivity() {
         WebSettings.getDefaultUserAgent(this)
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (!::webView.isInitialized || !::diagnostics.isInitialized) return
+        val last = diagnostics.recorder.snapshot().lastOrNull()
+        val restoredFreshScreen = diagnostics.mode == SourceDiagnosticRuntime.MODE_SCREEN &&
+            last?.name == "DIAGNOSTIC_SCREEN_STARTED" &&
+            last.attributes["screen"] == diagnosticScreenKey()
+        if (restoredFreshScreen) beginDiagnosticSession(resumed = true)
+        webView.onResume()
+    }
+
     override fun onPause() {
-        captureSession()
+        if (::webView.isInitialized) {
+            webView.onPause()
+            captureSession()
+        }
         super.onPause()
     }
 
@@ -445,6 +463,8 @@ class SourceLoginActivity : ComponentActivity() {
     private fun clearSessionCookies() {
         clearStoredSession(sourceId, allowedHosts, sessionStore)
     }
+
+    private fun diagnosticScreenKey(): String = "source-login:${sourceId.take(120)}"
 
     private fun diagnostic(
         name: String,

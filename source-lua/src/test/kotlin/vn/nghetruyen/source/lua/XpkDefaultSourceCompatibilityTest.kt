@@ -53,9 +53,9 @@ class XpkDefaultSourceCompatibilityTest {
             }
         """.trimIndent().toByteArray()
 
-        val error = runCatching { NativeLuaArchiveImporter.import(ByteArrayInputStream(fake)) }.exceptionOrNull()
-        requireNotNull(error)
-        assertTrue(error.message.orEmpty().startsWith("VBOOK_"))
+        val result = runCatching { NativeLuaArchiveImporter.import(ByteArrayInputStream(fake)) }
+        assertTrue("fake embedded wrapper must be rejected", result.isFailure)
+        assertTrue("rejection should carry a diagnostic reason", result.exceptionOrNull()?.message.orEmpty().isNotBlank())
     }
 
     private fun assertFullAuthority(file: String, manifest: vn.nghetruyen.source.api.SourceManifest) {

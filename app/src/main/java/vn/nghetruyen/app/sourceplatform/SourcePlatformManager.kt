@@ -485,7 +485,7 @@ class SourcePlatformManager(
             is SourcePlatformResult.Success -> result.value
             is SourcePlatformResult.Failure -> error("${result.error.code}: ${result.error.message}")
         }
-        preparePack(pack)
+        return preparePack(pack)
     }
 
     /**
@@ -536,7 +536,7 @@ class SourcePlatformManager(
             "VBOOK_RAW_PACKAGE_PRESERVED",
             "VBOOK_RUNTIME:${preview.validation.profile?.id ?: "unknown"}",
         )
-        SourceInstallPreview(
+        return SourceInstallPreview(
             sourceId = hostManifest.id,
             name = preview.name,
             version = version,
@@ -554,7 +554,7 @@ class SourcePlatformManager(
     private fun prepareNativeLuaImportInternal(input: InputStream): SourceInstallPreview {
         val (pack, warnings) = NativeLuaArchiveImporter.import(input)
         pendingWarnings = warnings
-        preparePack(pack)
+        return preparePack(pack)
     }
 
     fun pendingInstallWarnings(): List<String> = pendingWarnings

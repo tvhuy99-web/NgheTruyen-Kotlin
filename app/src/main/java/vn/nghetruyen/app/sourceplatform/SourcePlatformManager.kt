@@ -171,6 +171,10 @@ class SourcePlatformManager(
     private val repositoryHttpClient = SourceRepositoryHttpClient()
     private val repositories = linkedMapOf<String, CachedRepository>()
     private val builtinSourceIds = linkedSetOf<String>()
+    private val builtinRemovalPreferences = appContext.getSharedPreferences(
+        BUILTIN_REMOVAL_PREFERENCES,
+        Context.MODE_PRIVATE,
+    )
     private var pendingPack: VerifiedSourcePack? = null
     private var pendingVBook: PendingVBookImport? = null
     private var pendingWarnings: List<String> = emptyList()
@@ -204,7 +208,7 @@ class SourcePlatformManager(
                 else -> "DIRECT_HTML_FALLBACK"
             },
             commentFixtureCount = active?.manifest?.fixtures?.count { it.action == vn.nghetruyen.source.api.SourceActionName.COMMENTS } ?: 0,
-            removable = installed.sourceId !in builtinSourceIds,
+            removable = true,
             ecosystem = if (active?.manifest?.runtime?.mode == SourceRuntimeMode.VBOOK_JS_COMPAT) "VBOOK" else "NATIVE",
             contentType = active?.manifest?.contentType?.name.orEmpty(),
         )
@@ -430,8 +434,8 @@ class SourcePlatformManager(
     }
 
     fun removeInstalledPack(sourceId: String): Result<Unit> = runCatching {
-        require(sourceId !in builtinSourceIds) { "Không thể xóa tiện ích nguồn tích hợp." }
         require(store.remove(sourceId)) { "Không tìm thấy tiện ích để xóa." }
+        if (sourceId in builtinSourceIds) rememberBuiltinRemoved(sourceId)
     }
 
     fun exportInstalledPack(sourceId: String, output: OutputStream): Result<Unit> = runCatching {
@@ -489,6 +493,20 @@ class SourcePlatformManager(
         diagnostics.clear()
     }
 
+    private fun removedBuiltinSourceIds(): Set<String> =
+        builtinRemovalPreferences.getStringSet(REMOVED_BUILTIN_SOURCE_IDS, emptySet<String>())
+            ?.toSet()
+            .orEmpty()
+
+    private fun isBuiltinRemoved(sourceId: String): Boolean = sourceId in removedBuiltinSourceIds()
+
+    private fun rememberBuiltinRemoved(sourceId: String) {
+        val removed = removedBuiltinSourceIds().toMutableSet()
+        if (removed.add(sourceId)) {
+            builtinRemovalPreferences.edit().putStringSet(REMOVED_BUILTIN_SOURCE_IDS, removed).apply()
+        }
+    }
+
     private fun preparePack(pack: VerifiedSourcePack): SourceInstallPreview {
         validateCompatibility(pack)
         val selfTest = selfTest(pack)
@@ -519,6 +537,7 @@ class SourcePlatformManager(
                     is SourcePlatformResult.Failure -> error("${result.error.code}: ${result.error.message}")
                 }
                 builtinSourceIds += pack.manifest.id
+                if (isBuiltinRemoved(pack.manifest.id)) return@use
                 validateCompatibility(pack)
                 selfTest(pack)
                 val existing = store.load(pack.manifest.id)
@@ -566,6 +585,7 @@ class SourcePlatformManager(
                 }
                 .getOrNull()
             legacyPack?.let { builtinSourceIds += it.manifest.id }
+            val legacyWasRemoved = legacyPack?.manifest?.id?.let(::isBuiltinRemoved) == true
             val legacyInstalled = legacyPack?.let { store.load(it.manifest.id) }
             val legacyIsExactBundledCopy = legacyPack != null &&
                 legacyInstalled?.active?.packageSha256 == legacyPack.packageSha256
@@ -586,6 +606,10 @@ class SourcePlatformManager(
                 "BUILTIN_LUA_RUNTIME_MISMATCH:${spec.gzipAsset}:${imported.manifest.runtime.mode}"
             }
             builtinSourceIds += imported.manifest.id
+            if (legacyWasRemoved || isBuiltinRemoved(imported.manifest.id)) {
+                if (legacyWasRemoved) rememberBuiltinRemoved(imported.manifest.id)
+                return@runCatching
+            }
             validateCompatibility(imported)
             selfTest(imported)
 
@@ -882,6 +906,8 @@ class SourcePlatformManager(
         private const val MANUAL_VBOOK_REPOSITORY_ID = "manual.vbook.local"
         private const val DEMO_BUILTIN_SOURCEPACK_ASSET = "demo.ntsource"
         private const val MAX_BUILTIN_LUA_BYTES = 1024 * 1024
+        private const val BUILTIN_REMOVAL_PREFERENCES = "source_platform_builtin_removals"
+        private const val REMOVED_BUILTIN_SOURCE_IDS = "removed_source_ids"
         private val REPOSITORY_ID = Regex("^[a-z][a-z0-9]*(\\.[a-z0-9][a-z0-9-]*){2,}$")
         private val BUILTIN_LUA_SOURCES = listOf(
             BuiltinLuaSourceSpec(

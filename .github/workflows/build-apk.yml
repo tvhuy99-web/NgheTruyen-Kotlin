@@ -58,6 +58,42 @@ jobs:
       - name: Build debug APK
         run: ./gradlew --no-daemon --stacktrace :app:assembleDebug
 
+      - name: Verify exact default Lua assets in APK
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import gzip
+          import hashlib
+          import zipfile
+
+          apk = "app/build/outputs/apk/debug/app-debug.apk"
+          expected = {
+              "assets/source-lua/nguon_sangtacviet_native.lua.gz": "71999190a601cc334d05e87053af900350c8afb7c52a7017fada61f2de482b74",
+              "assets/source-lua/nguon_truyencom_native.lua.gz": "1052cddf2059b973f04a7a2e02d0ddea06d0f4e0ef49210a359fc4651102d58f",
+              "assets/source-lua/nguon_truyencv_native.lua.gz": "5bcb34b1c6e87ab0c63f430e34b3b14e41eb2903cff99f1a8310e650b1a83d8b",
+              "assets/source-lua/nguon_truyenfull_native.lua.gz": "77d4a70859592c391763ed883048d219bb973931aef4131c0ae4e5a10b8d3c68",
+              "assets/source-lua/nguon_truyenyy_native.lua.gz": "2f9b40b0c7fa2274ef57e1994b314472b937be5dd13bb9287bdbfd7557f7bffc",
+              "assets/source-lua/nguon_wattpad_vbook.lua.gz": "bd678f1a7245dbf979d24f0423920bb3c4f00654ae89b4beca03164ec4d79b0b",
+              "assets/source-lua/nguon_wikidich_native.lua.gz": "d49c62c4cd14f2111e43b53491e8d5623a7f2eaf6821233bc1aa7d0950501ecc",
+          }
+
+          with zipfile.ZipFile(apk) as archive:
+              names = set(archive.namelist())
+              for path, expected_sha in expected.items():
+                  if path not in names:
+                      raise SystemExit(f"Missing runtime Lua asset: {path}")
+                  try:
+                      raw = gzip.decompress(archive.read(path))
+                  except Exception as error:
+                      raise SystemExit(f"Runtime Lua asset is not gzip: {path}: {error}") from error
+                  actual_sha = hashlib.sha256(raw).hexdigest()
+                  if actual_sha != expected_sha:
+                      raise SystemExit(
+                          f"Runtime Lua SHA mismatch: {path}: expected {expected_sha}, got {actual_sha}"
+                      )
+                  print(f"OK {path} {actual_sha}")
+          PY
+
       - name: Package APK and checksum
         shell: bash
         run: |

@@ -42,7 +42,7 @@ class ExactBuiltinLuaAssetsTest {
     )
 
     private val cases = listOf(
-        Case("nguon_sangtacviet_native.lua.gz", "vn.nghetruyen.native.sangtacviet-native-instant-fast-v50", SourceRuntimeMode.NATIVE_LUA_COMPAT, "71999190a601cc334d05e87053af900350c8afb7c52a7017fada61f2de482b74"),
+        Case("nguon_sangtacviet_native.lua.gz", "vn.nghetruyen.native.sangtacviet-native-instant-fast-v50", SourceRuntimeMode.NATIVE_LUA_COMPAT, "f51d7eeed874eb93220fda0750670d9bf72dcdcd6648440f43f41315d83b0577"),
         Case("nguon_truyencom_native.lua.gz", "vn.nghetruyen.native.truyencom-default-native", SourceRuntimeMode.NATIVE_LUA_COMPAT, "1052cddf2059b973f04a7a2e02d0ddea06d0f4e0ef49210a359fc4651102d58f"),
         Case("nguon_truyencv_native.lua.gz", "vn.nghetruyen.native.truyencv-io-default-native", SourceRuntimeMode.NATIVE_LUA_COMPAT, "5bcb34b1c6e87ab0c63f430e34b3b14e41eb2903cff99f1a8310e650b1a83d8b"),
         Case("nguon_truyenfull_native.lua.gz", "vn.nghetruyen.native.truyenfull-native", SourceRuntimeMode.NATIVE_LUA_COMPAT, "77d4a70859592c391763ed883048d219bb973931aef4131c0ae4e5a10b8d3c68"),

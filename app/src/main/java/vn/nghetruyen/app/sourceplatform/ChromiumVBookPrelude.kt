@@ -45,6 +45,7 @@ internal object ChromiumVBookPrelude {
               var __loaded={};
               function __source(raw){ return String(__rpc('resource_read',{path:__path(raw)})||''); }
               function load(raw){
+                if(String(raw||'').toLowerCase()==='crypto.js') return true;
                 var path=__path(raw);
                 if(__loaded[path]) return true;
                 __loaded[path]=true;

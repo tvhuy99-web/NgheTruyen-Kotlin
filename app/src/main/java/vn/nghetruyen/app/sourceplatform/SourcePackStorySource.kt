@@ -28,6 +28,7 @@ import vn.nghetruyen.source.packagekit.VerifiedSourcePack
 import vn.nghetruyen.source.runtime.MapSourceResourceProvider
 import java.net.URI
 import java.util.Base64
+import java.util.concurrent.ConcurrentHashMap
 
 class SourcePackStorySource(
     private val pack: VerifiedSourcePack,
@@ -42,6 +43,7 @@ class SourcePackStorySource(
     private val categories = readCategories()
     private val fullParityCertified = isFullParityCertified()
     private val bridgeActive = builtInDelegate != null && metadata.delegateBuiltInId == sourceId
+    private val listContinuations = ConcurrentHashMap<ListContinuationKey, ConcurrentHashMap<Int, String>>()
 
     override val builtInDelegateId: String? get() = metadata.delegateBuiltInId
 
@@ -117,11 +119,15 @@ class SourcePackStorySource(
             SourceActionName.HOME,
             JsonValue.Obj(linkedMapOf(
                 "page" to JsonValue.Num(page.toDouble(), page.toString()),
+                "pageToken" to JsonValue.Str(pageToken(SourceActionName.HOME, "", page)),
                 "category" to JsonValue.Str(categories.firstOrNull().orEmpty()),
                 "input" to JsonValue.Str(""),
             )),
         )
-        if (result != null) return@guarded AppResult.Success(storyItems(result))
+        if (result != null) {
+            rememberPageToken(SourceActionName.HOME, "", page, result)
+            return@guarded AppResult.Success(storyItems(result))
+        }
 
         val fallback = categories.firstOrNull()?.let { category(it, page) } ?: search("", page)
         when (fallback) {
@@ -192,8 +198,10 @@ class SourcePackStorySource(
             JsonValue.Obj(linkedMapOf(
                 "query" to JsonValue.Str(query),
                 "page" to JsonValue.Num(page.toDouble(), page.toString()),
+                "pageToken" to JsonValue.Str(pageToken(SourceActionName.SEARCH, query, page)),
             )),
         ) ?: return@guarded AppResult.Failure("SOURCE_ACTION_MISSING", "Gói nguồn không hỗ trợ tìm kiếm.")
+        rememberPageToken(SourceActionName.SEARCH, query, page, result)
         AppResult.Success(storyItems(result))
     }
     }
@@ -206,8 +214,10 @@ class SourcePackStorySource(
             JsonValue.Obj(linkedMapOf(
                 "category" to JsonValue.Str(category),
                 "page" to JsonValue.Num(page.toDouble(), page.toString()),
+                "pageToken" to JsonValue.Str(pageToken(SourceActionName.GENRE, category, page)),
             )),
         ) ?: return@guarded search("", page)
+        rememberPageToken(SourceActionName.GENRE, category, page, result)
         AppResult.Success(storyItems(result))
     }
     }
@@ -389,12 +399,14 @@ class SourcePackStorySource(
     }
 
     private fun readCategories(): List<String> {
-        val infoCategories = pack.entries["data/source-info.json"]?.let { raw ->
-            runCatching {
-                val root = vn.nghetruyen.source.api.JsonCodec.parse(raw.toString(Charsets.UTF_8)) as? JsonValue.Obj
-                root?.stringArray("categories").orEmpty()
-            }.getOrDefault(emptyList())
-        }.orEmpty()
+        val infoCategories = sequenceOf("data/source-info.json", "data/native-source-info.json")
+            .mapNotNull(pack.entries::get)
+            .firstNotNullOfOrNull { raw ->
+                runCatching {
+                    val root = vn.nghetruyen.source.api.JsonCodec.parse(raw.toString(Charsets.UTF_8)) as? JsonValue.Obj
+                    root?.stringArray("categories")?.takeIf { it.isNotEmpty() }
+                }.getOrNull()
+            }.orEmpty()
         if (infoCategories.isNotEmpty()) return infoCategories.distinct()
         val raw = pack.entries["data/catalog.json"] ?: return emptyList()
         return runCatching {
@@ -404,6 +416,20 @@ class SourcePackStorySource(
                 .distinct()
                 .sorted()
         }.getOrDefault(emptyList())
+    }
+
+    private fun pageToken(action: SourceActionName, input: String, page: Int): String {
+        if (pack.manifest.runtime.mode != SourceRuntimeMode.NATIVE_LUA_COMPAT || page <= 1) return ""
+        return listContinuations[ListContinuationKey(action, input)]?.get(page).orEmpty()
+    }
+
+    private fun rememberPageToken(action: SourceActionName, input: String, page: Int, value: JsonValue) {
+        if (pack.manifest.runtime.mode != SourceRuntimeMode.NATIVE_LUA_COMPAT) return
+        val next = (value as? JsonValue.Obj)?.string("nextPageUrl")
+            ?.trim()?.takeIf { it.isNotBlank() && !it.equals("NO_NEXT", true) }
+        val pages = listContinuations.computeIfAbsent(ListContinuationKey(action, input)) { ConcurrentHashMap() }
+        if (page <= 1) pages.keys.removeIf { it > 1 }
+        if (next == null) pages.remove(page + 1) else pages[page + 1] = next
     }
 
     private fun storySummary(value: JsonValue): StorySummary? {
@@ -568,6 +594,8 @@ class SourcePackStorySource(
     )
 
     private data class PageContinuation(val storyUrl: String, val token: String)
+
+    private data class ListContinuationKey(val action: SourceActionName, val input: String)
 
     companion object {
         private const val SOURCE_PACK_COMPATIBILITY_PRIORITY = 50

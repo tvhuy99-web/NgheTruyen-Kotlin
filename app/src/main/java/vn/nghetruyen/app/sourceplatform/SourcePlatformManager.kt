@@ -949,7 +949,7 @@ class SourcePlatformManager(
                 legacySourcePackAsset = "sangtacviet.ntsource",
                 gzipAsset = "nguon_sangtacviet_native.lua.gz",
                 sourceId = "vn.nghetruyen.native.sangtacviet-native-instant-fast-v50",
-                sourceSha256 = "71999190a601cc334d05e87053af900350c8afb7c52a7017fada61f2de482b74",
+                sourceSha256 = "f51d7eeed874eb93220fda0750670d9bf72dcdcd6648440f43f41315d83b0577",
                 runtimeMode = SourceRuntimeMode.NATIVE_LUA_COMPAT,
             ),
             BuiltinLuaSourceSpec(

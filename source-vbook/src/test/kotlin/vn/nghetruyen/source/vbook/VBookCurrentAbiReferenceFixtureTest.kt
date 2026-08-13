@@ -6,8 +6,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import vn.nghetruyen.source.api.JsonValue
 import vn.nghetruyen.source.api.SemanticVersion
-import vn.nghetruyen.source.api.SourceCapabilities
+import vn.nghetruyen.source.api.SourceActionName
+import vn.nghetruyen.source.api.SourceActionRequest
+import vn.nghetruyen.source.api.SourceActionSpec
 import vn.nghetruyen.source.api.SourceCapabilityBrokers
+import vn.nghetruyen.source.api.SourceCapabilities
 import vn.nghetruyen.source.api.SourceContentType
 import vn.nghetruyen.source.api.SourceCryptoBroker
 import vn.nghetruyen.source.api.SourceCryptoOperation
@@ -17,6 +20,7 @@ import vn.nghetruyen.source.api.SourceRuntimeMode
 import vn.nghetruyen.source.api.SourceRuntimePolicy
 import vn.nghetruyen.source.api.SourceStorageBroker
 import vn.nghetruyen.source.api.SourceStorageRequest
+import vn.nghetruyen.source.runtime.MapSourceResourceProvider
 import vn.nghetruyen.source.runtime.SourceResourceProvider
 import java.security.MessageDigest
 
@@ -81,6 +85,60 @@ class VBookCurrentAbiReferenceFixtureTest {
         assertEquals("a", row.string("firstAttr"))
         assertFalse(row.string("cleaned").orEmpty().contains("script", ignoreCase = true))
         assertEquals(32, row.string("md5").orEmpty().length)
+    }
+
+    @Test
+    fun compatibilityValidationTreatsCryptoJsAsBundledHostLibrary() {
+        val report = VBookJsRuntime().validateScripts(
+            manifest().copy(actions = mapOf(SourceActionName.SEARCH to SourceActionSpec("src/search.js"))),
+            resources,
+        )
+
+        assertTrue(report.actions.single().detail, report.allCompatible)
+    }
+
+    @Test
+    fun nativeLuaUsesBlankFirstPageAndOpaqueContinuationInsteadOfVBookOffset() {
+        val script = """
+            function execute(query, page) {
+                return Response.success([{
+                    name: page === "" ? "FIRST_PAGE" : page,
+                    url: "https://example.invalid/story"
+                }], "https://example.invalid/next?cursor=a%2Bb");
+            }
+        """.trimIndent()
+        val nativeManifest = manifest().copy(
+            runtime = SourceRuntimePolicy(mode = SourceRuntimeMode.NATIVE_LUA_COMPAT),
+            actions = mapOf(SourceActionName.SEARCH to SourceActionSpec("src/search.js")),
+        )
+        val nativeResources = MapSourceResourceProvider(mapOf("src/search.js" to script.toByteArray()))
+
+        fun execute(input: String): JsonValue.Obj {
+            val result = VBookJsRuntime().execute(
+                nativeManifest,
+                nativeResources,
+                SourceActionRequest(
+                    sourceId = nativeManifest.id,
+                    action = SourceActionName.SEARCH,
+                    input = JsonValue.Obj(linkedMapOf(
+                        "query" to JsonValue.Str("fixture"),
+                        "page" to JsonValue.Num(2.0, "2"),
+                        "pageToken" to JsonValue.Str(input),
+                    )),
+                ),
+            ) as SourcePlatformResult.Success
+            return result.value.value as JsonValue.Obj
+        }
+
+        val first = execute("")
+        assertEquals("FIRST_PAGE", (first.array("items")!!.values.single() as JsonValue.Obj).string("title"))
+        assertEquals("https://example.invalid/next?cursor=a%2Bb", first.string("nextPageUrl"))
+
+        val next = execute("https://example.invalid/next?cursor=a%2Bb")
+        assertEquals(
+            "https://example.invalid/next?cursor=a%2Bb",
+            (next.array("items")!!.values.single() as JsonValue.Obj).string("title"),
+        )
     }
 
     @Test

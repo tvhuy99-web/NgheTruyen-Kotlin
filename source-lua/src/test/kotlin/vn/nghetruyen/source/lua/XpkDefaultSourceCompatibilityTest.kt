@@ -6,11 +6,15 @@ import org.junit.Test
 import vn.nghetruyen.source.api.SourceActionName
 import vn.nghetruyen.source.api.SourceFullAuthorityPolicy
 import vn.nghetruyen.source.api.SourceRuntimeMode
+import vn.nghetruyen.source.api.JsonCodec
+import vn.nghetruyen.source.api.JsonValue
+import vn.nghetruyen.source.runtime.MapSourceResourceProvider
+import vn.nghetruyen.source.vbook.VBookJsRuntime
 import java.io.ByteArrayInputStream
 import java.security.MessageDigest
 import java.util.zip.GZIPInputStream
 
-/** Exact 2026-08-03 default-source bytes from the supplied Lua/XPK, stored gzip-compressed as test resources. */
+/** Exact supplied default-source bytes, with the latest uploaded Sáng Tác Việt Lua, gzip-compressed. */
 class XpkDefaultSourceCompatibilityTest {
     @Test
     fun allSevenDefaultXpkSourcesImportWithoutRewriting() {
@@ -27,7 +31,33 @@ class XpkDefaultSourceCompatibilityTest {
             assertTrue("${case.file}: source.json", "source.json" in pack.entries)
             assertFullAuthority(case.file, pack.manifest)
             assertTrue("${case.file}: warnings", warnings.isNotEmpty())
+            if (case.runtime == SourceRuntimeMode.NATIVE_LUA_COMPAT) {
+                assertTrue("${case.file}: HOME feed", SourceActionName.HOME in pack.manifest.actions)
+                val compatibility = VBookJsRuntime().validateScripts(pack.manifest, MapSourceResourceProvider(pack.entries))
+                assertTrue(
+                    "${case.file}: ${compatibility.actions.filterNot { it.compatible }}",
+                    compatibility.allCompatible,
+                )
+            }
         }
+    }
+
+    @Test
+    fun sangTacVietKeepsLuaCategoriesAndRoutesHomeToRealFeed() {
+        val case = cases.first { it.file == "nguon_sangtacviet_native.lua" }
+        val (pack, _) = NativeLuaArchiveImporter.import(ByteArrayInputStream(exactBytes(case)))
+        val info = JsonCodec.parse(requireNotNull(pack.entries["data/native-source-info.json"]).toString(Charsets.UTF_8)) as JsonValue.Obj
+        val categories = info.array("categories")!!.values.map { (it as JsonValue.Str).value }
+        val home = requireNotNull(pack.entries["src/native_v2_home.js"]).toString(Charsets.UTF_8)
+        val genre = requireNotNull(pack.entries["src/native_v2_genre.js"]).toString(Charsets.UTF_8)
+        val toc = requireNotNull(pack.entries["src/native_v2_toc.js"]).toString(Charsets.UTF_8)
+
+        assertTrue("Mới cập nhật" in categories)
+        assertTrue("Huyền huyễn" in categories)
+        assertTrue(home.contains("NativeV2.response(\"latest\""))
+        assertTrue(genre.contains("function execute(input, page)"))
+        assertTrue(genre.contains("NativeV2.response(\"stories\""))
+        assertTrue(toc.contains("page: url || \"\""))
     }
 
     @Test
@@ -88,7 +118,7 @@ class XpkDefaultSourceCompatibilityTest {
     )
 
     private val cases = listOf(
-        Case("nguon_sangtacviet_native.lua", "vn.nghetruyen.native.sangtacviet-native-instant-fast-v50", "Sáng Tác Việt", SourceRuntimeMode.NATIVE_LUA_COMPAT, "71999190a601cc334d05e87053af900350c8afb7c52a7017fada61f2de482b74"),
+        Case("nguon_sangtacviet_native.lua", "vn.nghetruyen.native.sangtacviet-native-instant-fast-v50", "Sáng Tác Việt", SourceRuntimeMode.NATIVE_LUA_COMPAT, "f51d7eeed874eb93220fda0750670d9bf72dcdcd6648440f43f41315d83b0577"),
         Case("nguon_truyencom_native.lua", "vn.nghetruyen.native.truyencom-default-native", "Truyện Com", SourceRuntimeMode.NATIVE_LUA_COMPAT, "1052cddf2059b973f04a7a2e02d0ddea06d0f4e0ef49210a359fc4651102d58f"),
         Case("nguon_truyencv_native.lua", "vn.nghetruyen.native.truyencv-io-default-native", "TCV", SourceRuntimeMode.NATIVE_LUA_COMPAT, "5bcb34b1c6e87ab0c63f430e34b3b14e41eb2903cff99f1a8310e650b1a83d8b"),
         Case("nguon_truyenfull_native.lua", "vn.nghetruyen.native.truyenfull-native", "Truyện Full", SourceRuntimeMode.NATIVE_LUA_COMPAT, "77d4a70859592c391763ed883048d219bb973931aef4131c0ae4e5a10b8d3c68"),

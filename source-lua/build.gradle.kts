@@ -5,5 +5,6 @@ dependencies {
     implementation(project(":source-package"))
     implementation(project(":source-vbook"))
     implementation("org.luaj:luaj-jse:3.0.1")
+    testImplementation(project(":source-runtime"))
     testImplementation("junit:junit:4.13.2")
 }

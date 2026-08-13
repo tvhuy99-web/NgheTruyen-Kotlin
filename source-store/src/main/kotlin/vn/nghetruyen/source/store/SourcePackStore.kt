@@ -213,9 +213,13 @@ class SourcePackStore(
         sourcesDir.listFiles().orEmpty().filter(File::isDirectory).mapNotNull { load(it.name) }.sortedBy { it.sourceId }
     }
 
+    /**
+     * Reads the installed active artifact irrespective of whether execution is enabled.
+     * Runtime callers already filter disabled sources before dispatch. Management operations such
+     * as export, inspection and backup must still be able to read a disabled installed artifact.
+     */
     fun readActivePack(sourceId: String): VerifiedSourcePack? = synchronized(lock) {
         val installed = load(sourceId) ?: return@synchronized null
-        if (!installed.enabled) return@synchronized null
         val active = installed.active ?: return@synchronized null
         val entries = linkedMapOf<String, ByteArray>()
         active.directory.walkTopDown().filter(File::isFile).forEach { file ->
@@ -291,7 +295,6 @@ class SourcePackStore(
             installedAtEpochMs = meta.getProperty("installedAtEpochMs")?.toLongOrNull() ?: 0L,
         )
     }
-
 
     private fun payloadTreeSha256(entries: Map<String, ByteArray>): String {
         val digest = MessageDigest.getInstance("SHA-256")

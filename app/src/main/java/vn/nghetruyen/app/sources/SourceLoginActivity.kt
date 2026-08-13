@@ -416,13 +416,13 @@ class SourceLoginActivity : ComponentActivity() {
                 ),
             )
         }
-        if (::diagnosticScreenScope.isInitialized) diagnosticScreenScope.close()
         if (::webView.isInitialized) {
             runCatching { webView.stopLoading() }
             runCatching { webView.loadUrl("about:blank") }
             runCatching { webView.removeAllViews() }
             runCatching { webView.destroy() }
         }
+        if (::diagnosticScreenScope.isInitialized) diagnosticScreenScope.close()
         super.onDestroy()
     }
 

@@ -24,6 +24,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import vn.nghetruyen.app.NgheTruyenApplication
+import vn.nghetruyen.app.sourceplatform.DiagnosticTransientScreenScope
 import vn.nghetruyen.app.sourceplatform.SourceDiagnosticRuntime
 import vn.nghetruyen.source.diagnostics.DiagnosticCategory
 import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
@@ -38,6 +39,7 @@ class SourceLoginActivity : ComponentActivity() {
     private lateinit var status: TextView
     private lateinit var addressField: EditText
     private lateinit var diagnostics: SourceDiagnosticRuntime
+    private lateinit var diagnosticScreenScope: DiagnosticTransientScreenScope
     private lateinit var diagnosticTraceId: String
     private var diagnosticStartedAt: Long = 0L
     private var requestCount: Int = 0
@@ -60,6 +62,10 @@ class SourceLoginActivity : ComponentActivity() {
         val app = application as NgheTruyenApplication
         sessionStore = app.container.sourceSessionStore
         diagnostics = app.container.sourceDiagnostics
+        diagnosticScreenScope = DiagnosticTransientScreenScope.enter(
+            diagnostics = diagnostics,
+            screenKey = "source-login:${sourceId.take(120)}",
+        )
         diagnosticTraceId = "login:$sourceId:${UUID.randomUUID()}"
         diagnosticStartedAt = System.currentTimeMillis()
         desktopCompat = browserPrefs.getBoolean(KEY_CHROME_COMPAT, false)
@@ -392,6 +398,7 @@ class SourceLoginActivity : ComponentActivity() {
                 ),
             )
         }
+        if (::diagnosticScreenScope.isInitialized) diagnosticScreenScope.close()
         if (::webView.isInitialized) {
             runCatching { webView.stopLoading() }
             runCatching { webView.loadUrl("about:blank") }

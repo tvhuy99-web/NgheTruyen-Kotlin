@@ -29,6 +29,7 @@ import vn.nghetruyen.app.sourceplatform.VBookRepositorySubscriptionStore
 import vn.nghetruyen.app.sourceplatform.VBookSourcePlatform
 import vn.nghetruyen.app.sources.SourceHealthChecker
 import vn.nghetruyen.app.sources.SourceRegistry
+import vn.nghetruyen.app.sources.withStableDefaultLuaId
 import vn.nghetruyen.app.transfer.BackupTransferManager
 import vn.nghetruyen.app.transfer.BackupHistoryStore
 import vn.nghetruyen.app.transfer.LegacyXpkBackupImporter
@@ -138,6 +139,7 @@ class AppContainer(context: Context) {
     }
 
     private fun currentExternalStorySources() = sourcePlatformManager.activeStorySources()
+        .map { source -> source.withStableDefaultLuaId() }
 
     val sourceHealthChecker: SourceHealthChecker by lazy { SourceHealthChecker(sourceRegistry) }
     val bookImporter: BookImporter by lazy { BookImporter(appContext.contentResolver) }

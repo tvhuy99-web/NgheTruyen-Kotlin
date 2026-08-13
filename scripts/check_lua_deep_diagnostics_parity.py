@@ -14,6 +14,9 @@ browser = text("app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidSource
 chromium = text("app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidChromiumVBookRuntime.kt")
 models = text("app/src/main/java/vn/nghetruyen/app/sourceplatform/SourcePlatformModels.kt")
 core = text("source-diagnostics/src/main/kotlin/vn/nghetruyen/source/diagnostics/SourceDiagnostics.kt")
+vbook_log = text("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookDiagnosticLogParser.kt")
+manager = text("app/src/main/java/vn/nghetruyen/app/sourceplatform/SourcePlatformManager.kt")
+diagnostic_browser = text("app/src/main/java/vn/nghetruyen/app/sources/SourceDiagnosticBrowserActivity.kt")
 retention_test = text("source-diagnostics/src/test/kotlin/vn/nghetruyen/source/diagnostics/DiagnosticRetentionStatsTest.kt")
 forensics = text("app/src/main/java/vn/nghetruyen/app/sourceplatform/BrowserForensics.kt")
 
@@ -42,6 +45,42 @@ lua_codes = (
 )
 
 checks = {
+    "explicit operation contract replaces suffix guessing for new events": all(token in core for token in (
+        "DiagnosticOperationContract",
+        "operationId",
+        "operationKind",
+        "operationFlow",
+        "operationState",
+        "deadlineEpochMs",
+    )) and "DiagnosticOperationContract.state(event)" in deep,
+    "Native Lua log arguments stay structured": all(token in vbook_log for token in (
+        '"NATIVE_V2_$type"',
+        '"requestId"',
+        '"transport"',
+        '"method"',
+        '"status"',
+        '"warningStage"',
+        "DiagnosticOperationState.STARTED",
+        "DiagnosticOperationState.COMPLETED",
+    )),
+    "install failures persist with root-cause codes": all(token in (runtime + manager) for token in (
+        "CriticalDiagnosticStore",
+        "MAX_EVENTS = 100",
+        "persistent_install_failures.json",
+        "rootCauseCode",
+        "causeChain",
+        "runExtensionOperation",
+    )),
+    "diagnostic browser uses extension browser authority": all(token in diagnostic_browser for token in (
+        "ExtensionWebViewAuthority.apply",
+        "recordBrowserEnvironment",
+        "acceptThirdPartyCookies",
+        "databaseEnabled",
+        "mixedContentMode",
+        "onCreateWindow",
+        "POPUP_NAVIGATION",
+        "POPUP_BLOCKED",
+    )),
     "exact Lua error recipes retained": (
         "exactLuaCause" in models
         and "exactLuaSuggestion" in models

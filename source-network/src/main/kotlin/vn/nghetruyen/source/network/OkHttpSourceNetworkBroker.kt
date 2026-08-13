@@ -20,6 +20,8 @@ import vn.nghetruyen.source.api.SourcePlatformResult
 import vn.nghetruyen.source.api.SourceRedirectHop
 import vn.nghetruyen.source.diagnostics.DiagnosticCategory
 import vn.nghetruyen.source.diagnostics.DiagnosticEvent
+import vn.nghetruyen.source.diagnostics.DiagnosticOperationContract
+import vn.nghetruyen.source.diagnostics.DiagnosticOperationState
 import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 import vn.nghetruyen.source.diagnostics.DiagnosticSink
 import java.io.ByteArrayOutputStream
@@ -67,6 +69,8 @@ class OkHttpSourceNetworkBroker(
                 "origin" to SourceOriginPolicy.originOf(SourceOriginPolicy.requireInitialUrl(manifest, request.url)),
                 "requestBytes" to request.body.size.toString(),
                 "headerNames" to request.headers.keys.sorted().joinToString(","),
+                "timeoutMs" to request.timeoutMs.toString(),
+                "deadlineEpochMs" to (started + request.timeoutMs).toString(),
             )))
             require(request.timeoutMs in 100L..120_000L) { "SOURCE_NETWORK_TIMEOUT_INVALID" }
             val deadlineMs = started + request.timeoutMs
@@ -203,7 +207,27 @@ class OkHttpSourceNetworkBroker(
         severity: DiagnosticSeverity = DiagnosticSeverity.INFO,
         durationMs: Long? = null,
         attributes: Map<String, String> = emptyMap(),
-    ) = DiagnosticEvent(
+    ): DiagnosticEvent {
+        val state = when (name) {
+            "REQUEST_STARTED" -> DiagnosticOperationState.STARTED
+            "REQUEST_COMPLETED" -> DiagnosticOperationState.COMPLETED
+            "REQUEST_FAILED" -> if (attributes["code"]?.contains("TIMEOUT") == true) {
+                DiagnosticOperationState.TIMEOUT
+            } else {
+                DiagnosticOperationState.FAILED
+            }
+            else -> DiagnosticOperationState.STAGE
+        }
+        val operation = DiagnosticOperationContract.attributes(
+            id = "network:${request.traceId.ifBlank { "no-trace" }}",
+            kind = request.method.uppercase(Locale.ROOT),
+            flow = "network",
+            state = state,
+            stage = name,
+            timeoutMs = attributes["timeoutMs"]?.toLongOrNull(),
+            deadlineEpochMs = attributes["deadlineEpochMs"]?.toLongOrNull(),
+        )
+        return DiagnosticEvent(
         timestampEpochMs = clockMs(),
         traceId = request.traceId,
         sourceId = manifest.id,
@@ -212,8 +236,9 @@ class OkHttpSourceNetworkBroker(
         name = name,
         severity = severity,
         durationMs = durationMs,
-        attributes = attributes,
-    )
+        attributes = operation + attributes,
+        )
+    }
 
     private fun mapError(message: String): SourceErrorCode = when {
         "PRIVATE_ADDRESS" in message || "DNS" in message -> SourceErrorCode.NETWORK_DNS_BLOCKED

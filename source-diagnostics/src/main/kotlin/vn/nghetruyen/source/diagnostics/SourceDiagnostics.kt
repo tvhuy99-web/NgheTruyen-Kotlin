@@ -13,6 +13,7 @@ import kotlin.concurrent.withLock
 enum class DiagnosticLevel { OFF, BASIC, VERBOSE }
 enum class DiagnosticSeverity { DEBUG, INFO, WARN, ERROR }
 enum class DiagnosticCategory { PACKAGE, TRUST, STORE, RUNTIME, NETWORK, BROWSER, PARSER, REPLAY, SECURITY }
+enum class DiagnosticOperationState { STARTED, STAGE, COMPLETED, FAILED, CANCELLED, TIMEOUT }
 
 data class DiagnosticEvent(
     val timestampEpochMs: Long,
@@ -27,8 +28,50 @@ data class DiagnosticEvent(
 )
 
 /**
- * Legacy classification helper kept for source compatibility. DiagnosticLevel.OFF is now a true
- * off switch: recorders and the app diagnostic runtime do not retain any event while it is active.
+ * Stable operation metadata shared by every diagnostic producer.
+ *
+ * The Lua/XPK black box updates an explicit operation object. Keeping the same contract in the APK
+ * means reports do not have to guess operation state from event-name suffixes. Old events remain
+ * supported by the report layer, but all new instrumentation should populate this contract.
+ */
+object DiagnosticOperationContract {
+    const val ID = "operationId"
+    const val KIND = "operationKind"
+    const val FLOW = "operationFlow"
+    const val STATE = "operationState"
+    const val STAGE = "stage"
+    const val TIMEOUT_MS = "timeoutMs"
+    const val DEADLINE_EPOCH_MS = "deadlineEpochMs"
+
+    fun attributes(
+        id: String,
+        kind: String,
+        flow: String,
+        state: DiagnosticOperationState,
+        stage: String,
+        timeoutMs: Long? = null,
+        deadlineEpochMs: Long? = null,
+    ): Map<String, String> = buildMap {
+        put(ID, id.take(500))
+        put(KIND, kind.take(160))
+        put(FLOW, flow.take(80))
+        put(STATE, state.name)
+        put(STAGE, stage.take(300))
+        timeoutMs?.let { put(TIMEOUT_MS, it.coerceAtLeast(0L).toString()) }
+        deadlineEpochMs?.let { put(DEADLINE_EPOCH_MS, it.coerceAtLeast(0L).toString()) }
+    }
+
+    fun state(event: DiagnosticEvent): DiagnosticOperationState? = event.attributes[STATE]
+        ?.uppercase(Locale.ROOT)
+        ?.let { runCatching { DiagnosticOperationState.valueOf(it) }.getOrNull() }
+
+    fun id(event: DiagnosticEvent): String? = event.attributes[ID]?.takeIf(String::isNotBlank)
+}
+
+/**
+ * Legacy classification helper kept for source compatibility. DiagnosticLevel.OFF remains a true
+ * off switch for the recorder; an application may separately configure a filtered always-mirror
+ * sink for bounded, user-actionable install failures.
  */
 fun DiagnosticEvent.shouldRetainWhenDiagnosticsOff(): Boolean =
     severity == DiagnosticSeverity.ERROR ||
@@ -56,6 +99,7 @@ class BoundedDiagnosticRecorder(
     private val maxEvents: Int = 2_000,
     @Volatile var level: DiagnosticLevel = DiagnosticLevel.BASIC,
     private val mirror: DiagnosticSink = DiagnosticSink.NONE,
+    private val alwaysMirror: DiagnosticSink = DiagnosticSink.NONE,
 ) : DiagnosticSink {
     private val lock = ReentrantLock()
     private val events = ArrayDeque<DiagnosticEvent>(maxEvents.coerceAtLeast(1))
@@ -66,10 +110,12 @@ class BoundedDiagnosticRecorder(
     }
 
     override fun emit(event: DiagnosticEvent) {
-        // OFF is intentionally absolute. Do not keep hidden breadcrumbs behind an "off" UI.
+        val safe = event.copy(attributes = DiagnosticRedactor.redact(event.attributes))
+        // A filtered durable sink may retain a tiny set of user-actionable failures even while the
+        // main recorder is off. The normal recorder itself still obeys the absolute OFF contract.
+        runCatching { alwaysMirror.emit(safe) }
         if (level == DiagnosticLevel.OFF) return
         if (level == DiagnosticLevel.BASIC && event.severity == DiagnosticSeverity.DEBUG) return
-        val safe = event.copy(attributes = DiagnosticRedactor.redact(event.attributes))
         lock.withLock {
             while (events.size >= maxEvents) {
                 events.removeFirst()

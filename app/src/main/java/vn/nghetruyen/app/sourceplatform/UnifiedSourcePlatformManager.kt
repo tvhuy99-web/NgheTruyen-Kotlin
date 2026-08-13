@@ -348,7 +348,7 @@ class UnifiedSourcePlatformManager(
         }
 
     fun diagnosticSummaries(limit: Int = 20): List<SourceDiagnosticUi> = diagnosticsSnapshot()
-        .takeLast(limit.coerceIn(1, 200))
+        .takeLast(limit.coerceIn(1, 2_000))
         .asReversed()
         .map { event ->
             SourceDiagnosticUi(

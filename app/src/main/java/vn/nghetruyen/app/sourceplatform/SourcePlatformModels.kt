@@ -278,6 +278,10 @@ object DiagnosticHumanFormatter {
         "INSTALL_VALIDATION_FAILED" -> "Gói tiện ích thất bại ở bước kiểm tra trước khi ghi vào vùng cài đặt."
         "INSTALL_IO_FAILED" -> "Không thể ghi, di chuyển hoặc hoàn tất file cài đặt trên bộ nhớ thiết bị."
         "INSTALL_FINAL_VALIDATION_FAILED" -> "Gói đã được ghi tạm nhưng kiểm tra cuối sau cài đặt không đạt yêu cầu."
+        "PACKAGE_EMPTY" -> "Gói SourcePack không chứa entry hợp lệ sau khi đọc định dạng lưu trữ."
+        "VBOOK_PLUGIN_JSON_MISSING" -> "Gói vBook không chứa plugin.json tại vị trí mà trình nhập có thể nhận diện."
+        "VBOOK_RESOURCE_MISSING" -> "Manifest hoặc script đang tham chiếu tới một tài nguyên không có trong gói; đường dẫn thiếu nằm trong chi tiết kỹ thuật."
+        "VBOOK_COMPATIBILITY_FAILED" -> "Một hoặc nhiều action của tiện ích không thể nạp đủ script/tài nguyên trong runtime tương thích."
         "UNKNOWN_INSTALL_ERROR" -> "Quá trình cài đặt kết thúc bằng lỗi chưa được phân loại cụ thể."
         else -> null
     }
@@ -303,6 +307,10 @@ object DiagnosticHumanFormatter {
         "INSTALL_VALIDATION_FAILED" -> "Không bỏ qua validation. Sửa gói theo lỗi chi tiết rồi cài lại từ đầu."
         "INSTALL_IO_FAILED" -> "Kiểm tra dung lượng trống và quyền truy cập bộ nhớ ứng dụng, sau đó thử cài lại."
         "INSTALL_FINAL_VALIDATION_FAILED" -> "Xóa gói lỗi, kiểm tra manifest/tài nguyên sau giải nén và cài lại từ nguồn sạch."
+        "PACKAGE_EMPTY" -> "Kiểm tra đúng tệp đã chọn, kích thước tệp và định dạng ZIP/.ntsource; gửi kèm persistent_install_failures.json nếu lỗi lặp lại."
+        "VBOOK_PLUGIN_JSON_MISSING" -> "Mở gói ZIP và xác nhận có plugin.json cùng thư mục src; không dùng riêng tệp manifest."
+        "VBOOK_RESOURCE_MISSING" -> "Đối chiếu đường dẫn được báo với nội dung ZIP. Nếu đó là thư viện host như crypto.js, kiểm tra chính sách thư viện tích hợp của runtime."
+        "VBOOK_COMPATIBILITY_FAILED" -> "Xem từng action và tài nguyên thiếu trong chi tiết kỹ thuật; sửa action đầu tiên thất bại rồi chạy lại kiểm tra tương thích."
         "UNKNOWN_INSTALL_ERROR" -> "Xuất tệp chẩn đoán để lấy stack/trace/stage cuối và dùng mã lỗi phụ trong Chi tiết kỹ thuật để phân loại."
         else -> null
     }
@@ -333,7 +341,10 @@ object DiagnosticHumanFormatter {
     }
 
     private fun compactDetail(attributes: Map<String, String>): String? {
-        val useful = listOf("stage", "action", "url", "status", "count", "result")
+        val useful = listOf(
+            "operationFlow", "operationKind", "stage", "action", "requestId", "transport",
+            "method", "status", "url", "selector", "count", "result",
+        )
             .mapNotNull { key -> attributes[key]?.takeIf(String::isNotBlank)?.let { "$key=$it" } }
         return useful.takeIf(List<String>::isNotEmpty)?.joinToString(" • ")
     }

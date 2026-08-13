@@ -91,15 +91,12 @@ def main() -> None:
     )
     require(
         "app/src/main/java/vn/nghetruyen/app/sources/SourceDiagnosticBrowserActivity.kt",
-        "safeBrowsingEnabled = true",
-        "MIXED_CONTENT_NEVER_ALLOW",
-        "allowFileAccess = false",
-        "allowContentAccess = false",
+        "ExtensionWebViewAuthority.apply",
+        "recordBrowserEnvironment",
         "shouldInterceptRequest",
         "onReceivedSslError",
-        "safeBrowsingEnabled = true",
-        "XUẤT JSON",
-        "Đã lưu phiên nguồn",
+        "XUẤT NHẬT KÝ",
+        "captureSession",
     )
     require(
         "app/src/main/java/vn/nghetruyen/app/sources/StorySource.kt",

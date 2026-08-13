@@ -32,6 +32,8 @@ import vn.nghetruyen.source.diagnostics.DiagnosticEvidence
 import vn.nghetruyen.source.diagnostics.DiagnosticEvidenceSink
 import vn.nghetruyen.source.diagnostics.DiagnosticJsonExporter
 import vn.nghetruyen.source.diagnostics.DiagnosticLevel
+import vn.nghetruyen.source.diagnostics.DiagnosticOperationContract
+import vn.nghetruyen.source.diagnostics.DiagnosticOperationState
 import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 import vn.nghetruyen.source.diagnostics.SourceTraceExplorer
 import vn.nghetruyen.source.network.OkHttpSourceNetworkBroker
@@ -110,6 +112,8 @@ class SourcePlatformManager(
     private val vBookRuntime = VBookJsRuntime(brokers, diagnostics, evidence = evidence)
     private val executor = SourcePackActionExecutor { pack, resources, request ->
         val startedAt = System.currentTimeMillis()
+        val timeoutMs = pack.manifest.actions[request.action]?.timeoutMs ?: pack.manifest.runtime.actionTimeoutMs
+        val operationId = "source-action:${request.traceId.ifBlank { "no-trace" }}:${request.action.name}"
         diagnostics.emit(
             DiagnosticEvent(
                 timestampEpochMs = startedAt,
@@ -118,7 +122,15 @@ class SourcePlatformManager(
                 sourceVersion = pack.manifest.version.toString(),
                 category = DiagnosticCategory.RUNTIME,
                 name = "SOURCE_ACTION_STARTED",
-                attributes = mapOf(
+                attributes = DiagnosticOperationContract.attributes(
+                    id = operationId,
+                    kind = request.action.name,
+                    flow = "runtime",
+                    state = DiagnosticOperationState.STARTED,
+                    stage = "SOURCE_ACTION_STARTED",
+                    timeoutMs = timeoutMs,
+                    deadlineEpochMs = startedAt + timeoutMs,
+                ) + mapOf(
                     "action" to request.action.name,
                     "runtimeMode" to pack.manifest.runtime.mode.name,
                 ),
@@ -140,7 +152,13 @@ class SourcePlatformManager(
                 name = if (failure == null) "SOURCE_ACTION_COMPLETED" else "SOURCE_ACTION_FAILED",
                 severity = if (failure == null) DiagnosticSeverity.INFO else DiagnosticSeverity.ERROR,
                 durationMs = System.currentTimeMillis() - startedAt,
-                attributes = buildMap {
+                attributes = DiagnosticOperationContract.attributes(
+                    id = operationId,
+                    kind = request.action.name,
+                    flow = "runtime",
+                    state = if (failure == null) DiagnosticOperationState.COMPLETED else DiagnosticOperationState.FAILED,
+                    stage = if (failure == null) "SOURCE_ACTION_COMPLETED" else "SOURCE_ACTION_FAILED",
+                ) + buildMap {
                     put("action", request.action.name)
                     put("runtimeMode", pack.manifest.runtime.mode.name)
                     failure?.let {
@@ -290,20 +308,20 @@ class SourcePlatformManager(
         preparePack(pack)
     }.onFailure { recordExtensionFailure("repository_prepare_install", sourceId, it) }
 
-    fun prepareInstall(input: InputStream): Result<SourceInstallPreview> = runCatching {
+    fun prepareInstall(input: InputStream): Result<SourceInstallPreview> = runExtensionOperation("sourcepack_prepare_install", null) {
         val pack = when (val result = verifier.verify(input, trustRegistry.allKeys())) {
             is SourcePlatformResult.Success -> result.value
             is SourcePlatformResult.Failure -> error("${result.error.code}: ${result.error.message}")
         }
         preparePack(pack)
-    }.onFailure { recordExtensionFailure("sourcepack_prepare_install", null, it) }
+    }
 
     /**
      * Preview a raw vBook ZIP without converting it to SourcePack. The existing UI preview model is
      * reused only as presentation; the pending install retains the exact ZIP bytes and stable vBook
      * identity, and confirmation is committed by VBookSourcePlatform.
      */
-    fun prepareVBookImport(input: InputStream): Result<SourceInstallPreview> = runCatching {
+    fun prepareVBookImport(input: InputStream): Result<SourceInstallPreview> = runExtensionOperation("vbook_prepare_import", "vbook-import") {
         val platform = vBookSourcePlatform ?: error("VBOOK_SUBSYSTEM_UNAVAILABLE")
         val bytes = readBounded(input, VBookPackageLimits().maxZipBytes)
         val importTrace = "vbook-import:${UUID.randomUUID()}"
@@ -349,13 +367,13 @@ class SourcePlatformManager(
             permissionSummary = permissionSummary(diff),
             fixtureCount = preview.validation.audit?.features?.size ?: 0,
         )
-    }.onFailure { recordExtensionFailure("vbook_prepare_import", "vbook-import", it) }
+    }
 
-    fun prepareNativeLuaImport(input: InputStream): Result<SourceInstallPreview> = runCatching {
+    fun prepareNativeLuaImport(input: InputStream): Result<SourceInstallPreview> = runExtensionOperation("native_lua_prepare_import", "native-lua-import") {
         val (pack, warnings) = NativeLuaArchiveImporter.import(input)
         pendingWarnings = warnings
         preparePack(pack)
-    }.onFailure { recordExtensionFailure("native_lua_prepare_import", "native-lua-import", it) }
+    }
 
     fun pendingInstallWarnings(): List<String> = pendingWarnings
 
@@ -472,7 +490,7 @@ class SourcePlatformManager(
     }
 
     fun diagnosticSummaries(limit: Int = 20): List<SourceDiagnosticUi> = diagnostics.snapshot()
-        .takeLast(limit.coerceIn(1, 200))
+        .takeLast(limit.coerceIn(1, 2_000))
         .asReversed()
         .map { event ->
             SourceDiagnosticUi(
@@ -857,19 +875,86 @@ class SourcePlatformManager(
         if (isEmpty()) add("Không yêu cầu thêm quyền")
     }
 
-    private fun recordExtensionFailure(stage: String, sourceId: String?, error: Throwable) {
+    private fun <T> runExtensionOperation(stage: String, sourceId: String?, block: () -> T): Result<T> {
+        val traceId = "extension-install:${UUID.randomUUID()}"
+        val operationId = "$traceId:$stage"
+        val startedAt = System.currentTimeMillis()
+        diagnostics.emit(DiagnosticEvent(
+            timestampEpochMs = startedAt,
+            traceId = traceId,
+            sourceId = sourceId?.takeIf(String::isNotBlank) ?: "source-platform",
+            category = DiagnosticCategory.PACKAGE,
+            name = "SOURCE_EXTENSION_INSTALL_STARTED",
+            attributes = DiagnosticOperationContract.attributes(
+                id = operationId,
+                kind = "EXTENSION_INSTALL",
+                flow = "package",
+                state = DiagnosticOperationState.STARTED,
+                stage = stage,
+            ) + mapOf("installStage" to stage),
+        ))
+        return runCatching(block).onSuccess {
+            diagnostics.emit(DiagnosticEvent(
+                timestampEpochMs = System.currentTimeMillis(),
+                traceId = traceId,
+                sourceId = sourceId?.takeIf(String::isNotBlank) ?: "source-platform",
+                category = DiagnosticCategory.PACKAGE,
+                name = "SOURCE_EXTENSION_INSTALL_COMPLETED",
+                durationMs = System.currentTimeMillis() - startedAt,
+                attributes = DiagnosticOperationContract.attributes(
+                    id = operationId,
+                    kind = "EXTENSION_INSTALL",
+                    flow = "package",
+                    state = DiagnosticOperationState.COMPLETED,
+                    stage = stage,
+                ) + mapOf("installStage" to stage),
+            ))
+        }.onFailure { recordExtensionFailure(stage, sourceId, it, traceId, operationId, startedAt) }
+    }
+
+    private fun recordExtensionFailure(
+        stage: String,
+        sourceId: String?,
+        error: Throwable,
+        traceId: String = "extension-install:${UUID.randomUUID()}",
+        operationId: String = "$traceId:$stage",
+        startedAt: Long? = null,
+    ) {
+        val message = error.message ?: error.javaClass.simpleName
+        // Action labels such as GENRE/SEARCH/DETAIL are context, not error codes. Extension error
+        // codes consistently contain an underscore, so keep the causal chain free of those labels.
+        val codes = EXTENSION_ERROR_CODE.findAll(message)
+            .map(MatchResult::value)
+            .filter { '_' in it }
+            .distinct()
+            .take(20)
+            .toList()
         diagnostics.emit(
             DiagnosticEvent(
                 timestampEpochMs = System.currentTimeMillis(),
-                traceId = "extension-install:${UUID.randomUUID()}",
+                traceId = traceId,
                 sourceId = sourceId?.takeIf(String::isNotBlank) ?: "source-platform",
                 category = DiagnosticCategory.PACKAGE,
                 name = "SOURCE_EXTENSION_INSTALL_FAILED",
                 severity = DiagnosticSeverity.ERROR,
-                attributes = mapOf(
+                durationMs = startedAt?.let { System.currentTimeMillis() - it },
+                attributes = DiagnosticOperationContract.attributes(
+                    id = operationId,
+                    kind = "EXTENSION_INSTALL",
+                    flow = "package",
+                    state = DiagnosticOperationState.FAILED,
+                    stage = stage,
+                ) + mapOf(
+                    "code" to codes.lastOrNull().orEmpty().ifBlank { "UNKNOWN_INSTALL_ERROR" },
+                    "outerCode" to codes.firstOrNull().orEmpty().ifBlank { "UNKNOWN_INSTALL_ERROR" },
+                    "rootCauseCode" to codes.lastOrNull().orEmpty().ifBlank { "UNKNOWN_INSTALL_ERROR" },
+                    "errorCodes" to codes.joinToString(","),
                     "stage" to stage,
-                    "message" to (error.message ?: error.javaClass.simpleName).take(1_000),
+                    "message" to message.take(4_000),
                     "errorType" to error.javaClass.simpleName,
+                    "causeChain" to generateSequence(error) { it.cause }.take(8).joinToString(" -> ") {
+                        "${it.javaClass.simpleName}:${it.message.orEmpty()}"
+                    }.take(8_000),
                     "pendingWarnings" to pendingWarnings.take(20).joinToString(" | ").take(2_000),
                 ),
             ),
@@ -909,6 +994,7 @@ class SourcePlatformManager(
         private const val BUILTIN_REMOVAL_PREFERENCES = "source_platform_builtin_removals"
         private const val REMOVED_BUILTIN_SOURCE_IDS = "removed_source_ids"
         private val REPOSITORY_ID = Regex("^[a-z][a-z0-9]*(\\.[a-z0-9][a-z0-9-]*){2,}$")
+        private val EXTENSION_ERROR_CODE = Regex("[A-Z][A-Z0-9_]{2,}")
         private val BUILTIN_LUA_SOURCES = listOf(
             BuiltinLuaSourceSpec(
                 legacySourcePackAsset = "truyenfull.ntsource",

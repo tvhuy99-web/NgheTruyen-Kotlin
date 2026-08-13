@@ -5,6 +5,8 @@ import org.json.JSONObject
 import vn.nghetruyen.source.diagnostics.DiagnosticCategory
 import vn.nghetruyen.source.diagnostics.DiagnosticEvidenceStats
 import vn.nghetruyen.source.diagnostics.DiagnosticEvent
+import vn.nghetruyen.source.diagnostics.DiagnosticOperationContract
+import vn.nghetruyen.source.diagnostics.DiagnosticOperationState
 import vn.nghetruyen.source.diagnostics.DiagnosticRecorderStats
 import vn.nghetruyen.source.diagnostics.DiagnosticRedactor
 import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
@@ -82,7 +84,7 @@ object DiagnosticDeepBlackBox {
                     traceId = event.traceId,
                     sourceId = event.sourceId,
                     flow = flow,
-                    kind = first(attrs, "operation", "action", "method", "kind") ?: event.name,
+                    kind = first(attrs, DiagnosticOperationContract.KIND, "operation", "action", "method", "kind") ?: event.name,
                     startedAt = event.timestampEpochMs,
                     lastAt = event.timestampEpochMs,
                     lastEvent = event.name,
@@ -95,7 +97,7 @@ object DiagnosticDeepBlackBox {
             current.eventCount += 1
             current.lastAt = event.timestampEpochMs
             current.lastEvent = event.name
-            current.kind = first(attrs, "operation", "action", "kind") ?: current.kind
+            current.kind = first(attrs, DiagnosticOperationContract.KIND, "operation", "action", "kind") ?: current.kind
             current.stage = first(attrs, "stage", "phase", "step") ?: event.name
             detail(event).takeIf(String::isNotBlank)?.let { current.detail = it }
             first(attrs, "requestId", "request_id", "operationId", "operation_id")?.let { current.requestId = it }
@@ -105,8 +107,22 @@ object DiagnosticDeepBlackBox {
             long(attrs, "remainingMs", "deadlineRemainingMs", "pollRemainingMs")?.let { current.eventRemainingMs = it }
             long(attrs, "polls", "pollCount", "poll_count")?.let { current.pollCount = it }
             long(attrs, "elapsedMs", "pollElapsedMs", "poll_elapsed_ms")?.let { current.pollElapsedMs = it }
-            if (isStart(event.name)) current.hadStart = true
-            if (isTerminal(event.name)) current.terminal = true
+            when (DiagnosticOperationContract.state(event)) {
+                DiagnosticOperationState.STARTED -> {
+                    current.hadStart = true
+                    current.terminal = false
+                    current.startedAt = event.timestampEpochMs
+                }
+                DiagnosticOperationState.COMPLETED,
+                DiagnosticOperationState.FAILED,
+                DiagnosticOperationState.CANCELLED,
+                DiagnosticOperationState.TIMEOUT -> current.terminal = true
+                DiagnosticOperationState.STAGE -> Unit
+                null -> {
+                    if (isStart(event.name)) current.hadStart = true
+                    if (isTerminal(event.name)) current.terminal = true
+                }
+            }
             if (event.severity == DiagnosticSeverity.ERROR) current.errorCount += 1
             if (event.severity == DiagnosticSeverity.WARN) current.warningCount += 1
         }
@@ -115,7 +131,7 @@ object DiagnosticDeepBlackBox {
                 state.deadlineEpochMs = state.startedAt + state.timeoutMs!!
             }
             if (!state.terminal && state.deadlineEpochMs != null) {
-                state.eventRemainingMs = (state.deadlineEpochMs!! - nowMs).coerceAtLeast(0L)
+                state.eventRemainingMs = state.deadlineEpochMs!! - nowMs
             }
         }
         return output.values.sortedBy { it.startedAt }
@@ -137,6 +153,7 @@ object DiagnosticDeepBlackBox {
                 put("timeoutMs", item.timeoutMs ?: JSONObject.NULL)
                 put("deadlineEpochMs", item.deadlineEpochMs ?: JSONObject.NULL)
                 put("remainingMs", item.eventRemainingMs ?: JSONObject.NULL)
+                put("deadlineExceeded", item.eventRemainingMs?.let { it < 0L } ?: false)
                 put("stage", item.stage)
                 put("detail", item.detail)
                 put("lastEvent", item.lastEvent)
@@ -267,7 +284,8 @@ object DiagnosticDeepBlackBox {
         .toSortedMap()
 
     private fun flow(event: DiagnosticEvent): String {
-        first(event.attributes, "flow", "diagnosticFlow")?.trim()?.lowercase(Locale.ROOT)?.takeIf(String::isNotBlank)?.let { return it }
+        first(event.attributes, DiagnosticOperationContract.FLOW, "flow", "diagnosticFlow")
+            ?.trim()?.lowercase(Locale.ROOT)?.takeIf(String::isNotBlank)?.let { return it }
         val name = event.name.uppercase(Locale.ROOT)
         return when {
             "BROWSER" in name || "WEBVIEW" in name || event.category == DiagnosticCategory.BROWSER -> "browser"

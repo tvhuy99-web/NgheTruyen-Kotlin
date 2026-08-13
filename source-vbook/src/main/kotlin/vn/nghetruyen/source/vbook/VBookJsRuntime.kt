@@ -116,7 +116,7 @@ class VBookJsRuntime(
                 )))
                 val execute = ScriptableObject.getProperty(scope, "execute") as? Function
                     ?: error("VBOOK_EXECUTE_FUNCTION_MISSING:${action.entry}")
-                val args = actionArguments(cx, scope, request)
+                val args = actionArguments(cx, scope, manifest, request)
                 diagnostics.emit(event(manifest, request, "VBOOK_STAGE_EXECUTOR_CALL", DiagnosticSeverity.DEBUG, attributes = mapOf(
                     "action" to request.action.name,
                     "remainingMs" to (budget.deadlineMs - clockMs()).coerceAtLeast(0L).toString(),
@@ -831,23 +831,35 @@ class VBookJsRuntime(
         override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<out Any>): Any? = block(args)
     }
 
-    private fun actionArguments(cx: Context, scope: Scriptable, request: SourceActionRequest): Array<Any> {
+    private fun actionArguments(
+        cx: Context,
+        scope: Scriptable,
+        manifest: SourceManifest,
+        request: SourceActionRequest,
+    ): Array<Any> {
         fun js(value: JsonValue?): Any = jsonToJs(cx, scope, value ?: JsonValue.Null)
-        val page = max(0, (request.input.int("page") ?: 1) - 1) * 30
+        val page = if (manifest.runtime.mode == SourceRuntimeMode.NATIVE_LUA_COMPAT) {
+            // Native Source API 2 uses the second vBook argument as an opaque continuation URL.
+            // Passing vBook's numeric item offset ("0", "30", ...) makes `$page` win over the
+            // source's real first-page URL and sends requests to paths such as /0.
+            request.input.string("pageToken").orEmpty()
+        } else {
+            (max(0, (request.input.int("page") ?: 1) - 1) * 30).toString()
+        }
         return when (request.action) {
             SourceActionName.HOME -> arrayOf(
                 js(request.input["input"] ?: request.input["category"] ?: JsonValue.Str("")),
-                page.toString(),
+                page,
             )
-            SourceActionName.GENRE -> arrayOf(js(request.input["category"]), page.toString())
-            SourceActionName.SEARCH -> arrayOf(js(request.input["query"]), page.toString())
+            SourceActionName.GENRE -> arrayOf(js(request.input["category"]), page)
+            SourceActionName.SEARCH -> arrayOf(js(request.input["query"]), page)
             SourceActionName.DETAIL, SourceActionName.LATEST_CHAPTER, SourceActionName.TOC, SourceActionName.CHAPTER -> arrayOf(js(request.input["url"]))
-            SourceActionName.COMMENTS -> arrayOf(js(request.input["url"]), page.toString())
-            SourceActionName.SUGGESTIONS -> arrayOf(js(request.input["query"] ?: request.input["url"]), page.toString())
+            SourceActionName.COMMENTS -> arrayOf(js(request.input["url"]), page)
+            SourceActionName.SUGGESTIONS -> arrayOf(js(request.input["query"] ?: request.input["url"]), page)
             SourceActionName.LOGIN, SourceActionName.UI_ACTION -> arrayOf(js(request.input))
             SourceActionName.TOC_PAGES -> arrayOf(
                 js(request.input["url"]),
-                js(request.input["pageToken"] ?: JsonValue.Str(page.toString())),
+                js(request.input["pageToken"] ?: JsonValue.Str(page)),
             )
         }
     }
@@ -1206,7 +1218,9 @@ private class ScriptLoader(
     }
 
     fun load(raw: String) {
-        val path = normalize(raw)
+        val target = VBookLoadPolicy.resolve(raw)
+        if (target.kind == VBookLoadKind.BUNDLED_CRYPTO) return
+        val path = requireNotNull(target.path) { "VBOOK_LOAD_TARGET_PATH_REQUIRED" }
         if (!loaded.add(path)) return
         val bytes = resources.read(path, 2 * 1024 * 1024) ?: error("VBOOK_RESOURCE_MISSING:$path")
         budget.charge(1 + bytes.size / 128)
@@ -1214,12 +1228,6 @@ private class ScriptLoader(
         onLoad(path, bytes.size)
     }
 
-    private fun normalize(raw: String): String {
-        val clean = raw.replace('\\', '/').removePrefix("/")
-        val path = if (clean.startsWith("src/")) clean else "src/$clean"
-        SourceManifest.requireSafeRelativePath(path)
-        return path
-    }
 }
 
 private class FetchResponseObject(

@@ -743,7 +743,9 @@ function Adapter.build(sourceInput, metadata, options)
     ["native_v2_stories.js"] = wrapper("stories", "input, page", [[{input: input || "", query: input || "", page: page || "", url: input || ""}]]),
     ["native_v2_latest.js"] = wrapper("latest", "input, page", [[{input: input || "", query: input || "", page: page || "", url: input || ""}]]),
     ["native_v2_detail.js"] = actions.detail and wrapper("detail", "url", [[{input: url || "", url: url || ""}]]) or [[function execute(url) { return Response.success({name:String(url || "Truyện"), url:String(url || "")}); }]],
-    ["native_v2_toc.js"] = wrapper("chapters", "url", [[{input: url || "", url: url || ""}]]),
+    -- In the Lua application the current TOC URL doubles as the opaque page token. Preserve that
+    -- contract so paged chapter sources can inspect `$page` as well as `$input`.
+    ["native_v2_toc.js"] = wrapper("chapters", "url", [[{input: url || "", page: url || "", url: url || ""}]]),
     ["native_v2_chap.js"] = wrapper("content", "url", [[{input: url || "", url: url || ""}]]),
   }
 
@@ -769,32 +771,27 @@ function Adapter.build(sourceInput, metadata, options)
   local categoryAction = actions.stories and "stories" or (actions.search and "search" or (actions.latest and "latest" or "stories"))
   files["native_v2_genre.js"] = table.concat({
     [[load("native_v2_core.js");]],
-    "function execute() {",
-    [[  var r = NativeV2.run("categories", {input:"", query:"", page:"", url:""});]],
-    [[  var list = Array.isArray(r.data) ? r.data : [];]],
-    [[  return Response.success(list.map(function(x){ return { title: String(x.title || x.name || "Mục"), input: String(x.url || x.link || x.input || ""), script: ]] .. string.format("%q", categoryAction == "search" and "native_v2_search.js" or (categoryAction == "latest" and "native_v2_latest.js" or "native_v2_stories.js")) .. [[ }; }));]],
+    "function execute(input, page) {",
+    [[  try {]],
+    [[    var r = NativeV2.run("categories", {input:"", query:"", page:"", url:""});]],
+    [[    var list = Array.isArray(r.data) ? r.data : [];]],
+    [[    var wanted = String(input || "").trim(), target = wanted;]],
+    [[    for (var i=0;i<list.length;i++) {]],
+    [[      var x=list[i]||{}, title=String(x.title||x.name||"").trim();]],
+    [[      var route=String(x.url||x.link||x.input||"").trim();]],
+    [[      if (wanted===title || wanted===route) { target=route||wanted; break; }]],
+    [[    }]],
+    "    return NativeV2.response(" .. string.format("%q", categoryAction) .. [[, {input:target, query:target, page:String(page||""), url:target});]],
+    [[  } catch (e) { return Response.error(String(e && e.message ? e.message : e)); }]],
     "}",
   }, "\n")
 
-  local homeEntries = {}
-  local uiSpec = type(sourceInput.ui) == "table" and sourceInput.ui or {}
-  local exploreUi = type(uiSpec.explore) == "table" and uiSpec.explore or {}
-  local isSangtacvietNative = tostring(metadata.id or ""):find("sangtacviet%-native%-") ~= nil
-  local defaultShortcutMode = (isSangtacvietNative and actions.categories) and "none" or "auto"
-  local shortcutMode = tostring(exploreUi.home_shortcuts or defaultShortcutMode):lower():gsub("[- ]", "_")
-  local allowLatest, allowStories = true, true
-  if shortcutMode == "none" or shortcutMode == "hidden" or shortcutMode == "off" then allowLatest, allowStories = false, false end
-  if type(exploreUi.home_shortcuts) == "table" then
-    allowLatest = exploreUi.home_shortcuts.latest ~= false
-    allowStories = exploreUi.home_shortcuts.stories ~= false
+  -- SourcePack HOME is a story feed, unlike vBook's home.js menu of shortcut descriptors. Route it
+  -- to the Lua source's real feed action so valid Native results are not normalized to an empty list.
+  local homeAction = actions.latest and "latest" or (actions.stories and "stories" or (actions.search and "search" or nil))
+  if homeAction then
+    files["native_v2_home.js"] = wrapper(homeAction, "input, page", [[{input: input || "", query: input || "", page: page || "", url: input || ""}]])
   end
-  if allowLatest and actions.latest then homeEntries[#homeEntries + 1] = [[{title:"Mới cập nhật", input:"", script:"native_v2_latest.js"}]] end
-  if allowStories and actions.stories then homeEntries[#homeEntries + 1] = [[{title:"Danh sách", input:"", script:"native_v2_stories.js"}]] end
-  files["native_v2_home.js"] = table.concat({
-    "function execute() {",
-    "  return Response.success([" .. table.concat(homeEntries, ",") .. "]);",
-    "}",
-  }, "\n")
 
   local manifest = {
     metadata = {
@@ -819,7 +816,7 @@ function Adapter.build(sourceInput, metadata, options)
   }
   if actions.categories then manifest.script.genre = "native_v2_genre.js" end
   if actions.comments then manifest.script.comments = "native_v2_comments.js" end
-  if #homeEntries > 0 then manifest.script.home = "native_v2_home.js" end
+  if homeAction then manifest.script.home = "native_v2_home.js" end
 
   local filesPayload = {}
   for path, body in pairs(files) do filesPayload["src/" .. path] = body end

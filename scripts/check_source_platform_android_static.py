@@ -31,15 +31,24 @@ def main() -> None:
             "service-worker-blocked",
             "resource-blocked",
             "blockedResponse()",
-            "setAcceptThirdPartyCookies(webView, false)",
-            "mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW",
-            "allowFileAccess = false",
-            "allowContentAccess = false",
+            "ExtensionWebViewAuthority.apply",
             "onRenderProcessGone",
             "removeAllCookies",
             "degradedIsolation = true",
         ],
         ["addJavascriptInterface"],
+    )
+    require(
+        "app/src/main/java/vn/nghetruyen/app/sourceplatform/ExtensionWebViewAuthority.kt",
+        [
+            "javaScriptEnabled = true",
+            "domStorageEnabled = true",
+            "databaseEnabled = true",
+            "setAcceptThirdPartyCookies(webView, true)",
+            "mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE",
+            "allowFileAccess = false",
+            "allowContentAccess = false",
+        ],
     )
     require(
         "app/src/main/java/vn/nghetruyen/app/sourceplatform/SourcePlatformManager.kt",

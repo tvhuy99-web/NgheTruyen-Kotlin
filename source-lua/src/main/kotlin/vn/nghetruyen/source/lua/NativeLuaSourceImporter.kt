@@ -186,6 +186,7 @@ object NativeLuaSourceImporter {
             "hasComments" to JsonValue.Bool(manifest.actions.keys.any { it.name == "COMMENTS" }),
             "archiveEntryCount" to JsonValue.Num(archiveFiles.size.toDouble(), archiveFiles.size.toString()),
             "moduleCount" to JsonValue.Num(moduleBundle.entryPaths.size.toDouble(), moduleBundle.entryPaths.size.toString()),
+            "categories" to JsonValue.Arr(staticCategoryNames(source).map(JsonValue::Str)),
         ))).toByteArray(Charsets.UTF_8)
         entries["source.json"] = SourceManifestWriter.write(manifest)
         val warnings = buildList {
@@ -299,6 +300,21 @@ object NativeLuaSourceImporter {
         value.isstring() -> listOf(value.tojstring())
         value.istable() -> (1..value.length()).mapNotNull { index -> value.get(index).takeIf(LuaValue::isstring)?.tojstring() }
         else -> emptyList()
+    }
+
+    /** Static category labels are part of the native package contract and safe to expose to Android UI. */
+    private fun staticCategoryNames(source: LuaTable): List<String> {
+        val items = source.get("actions").takeIf(LuaValue::istable)
+            ?.get("categories")?.takeIf(LuaValue::istable)
+            ?.get("result")?.takeIf(LuaValue::istable)
+            ?.get("items")?.takeIf(LuaValue::istable)
+            ?.checktable()
+            ?: return emptyList()
+        return (1..items.length()).mapNotNull { index ->
+            val item = items.get(index).takeIf(LuaValue::istable)?.checktable() ?: return@mapNotNull null
+            firstNonBlank(item.get("name").optjstring(""), item.get("title").optjstring(""))
+                .trim().takeIf(String::isNotBlank)
+        }.distinct().take(256)
     }
 
     private fun normalizeHost(raw: String): String = raw.trim().lowercase(Locale.ROOT)

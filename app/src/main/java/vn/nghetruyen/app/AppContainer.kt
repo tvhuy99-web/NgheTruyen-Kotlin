@@ -106,6 +106,7 @@ class AppContainer(context: Context) {
         SourceRegistry(
             sessionStore = sourceSessionStore,
             sourcePackSources = currentExternalStorySources(),
+            diagnostics = sourceDiagnostics,
         )
     }
 

@@ -292,6 +292,7 @@ object DiagnosticHumanFormatter {
         "VBOOK_RESOURCE_MISSING" -> "Manifest hoặc script đang tham chiếu tới một tài nguyên không có trong gói; đường dẫn thiếu nằm trong chi tiết kỹ thuật."
         "VBOOK_COMPATIBILITY_FAILED" -> "Một hoặc nhiều action của tiện ích không thể nạp đủ script/tài nguyên trong runtime tương thích."
         "UNKNOWN_INSTALL_ERROR" -> "Quá trình cài đặt kết thúc bằng lỗi chưa được phân loại cụ thể."
+        "BUILTIN_LUA_SOURCE_CONFLICT_PRESERVED" -> "APK chứa một bản nguồn tích hợp khác với bản đang hoạt động; ứng dụng chủ động giữ bản hiện tại để tránh tự ghi đè dữ liệu hoặc lựa chọn của người dùng."
         else -> null
     }
 
@@ -321,6 +322,7 @@ object DiagnosticHumanFormatter {
         "VBOOK_RESOURCE_MISSING" -> "Đối chiếu đường dẫn được báo với nội dung ZIP. Nếu đó là thư viện host như crypto.js, kiểm tra chính sách thư viện tích hợp của runtime."
         "VBOOK_COMPATIBILITY_FAILED" -> "Xem từng action và tài nguyên thiếu trong chi tiết kỹ thuật; sửa action đầu tiên thất bại rồi chạy lại kiểm tra tương thích."
         "UNKNOWN_INSTALL_ERROR" -> "Xuất tệp chẩn đoán để lấy stack/trace/stage cuối và dùng mã lỗi phụ trong Chi tiết kỹ thuật để phân loại."
+        "BUILTIN_LUA_SOURCE_CONFLICT_PRESERVED" -> "Đây là cảnh báo bảo toàn, không phải lỗi runtime. So sánh SHA-256, signer và phiên bản trước khi chủ động thay thế nguồn đang hoạt động."
         else -> null
     }
 

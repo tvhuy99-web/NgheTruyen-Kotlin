@@ -95,10 +95,14 @@ private fun ReferenceDiagnosticsDialog(
         title = timelineTitle,
     )
     val logText = buildString {
-        appendLine("TRẠNG THÁI HỘP ĐEN")
-        appendLine("Lỗi cài/import được giữ bền vững: ${state.diagnosticPersistentCriticalCount}")
-        if (state.diagnosticsMode == "off") {
-            appendLine("Ghi theo phiên đang tắt; các lỗi cài/import quan trọng bên dưới vẫn được giữ.")
+        when (state.diagnosticsMode) {
+            "off" -> {
+                appendLine("TRẠNG THÁI HỘP ĐEN")
+                appendLine("Lỗi cài/import được giữ bền vững: ${state.diagnosticPersistentCriticalCount}")
+                appendLine("Ghi theo phiên đang tắt; các lỗi cài/import quan trọng bên dưới vẫn được giữ.")
+            }
+            "basic", "screen" -> appendLine("PHIÊN GỠ LỖI THEO MÀN HÌNH")
+            else -> appendLine("PHIÊN GỠ LỖI NỐI LIỀN")
         }
         if (state.diagnosticActiveOperations.isNotEmpty()) {
             appendLine()

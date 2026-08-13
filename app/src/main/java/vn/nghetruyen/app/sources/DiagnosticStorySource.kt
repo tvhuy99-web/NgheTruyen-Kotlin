@@ -11,6 +11,8 @@ import vn.nghetruyen.app.core.model.StoryDetail
 import vn.nghetruyen.app.core.model.StorySummary
 import vn.nghetruyen.app.sourceplatform.SourceDiagnosticRuntime
 import vn.nghetruyen.source.diagnostics.DiagnosticCategory
+import vn.nghetruyen.source.diagnostics.DiagnosticOperationContract
+import vn.nghetruyen.source.diagnostics.DiagnosticOperationState
 import vn.nghetruyen.source.diagnostics.DiagnosticRedactor
 import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 import java.util.UUID
@@ -114,7 +116,7 @@ internal class DiagnosticStorySource(
     ): AppResult<T> {
         if (diagnostics.mode == SourceDiagnosticRuntime.MODE_OFF) return block()
 
-        val traceId = "source-action:${descriptor.id.take(120)}:${action.lowercase()}:${UUID.randomUUID()}"
+        val operationId = "source-action:${descriptor.id.take(120)}:${action.lowercase()}:${UUID.randomUUID()}"
         val startedAt = System.currentTimeMillis()
         val base = baseAttributes(action) + attributes
         diagnostics.mark(
@@ -122,12 +124,8 @@ internal class DiagnosticStorySource(
             category = DiagnosticCategory.RUNTIME,
             severity = DiagnosticSeverity.INFO,
             sourceId = descriptor.id,
-            traceId = traceId,
-            attributes = base + mapOf(
-                "flow" to "source-action",
-                "stage" to action,
-                "operation" to action,
-            ),
+            traceId = operationId,
+            attributes = base + operationAttributes(operationId, action, DiagnosticOperationState.STARTED),
         )
 
         return try {
@@ -139,14 +137,11 @@ internal class DiagnosticStorySource(
                         category = DiagnosticCategory.RUNTIME,
                         severity = DiagnosticSeverity.INFO,
                         sourceId = descriptor.id,
-                        traceId = traceId,
+                        traceId = operationId,
                         durationMs = duration,
-                        attributes = base + successMetadata(result.value) + mapOf(
-                            "flow" to "source-action",
-                            "stage" to action,
-                            "operation" to action,
-                            "status" to "success",
-                        ),
+                        attributes = base + successMetadata(result.value) +
+                            operationAttributes(operationId, action, DiagnosticOperationState.COMPLETED) +
+                            mapOf("status" to "success"),
                     )
                     result
                 }
@@ -157,12 +152,9 @@ internal class DiagnosticStorySource(
                         category = DiagnosticCategory.RUNTIME,
                         severity = DiagnosticSeverity.ERROR,
                         sourceId = descriptor.id,
-                        traceId = traceId,
+                        traceId = operationId,
                         durationMs = duration,
-                        attributes = base + mapOf(
-                            "flow" to "source-action",
-                            "stage" to action,
-                            "operation" to action,
+                        attributes = base + operationAttributes(operationId, action, DiagnosticOperationState.FAILED) + mapOf(
                             "status" to "failed",
                             "code" to safeText(result.code, 240),
                             "errorCode" to safeText(result.code, 240),
@@ -181,12 +173,9 @@ internal class DiagnosticStorySource(
                 category = DiagnosticCategory.RUNTIME,
                 severity = DiagnosticSeverity.INFO,
                 sourceId = descriptor.id,
-                traceId = traceId,
+                traceId = operationId,
                 durationMs = elapsedSince(startedAt),
-                attributes = base + mapOf(
-                    "flow" to "source-action",
-                    "stage" to action,
-                    "operation" to action,
+                attributes = base + operationAttributes(operationId, action, DiagnosticOperationState.CANCELLED) + mapOf(
                     "status" to "cancelled",
                     "causeType" to cancelled.javaClass.name,
                     "message" to safeText(cancelled.message.orEmpty(), 1_000),
@@ -199,12 +188,9 @@ internal class DiagnosticStorySource(
                 category = DiagnosticCategory.RUNTIME,
                 severity = DiagnosticSeverity.ERROR,
                 sourceId = descriptor.id,
-                traceId = traceId,
+                traceId = operationId,
                 durationMs = elapsedSince(startedAt),
-                attributes = base + mapOf(
-                    "flow" to "source-action",
-                    "stage" to action,
-                    "operation" to action,
+                attributes = base + operationAttributes(operationId, action, DiagnosticOperationState.FAILED) + mapOf(
                     "status" to "failed",
                     "code" to "SOURCE_ACTION_UNCAUGHT",
                     "errorCode" to "SOURCE_ACTION_UNCAUGHT",
@@ -217,6 +203,18 @@ internal class DiagnosticStorySource(
             throw error
         }
     }
+
+    private fun operationAttributes(
+        operationId: String,
+        action: String,
+        state: DiagnosticOperationState,
+    ): Map<String, String> = DiagnosticOperationContract.attributes(
+        id = operationId,
+        kind = "SOURCE_ACTION",
+        flow = "source-action",
+        state = state,
+        stage = action,
+    ) + mapOf("operation" to action)
 
     private fun baseAttributes(action: String): Map<String, String> = mapOf(
         "action" to action,

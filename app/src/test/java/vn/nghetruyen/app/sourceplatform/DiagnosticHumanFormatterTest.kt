@@ -64,7 +64,7 @@ class DiagnosticHumanFormatterTest {
     }
 
     @Test
-    fun builtinConflictUsesSourceSyncLabel() {
+    fun builtinConflictIsExplainedAsPreservationNotFailure() {
         val report = DiagnosticHumanFormatter.formatEvents(
             events = listOf(
                 event(
@@ -82,6 +82,9 @@ class DiagnosticHumanFormatterTest {
         )
 
         assertTrue(report.contains("Đồng bộ nguồn tích hợp"))
+        assertTrue(report.contains("chủ động giữ bản hiện tại"))
+        assertTrue(report.contains("cảnh báo bảo toàn"))
+        assertFalse(report.contains("Thao tác kết thúc bất thường"))
         assertFalse(report.contains("AI / chuyển ngữ"))
     }
 

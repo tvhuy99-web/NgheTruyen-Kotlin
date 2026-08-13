@@ -74,6 +74,7 @@ object DiagnosticDeepBlackBox {
     private fun reconstructOperations(events: List<DiagnosticEvent>, nowMs: Long): List<OperationState> {
         val output = linkedMapOf<String, OperationState>()
         events.forEach { event ->
+            if (isDiagnosticBoundary(event.name)) return@forEach
             val attrs = event.attributes
             val flow = flow(event)
             val explicitId = first(attrs, "operationId", "operation_id", "requestId", "request_id")
@@ -326,6 +327,11 @@ object DiagnosticDeepBlackBox {
 
     private fun maxLong(events: List<DiagnosticEvent>, vararg keys: String): Long =
         events.mapNotNull { event -> long(event.attributes, *keys) }.maxOrNull() ?: 0L
+
+    private fun isDiagnosticBoundary(name: String): Boolean {
+        val upper = name.uppercase(Locale.ROOT)
+        return upper.startsWith("DIAGNOSTIC_SCREEN_") || upper.startsWith("DIAGNOSTICS_MODE_")
+    }
 
     private fun isStart(name: String): Boolean {
         val upper = name.uppercase(Locale.ROOT)

@@ -217,6 +217,8 @@ object DiagnosticHumanFormatter {
     }
 
     private fun actionLabel(code: String, category: String): String = when {
+        code.contains("BUILTIN_LUA_SOURCE_CONFLICT", true) -> "Đồng bộ nguồn tích hợp"
+        code.contains("BUILTIN_SOURCEPACK_BOOTSTRAP", true) -> "Khởi tạo nguồn tích hợp"
         code.contains("INSTALL", true) -> "Cài đặt tiện ích"
         code.contains("PACKAGE", true) || code.contains("FETCH", true) -> "Tải dữ liệu"
         code.contains("NETWORK", true) || code.contains("HTTP", true) || category == "NETWORK" -> "Kết nối mạng"
@@ -226,7 +228,7 @@ object DiagnosticHumanFormatter {
         code.contains("REPOSITORY", true) -> "Kho tiện ích"
         code.contains("TRUST", true) || code.contains("SIGNATURE", true) || category == "TRUST" -> "Xác minh chữ ký"
         code.contains("TTS", true) || code.contains("VOICE", true) -> "TTS / giọng đọc"
-        code.contains("AI", true) || code.contains("TRANSLAT", true) -> "AI / chuyển ngữ"
+        isAiCode(code) -> "AI / chuyển ngữ"
         code.contains("DOWNLOAD", true) -> "Tải truyện"
         code.contains("BACKUP", true) || code.contains("RESTORE", true) -> "Sao lưu / khôi phục"
         code.contains("ACTION", true) || code.contains("RUNTIME", true) || category == "RUNTIME" -> "Chạy tiện ích"
@@ -234,7 +236,7 @@ object DiagnosticHumanFormatter {
     }
 
     private fun stageLabel(code: String, category: String, attributes: Map<String, String>): String =
-        first(attributes, "stage", "phase", "operation", "action", "step") ?: actionLabel(code, category)
+        first(attributes, "stage", "operationStage", "installStage", "phase", "operation", "action", "step") ?: actionLabel(code, category)
 
     private fun target(attributes: Map<String, String>): String? =
         first(attributes, "target", "url", "uri", "path", "host", "selector", "sourceUrl")
@@ -259,7 +261,7 @@ object DiagnosticHumanFormatter {
             code.contains("REPOSITORY", true) -> "Danh mục kho không tải được, không hợp lệ hoặc không khớp dữ liệu gói."
             code.contains("NETWORK", true) || category == DiagnosticCategory.NETWORK.name -> "Kết nối mạng không hoàn thành đúng như nguồn yêu cầu."
             code.contains("TTS", true) || code.contains("VOICE", true) -> "Bộ đọc, giọng hoặc trạng thái phát âm thanh không sẵn sàng cho thao tác hiện tại."
-            code.contains("AI", true) || code.contains("TRANSLAT", true) -> "Yêu cầu AI không hoàn thành hoặc phản hồi không thỏa điều kiện xử lý."
+            isAiCode(code) -> "Yêu cầu AI không hoàn thành hoặc phản hồi không thỏa điều kiện xử lý."
             else -> "Thao tác kết thúc bất thường ở giai đoạn ${actionLabel(code, category)}."
         }
     }
@@ -342,10 +344,15 @@ object DiagnosticHumanFormatter {
                 "Tải lại gói từ nguồn tin cậy và kiểm tra đúng định dạng. Xuất tệp nếu cần xác định file hoặc manifest gây lỗi."
             code.contains("REPOSITORY", true) -> "Kiểm tra URL repository, kết nối và chữ ký danh mục, sau đó làm mới kho rồi thử lại."
             code.contains("TTS", true) || code.contains("VOICE", true) -> "Kiểm tra bộ đọc TTS, giọng đã chọn và thử nghe mẫu. Xuất tệp nếu lỗi chỉ xảy ra với một truyện hoặc giọng."
-            code.contains("AI", true) || code.contains("TRANSLAT", true) -> "Kiểm tra nhà cung cấp, model và kết nối. Tệp xuất giữ timing cần thiết nhưng vẫn che dữ liệu nhạy cảm."
+            isAiCode(code) -> "Kiểm tra nhà cung cấp, model và kết nối. Tệp xuất giữ timing cần thiết nhưng vẫn che dữ liệu nhạy cảm."
             else -> "Thực hiện lại thao tác. Nếu lỗi lặp lại, dùng XUẤT TỆP để lấy đầy đủ trace, evidence và trạng thái runtime."
         }
     }
+
+    private fun isAiCode(code: String): Boolean =
+        code.uppercase(Locale.ROOT)
+            .split(Regex("[^A-Z0-9]+"))
+            .any { it == "AI" } || code.contains("TRANSLAT", ignoreCase = true)
 
     private fun compactDetail(attributes: Map<String, String>): String? {
         val useful = listOf(

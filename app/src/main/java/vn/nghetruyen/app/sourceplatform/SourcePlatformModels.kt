@@ -50,6 +50,13 @@ data class SourceInstallPreview(
     val fixtureCount: Int,
 )
 
+/** Safe metadata from Android's document provider; raw content URIs are never logged. */
+data class SourceImportFileMetadata(
+    val displayName: String = "",
+    val mimeType: String = "",
+    val declaredSizeBytes: Long? = null,
+)
+
 data class SourceRepositoryUiInfo(
     val id: String,
     val name: String,

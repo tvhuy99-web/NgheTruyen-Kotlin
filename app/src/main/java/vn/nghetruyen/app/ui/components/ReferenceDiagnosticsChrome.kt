@@ -41,7 +41,7 @@ fun ReferenceDiagnosticsChrome(
     onExport: () -> Unit,
     onClear: () -> Unit,
 ) {
-    if (state.diagnosticsMode == "off") return
+    if (state.diagnosticsMode == "off" && state.diagnosticPersistentCriticalCount == 0) return
 
     var showLog by remember { mutableStateOf(false) }
     LaunchedEffect(state.diagnosticsMode) {
@@ -51,6 +51,8 @@ fun ReferenceDiagnosticsChrome(
     val recording = state.diagnosticActiveOperations.isNotEmpty()
     val label = when {
         recording -> "ĐANG GHI NHẬT KÝ..."
+        state.diagnosticsMode == "off" && state.diagnosticPersistentCriticalCount > 0 ->
+            "XEM ${state.diagnosticPersistentCriticalCount} LỖI CÀI ĐẶT"
         state.sourceDiagnosticCount > 0 -> "XEM NHẬT KÝ"
         else -> "CHƯA CÓ NHẬT KÝ"
     }
@@ -82,11 +84,25 @@ private fun ReferenceDiagnosticsDialog(
     onDismiss: () -> Unit,
 ) {
     val clipboard = LocalClipboardManager.current
-    val logText = DiagnosticHumanFormatter.formatUi(
+    val timeline = DiagnosticHumanFormatter.formatUi(
         events = state.sourceDiagnostics,
         mode = state.diagnosticsMode,
         title = "NHẬT KÝ TRANG HIỆN TẠI",
     )
+    val logText = buildString {
+        appendLine("TRẠNG THÁI HỘP ĐEN")
+        appendLine("Lỗi cài/import được giữ bền vững: ${state.diagnosticPersistentCriticalCount}")
+        if (state.diagnosticsMode == "off") {
+            appendLine("Ghi theo phiên đang tắt; các lỗi cài/import quan trọng bên dưới vẫn được giữ.")
+        }
+        if (state.diagnosticActiveOperations.isNotEmpty()) {
+            appendLine()
+            appendLine("THAO TÁC ĐANG HOẠT ĐỘNG (${state.diagnosticActiveOperations.size})")
+            state.diagnosticActiveOperations.forEach { appendLine("• $it") }
+        }
+        appendLine()
+        append(timeline)
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,

@@ -26,6 +26,11 @@ class PersistentCriticalDiagnosticPolicyTest {
             severity = DiagnosticSeverity.INFO,
         )))
         assertFalse(PersistentCriticalDiagnosticPolicy.shouldPersist(event(
+            name = "SOURCE_EXTENSION_FORMAT_PROBE_REJECTED",
+            category = DiagnosticCategory.PACKAGE,
+            severity = DiagnosticSeverity.INFO,
+        )))
+        assertFalse(PersistentCriticalDiagnosticPolicy.shouldPersist(event(
             name = "BROWSER_CONSOLE",
             category = DiagnosticCategory.BROWSER,
             severity = DiagnosticSeverity.ERROR,

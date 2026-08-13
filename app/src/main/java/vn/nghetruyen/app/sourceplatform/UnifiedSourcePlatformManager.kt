@@ -109,20 +109,29 @@ class UnifiedSourcePlatformManager(
     /** Try the native signed-repository schema first; fall back to the canonical vBook index schema. */
     fun refreshRepository(url: String): Result<SourceRepositoryUiInfo> {
         clearPendingCatalogInstall()
-        val native = legacy.refreshRepository(url)
+        val native = legacy.probeRepository(url)
         if (native.isSuccess) return native
-        return runCatching {
-            val snapshot = vBookRepositories.snapshot(url, strict = false)
-            require(snapshot.repositories.isNotEmpty()) {
-                "vBook repository không có catalog hợp lệ: ${snapshot.errors.joinToString { it.code }}"
-            }
-            val uiId = vBookIndexUiId(snapshot.indexUrl)
-            vBookSnapshots[uiId] = snapshot
-            vBookRepositorySubscriptions.add(snapshot.indexUrl)
-            repositories().first { it.id == uiId }
-        }.recoverCatching { vBookError ->
-            val nativeMessage = native.exceptionOrNull()?.message.orEmpty()
-            error(listOf(nativeMessage, vBookError.message.orEmpty()).filter(String::isNotBlank).joinToString(" | "))
+        val nativeError = native.exceptionOrNull()?.message.orEmpty().take(2_000)
+        return legacy.runExternalExtensionOperation(
+            stage = "vbook_repository_refresh",
+            sourceId = null,
+            operationKind = "EXTENSION_REPOSITORY",
+            extraAttributes = mapOf(
+                "repositoryFingerprint" to vBookIndexUiId(url),
+                "nativeRepositoryProbeError" to nativeError,
+            ),
+            block = {
+                val snapshot = vBookRepositories.snapshot(url, strict = false)
+                require(snapshot.repositories.isNotEmpty()) {
+                    "vBook repository không có catalog hợp lệ: ${snapshot.errors.joinToString { it.code }}"
+                }
+                val uiId = vBookIndexUiId(snapshot.indexUrl)
+                vBookSnapshots[uiId] = snapshot
+                vBookRepositorySubscriptions.add(snapshot.indexUrl)
+                repositories().first { it.id == uiId }
+            },
+        ).recoverCatching { vBookError ->
+            error(listOf(nativeError, vBookError.message.orEmpty()).filter(String::isNotBlank).joinToString(" | "))
         }
     }
 
@@ -172,27 +181,33 @@ class UnifiedSourcePlatformManager(
             clearPendingCatalogInstall()
             return legacy.prepareRepositoryInstall(repositoryId, sourceId)
         }
-        return runCatching {
-            val item = snapshot.items.firstOrNull { it.installIdentity == sourceId }
-                ?: error("Không tìm thấy tiện ích vBook trong repository snapshot.")
-            require(item.item.packageUrl.startsWith("https://", ignoreCase = true)) {
-                "VBOOK_REPOSITORY_PACKAGE_HTTPS_REQUIRED"
-            }
-            val prepared = vBookCatalog.prepare(item)
-            require(prepared.preview.activatable) {
-                val blockers = prepared.preview.blockingFeatures.sortedBy(Enum<*>::name).joinToString { it.name }
-                val failures = prepared.preview.validation.failures.joinToString("; ") { it.message }
-                "VBOOK_IMPORT_NOT_ACTIVATABLE:${listOf(blockers, failures).filter(String::isNotBlank).joinToString(" | ")}"
-            }
-            val presentation = ByteArrayInputStream(prepared.bytes).use { legacy.prepareVBookImport(it).getOrThrow() }
-            pendingVBookCatalog = prepared
-            val identity = SourceArtifactIdentity(SourceEcosystem.VBOOK, item.repositoryId, item.remoteIdentity)
-            presentation.copy(
-                sourceId = VBookHostManifestFactory.stableSourceId(identity.canonicalKey()),
-                name = prepared.preview.name,
-                version = prepared.preview.version ?: item.item.version,
-            )
-        }.onFailure {
+        return legacy.runExternalExtensionOperation(
+            stage = "vbook_repository_prepare_install",
+            sourceId = sourceId,
+            operationKind = "EXTENSION_REPOSITORY_INSTALL",
+            extraAttributes = mapOf("repositoryId" to repositoryId.take(300)),
+            block = {
+                val item = snapshot.items.firstOrNull { it.installIdentity == sourceId }
+                    ?: error("Không tìm thấy tiện ích vBook trong repository snapshot.")
+                require(item.item.packageUrl.startsWith("https://", ignoreCase = true)) {
+                    "VBOOK_REPOSITORY_PACKAGE_HTTPS_REQUIRED"
+                }
+                val prepared = vBookCatalog.prepare(item)
+                require(prepared.preview.activatable) {
+                    val blockers = prepared.preview.blockingFeatures.sortedBy(Enum<*>::name).joinToString { it.name }
+                    val failures = prepared.preview.validation.failures.joinToString("; ") { it.message }
+                    "VBOOK_IMPORT_NOT_ACTIVATABLE:${listOf(blockers, failures).filter(String::isNotBlank).joinToString(" | ")}"
+                }
+                val presentation = ByteArrayInputStream(prepared.bytes).use { legacy.prepareVBookImport(it).getOrThrow() }
+                pendingVBookCatalog = prepared
+                val identity = SourceArtifactIdentity(SourceEcosystem.VBOOK, item.repositoryId, item.remoteIdentity)
+                presentation.copy(
+                    sourceId = VBookHostManifestFactory.stableSourceId(identity.canonicalKey()),
+                    name = prepared.preview.name,
+                    version = prepared.preview.version ?: item.item.version,
+                )
+            },
+        ).onFailure {
             pendingVBookCatalog = null
             legacy.cancelPendingInstall()
         }
@@ -217,6 +232,14 @@ class UnifiedSourcePlatformManager(
         )
     }
 
+    fun prepareManualImport(
+        input: InputStream,
+        metadata: SourceImportFileMetadata = SourceImportFileMetadata(),
+    ): Result<SourceInstallPreview> {
+        clearPendingCatalogInstall()
+        return legacy.prepareManualImport(input, metadata)
+    }
+
     fun prepareVBookImport(input: InputStream): Result<SourceInstallPreview> {
         clearPendingCatalogInstall()
         return legacy.prepareVBookImport(input)
@@ -236,18 +259,28 @@ class UnifiedSourcePlatformManager(
         val prepared = pendingVBookCatalog ?: return legacy.confirmPendingInstall()
         pendingVBookCatalog = null
         legacy.cancelPendingInstall()
-        return runCatching {
-            val result = vBookCatalog.installPrepared(prepared)
-            require(result.disposition == VBookUpdateDisposition.ACTIVATED && result.active != null) {
-                val blockers = result.validation.blockingFeatures.sortedBy(Enum<*>::name).joinToString { it.name }
-                "VBOOK_INSTALL_QUARANTINED:${blockers.ifBlank { result.validation.failures.joinToString("; ") { it.message } }}"
-            }
-            onExternalSourcesChanged()
-            val info = vBook.installedSources().firstOrNull {
-                it.repositoryId == prepared.item.repositoryId && it.remoteIdentity == prepared.item.remoteIdentity
-            } ?: error("VBOOK_INSTALLED_SOURCE_NOT_FOUND_AFTER_ACTIVATION")
-            installedUi(info)
-        }
+        return legacy.runExternalExtensionOperation(
+            stage = "vbook_catalog_confirm_install",
+            sourceId = prepared.item.installIdentity,
+            operationKind = "EXTENSION_INSTALL_COMMIT",
+            extraAttributes = mapOf(
+                "repositoryId" to prepared.item.repositoryId.take(300),
+                "remoteIdentity" to prepared.item.remoteIdentity.take(300),
+                "version" to prepared.item.item.version.take(100),
+            ),
+            block = {
+                val result = vBookCatalog.installPrepared(prepared)
+                require(result.disposition == VBookUpdateDisposition.ACTIVATED && result.active != null) {
+                    val blockers = result.validation.blockingFeatures.sortedBy(Enum<*>::name).joinToString { it.name }
+                    "VBOOK_INSTALL_QUARANTINED:${blockers.ifBlank { result.validation.failures.joinToString("; ") { it.message } }}"
+                }
+                onExternalSourcesChanged()
+                val info = vBook.installedSources().firstOrNull {
+                    it.repositoryId == prepared.item.repositoryId && it.remoteIdentity == prepared.item.remoteIdentity
+                } ?: error("VBOOK_INSTALLED_SOURCE_NOT_FOUND_AFTER_ACTIVATION")
+                installedUi(info)
+            },
+        )
     }
 
     fun cancelPendingInstall() {
@@ -264,28 +297,44 @@ class UnifiedSourcePlatformManager(
     fun setEnabled(sourceId: String, enabled: Boolean): Result<Unit> {
         val vBookInstalled = vBook.installedSources().any { it.sourceId == sourceId }
         if (!vBookInstalled) return legacy.setEnabled(sourceId, enabled)
-        return runCatching {
-            vBook.setEnabled(sourceId, enabled)
-            onExternalSourcesChanged()
-        }
+        return legacy.runExternalExtensionOperation(
+            stage = if (enabled) "enable_vbook_source" else "disable_vbook_source",
+            sourceId = sourceId,
+            operationKind = "EXTENSION_ACTIVATION",
+            extraAttributes = mapOf("enabled" to enabled.toString()),
+            block = {
+                vBook.setEnabled(sourceId, enabled)
+                onExternalSourcesChanged()
+            },
+        )
     }
 
     fun rollback(sourceId: String): Result<Unit> {
         val vBookInstalled = vBook.installedSources().any { it.sourceId == sourceId }
         if (!vBookInstalled) return legacy.rollback(sourceId)
-        return runCatching {
-            vBook.rollbackBySourceId(sourceId)
-            onExternalSourcesChanged()
-        }
+        return legacy.runExternalExtensionOperation(
+            stage = "rollback_vbook_source",
+            sourceId = sourceId,
+            operationKind = "EXTENSION_ROLLBACK",
+            block = {
+                vBook.rollbackBySourceId(sourceId)
+                onExternalSourcesChanged()
+            },
+        )
     }
 
     fun removeInstalledPack(sourceId: String): Result<Unit> {
         val vBookInstalled = vBook.installedSources().any { it.sourceId == sourceId }
         if (!vBookInstalled) return legacy.removeInstalledPack(sourceId)
-        return runCatching {
-            require(vBook.uninstallBySourceId(sourceId)) { "Không tìm thấy tiện ích vBook để xóa." }
-            onExternalSourcesChanged()
-        }
+        return legacy.runExternalExtensionOperation(
+            stage = "remove_vbook_source",
+            sourceId = sourceId,
+            operationKind = "EXTENSION_REMOVE",
+            block = {
+                require(vBook.uninstallBySourceId(sourceId)) { "Không tìm thấy tiện ích vBook để xóa." }
+                onExternalSourcesChanged()
+            },
+        )
     }
 
     fun saveConfiguration(sourceId: String, changes: Map<String, String>): Result<Unit> = runCatching {

@@ -4,6 +4,9 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.ByteArrayOutputStream
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 class SourceDiagnosticsTest {
     @Test fun redactsSecretsAndBoundsEvents() {
@@ -67,5 +70,42 @@ class SourceDiagnosticsTest {
         verbose.emit(debug)
         assertTrue(basic.snapshot().isEmpty())
         assertTrue(verbose.snapshot().single().name == "debug")
+    }
+
+    @Test fun throwableDetailKeepsBoundedFramesAndRedactsCredentials() {
+        val root = IllegalArgumentException("token=top-secret")
+        root.stackTrace = Array(140) { index -> StackTraceElement("Example$index", "run", "Example.kt", index + 1) }
+        val error = IllegalStateException("install failed", root)
+
+        val attributes = DiagnosticThrowableFormatter.attributes(error, maxFrames = 12, maxChars = 4_000)
+
+        assertEquals("java.lang.IllegalStateException", attributes["errorType"])
+        assertEquals("12", attributes["stackFrameCount"])
+        assertTrue(attributes.getValue("stackTraceTruncated").toBoolean())
+        assertTrue(attributes.getValue("stackTrace").contains("Example0.run"))
+        assertFalse(attributes.values.any { "top-secret" in it })
+    }
+
+    @Test fun artifactInspectorCorrelatesSafeIdentityAndZipShape() {
+        val bytes = ByteArrayOutputStream().also { output ->
+            ZipOutputStream(output).use { zip ->
+                listOf("plugin.json", "src/main.js").forEach { name ->
+                    zip.putNextEntry(ZipEntry(name))
+                    zip.write("{}".toByteArray())
+                    zip.closeEntry()
+                }
+            }
+        }.toByteArray()
+
+        val attributes = DiagnosticArtifactInspector.inspect(
+            bytes,
+            DiagnosticArtifactMetadata("../bad\u0000/name.zip", " application/zip\n", bytes.size.toLong()),
+        )
+
+        assertEquals("name.zip", attributes["fileName"])
+        assertEquals("application/zip", attributes["mimeType"])
+        assertEquals("ZIP", attributes["detectedContainer"])
+        assertEquals("2", attributes["zipEntryCount"])
+        assertEquals(64, attributes.getValue("contentSha256").length)
     }
 }

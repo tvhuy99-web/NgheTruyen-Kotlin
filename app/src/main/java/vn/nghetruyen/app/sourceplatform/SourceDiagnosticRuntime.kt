@@ -217,11 +217,17 @@ class SourceDiagnosticRuntime(private val context: Context) {
 
     fun activityLines(nowMs: Long = System.currentTimeMillis()): List<String> = activitySnapshot().map { operation ->
         val elapsed = (nowMs - operation.startedAtEpochMs).coerceAtLeast(0L)
-        val deadline = operation.deadlineEpochMs?.let { " • deadline=${it - nowMs}ms" }.orEmpty()
+        val deadline = operation.deadlineEpochMs?.let { deadlineAt ->
+            val remaining = deadlineAt - nowMs
+            if (remaining >= 0L) " • còn=${remaining}ms" else " • ĐÃ QUÁ HẠN ${-remaining}ms"
+        }.orEmpty()
         "${operation.sourceId} • ${operation.flow}/${operation.kind} • ${operation.stage} • ${elapsed}ms$deadline • op=${operation.operationId.take(36)}"
     }
 
     fun persistentCriticalCount(): Int = criticalStore.eventCount
+
+    /** Read-only durable install/import history, available even while session diagnostics are off. */
+    fun persistentCriticalSnapshot(): List<DiagnosticEvent> = criticalStore.snapshot()
 
     /** User-requested clear: this is the only action that deletes continuous history. */
     fun clearBlackBox() {
@@ -339,6 +345,10 @@ class SourceDiagnosticRuntime(private val context: Context) {
         put("activeScreen", activeScreenKey)
         put("appVersionName", BuildConfig.VERSION_NAME)
         put("appVersionCode", BuildConfig.VERSION_CODE)
+        put("buildType", BuildConfig.BUILD_TYPE)
+        put("debugBuild", BuildConfig.DEBUG)
+        put("diagnosticBuildId", BuildConfig.DIAGNOSTIC_BUILD_ID)
+        put("symbolMappingIdentity", "${BuildConfig.VERSION_CODE}:${BuildConfig.DIAGNOSTIC_BUILD_ID}")
         put("androidSdk", Build.VERSION.SDK_INT)
         put("manufacturer", Build.MANUFACTURER)
         put("model", Build.MODEL)
@@ -534,6 +544,7 @@ private class DiagnosticActivityTracker : DiagnosticSink {
             state in TERMINAL_STATES -> active.remove(operationId)
             state == null && isTerminal(name) && current != null && operationStem(name) == operationStem(current.startEvent.uppercase()) -> active.remove(operationId)
             current != null -> active[operationId] = current.copy(
+                sourceId = event.sourceId.takeIf { it.isNotBlank() && it != "manual-import" } ?: current.sourceId,
                 lastEventAtEpochMs = event.timestampEpochMs,
                 lastEvent = event.name,
                 kind = event.attributes[DiagnosticOperationContract.KIND] ?: current.kind,

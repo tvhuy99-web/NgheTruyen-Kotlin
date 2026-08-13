@@ -26,6 +26,8 @@ import vn.nghetruyen.source.vbook.VBookPackageLimits
 import vn.nghetruyen.source.vbook.VBookPackageReader
 import vn.nghetruyen.source.vbook.VBookPackageResourceProvider
 import vn.nghetruyen.source.diagnostics.BoundedDiagnosticRecorder
+import vn.nghetruyen.source.diagnostics.DiagnosticArtifactInspector
+import vn.nghetruyen.source.diagnostics.DiagnosticArtifactMetadata
 import vn.nghetruyen.source.diagnostics.DiagnosticCategory
 import vn.nghetruyen.source.diagnostics.DiagnosticEvent
 import vn.nghetruyen.source.diagnostics.DiagnosticEvidence
@@ -35,6 +37,7 @@ import vn.nghetruyen.source.diagnostics.DiagnosticLevel
 import vn.nghetruyen.source.diagnostics.DiagnosticOperationContract
 import vn.nghetruyen.source.diagnostics.DiagnosticOperationState
 import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
+import vn.nghetruyen.source.diagnostics.DiagnosticThrowableFormatter
 import vn.nghetruyen.source.diagnostics.SourceTraceExplorer
 import vn.nghetruyen.source.network.OkHttpSourceNetworkBroker
 import vn.nghetruyen.source.packagekit.SourcePackArchiveVerifier
@@ -113,7 +116,7 @@ class SourcePlatformManager(
     private val executor = SourcePackActionExecutor { pack, resources, request ->
         val startedAt = System.currentTimeMillis()
         val timeoutMs = pack.manifest.actions[request.action]?.timeoutMs ?: pack.manifest.runtime.actionTimeoutMs
-        val operationId = "source-action:${request.traceId.ifBlank { "no-trace" }}:${request.action.name}"
+        val operationId = "source-action:${request.traceId.ifBlank { "no-trace" }}:${request.action.name}:${UUID.randomUUID()}"
         diagnostics.emit(
             DiagnosticEvent(
                 timestampEpochMs = startedAt,
@@ -164,6 +167,7 @@ class SourcePlatformManager(
                     failure?.let {
                         put("errorCode", it.error.code.name)
                         put("error", it.error.message.take(1_000))
+                        it.error.cause?.let { cause -> putAll(DiagnosticThrowableFormatter.attributes(cause)) }
                     }
                 },
             ),
@@ -196,6 +200,7 @@ class SourcePlatformManager(
     private var pendingPack: VerifiedSourcePack? = null
     private var pendingVBook: PendingVBookImport? = null
     private var pendingWarnings: List<String> = emptyList()
+    private var pendingImportContext: PendingImportContext? = null
 
     init {
         loadCachedRepositories()
@@ -266,16 +271,37 @@ class SourcePlatformManager(
         }.sortedWith(compareBy<SourceRepositoryPackageUiInfo> { it.status }.thenBy { it.name })
     }
 
-    fun refreshRepository(url: String): Result<SourceRepositoryUiInfo> = runCatching {
-        val normalized = normalizeRepositoryUrl(url)
-        val raw = repositoryHttpClient.fetchIndex(normalized, SourceRepositoryVerifier.MAX_INDEX_BYTES)
-        val verified = when (val result = repositoryVerifier.verify(raw, trustRegistry.allKeys())) {
-            is SourcePlatformResult.Success -> result.value
-            is SourcePlatformResult.Failure -> error("${result.error.code}: ${result.error.message}")
-        }
-        rememberRepository(normalized, raw, verified)
-        repositories().first { it.id == verified.index.repositoryId }
-    }.onFailure { recordExtensionFailure("repository_refresh", null, it) }
+    fun refreshRepository(url: String): Result<SourceRepositoryUiInfo> = refreshRepositoryOperation(
+        url = url,
+        failureSeverity = DiagnosticSeverity.ERROR,
+    )
+
+    /** A schema mismatch is expected while the unified facade tries the vBook repository schema. */
+    internal fun probeRepository(url: String): Result<SourceRepositoryUiInfo> = refreshRepositoryOperation(
+        url = url,
+        failureSeverity = DiagnosticSeverity.INFO,
+    )
+
+    private fun refreshRepositoryOperation(
+        url: String,
+        failureSeverity: DiagnosticSeverity,
+    ): Result<SourceRepositoryUiInfo> = runExtensionOperation(
+        stage = "repository_refresh",
+        sourceId = null,
+        operationKind = "EXTENSION_REPOSITORY",
+        extraAttributes = mapOf("repositoryHost" to runCatching { URI(url.trim()).host.orEmpty() }.getOrDefault("invalid")),
+        failureSeverity = failureSeverity,
+        block = {
+            val normalized = normalizeRepositoryUrl(url)
+            val raw = repositoryHttpClient.fetchIndex(normalized, SourceRepositoryVerifier.MAX_INDEX_BYTES)
+            val verified = when (val result = repositoryVerifier.verify(raw, trustRegistry.allKeys())) {
+                is SourcePlatformResult.Success -> result.value
+                is SourcePlatformResult.Failure -> error("${result.error.code}: ${result.error.message}")
+            }
+            rememberRepository(normalized, raw, verified)
+            repositories().first { it.id == verified.index.repositoryId }
+        },
+    )
 
     fun removeRepository(repositoryId: String): Result<Unit> = runCatching {
         require(REPOSITORY_ID.matches(repositoryId)) { "Repository ID không hợp lệ." }
@@ -283,32 +309,178 @@ class SourcePlatformManager(
         repositoryDirectory(repositoryId).deleteRecursively()
     }
 
-    fun prepareRepositoryInstall(repositoryId: String, sourceId: String): Result<SourceInstallPreview> = runCatching {
-        val cached = repositories[repositoryId] ?: error("Repository chưa được tải hoặc đã hết hạn.")
-        val entry = cached.repository.index.packages.firstOrNull { it.sourceId == sourceId }
-            ?: error("Không tìm thấy gói nguồn trong repository.")
-        val minAppVersion = entry.minAppVersion
-        val maxAppVersion = entry.maxAppVersion
-        val compatible = (minAppVersion == null || CURRENT_APP_VERSION >= minAppVersion) &&
-            (maxAppVersion == null || CURRENT_APP_VERSION <= maxAppVersion)
-        require(compatible) { "Phiên bản nguồn không tương thích với ứng dụng hiện tại." }
-        val bytes = repositoryHttpClient.fetchPackage(
-            url = entry.packageUrl,
-            maxBytes = SourceRepositoryVerifier.MAX_PACKAGE_BYTES,
-            expectedBytes = entry.packageBytes,
-            expectedSha256 = entry.packageSha256,
+    fun prepareRepositoryInstall(repositoryId: String, sourceId: String): Result<SourceInstallPreview> = runExtensionOperation(
+        stage = "repository_prepare_install",
+        sourceId = sourceId,
+        operationKind = "EXTENSION_REPOSITORY_INSTALL",
+        extraAttributes = mapOf("repositoryId" to repositoryId.take(300)),
+        block = {
+            val cached = repositories[repositoryId] ?: error("Repository chưa được tải hoặc đã hết hạn.")
+            val entry = cached.repository.index.packages.firstOrNull { it.sourceId == sourceId }
+                ?: error("Không tìm thấy gói nguồn trong repository.")
+            val minAppVersion = entry.minAppVersion
+            val maxAppVersion = entry.maxAppVersion
+            val compatible = (minAppVersion == null || CURRENT_APP_VERSION >= minAppVersion) &&
+                (maxAppVersion == null || CURRENT_APP_VERSION <= maxAppVersion)
+            require(compatible) { "Phiên bản nguồn không tương thích với ứng dụng hiện tại." }
+            val bytes = repositoryHttpClient.fetchPackage(
+                url = entry.packageUrl,
+                maxBytes = SourceRepositoryVerifier.MAX_PACKAGE_BYTES,
+                expectedBytes = entry.packageBytes,
+                expectedSha256 = entry.packageSha256,
+            )
+            val pack = when (val result = ByteArrayInputStream(bytes).use { verifier.verify(it, trustRegistry.allKeys()) }) {
+                is SourcePlatformResult.Success -> result.value
+                is SourcePlatformResult.Failure -> error("${result.error.code}: ${result.error.message}")
+            }
+            require(pack.manifest.id == entry.sourceId) { "Repository và gói nguồn không cùng sourceId." }
+            require(pack.manifest.version == entry.version) { "Repository và gói nguồn không cùng phiên bản." }
+            require(pack.packageSha256 == entry.packageSha256) { "Hash gói nguồn không khớp repository." }
+            preparePack(pack)
+        },
+    )
+
+    /**
+     * One authoritative manual-file import transaction. All format probes share one trace and one
+     * safe file fingerprint, so a report can reconstruct the exact attempt without retaining a raw
+     * content URI or file contents.
+     */
+    fun prepareManualImport(
+        input: InputStream,
+        metadata: SourceImportFileMetadata = SourceImportFileMetadata(),
+    ): Result<SourceInstallPreview> {
+        cancelPendingInstall()
+        val traceId = "extension-import:${UUID.randomUUID()}"
+        val operationId = "$traceId:manual-file"
+        val startedAt = System.currentTimeMillis()
+        val declared = DiagnosticArtifactMetadata(metadata.displayName, metadata.mimeType, metadata.declaredSizeBytes)
+        val declaredAttributes = mapOf(
+            "fileName" to DiagnosticArtifactInspector.safeDisplayName(metadata.displayName),
+            "mimeType" to metadata.mimeType.trim().replace(Regex("[\\p{Cntrl}\\s]+"), " ").take(160),
+            "declaredBytes" to (metadata.declaredSizeBytes?.takeIf { it >= 0L }?.toString() ?: "unknown"),
+            "importAttemptId" to traceId,
+        ) + diagnosticBuildAttributes()
+        emitImportParent(
+            traceId = traceId,
+            operationId = operationId,
+            state = DiagnosticOperationState.STARTED,
+            stage = "read_selected_file",
+            name = "SOURCE_EXTENSION_IMPORT_STARTED",
+            startedAt = startedAt,
+            attributes = declaredAttributes,
         )
-        val pack = when (val result = ByteArrayInputStream(bytes).use { verifier.verify(it, trustRegistry.allKeys()) }) {
-            is SourcePlatformResult.Success -> result.value
-            is SourcePlatformResult.Failure -> error("${result.error.code}: ${result.error.message}")
+
+        val bytes = runCatching {
+            readBounded(input, MAX_MANUAL_IMPORT_BYTES, "SOURCE_IMPORT_TOO_LARGE", "SOURCE_IMPORT_EMPTY")
+        }.getOrElse { error ->
+            recordExtensionFailure(
+                stage = "read_selected_file",
+                sourceId = "manual-import",
+                error = error,
+                traceId = traceId,
+                operationId = operationId,
+                startedAt = startedAt,
+                operationKind = "EXTENSION_IMPORT",
+                extraAttributes = declaredAttributes,
+            )
+            return Result.failure(error)
         }
-        require(pack.manifest.id == entry.sourceId) { "Repository và gói nguồn không cùng sourceId." }
-        require(pack.manifest.version == entry.version) { "Repository và gói nguồn không cùng phiên bản." }
-        require(pack.packageSha256 == entry.packageSha256) { "Hash gói nguồn không khớp repository." }
-        preparePack(pack)
-    }.onFailure { recordExtensionFailure("repository_prepare_install", sourceId, it) }
+        val artifactAttributes = DiagnosticArtifactInspector.inspect(bytes, declared) +
+            mapOf("importAttemptId" to traceId) + diagnosticBuildAttributes()
+        val failures = linkedMapOf<String, Throwable>()
+
+        fun probe(
+            stage: String,
+            sourceId: String?,
+            block: () -> SourceInstallPreview,
+        ): Result<SourceInstallPreview> = runExtensionOperation(
+            stage = stage,
+            sourceId = sourceId,
+            block = block,
+            traceId = traceId,
+            operationId = "$traceId:$stage",
+            operationKind = "EXTENSION_FORMAT_PROBE",
+            extraAttributes = artifactAttributes,
+            failureSeverity = DiagnosticSeverity.INFO,
+        ).also { result -> result.exceptionOrNull()?.let { failures[stage] = it } }
+
+        val probePlan: List<Pair<String, () -> Result<SourceInstallPreview>>> = listOf(
+            "sourcepack_prepare_install" to {
+                probe("sourcepack_prepare_install", null) { prepareSourcePackInternal(ByteArrayInputStream(bytes)) }
+            },
+            "vbook_prepare_import" to {
+                probe("vbook_prepare_import", "vbook-import") {
+                    prepareVBookImportInternal(ByteArrayInputStream(bytes), traceId)
+                }
+            },
+            "native_lua_prepare_import" to {
+                probe("native_lua_prepare_import", "native-lua-import") { prepareNativeLuaImportInternal(ByteArrayInputStream(bytes)) }
+            },
+        )
+        val probes = mutableListOf<Pair<String, Result<SourceInstallPreview>>>()
+        var recognized: Pair<String, Result<SourceInstallPreview>>? = null
+        for ((name, attempt) in probePlan) {
+            val result = attempt()
+            probes += name to result
+            if (result.isSuccess) {
+                recognized = name to result
+                break
+            }
+        }
+        val recognizedProbe = recognized
+        if (recognizedProbe != null) {
+            val preview = recognizedProbe.second.getOrThrow()
+            val context = PendingImportContext(traceId, operationId, startedAt, artifactAttributes)
+            pendingImportContext = context
+            emitImportParent(
+                traceId = traceId,
+                operationId = operationId,
+                state = DiagnosticOperationState.STAGE,
+                stage = "format_recognized",
+                name = "SOURCE_EXTENSION_IMPORT_FORMAT_RECOGNIZED",
+                startedAt = startedAt,
+                sourceId = preview.sourceId,
+                attributes = artifactAttributes + mapOf(
+                    "recognizedFormat" to recognizedProbe.first,
+                    "sourceName" to preview.name.take(300),
+                    "sourceVersion" to preview.version.take(100),
+                    "probeFailureCount" to failures.size.toString(),
+                ),
+            )
+            return Result.success(preview)
+        }
+
+        val combined = IllegalArgumentException(
+            "Không nhận diện được .ntsource, vBook ZIP hoặc Lua Native Source API 2. " +
+                "SourcePack: ${failures["sourcepack_prepare_install"]?.message.orEmpty()}; " +
+                "vBook: ${failures["vbook_prepare_import"]?.message.orEmpty()}; " +
+                "Lua: ${failures["native_lua_prepare_import"]?.message.orEmpty()}",
+            failures.values.lastOrNull(),
+        )
+        recordExtensionFailure(
+            stage = "detect_extension_format",
+            sourceId = "manual-import",
+            error = combined,
+            traceId = traceId,
+            operationId = operationId,
+            startedAt = startedAt,
+            operationKind = "EXTENSION_IMPORT",
+            extraAttributes = artifactAttributes + mapOf(
+                "probeOrder" to probes.joinToString(",") { it.first },
+                "probeFailureCount" to failures.size.toString(),
+                "sourcePackError" to failures["sourcepack_prepare_install"]?.message.orEmpty().take(2_000),
+                "vBookError" to failures["vbook_prepare_import"]?.message.orEmpty().take(2_000),
+                "nativeLuaError" to failures["native_lua_prepare_import"]?.message.orEmpty().take(2_000),
+            ),
+        )
+        return Result.failure(combined)
+    }
 
     fun prepareInstall(input: InputStream): Result<SourceInstallPreview> = runExtensionOperation("sourcepack_prepare_install", null) {
+        prepareSourcePackInternal(input)
+    }
+
+    private fun prepareSourcePackInternal(input: InputStream): SourceInstallPreview {
         val pack = when (val result = verifier.verify(input, trustRegistry.allKeys())) {
             is SourcePlatformResult.Success -> result.value
             is SourcePlatformResult.Failure -> error("${result.error.code}: ${result.error.message}")
@@ -322,9 +494,15 @@ class SourcePlatformManager(
      * identity, and confirmation is committed by VBookSourcePlatform.
      */
     fun prepareVBookImport(input: InputStream): Result<SourceInstallPreview> = runExtensionOperation("vbook_prepare_import", "vbook-import") {
+        prepareVBookImportInternal(input)
+    }
+
+    private fun prepareVBookImportInternal(
+        input: InputStream,
+        importTrace: String = "vbook-import:${UUID.randomUUID()}",
+    ): SourceInstallPreview {
         val platform = vBookSourcePlatform ?: error("VBOOK_SUBSYSTEM_UNAVAILABLE")
         val bytes = readBounded(input, VBookPackageLimits().maxZipBytes)
-        val importTrace = "vbook-import:${UUID.randomUUID()}"
         evidence.capture(DiagnosticEvidence(
             timestampEpochMs = System.currentTimeMillis(),
             traceId = importTrace,
@@ -370,12 +548,32 @@ class SourcePlatformManager(
     }
 
     fun prepareNativeLuaImport(input: InputStream): Result<SourceInstallPreview> = runExtensionOperation("native_lua_prepare_import", "native-lua-import") {
+        prepareNativeLuaImportInternal(input)
+    }
+
+    private fun prepareNativeLuaImportInternal(input: InputStream): SourceInstallPreview {
         val (pack, warnings) = NativeLuaArchiveImporter.import(input)
         pendingWarnings = warnings
         preparePack(pack)
     }
 
     fun pendingInstallWarnings(): List<String> = pendingWarnings
+
+    internal fun <T> runExternalExtensionOperation(
+        stage: String,
+        sourceId: String?,
+        operationKind: String,
+        extraAttributes: Map<String, String> = emptyMap(),
+        failureSeverity: DiagnosticSeverity = DiagnosticSeverity.ERROR,
+        block: () -> T,
+    ): Result<T> = runExtensionOperation(
+        stage = stage,
+        sourceId = sourceId,
+        block = block,
+        operationKind = operationKind,
+        extraAttributes = extraAttributes,
+        failureSeverity = failureSeverity,
+    )
 
     fun trustKeys(): List<SourceTrustKeyUi> = trustRegistry.userKeys()
 
@@ -386,7 +584,65 @@ class SourcePlatformManager(
 
     fun applyTrustKeyRotation(raw: ByteArray): Result<SourceTrustKeyUi> = trustRegistry.applyRotation(raw)
 
-    fun confirmPendingInstall(): Result<SourcePackUiInfo> = runCatching {
+    fun confirmPendingInstall(): Result<SourcePackUiInfo> {
+        val context = pendingImportContext
+        val sourceId = pendingVBook?.sourceId ?: pendingPack?.manifest?.id
+        val traceId = context?.traceId ?: "extension-install:${UUID.randomUUID()}"
+        val result = runExtensionOperation(
+            stage = "confirm_install",
+            sourceId = sourceId,
+            block = ::commitPendingInstall,
+            traceId = traceId,
+            operationId = "$traceId:confirm_install",
+            operationKind = "EXTENSION_INSTALL_COMMIT",
+            extraAttributes = context?.attributes.orEmpty(),
+            // A correlated manual import emits one durable parent failure below. Keep this child
+            // stage in live/continuous logs without counting the same failed attempt twice.
+            failureSeverity = if (context != null) DiagnosticSeverity.INFO else DiagnosticSeverity.ERROR,
+        )
+        if (context != null) {
+            result.onSuccess { installed ->
+                emitImportParent(
+                    traceId = context.traceId,
+                    operationId = context.operationId,
+                    state = DiagnosticOperationState.COMPLETED,
+                    stage = "installed_and_activated",
+                    name = "SOURCE_EXTENSION_IMPORT_COMPLETED",
+                    startedAt = context.startedAt,
+                    sourceId = installed.id,
+                    attributes = context.attributes + mapOf(
+                        "installedSourceId" to installed.id,
+                        "installedName" to installed.name.take(300),
+                        "installedVersion" to installed.version.take(100),
+                        "installDisposition" to "ACTIVATED",
+                    ),
+                )
+            }.onFailure { error ->
+                val codes = extensionErrorCodes(error)
+                emitImportParent(
+                    traceId = context.traceId,
+                    operationId = context.operationId,
+                    state = DiagnosticOperationState.FAILED,
+                    stage = "confirm_install",
+                    name = "SOURCE_EXTENSION_IMPORT_FAILED",
+                    startedAt = context.startedAt,
+                    sourceId = sourceId ?: "manual-import",
+                    attributes = context.attributes + DiagnosticThrowableFormatter.attributes(error) + mapOf(
+                        "code" to codes.lastOrNull().orEmpty().ifBlank { "UNKNOWN_INSTALL_ERROR" },
+                        "outerCode" to codes.firstOrNull().orEmpty().ifBlank { "UNKNOWN_INSTALL_ERROR" },
+                        "rootCauseCode" to codes.lastOrNull().orEmpty().ifBlank { "UNKNOWN_INSTALL_ERROR" },
+                        "errorCodes" to codes.joinToString(","),
+                        "message" to (error.message ?: error.javaClass.simpleName).take(4_000),
+                        "pendingWarnings" to pendingWarnings.take(20).joinToString(" | ").take(2_000),
+                    ),
+                )
+            }
+            pendingImportContext = null
+        }
+        return result
+    }
+
+    private fun commitPendingInstall(): SourcePackUiInfo {
         val pendingVBookValue = pendingVBook
         if (pendingVBookValue != null) {
             val platform = vBookSourcePlatform ?: error("VBOOK_SUBSYSTEM_UNAVAILABLE")
@@ -403,7 +659,7 @@ class SourcePlatformManager(
             pendingVBook = null
             pendingWarnings = emptyList()
             onVBookChanged()
-            return@runCatching SourcePackUiInfo(
+            return SourcePackUiInfo(
                 id = pendingVBookValue.sourceId,
                 name = pendingVBookValue.name,
                 version = pendingVBookValue.version,
@@ -426,35 +682,61 @@ class SourcePlatformManager(
         }
         pendingPack = null
         pendingWarnings = emptyList()
-        installedPacks().first { it.id == installed.sourceId }
-    }.onFailure {
-        recordExtensionFailure("confirm_install", pendingVBook?.sourceId ?: pendingPack?.manifest?.id, it)
+        return installedPacks().first { it.id == installed.sourceId }
     }
 
     fun cancelPendingInstall() {
+        pendingImportContext?.let { context ->
+            emitImportParent(
+                traceId = context.traceId,
+                operationId = context.operationId,
+                state = DiagnosticOperationState.CANCELLED,
+                stage = "cancelled_by_user",
+                name = "SOURCE_EXTENSION_IMPORT_CANCELLED",
+                startedAt = context.startedAt,
+                attributes = context.attributes,
+            )
+        }
+        pendingImportContext = null
         pendingPack = null
         pendingVBook = null
         pendingWarnings = emptyList()
     }
 
-    fun setEnabled(sourceId: String, enabled: Boolean): Result<Unit> = runCatching {
-        when (val result = store.setEnabled(sourceId, enabled)) {
-            is SourcePlatformResult.Success -> Unit
-            is SourcePlatformResult.Failure -> error(result.error.message)
-        }
-    }
+    fun setEnabled(sourceId: String, enabled: Boolean): Result<Unit> = runExtensionOperation(
+        stage = if (enabled) "enable_source" else "disable_source",
+        sourceId = sourceId,
+        operationKind = "EXTENSION_ACTIVATION",
+        extraAttributes = mapOf("enabled" to enabled.toString()),
+        block = {
+            when (val result = store.setEnabled(sourceId, enabled)) {
+                is SourcePlatformResult.Success -> Unit
+                is SourcePlatformResult.Failure -> error(result.error.message)
+            }
+        },
+    )
 
-    fun rollback(sourceId: String): Result<Unit> = runCatching {
-        when (val result = store.rollback(sourceId)) {
-            is SourcePlatformResult.Success -> Unit
-            is SourcePlatformResult.Failure -> error(result.error.message)
-        }
-    }
+    fun rollback(sourceId: String): Result<Unit> = runExtensionOperation(
+        stage = "rollback_source",
+        sourceId = sourceId,
+        operationKind = "EXTENSION_ROLLBACK",
+        block = {
+            when (val result = store.rollback(sourceId)) {
+                is SourcePlatformResult.Success -> Unit
+                is SourcePlatformResult.Failure -> error(result.error.message)
+            }
+        },
+    )
 
-    fun removeInstalledPack(sourceId: String): Result<Unit> = runCatching {
-        require(store.remove(sourceId)) { "Không tìm thấy tiện ích để xóa." }
-        if (sourceId in builtinSourceIds) rememberBuiltinRemoved(sourceId)
-    }
+    fun removeInstalledPack(sourceId: String): Result<Unit> = runExtensionOperation(
+        stage = "remove_source",
+        sourceId = sourceId,
+        operationKind = "EXTENSION_REMOVE",
+        block = {
+            require(store.remove(sourceId)) { "Không tìm thấy tiện ích để xóa." }
+            if (sourceId in builtinSourceIds) rememberBuiltinRemoved(sourceId)
+        },
+    )
 
     fun exportInstalledPack(sourceId: String, output: OutputStream): Result<Unit> = runCatching {
         val pack = store.readActivePack(sourceId) ?: error("Không tìm thấy gói tiện ích đang hoạt động.")
@@ -830,7 +1112,12 @@ class SourcePlatformManager(
         }
     }
 
-    private fun readBounded(input: InputStream, maxBytes: Int): ByteArray {
+    private fun readBounded(
+        input: InputStream,
+        maxBytes: Int,
+        tooLargeCode: String = "VBOOK_ZIP_SIZE_INVALID",
+        emptyCode: String = tooLargeCode,
+    ): ByteArray {
         require(maxBytes > 0) { "VBOOK_IMPORT_LIMIT_INVALID" }
         val output = ByteArrayOutputStream(minOf(maxBytes, 256 * 1024))
         val buffer = ByteArray(16 * 1024)
@@ -839,10 +1126,10 @@ class SourcePlatformManager(
             val read = input.read(buffer)
             if (read < 0) break
             total += read
-            require(total <= maxBytes) { "VBOOK_ZIP_SIZE_INVALID" }
+            require(total <= maxBytes) { tooLargeCode }
             output.write(buffer, 0, read)
         }
-        return output.toByteArray().also { require(it.isNotEmpty()) { "VBOOK_ZIP_SIZE_INVALID" } }
+        return output.toByteArray().also { require(it.isNotEmpty()) { emptyCode } }
     }
 
     private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
@@ -875,9 +1162,16 @@ class SourcePlatformManager(
         if (isEmpty()) add("Không yêu cầu thêm quyền")
     }
 
-    private fun <T> runExtensionOperation(stage: String, sourceId: String?, block: () -> T): Result<T> {
-        val traceId = "extension-install:${UUID.randomUUID()}"
-        val operationId = "$traceId:$stage"
+    private fun <T> runExtensionOperation(
+        stage: String,
+        sourceId: String?,
+        traceId: String = "extension-install:${UUID.randomUUID()}",
+        operationId: String = "$traceId:$stage",
+        operationKind: String = "EXTENSION_INSTALL",
+        extraAttributes: Map<String, String> = emptyMap(),
+        failureSeverity: DiagnosticSeverity = DiagnosticSeverity.ERROR,
+        block: () -> T,
+    ): Result<T> {
         val startedAt = System.currentTimeMillis()
         diagnostics.emit(DiagnosticEvent(
             timestampEpochMs = startedAt,
@@ -887,11 +1181,11 @@ class SourcePlatformManager(
             name = "SOURCE_EXTENSION_INSTALL_STARTED",
             attributes = DiagnosticOperationContract.attributes(
                 id = operationId,
-                kind = "EXTENSION_INSTALL",
+                kind = operationKind,
                 flow = "package",
                 state = DiagnosticOperationState.STARTED,
                 stage = stage,
-            ) + mapOf("installStage" to stage),
+            ) + mapOf("installStage" to stage) + diagnosticBuildAttributes() + extraAttributes,
         ))
         return runCatching(block).onSuccess {
             diagnostics.emit(DiagnosticEvent(
@@ -903,13 +1197,18 @@ class SourcePlatformManager(
                 durationMs = System.currentTimeMillis() - startedAt,
                 attributes = DiagnosticOperationContract.attributes(
                     id = operationId,
-                    kind = "EXTENSION_INSTALL",
+                    kind = operationKind,
                     flow = "package",
                     state = DiagnosticOperationState.COMPLETED,
                     stage = stage,
-                ) + mapOf("installStage" to stage),
+                ) + mapOf("installStage" to stage) + diagnosticBuildAttributes() + extraAttributes,
             ))
-        }.onFailure { recordExtensionFailure(stage, sourceId, it, traceId, operationId, startedAt) }
+        }.onFailure {
+            recordExtensionFailure(
+                stage, sourceId, it, traceId, operationId, startedAt, operationKind, extraAttributes,
+                failureSeverity,
+            )
+        }
     }
 
     private fun recordExtensionFailure(
@@ -919,47 +1218,105 @@ class SourcePlatformManager(
         traceId: String = "extension-install:${UUID.randomUUID()}",
         operationId: String = "$traceId:$stage",
         startedAt: Long? = null,
+        operationKind: String = "EXTENSION_INSTALL",
+        extraAttributes: Map<String, String> = emptyMap(),
+        severity: DiagnosticSeverity = DiagnosticSeverity.ERROR,
     ) {
         val message = error.message ?: error.javaClass.simpleName
         // Action labels such as GENRE/SEARCH/DETAIL are context, not error codes. Extension error
         // codes consistently contain an underscore, so keep the causal chain free of those labels.
-        val codes = EXTENSION_ERROR_CODE.findAll(message)
-            .map(MatchResult::value)
-            .filter { '_' in it }
-            .distinct()
-            .take(20)
-            .toList()
+        val codes = extensionErrorCodes(error)
         diagnostics.emit(
             DiagnosticEvent(
                 timestampEpochMs = System.currentTimeMillis(),
                 traceId = traceId,
                 sourceId = sourceId?.takeIf(String::isNotBlank) ?: "source-platform",
                 category = DiagnosticCategory.PACKAGE,
-                name = "SOURCE_EXTENSION_INSTALL_FAILED",
-                severity = DiagnosticSeverity.ERROR,
+                name = when (operationKind) {
+                    "EXTENSION_IMPORT" -> "SOURCE_EXTENSION_IMPORT_FAILED"
+                    "EXTENSION_FORMAT_PROBE" -> "SOURCE_EXTENSION_FORMAT_PROBE_REJECTED"
+                    else -> "SOURCE_EXTENSION_INSTALL_FAILED"
+                },
+                severity = severity,
                 durationMs = startedAt?.let { System.currentTimeMillis() - it },
                 attributes = DiagnosticOperationContract.attributes(
                     id = operationId,
-                    kind = "EXTENSION_INSTALL",
+                    kind = operationKind,
                     flow = "package",
                     state = DiagnosticOperationState.FAILED,
                     stage = stage,
                 ) + mapOf(
-                    "code" to codes.lastOrNull().orEmpty().ifBlank { "UNKNOWN_INSTALL_ERROR" },
-                    "outerCode" to codes.firstOrNull().orEmpty().ifBlank { "UNKNOWN_INSTALL_ERROR" },
-                    "rootCauseCode" to codes.lastOrNull().orEmpty().ifBlank { "UNKNOWN_INSTALL_ERROR" },
+                    "code" to codes.lastOrNull().orEmpty().ifBlank {
+                        if (operationKind == "EXTENSION_FORMAT_PROBE") "FORMAT_NOT_RECOGNIZED" else "UNKNOWN_INSTALL_ERROR"
+                    },
+                    "outerCode" to codes.firstOrNull().orEmpty().ifBlank {
+                        if (operationKind == "EXTENSION_FORMAT_PROBE") "FORMAT_NOT_RECOGNIZED" else "UNKNOWN_INSTALL_ERROR"
+                    },
+                    "rootCauseCode" to codes.lastOrNull().orEmpty().ifBlank {
+                        if (operationKind == "EXTENSION_FORMAT_PROBE") "FORMAT_NOT_RECOGNIZED" else "UNKNOWN_INSTALL_ERROR"
+                    },
                     "errorCodes" to codes.joinToString(","),
                     "stage" to stage,
                     "message" to message.take(4_000),
-                    "errorType" to error.javaClass.simpleName,
-                    "causeChain" to generateSequence(error) { it.cause }.take(8).joinToString(" -> ") {
-                        "${it.javaClass.simpleName}:${it.message.orEmpty()}"
-                    }.take(8_000),
                     "pendingWarnings" to pendingWarnings.take(20).joinToString(" | ").take(2_000),
-                ),
+                ) + diagnosticBuildAttributes() + DiagnosticThrowableFormatter.attributes(error) + extraAttributes,
             ),
         )
     }
+
+    private fun emitImportParent(
+        traceId: String,
+        operationId: String,
+        state: DiagnosticOperationState,
+        stage: String,
+        name: String,
+        startedAt: Long,
+        sourceId: String = "manual-import",
+        attributes: Map<String, String>,
+        severity: DiagnosticSeverity = if (state == DiagnosticOperationState.FAILED) DiagnosticSeverity.ERROR else DiagnosticSeverity.INFO,
+    ) {
+        diagnostics.emit(DiagnosticEvent(
+            timestampEpochMs = System.currentTimeMillis(),
+            traceId = traceId,
+            sourceId = sourceId,
+            category = DiagnosticCategory.PACKAGE,
+            name = name,
+            severity = severity,
+            durationMs = if (state in setOf(
+                    DiagnosticOperationState.COMPLETED,
+                    DiagnosticOperationState.FAILED,
+                    DiagnosticOperationState.CANCELLED,
+                )) System.currentTimeMillis() - startedAt else null,
+            attributes = DiagnosticOperationContract.attributes(
+                id = operationId,
+                kind = "EXTENSION_IMPORT",
+                flow = "package",
+                state = state,
+                stage = stage,
+            ) + attributes,
+        ))
+    }
+
+    private fun diagnosticBuildAttributes(): Map<String, String> = mapOf(
+        "appVersionName" to BuildConfig.VERSION_NAME,
+        "appVersionCode" to BuildConfig.VERSION_CODE.toString(),
+        "buildType" to BuildConfig.BUILD_TYPE,
+        "diagnosticBuildId" to BuildConfig.DIAGNOSTIC_BUILD_ID,
+        "symbolMappingIdentity" to "${BuildConfig.VERSION_CODE}:${BuildConfig.DIAGNOSTIC_BUILD_ID}",
+    )
+
+    private fun extensionErrorCodes(error: Throwable): List<String> = generateSequence(error) { current ->
+        current.cause?.takeUnless { it === current }
+    }.take(8).flatMap { cause ->
+        EXTENSION_ERROR_CODE.findAll(cause.message.orEmpty()).map(MatchResult::value)
+    }.filter { '_' in it }.distinct().take(20).toList()
+
+    private data class PendingImportContext(
+        val traceId: String,
+        val operationId: String,
+        val startedAt: Long,
+        val attributes: Map<String, String>,
+    )
 
     private data class PendingVBookImport(
         val identity: SourceArtifactIdentity,
@@ -991,6 +1348,7 @@ class SourcePlatformManager(
         private const val MANUAL_VBOOK_REPOSITORY_ID = "manual.vbook.local"
         private const val DEMO_BUILTIN_SOURCEPACK_ASSET = "demo.ntsource"
         private const val MAX_BUILTIN_LUA_BYTES = 1024 * 1024
+        private const val MAX_MANUAL_IMPORT_BYTES = 64 * 1024 * 1024
         private const val BUILTIN_REMOVAL_PREFERENCES = "source_platform_builtin_removals"
         private const val REMOVED_BUILTIN_SOURCE_IDS = "removed_source_ids"
         private val REPOSITORY_ID = Regex("^[a-z][a-z0-9]*(\\.[a-z0-9][a-z0-9-]*){2,}$")

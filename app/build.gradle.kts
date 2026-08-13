@@ -7,6 +7,13 @@ plugins {
     id("org.jetbrains.kotlin.kapt")
 }
 
+val diagnosticBuildId = providers.environmentVariable("GITHUB_SHA")
+    .orElse(providers.environmentVariable("NGHETRUYEN_BUILD_SHA"))
+    .orElse("local")
+    .get()
+    .replace(Regex("[^A-Za-z0-9._-]"), "_")
+    .take(80)
+
 val stableDebugKeystoreB64 = rootProject.file(".github/signing/stable-debug.keystore.b64")
 val stableDebugKeystore = rootProject.file(".gradle/nghetruyen-stable-debug.keystore")
 check(stableDebugKeystoreB64.isFile) {
@@ -30,6 +37,7 @@ android {
         // Legacy release-gate tokens: versionCode = 28, versionName = "2.8.0-ai-narration-priority2-complete"
         versionCode = 33
         versionName = "2.9.0-xpk-parity"
+        buildConfigField("String", "DIAGNOSTIC_BUILD_ID", "\"$diagnosticBuildId\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true

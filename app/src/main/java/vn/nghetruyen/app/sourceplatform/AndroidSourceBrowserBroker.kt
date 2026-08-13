@@ -42,6 +42,7 @@ import vn.nghetruyen.source.diagnostics.DiagnosticOperationContract
 import vn.nghetruyen.source.diagnostics.DiagnosticOperationState
 import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 import vn.nghetruyen.source.diagnostics.DiagnosticSink
+import vn.nghetruyen.source.diagnostics.DiagnosticThrowableFormatter
 import vn.nghetruyen.source.network.SourceOriginPolicy
 import vn.nghetruyen.source.network.PublicAddressPolicy
 import org.json.JSONTokener
@@ -105,7 +106,13 @@ class AndroidSourceBrowserBroker(
         if (Looper.myLooper() == Looper.getMainLooper()) {
             return failure(SourceErrorCode.BROWSER_UNAVAILABLE, "SOURCE_BROWSER_BLOCKING_CALL_ON_MAIN", request)
         }
+        val requestId = UUID.randomUUID().toString()
+        val trackedRequest = request.copy(options = request.options + mapOf(
+            INTERNAL_DIAGNOSTIC_REQUEST_ID to requestId,
+            INTERNAL_DIAGNOSTIC_OPERATION_ID to "browser:${request.traceId.ifBlank { "no-trace" }}:$requestId",
+        ))
         return synchronized(operationLock) {
+            val request = trackedRequest
             runCatching {
                 require(request.sourceId == manifest.id) { "SOURCE_BROWSER_SOURCE_ID_MISMATCH" }
                 require(request.timeoutMs in 100L..120_000L) { "SOURCE_BROWSER_TIMEOUT_INVALID" }
@@ -123,7 +130,7 @@ class AndroidSourceBrowserBroker(
                     "stage" to "action_start",
                     "timeoutMs" to request.timeoutMs.toString(),
                     "deadlineEpochMs" to (started + request.timeoutMs).toString(),
-                    "requestId" to request.traceId,
+                    "requestId" to requestId,
                     "sessionId" to session.sessionId,
                     "navigationGeneration" to session.navigationGeneration.toString(),
                     "url" to diagnosticUrl(request.url.orEmpty()),
@@ -198,7 +205,7 @@ class AndroidSourceBrowserBroker(
                     "stage" to "action_failed",
                     "code" to code.name,
                     "error" to (error.message ?: error.javaClass.simpleName),
-                )))
+                ) + DiagnosticThrowableFormatter.attributes(error)))
                 active?.let { session -> captureBrowserEvidence(session, request, "failed-${request.action.name.lowercase()}") }
                 SourcePlatformResult.Failure(SourcePlatformFailure(code, error.message ?: "SOURCE_BROWSER_FAILED", request.traceId, error))
 
@@ -1114,7 +1121,8 @@ class AndroidSourceBrowserBroker(
             else -> DiagnosticOperationState.STAGE
         }
         val operation = DiagnosticOperationContract.attributes(
-            id = "browser:${request.traceId.ifBlank { "no-trace" }}:${request.action.name}",
+            id = request.options[INTERNAL_DIAGNOSTIC_OPERATION_ID]
+                ?: "browser:${request.traceId.ifBlank { "no-trace" }}:${request.action.name}",
             kind = request.action.name,
             flow = "browser",
             state = state,
@@ -1124,7 +1132,8 @@ class AndroidSourceBrowserBroker(
         )
         return DiagnosticEvent(
             clockMs(), request.traceId, manifest.id, manifest.version.toString(),
-            DiagnosticCategory.BROWSER, name, severity, durationMs, operation + attributes,
+            DiagnosticCategory.BROWSER, name, severity, durationMs,
+            operation + mapOf("requestId" to request.options[INTERNAL_DIAGNOSTIC_REQUEST_ID].orEmpty()) + attributes,
         )
     }
 
@@ -1258,4 +1267,9 @@ class AndroidSourceBrowserBroker(
     private data class WebViewState(val url: String?, val title: String?, val progress: Int)
     private data class DialogPolicy(val defaultAction: String, val defaultValue: String)
     private data class DialogDecision(val accepted: Boolean, val value: String?)
+
+    private companion object {
+        const val INTERNAL_DIAGNOSTIC_REQUEST_ID = "__nghetruyenDiagnosticRequestId"
+        const val INTERNAL_DIAGNOSTIC_OPERATION_ID = "__nghetruyenDiagnosticOperationId"
+    }
 }

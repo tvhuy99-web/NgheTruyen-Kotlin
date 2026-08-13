@@ -287,6 +287,126 @@ object DiagnosticRedactor {
         .joinToString("") { "%02x".format(Locale.ROOT, it) }
 }
 
+/**
+ * Bounded exception detail suitable for a user-shareable diagnostic bundle. Keeping stack frames
+ * is essential for host-side Android/Kotlin failures, but the output must remain small and pass
+ * through the same credential redaction as every other diagnostic attribute.
+ */
+object DiagnosticThrowableFormatter {
+    fun attributes(
+        error: Throwable,
+        maxCauses: Int = 8,
+        maxFrames: Int = 96,
+        maxChars: Int = 16_000,
+    ): Map<String, String> {
+        require(maxCauses in 1..16) { "DIAGNOSTIC_CAUSE_LIMIT_INVALID" }
+        require(maxFrames in 1..256) { "DIAGNOSTIC_FRAME_LIMIT_INVALID" }
+        require(maxChars in 512..64_000) { "DIAGNOSTIC_STACK_SIZE_INVALID" }
+
+        val causes = generateSequence(error) { current -> current.cause?.takeUnless { it === current } }
+            .take(maxCauses)
+            .toList()
+        var retainedFrames = 0
+        var truncated = false
+        val framesPerCause = (maxFrames / causes.size.coerceAtLeast(1)).coerceAtLeast(1)
+        val stack = buildString {
+            causes.forEachIndexed { index, cause ->
+                if (index > 0) append("Caused by: ")
+                append(cause.javaClass.name)
+                cause.message?.takeIf(String::isNotBlank)?.let { append(": ").append(it) }
+                appendLine()
+                val allowance = minOf(framesPerCause, maxFrames - retainedFrames)
+                cause.stackTrace.take(allowance).forEach { frame ->
+                    if (length >= maxChars) {
+                        truncated = true
+                        return@forEach
+                    }
+                    append("\tat ").append(frame).appendLine()
+                    retainedFrames += 1
+                }
+                if (cause.stackTrace.size > allowance) truncated = true
+            }
+        }.take(maxChars)
+        val chain = causes.joinToString(" -> ") { cause ->
+            "${cause.javaClass.simpleName}:${cause.message.orEmpty()}"
+        }.take(maxChars / 2)
+        return DiagnosticRedactor.redact(
+            mapOf(
+                "errorType" to error.javaClass.name,
+                "causeChain" to chain,
+                "stackTrace" to stack,
+                "stackFrameCount" to retainedFrames.toString(),
+                "stackTraceTruncated" to (truncated || stack.length >= maxChars).toString(),
+            ),
+        )
+    }
+}
+
+data class DiagnosticArtifactMetadata(
+    val displayName: String = "",
+    val mimeType: String = "",
+    val declaredSizeBytes: Long? = null,
+)
+
+/** Safe identity and format hints for correlating every probe of one user-selected file. */
+object DiagnosticArtifactInspector {
+    fun inspect(bytes: ByteArray, metadata: DiagnosticArtifactMetadata): Map<String, String> = buildMap {
+        put("fileName", safeDisplayName(metadata.displayName))
+        put("mimeType", metadata.mimeType.trim().replace(Regex("[\\p{Cntrl}\\s]+"), " ").take(160))
+        metadata.declaredSizeBytes?.takeIf { it >= 0L }?.let { put("declaredBytes", it.toString()) }
+        put("actualBytes", bytes.size.toString())
+        put("contentSha256", sha256(bytes))
+        put("magicHex", bytes.take(16).joinToString("") { "%02x".format(Locale.ROOT, it.toInt() and 0xff) })
+        put("detectedContainer", detectedContainer(bytes, metadata.displayName))
+        zipEntryCount(bytes)?.let {
+            put("zipEntryCount", it.toString())
+            put("zipEntryCountMethod", "central-directory-signature")
+        }
+    }
+
+    fun safeDisplayName(raw: String): String = raw
+        .substringAfterLast('/')
+        .substringAfterLast('\\')
+        .replace(Regex("[\\p{Cntrl}]+"), "_")
+        .trim()
+        .take(180)
+        .ifBlank { "unknown-file" }
+
+    private fun detectedContainer(bytes: ByteArray, displayName: String): String {
+        if (bytes.isEmpty()) return "EMPTY"
+        if (bytes.size >= 4 && bytes[0] == 0x50.toByte() && bytes[1] == 0x4b.toByte()) return "ZIP"
+        val sample = bytes.take(4_096).toByteArray().toString(Charsets.UTF_8).trimStart()
+        return when {
+            displayName.endsWith(".lua", true) || sample.startsWith("return ") || sample.startsWith("local ") -> "LUA_TEXT"
+            sample.startsWith("{") || sample.startsWith("[") -> "JSON_TEXT"
+            sample.isNotBlank() && sample.count { !it.isISOControl() || it == '\n' || it == '\r' || it == '\t' } >= sample.length * 9 / 10 -> "TEXT"
+            else -> "BINARY"
+        }
+    }
+
+    private fun zipEntryCount(bytes: ByteArray): Int? {
+        if (bytes.size < 4 || bytes[0] != 0x50.toByte() || bytes[1] != 0x4b.toByte()) return null
+        var count = 0
+        var index = 0
+        while (index <= bytes.size - 4) {
+            if (bytes[index] == 0x50.toByte() && bytes[index + 1] == 0x4b.toByte() &&
+                bytes[index + 2] == 0x01.toByte() && bytes[index + 3] == 0x02.toByte()
+            ) {
+                count += 1
+                if (count > MAX_ZIP_ENTRIES_TO_COUNT) return -1
+            }
+            index += 1
+        }
+        return count
+    }
+
+    private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
+        .digest(bytes)
+        .joinToString("") { "%02x".format(Locale.ROOT, it.toInt() and 0xff) }
+
+    private const val MAX_ZIP_ENTRIES_TO_COUNT = 4_096
+}
+
 object DiagnosticJsonExporter {
     fun eventLine(event: DiagnosticEvent): String = JsonCodec.stringify(eventJson(event))
 

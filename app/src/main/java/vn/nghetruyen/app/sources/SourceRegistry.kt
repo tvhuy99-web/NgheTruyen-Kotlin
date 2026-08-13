@@ -8,12 +8,15 @@ import vn.nghetruyen.app.core.model.ChapterSummary
 import vn.nghetruyen.app.core.model.SourceHealth
 import vn.nghetruyen.app.core.model.StoryDetail
 import vn.nghetruyen.app.core.model.StorySummary
+import vn.nghetruyen.app.sourceplatform.SourceDiagnosticRuntime
 
 class SourceRegistry(
     sources: List<StorySource>? = null,
     sessionStore: SourceSessionStore = InMemorySourceSessionStore(),
     sourcePackSources: List<StorySource> = emptyList(),
+    diagnostics: SourceDiagnosticRuntime? = null,
 ) {
+    private val diagnosticRuntime = diagnostics
     private val legacySources = (sources ?: defaultSources(sessionStore)).distinctBy { it.descriptor.id }
     @Volatile
     private var byId: Map<String, StorySource> = merge(sourcePackSources)
@@ -74,7 +77,9 @@ class SourceRegistry(
                 selected[id] = candidate
             }
         }
-        return selected.mapValues { (_, source) -> source.withVBookExecutionBoundary() }
+        return selected.mapValues { (_, source) ->
+            source.withExecutionAndDiagnostics(diagnosticRuntime)
+        }
     }
 
     companion object {
@@ -89,6 +94,11 @@ class SourceRegistry(
             NotPortedSource("wattpad", "Wattpad / vBook", "https://www.wattpad.com"),
         )
     }
+}
+
+private fun StorySource.withExecutionAndDiagnostics(diagnostics: SourceDiagnosticRuntime?): StorySource {
+    if (this is DiagnosticStorySource) return this
+    return withVBookExecutionBoundary().withDiagnostics(diagnostics)
 }
 
 /**

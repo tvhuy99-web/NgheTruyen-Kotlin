@@ -84,10 +84,15 @@ private fun ReferenceDiagnosticsDialog(
     onDismiss: () -> Unit,
 ) {
     val clipboard = LocalClipboardManager.current
+    val timelineTitle = if (state.diagnosticsMode == "off") {
+        "LỖI CÀI/IMPORT ĐƯỢC GIỮ LẠI"
+    } else {
+        "NHẬT KÝ TRANG HIỆN TẠI"
+    }
     val timeline = DiagnosticHumanFormatter.formatUi(
         events = state.sourceDiagnostics,
         mode = state.diagnosticsMode,
-        title = "NHẬT KÝ TRANG HIỆN TẠI",
+        title = timelineTitle,
     )
     val logText = buildString {
         appendLine("TRẠNG THÁI HỘP ĐEN")

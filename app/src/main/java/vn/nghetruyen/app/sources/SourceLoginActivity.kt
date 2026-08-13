@@ -62,14 +62,14 @@ class SourceLoginActivity : ComponentActivity() {
         val app = application as NgheTruyenApplication
         sessionStore = app.container.sourceSessionStore
         diagnostics = app.container.sourceDiagnostics
+        desktopCompat = browserPrefs.getBoolean(KEY_CHROME_COMPAT, false)
+        logLevel = browserPrefs.getInt(KEY_LOG_LEVEL, 1).coerceIn(0, 2)
+        autoClearLogOnClose = browserPrefs.getBoolean(KEY_AUTO_CLEAR_LOG_ON_CLOSE, true)
         diagnosticScreenScope = DiagnosticTransientScreenScope.enter(
             diagnostics = diagnostics,
             screenKey = diagnosticScreenKey(),
         )
         beginDiagnosticSession(resumed = false)
-        desktopCompat = browserPrefs.getBoolean(KEY_CHROME_COMPAT, false)
-        logLevel = browserPrefs.getInt(KEY_LOG_LEVEL, 1).coerceIn(0, 2)
-        autoClearLogOnClose = browserPrefs.getBoolean(KEY_AUTO_CLEAR_LOG_ON_CLOSE, true)
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -260,6 +260,8 @@ class SourceLoginActivity : ComponentActivity() {
                 "url" to diagnosticUrl(loginUrl),
                 "allowedHosts" to allowedHosts.size.toString(),
                 "resumed" to resumed.toString(),
+                "localLogLevel" to logLevelLabel(logLevel),
+                "autoClearLocalLog" to autoClearLogOnClose.toString(),
             ),
         )
     }
@@ -385,9 +387,9 @@ class SourceLoginActivity : ComponentActivity() {
         WebSettings.getDefaultUserAgent(this)
     }
 
-    override fun onResume() {
-        super.onResume()
-        if (!::webView.isInitialized || !::diagnostics.isInitialized) return
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus || !::webView.isInitialized || !::diagnostics.isInitialized) return
         val last = diagnostics.recorder.snapshot().lastOrNull()
         val restoredFreshScreen = diagnostics.mode == SourceDiagnosticRuntime.MODE_SCREEN &&
             last?.name == "DIAGNOSTIC_SCREEN_STARTED" &&

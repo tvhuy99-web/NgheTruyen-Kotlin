@@ -91,8 +91,8 @@ class SourceDiagnosticRuntime(private val context: Context) {
         applyMode(restoredMode)
         if (restoredMode == MODE_CONTINUOUS) {
             recorder.restore(continuousStore.restoreRecentEvents(MAX_IN_MEMORY_EVENTS))
+            restoreCriticalHistory()
         }
-        if (restoredMode != MODE_OFF) restoreCriticalHistory()
     }
 
     fun setMode(requested: String): String {
@@ -134,7 +134,6 @@ class SourceDiagnosticRuntime(private val context: Context) {
                 clearCurrentSession()
                 activeScreenKey = ""
                 applyMode(normalized)
-                restoreCriticalHistory()
                 mark(
                     name = "DIAGNOSTICS_MODE_CHANGED",
                     category = DiagnosticCategory.RUNTIME,
@@ -164,7 +163,6 @@ class SourceDiagnosticRuntime(private val context: Context) {
         return when (mode) {
             MODE_SCREEN -> {
                 clearCurrentSession()
-                restoreCriticalHistory()
                 mark(
                     name = "DIAGNOSTIC_SCREEN_STARTED",
                     category = DiagnosticCategory.RUNTIME,
@@ -226,8 +224,12 @@ class SourceDiagnosticRuntime(private val context: Context) {
 
     fun persistentCriticalCount(): Int = criticalStore.eventCount
 
-    /** Read-only durable install/import history, available even while session diagnostics are off. */
-    fun persistentCriticalSnapshot(): List<DiagnosticEvent> = criticalStore.snapshot()
+    /**
+     * Durable install/import history is visible as a fallback only while session diagnostics are off.
+     * Screen/continuous modes must never mix old persisted failures into their live timeline.
+     */
+    fun persistentCriticalSnapshot(): List<DiagnosticEvent> =
+        if (mode == MODE_OFF) criticalStore.snapshot() else emptyList()
 
     /** User-requested clear: this is the only action that deletes continuous history. */
     fun clearBlackBox() {
@@ -278,8 +280,6 @@ class SourceDiagnosticRuntime(private val context: Context) {
                 zip.addText("report/backup_tail.log", DiagnosticRedactor.redactLongText(backupLogTail, 64_000))
             }
 
-            // Current-session RAM evidence mirrors the Lua advanced package: full capture plus a
-            // sanitized HTML view that is easier to inspect and share.
             evidence.snapshot().forEachIndexed { index, item ->
                 val base = "evidence/current/${index.toString().padStart(4, '0')}-${safePath(item.name)}"
                 zip.addBytes(base, safeEvidenceBytes(item))
@@ -293,8 +293,6 @@ class SourceDiagnosticRuntime(private val context: Context) {
                 }
             }
 
-            // Continuous history survives process restarts and is bounded by two rotated JSONL
-            // segments so leaving diagnostics enabled cannot grow storage without limit.
             if (mode == MODE_CONTINUOUS) {
                 continuousStore.filesForExport().forEach { (name, file) ->
                     zip.addFile("continuous/$name", file)
@@ -511,7 +509,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
     }
 }
 
-private class DiagnosticActivityTracker : DiagnosticSink {
+internal class DiagnosticActivityTracker : DiagnosticSink {
     private val lock = Any()
     private val active = linkedMapOf<String, DiagnosticActiveOperation>()
 
@@ -521,6 +519,7 @@ private class DiagnosticActivityTracker : DiagnosticSink {
         val name = event.name.uppercase()
         val operationId = DiagnosticOperationContract.id(event) ?: traceId
         val state = DiagnosticOperationContract.state(event)
+        if (state == null && isDiagnosticBoundary(name)) return@synchronized
         val current = active[operationId]
         when {
             (state == DiagnosticOperationState.STARTED || state == null && isStart(name)) -> {
@@ -563,6 +562,8 @@ private class DiagnosticActivityTracker : DiagnosticSink {
     fun clear() = synchronized(lock) { active.clear() }
 
     private fun isStart(name: String): Boolean = name.endsWith("_START") || name.endsWith("_STARTED")
+    private fun isDiagnosticBoundary(name: String): Boolean =
+        name.startsWith("DIAGNOSTIC_SCREEN_") || name.startsWith("DIAGNOSTICS_MODE_")
     private fun isTerminal(name: String): Boolean = TERMINAL_SUFFIXES.any(name::endsWith)
     private fun operationStem(name: String): String =
         (START_SUFFIXES + TERMINAL_SUFFIXES).firstOrNull(name::endsWith)?.let(name::removeSuffix) ?: name
@@ -592,7 +593,6 @@ internal object PersistentCriticalDiagnosticPolicy {
     }
 }
 
-/** Lua-compatible bounded failure history that works even when the main diagnostic mode is off. */
 private class CriticalDiagnosticStore(context: Context) : DiagnosticSink {
     private val lock = Any()
     private val root = File(context.filesDir, "source-diagnostics-critical")
@@ -643,7 +643,6 @@ private class CriticalDiagnosticStore(context: Context) : DiagnosticSink {
     }
 }
 
-/** Cross-process store with bounded event history for the user-facing continuous mode. */
 private class ContinuousDiagnosticStore(private val context: Context) : DiagnosticSink, DiagnosticEvidenceSink {
     private val lock = Any()
     private val root = File(context.filesDir, "source-diagnostics-continuous")

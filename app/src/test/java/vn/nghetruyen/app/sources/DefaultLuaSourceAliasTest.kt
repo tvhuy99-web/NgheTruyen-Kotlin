@@ -34,6 +34,22 @@ class DefaultLuaSourceAliasTest {
     }
 
     @Test
+    fun allSevenDefaultPackageIdsArePinnedToStableUserDataIds() {
+        assertEquals(
+            mapOf(
+                "vn.nghetruyen.native.truyenfull-native" to "truyenfull",
+                "vn.nghetruyen.native.truyencv-io-default-native" to "truyencv",
+                "vn.nghetruyen.native.truyencom-default-native" to "truyencom",
+                "vn.nghetruyen.native.truyenyy-co-native" to "truyenyy",
+                "vn.nghetruyen.native.wikidich-default-native-v9-complete-scroll" to "wikidich",
+                "vn.nghetruyen.native.sangtacviet-native-instant-fast-v50" to "sangtacviet",
+                "vn.nghetruyen.vbook.wattpad-default-vbook" to "wattpad",
+            ),
+            DEFAULT_LUA_STABLE_IDS,
+        )
+    }
+
+    @Test
     fun unrelatedExternalSourceIsNotRewritten() {
         val source = FakeSource("third.party.source", priority = 150)
         assertSame(source, source.withStableDefaultLuaId())

@@ -11,7 +11,7 @@ def w(root,path,text):
 
 def main():
  src=(ROOT/'app/src/main/java/vn/nghetruyen/app/sources/SourceDiagnosticBrowserActivity.kt').read_text(encoding='utf-8')
- for token in ('MIXED_CONTENT_NEVER_ALLOW','safeBrowsingEnabled = true','allowFileAccess = false','allowContentAccess = false','shouldInterceptRequest','onReceivedSslError','CookieHeaderCodec.cookieNames','XUẤT JSON','onJsPrompt','ORIGIN_MODE','RESOURCE_MODE','STORAGE_PROBE','requests'):
+ for token in ('ExtensionWebViewAuthority.apply','recordBrowserEnvironment','onCreateWindow','POPUP_NAVIGATION','POPUP_BLOCKED','shouldInterceptRequest','onReceivedSslError','CookieHeaderCodec.cookieNames','XUẤT NHẬT KÝ','runJavaScriptProbe','runDomProbe','runCookieProbe','requestCount'):
   assert token in src, token
  assert 'SafeBrowsingResponse' not in src, 'API 27 type must not be linked directly with minSdk 26'
  if not K:
@@ -39,7 +39,7 @@ class Uri private constructor(private val raw:String="https://example.com/") {
 }
 ''')]
   f += [w(r,'android/net/http/SslError.kt','package android.net.http\nclass SslError { val primaryError:Int=0; val url:String?="https://example.com" }\n')]
-  f += [w(r,'android/os/Os.kt','package android.os\nopen class Bundle\nopen class Message\n')]
+  f += [w(r,'android/os/Os.kt','package android.os\nopen class Bundle\nopen class Message { var obj:Any?=null; fun sendToTarget(){} }\n')]
   f += [w(r,'android/view/View.kt',r'''package android.view
 open class View
 open class ViewGroup:View(){ open class LayoutParams(val width:Int,val height:Int){ companion object { const val MATCH_PARENT=-1; const val WRAP_CONTENT=-2 } } }
@@ -64,7 +64,7 @@ import android.os.Message
 import android.view.ViewGroup
 import java.io.InputStream
 open class ConsoleMessage { fun message():String=""; fun messageLevel():MessageLevel=MessageLevel.LOG; fun lineNumber():Int=0; enum class MessageLevel { TIP,LOG,WARNING,ERROR,DEBUG } }
-class CookieManager { fun setAcceptCookie(v:Boolean){}; fun setAcceptThirdPartyCookies(view:WebView,v:Boolean){}; fun getCookie(url:String):String?=null; fun setCookie(url:String,value:String){}; fun flush(){}; companion object { fun getInstance()=CookieManager() } }
+class CookieManager { fun setAcceptCookie(v:Boolean){}; fun setAcceptThirdPartyCookies(view:WebView,v:Boolean){}; fun acceptCookie()=true; fun acceptThirdPartyCookies(view:WebView)=true; fun getCookie(url:String):String?=null; fun setCookie(url:String,value:String){}; fun flush(){}; companion object { fun getInstance()=CookieManager() } }
 open class SslErrorHandler { fun cancel(){} }
 open class JsResult { fun confirm(){}; fun cancel(){} }
 open class JsPromptResult:JsResult() { fun confirm(value:String){} }
@@ -72,8 +72,8 @@ open class WebChromeClient { open fun onProgressChanged(view:WebView?,newProgres
 open class WebResourceError { val errorCode:Int=0; val description:CharSequence="" }
 interface WebResourceRequest { val url:Uri; val method:String; val isForMainFrame:Boolean; val requestHeaders:Map<String,String> }
 open class WebResourceResponse { val statusCode:Int=200; constructor(mime:String?,encoding:String?,data:InputStream?); constructor(mime:String?,encoding:String?,statusCode:Int,reason:String,headers:Map<String,String>,data:InputStream?) }
-open class WebSettings { var javaScriptEnabled=false; var domStorageEnabled=false; var databaseEnabled=false; var allowFileAccess=false; var allowContentAccess=false; var javaScriptCanOpenWindowsAutomatically=false; var mixedContentMode:Int=0; var safeBrowsingEnabled=false; var mediaPlaybackRequiresUserGesture=false; var cacheMode:Int=0; var userAgentString:String=""; fun setSupportMultipleWindows(v:Boolean){}; companion object { const val MIXED_CONTENT_NEVER_ALLOW=1; const val LOAD_DEFAULT=0; fun getDefaultUserAgent(context:Context):String="system" } }
-open class WebView(c:Context):ViewGroup(){ val settings=WebSettings(); var webChromeClient:WebChromeClient=WebChromeClient(); var webViewClient:WebViewClient=WebViewClient(); var title:String?=""; var url:String?="https://example.com"; fun canGoBack()=false; fun canGoForward()=false; fun goBack(){}; fun goForward(){}; fun reload(){}; fun loadUrl(value:String){}; fun evaluateJavascript(script:String,callback:(String?)->Unit){callback("null")}; fun stopLoading(){}; fun removeAllViews(){}; fun destroy(){}; companion object { fun setWebContentsDebuggingEnabled(v:Boolean){} } }
+open class WebSettings { var javaScriptEnabled=false; var domStorageEnabled=false; var databaseEnabled=false; var allowFileAccess=false; var allowContentAccess=false; var javaScriptCanOpenWindowsAutomatically=false; var mixedContentMode:Int=0; var safeBrowsingEnabled=false; var mediaPlaybackRequiresUserGesture=false; var loadsImagesAutomatically=true; var blockNetworkImage=false; var builtInZoomControls=false; var displayZoomControls=false; var cacheMode:Int=0; var userAgentString:String=""; fun setSupportMultipleWindows(v:Boolean){}; fun supportMultipleWindows()=true; companion object { const val MIXED_CONTENT_NEVER_ALLOW=1; const val MIXED_CONTENT_COMPATIBILITY_MODE=2; const val LOAD_DEFAULT=0; fun getDefaultUserAgent(context:Context):String="system" } }
+open class WebView(c:Context):ViewGroup(){ class WebViewTransport { var webView:WebView?=null }; val settings=WebSettings(); var webChromeClient:WebChromeClient=WebChromeClient(); var webViewClient:WebViewClient=WebViewClient(); var title:String?=""; var url:String?="https://example.com"; fun canGoBack()=false; fun canGoForward()=false; fun goBack(){}; fun goForward(){}; fun reload(){}; fun loadUrl(value:String){}; fun evaluateJavascript(script:String,callback:(String?)->Unit){callback("null")}; fun stopLoading(){}; fun removeAllViews(){}; fun destroy(){}; companion object { fun setWebContentsDebuggingEnabled(v:Boolean){} } }
 open class WebViewClient { open fun shouldOverrideUrlLoading(view:WebView,request:WebResourceRequest):Boolean=false; open fun onPageStarted(view:WebView,url:String,favicon:Bitmap?){}; open fun onPageFinished(view:WebView,url:String){}; open fun shouldInterceptRequest(view:WebView,request:WebResourceRequest):WebResourceResponse?=null; open fun onReceivedError(view:WebView,request:WebResourceRequest,error:WebResourceError){}; open fun onReceivedHttpError(view:WebView,request:WebResourceRequest,errorResponse:WebResourceResponse){}; open fun onReceivedSslError(view:WebView,handler:SslErrorHandler,error:SslError){} }
 ''')]
   f += [w(r,'androidx/activity/result/Result.kt',r'''package androidx.activity.result
@@ -101,7 +101,7 @@ class JSONTokener(val value:String){ fun nextValue():Any?=value }
 class NgheTruyenApplication { val container=Container() }
 class Container { val sourceSessionStore:vn.nghetruyen.app.sources.SourceSessionStore=vn.nghetruyen.app.sources.InMemorySourceSessionStore() }
 ''')]
-  f += [ROOT/'app/src/main/java/vn/nghetruyen/app/sources/SourceSessionStore.kt', ROOT/'app/src/main/java/vn/nghetruyen/app/sources/SourceDiagnosticBrowserActivity.kt']
+  f += [ROOT/'app/src/main/java/vn/nghetruyen/app/sources/SourceSessionStore.kt', ROOT/'app/src/main/java/vn/nghetruyen/app/sourceplatform/ExtensionWebViewAuthority.kt', ROOT/'app/src/main/java/vn/nghetruyen/app/sources/SourceDiagnosticBrowserActivity.kt']
   cp=subprocess.run([K,*map(str,f),'-d',str(r/'out.jar')],cwd=ROOT,text=True,capture_output=True)
   if cp.returncode:
    print(cp.stdout); print(cp.stderr); raise SystemExit(cp.returncode)

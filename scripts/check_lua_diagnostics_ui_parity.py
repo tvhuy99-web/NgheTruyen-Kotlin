@@ -33,7 +33,10 @@ checks = {
         and "bottomBar = {" in app
         and app.index("ReferenceDiagnosticsChrome(") < app.index("ReferencePrimaryBottomBar(")
     ),
-    "OFF hides diagnostics completely": 'if (state.diagnosticsMode == "off") return' in chrome,
+    "OFF hides session UI but preserves actionable install failures": (
+        'if (state.diagnosticsMode == "off" && state.diagnosticPersistentCriticalCount == 0) return' in chrome
+        and "XEM ${state.diagnosticPersistentCriticalCount} LỖI CÀI ĐẶT" in chrome
+    ),
     "Lua recording label": "ĐANG GHI NHẬT KÝ..." in chrome,
     "Lua view label": "XEM NHẬT KÝ" in chrome,
     "Lua empty label": "CHƯA CÓ NHẬT KÝ" in chrome,
@@ -53,7 +56,7 @@ checks = {
         '"settings_diagnostics" -> PersonalSubPage("CHẨN ĐOÁN")' in personal
         and "SourceDiagnosticsSection(" in personal
     ),
-    "large live event window": "diagnosticSummaries(2_000)" in vm,
+    "large live event window": "takeLast(2_000)" in vm and "visibleDiagnosticSummaries" in vm,
     "large live trace window": "diagnosticTraces(100)" in vm,
     "shared app diagnostic mark API": "fun mark(" in runtime and "DIAGNOSTICS_MODE_CHANGED" in runtime,
     "three diagnostic modes": all(token in runtime for token in (

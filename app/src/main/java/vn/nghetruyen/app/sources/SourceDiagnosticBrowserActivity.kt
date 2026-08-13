@@ -9,6 +9,7 @@ import android.graphics.Color
 import android.net.Uri
 import android.net.http.SslError
 import android.os.Bundle
+import android.os.Message
 import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
 import android.webkit.SslErrorHandler
@@ -30,7 +31,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 import vn.nghetruyen.app.NgheTruyenApplication
 import vn.nghetruyen.app.sourceplatform.SourceDiagnosticRuntime
+import vn.nghetruyen.app.sourceplatform.ExtensionWebViewAuthority
 import vn.nghetruyen.source.diagnostics.DiagnosticCategory
+import vn.nghetruyen.source.diagnostics.DiagnosticOperationContract
+import vn.nghetruyen.source.diagnostics.DiagnosticOperationState
 import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -101,7 +105,10 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
             severity = DiagnosticSeverity.INFO,
             sourceId = sourceId,
             traceId = diagnosticTraceId,
-            attributes = mapOf("url" to redactUrl(initialUrl), "localLogLevel" to SourceLoginActivity.logLevelLabel(logLevel)),
+            attributes = browserOperation(DiagnosticOperationState.STARTED, "DIAGNOSTIC_BROWSER_STARTED") + mapOf(
+                "url" to redactUrl(initialUrl),
+                "localLogLevel" to SourceLoginActivity.logLevelLabel(logLevel),
+            ),
         )
 
         WebView.setWebContentsDebuggingEnabled(false)
@@ -147,25 +154,45 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
         root.addView(addressRow, matchWrap())
 
         webView = WebView(this).apply browser@{
-            settings.apply {
-                javaScriptEnabled = true
-                domStorageEnabled = true
-                databaseEnabled = false
-                allowFileAccess = false
-                allowContentAccess = false
-                javaScriptCanOpenWindowsAutomatically = false
-                setSupportMultipleWindows(false)
-                mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                safeBrowsingEnabled = true
-                mediaPlaybackRequiresUserGesture = true
-                cacheMode = WebSettings.LOAD_DEFAULT
-                userAgentString = currentUserAgent()
-            }
-            CookieManager.getInstance().apply {
-                setAcceptCookie(true)
-                setAcceptThirdPartyCookies(this@browser, false)
-            }
+            // Use the exact same browser authority as installed extensions. A diagnostic browser
+            // with stricter cookies/storage/mixed-content rules can otherwise manufacture a bug
+            // that the real source runtime never sees (or hide one that it does).
+            ExtensionWebViewAuthority.apply(this@SourceDiagnosticBrowserActivity, this)
+            settings.userAgentString = currentUserAgent()
             webChromeClient = object : WebChromeClient() {
+                override fun onCreateWindow(
+                    view: WebView?,
+                    isDialog: Boolean,
+                    isUserGesture: Boolean,
+                    resultMsg: Message?,
+                ): Boolean {
+                    val transport = resultMsg?.obj as? WebView.WebViewTransport ?: return false
+                    val popup = WebView(this@SourceDiagnosticBrowserActivity)
+                    ExtensionWebViewAuthority.apply(this@SourceDiagnosticBrowserActivity, popup)
+                    popup.settings.userAgentString = currentUserAgent()
+                    popup.webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(popupView: WebView, request: WebResourceRequest): Boolean {
+                            val target = request.url.toString()
+                            if (isAllowed(target)) {
+                                record("PAGE", "POPUP_NAVIGATION", redactUrl(target))
+                                webView.loadUrl(target)
+                            } else {
+                                record("SECURITY", "POPUP_BLOCKED", redactUrl(target))
+                            }
+                            popupView.destroy()
+                            return true
+                        }
+                    }
+                    transport.webView = popup
+                    resultMsg.sendToTarget()
+                    record(
+                        "PAGE",
+                        "POPUP_CREATED",
+                        "dialog=$isDialog | userGesture=$isUserGesture",
+                    )
+                    return true
+                }
+
                 override fun onProgressChanged(view: WebView?, newProgress: Int) {
                     this@SourceDiagnosticBrowserActivity.progress.progress = newProgress
                 }
@@ -179,9 +206,36 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
         }
         root.addView(webView, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
         setContentView(root)
+        recordBrowserEnvironment()
         seedWebViewCookies()
         record("INFO", "BROWSER_STARTED", "source=$sourceId")
         navigate(initialUrl)
+    }
+
+    private fun recordBrowserEnvironment() {
+        val manager = CookieManager.getInstance()
+        val attributes = mapOf(
+            "flow" to "browser",
+            "stage" to "environment_probe",
+            "authority" to "ExtensionWebViewAuthority",
+            "javaScriptEnabled" to webView.settings.javaScriptEnabled.toString(),
+            "domStorageEnabled" to webView.settings.domStorageEnabled.toString(),
+            "databaseEnabled" to webView.settings.databaseEnabled.toString(),
+            "mixedContentMode" to webView.settings.mixedContentMode.toString(),
+            "multipleWindows" to webView.settings.supportMultipleWindows().toString(),
+            "acceptCookies" to manager.acceptCookie().toString(),
+            "acceptThirdPartyCookies" to manager.acceptThirdPartyCookies(webView).toString(),
+            "userAgent" to webView.settings.userAgentString.orEmpty().take(1_000),
+        )
+        diagnostics.mark(
+            name = "DIAGNOSTIC_BROWSER_ENVIRONMENT",
+            category = DiagnosticCategory.BROWSER,
+            severity = DiagnosticSeverity.INFO,
+            sourceId = sourceId,
+            traceId = diagnosticTraceId,
+            attributes = browserOperation(DiagnosticOperationState.STAGE, "DIAGNOSTIC_BROWSER_ENVIRONMENT") + attributes,
+        )
+        record("INFO", "BROWSER_AUTHORITY", attributes.entries.joinToString(" | ") { "${it.key}=${it.value}" })
     }
 
     private fun showBrowserOptions() {
@@ -432,9 +486,21 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
             severity = severity,
             sourceId = sourceId,
             traceId = diagnosticTraceId,
-            attributes = mapOf("detail" to detail, "localLogLevel" to SourceLoginActivity.logLevelLabel(logLevel)),
+            attributes = browserOperation(DiagnosticOperationState.STAGE, safeName) + mapOf(
+                "detail" to detail,
+                "localLogLevel" to SourceLoginActivity.logLevelLabel(logLevel),
+            ),
         )
     }
+
+    private fun browserOperation(state: DiagnosticOperationState, stage: String): Map<String, String> =
+        DiagnosticOperationContract.attributes(
+            id = "diagnostic-browser:$diagnosticTraceId",
+            kind = "DIAGNOSTIC_BROWSER",
+            flow = "browser",
+            state = state,
+            stage = stage,
+        )
 
     private fun copyLog() {
         val text = renderLogText()
@@ -528,7 +594,10 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
                 sourceId = sourceId,
                 traceId = diagnosticTraceId,
                 durationMs = (System.currentTimeMillis() - diagnosticStartedAt).coerceAtLeast(0L),
-                attributes = mapOf("requestCount" to requestCount.toString(), "storedSession" to sessionStore.hasSession(sourceId).toString()),
+                attributes = browserOperation(DiagnosticOperationState.COMPLETED, "DIAGNOSTIC_BROWSER_STOPPED") + mapOf(
+                    "requestCount" to requestCount.toString(),
+                    "storedSession" to sessionStore.hasSession(sourceId).toString(),
+                ),
             )
         }
         if (autoClearLogOnClose) clearLog()

@@ -44,6 +44,8 @@ import vn.nghetruyen.source.diagnostics.DiagnosticCategory
 import vn.nghetruyen.source.diagnostics.DiagnosticEvidence
 import vn.nghetruyen.source.diagnostics.DiagnosticEvidenceSink
 import vn.nghetruyen.source.diagnostics.DiagnosticEvent
+import vn.nghetruyen.source.diagnostics.DiagnosticOperationContract
+import vn.nghetruyen.source.diagnostics.DiagnosticOperationState
 import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 import vn.nghetruyen.source.diagnostics.DiagnosticSink
 import vn.nghetruyen.source.runtime.SourceResourceProvider
@@ -75,7 +77,11 @@ class VBookJsRuntime(
         val action = manifest.actions[request.action]
             ?: return failure(SourceErrorCode.ACTION_NOT_FOUND, "SOURCE_ACTION_NOT_FOUND:${request.action}", request)
         val timeoutMs = action.timeoutMs ?: manifest.runtime.actionTimeoutMs
-        diagnostics.emit(event(manifest, request, "VBOOK_ACTION_STARTED", attributes = mapOf("action" to request.action.name)))
+        diagnostics.emit(event(manifest, request, "VBOOK_ACTION_STARTED", attributes = mapOf(
+            "action" to request.action.name,
+            "timeoutMs" to timeoutMs.toString(),
+            "deadlineEpochMs" to (started + timeoutMs).toString(),
+        )))
         runCatching { JsonCodec.stringify(request.input) }.getOrNull()?.let { input ->
             captureEvidence(manifest, request, "executor-input.json", "application/json", input, mapOf("action" to request.action.name))
         }
@@ -585,8 +591,13 @@ class VBookJsRuntime(
     private fun diagnosticLogObject(cx: Context, scope: Scriptable, manifest: SourceManifest, request: SourceActionRequest): Scriptable =
         cx.newObject(scope).also { obj ->
             fun logger(severity: DiagnosticSeverity): BaseFunction = hostFunction { args ->
-                val message = args.joinToString(" ") { Context.toString(it) }.take(2_000)
-                diagnostics.emit(event(manifest, request, "VBOOK_LOG", severity, attributes = mapOf("message" to message)))
+                val parsed = VBookDiagnosticLogParser.parse(
+                    rawArguments = args.map { Context.toString(it) },
+                    requestedSeverity = severity,
+                    traceId = request.traceId,
+                    action = request.action,
+                )
+                diagnostics.emit(event(manifest, request, parsed.name, parsed.severity, attributes = parsed.attributes))
                 true
             }
             ScriptableObject.putProperty(obj, "d", logger(DiagnosticSeverity.DEBUG))
@@ -1084,8 +1095,49 @@ class VBookJsRuntime(
     private fun failure(code: SourceErrorCode, message: String, request: SourceActionRequest) =
         SourcePlatformResult.Failure(SourcePlatformFailure(code, message, request.traceId))
 
-    private fun event(manifest: SourceManifest, request: SourceActionRequest, name: String, severity: DiagnosticSeverity = DiagnosticSeverity.INFO, durationMs: Long? = null, attributes: Map<String, String> = emptyMap()) =
-        DiagnosticEvent(clockMs(), request.traceId, manifest.id, manifest.version.toString(), DiagnosticCategory.RUNTIME, name, severity, durationMs, attributes)
+    private fun event(
+        manifest: SourceManifest,
+        request: SourceActionRequest,
+        name: String,
+        severity: DiagnosticSeverity = DiagnosticSeverity.INFO,
+        durationMs: Long? = null,
+        attributes: Map<String, String> = emptyMap(),
+    ): DiagnosticEvent {
+        val flow = attributes[DiagnosticOperationContract.FLOW] ?: attributes["flow"] ?: when {
+            name.contains("BRIDGE") -> "bridge"
+            name.contains("BROWSER") -> "browser"
+            name.contains("NATIVE") -> "native"
+            else -> "executor"
+        }
+        val state = attributes[DiagnosticOperationContract.STATE]?.let {
+            runCatching { DiagnosticOperationState.valueOf(it) }.getOrNull()
+        } ?: when {
+            name == "VBOOK_ACTION_STARTED" -> DiagnosticOperationState.STARTED
+            name == "VBOOK_ACTION_COMPLETED" -> DiagnosticOperationState.COMPLETED
+            name == "VBOOK_ACTION_FAILED" -> DiagnosticOperationState.FAILED
+            else -> DiagnosticOperationState.STAGE
+        }
+        val operation = DiagnosticOperationContract.attributes(
+            id = "vbook:${request.traceId.ifBlank { "no-trace" }}:${request.action.name}",
+            kind = request.action.name,
+            flow = flow,
+            state = state,
+            stage = attributes["stage"] ?: name,
+            timeoutMs = attributes["timeoutMs"]?.toLongOrNull(),
+            deadlineEpochMs = attributes["deadlineEpochMs"]?.toLongOrNull(),
+        )
+        return DiagnosticEvent(
+            clockMs(),
+            request.traceId,
+            manifest.id,
+            manifest.version.toString(),
+            DiagnosticCategory.RUNTIME,
+            name,
+            severity,
+            durationMs,
+            operation + attributes,
+        )
+    }
 
     private fun captureEvidence(
         manifest: SourceManifest,

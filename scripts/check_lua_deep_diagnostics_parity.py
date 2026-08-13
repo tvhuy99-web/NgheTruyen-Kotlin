@@ -14,6 +14,12 @@ browser = text("app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidSource
 chromium = text("app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidChromiumVBookRuntime.kt")
 models = text("app/src/main/java/vn/nghetruyen/app/sourceplatform/SourcePlatformModels.kt")
 core = text("source-diagnostics/src/main/kotlin/vn/nghetruyen/source/diagnostics/SourceDiagnostics.kt")
+vbook_log = text("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookDiagnosticLogParser.kt")
+manager = text("app/src/main/java/vn/nghetruyen/app/sourceplatform/SourcePlatformManager.kt")
+diagnostic_browser = text("app/src/main/java/vn/nghetruyen/app/sources/SourceDiagnosticBrowserActivity.kt")
+app_view_model = text("app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt")
+diagnostic_chrome = text("app/src/main/java/vn/nghetruyen/app/ui/components/ReferenceDiagnosticsChrome.kt")
+network = text("source-network/src/main/kotlin/vn/nghetruyen/source/network/OkHttpSourceNetworkBroker.kt")
 retention_test = text("source-diagnostics/src/test/kotlin/vn/nghetruyen/source/diagnostics/DiagnosticRetentionStatsTest.kt")
 forensics = text("app/src/main/java/vn/nghetruyen/app/sourceplatform/BrowserForensics.kt")
 
@@ -42,6 +48,79 @@ lua_codes = (
 )
 
 checks = {
+    "manual import uses one correlated trace and safe file fingerprint": all(token in (manager + app_view_model + core) for token in (
+        "prepareManualImport",
+        "importAttemptId",
+        "contentSha256",
+        "detectedContainer",
+        "zipEntryCount",
+        "SOURCE_EXTENSION_IMPORT_FORMAT_RECOGNIZED",
+        "SOURCE_EXTENSION_FORMAT_PROBE_REJECTED",
+        "failureSeverity = DiagnosticSeverity.INFO",
+        "OpenableColumns.DISPLAY_NAME",
+    )),
+    "install confirmation closes the parent import lifecycle": all(token in manager for token in (
+        "EXTENSION_INSTALL_COMMIT",
+        "SOURCE_EXTENSION_IMPORT_COMPLETED",
+        "installed_and_activated",
+        "SOURCE_EXTENSION_IMPORT_CANCELLED",
+    )),
+    "bounded host stack traces carry build identity": all(token in (core + manager + runtime) for token in (
+        "DiagnosticThrowableFormatter",
+        "stackTrace",
+        "stackFrameCount",
+        "diagnosticBuildId",
+        "symbolMappingIdentity",
+    )),
+    "network and browser operations have unique request ids": (
+        "UUID.randomUUID().toString()" in network
+        and '"network:${request.traceId.ifBlank { "no-trace" }}:$requestId"' in network
+        and "INTERNAL_DIAGNOSTIC_OPERATION_ID" in browser
+        and '"requestId" to requestId' in browser
+    ),
+    "durable install failures remain visible while session logging is off": all(token in (runtime + app_view_model + diagnostic_chrome) for token in (
+        "persistentCriticalSnapshot",
+        "visibleDiagnosticEvents",
+        "diagnosticPersistentCriticalCount",
+        "LỖI CÀI ĐẶT",
+        "THAO TÁC ĐANG HOẠT ĐỘNG",
+    )),
+    "explicit operation contract replaces suffix guessing for new events": all(token in core for token in (
+        "DiagnosticOperationContract",
+        "operationId",
+        "operationKind",
+        "operationFlow",
+        "operationState",
+        "deadlineEpochMs",
+    )) and "DiagnosticOperationContract.state(event)" in deep,
+    "Native Lua log arguments stay structured": all(token in vbook_log for token in (
+        '"NATIVE_V2_$type"',
+        '"requestId"',
+        '"transport"',
+        '"method"',
+        '"status"',
+        '"warningStage"',
+        "DiagnosticOperationState.STARTED",
+        "DiagnosticOperationState.COMPLETED",
+    )),
+    "install failures persist with root-cause codes": all(token in (runtime + manager + core) for token in (
+        "CriticalDiagnosticStore",
+        "MAX_EVENTS = 100",
+        "persistent_install_failures.json",
+        "rootCauseCode",
+        "causeChain",
+        "runExtensionOperation",
+    )),
+    "diagnostic browser uses extension browser authority": all(token in diagnostic_browser for token in (
+        "ExtensionWebViewAuthority.apply",
+        "recordBrowserEnvironment",
+        "acceptThirdPartyCookies",
+        "databaseEnabled",
+        "mixedContentMode",
+        "onCreateWindow",
+        "POPUP_NAVIGATION",
+        "POPUP_BLOCKED",
+    )),
     "exact Lua error recipes retained": (
         "exactLuaCause" in models
         and "exactLuaSuggestion" in models

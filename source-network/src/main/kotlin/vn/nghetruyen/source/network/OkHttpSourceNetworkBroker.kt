@@ -20,14 +20,19 @@ import vn.nghetruyen.source.api.SourcePlatformResult
 import vn.nghetruyen.source.api.SourceRedirectHop
 import vn.nghetruyen.source.diagnostics.DiagnosticCategory
 import vn.nghetruyen.source.diagnostics.DiagnosticEvent
+import vn.nghetruyen.source.diagnostics.DiagnosticOperationContract
+import vn.nghetruyen.source.diagnostics.DiagnosticOperationState
 import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 import vn.nghetruyen.source.diagnostics.DiagnosticSink
+import vn.nghetruyen.source.diagnostics.DiagnosticThrowableFormatter
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.net.InetAddress
+import java.security.MessageDigest
 import java.time.Duration
 import java.util.Locale
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 class OkHttpSourceNetworkBroker(
@@ -54,6 +59,8 @@ class OkHttpSourceNetworkBroker(
         request: SourceNetworkRequest,
     ): SourcePlatformResult<SourceNetworkResponse> {
         val started = clockMs()
+        val requestId = UUID.randomUUID().toString()
+        val operationId = "network:${request.traceId.ifBlank { "no-trace" }}:$requestId"
         return runCatching {
             require(request.sourceId == manifest.id) { "SOURCE_NETWORK_SOURCE_ID_MISMATCH" }
             val capability = manifest.capabilities.network ?: error("SOURCE_NETWORK_CAPABILITY_REQUIRED")
@@ -62,11 +69,14 @@ class OkHttpSourceNetworkBroker(
             require(request.body.size <= capability.maxRequestBytes) { "SOURCE_NETWORK_REQUEST_TOO_LARGE" }
             SourceHeaderPolicy.validate(request.headers)
             SourceOriginPolicy.requireInitialUrl(manifest, request.url)
-            diagnostics.emit(networkEvent(manifest, request, "REQUEST_STARTED", attributes = mapOf(
+            diagnostics.emit(networkEvent(manifest, request, operationId, "REQUEST_STARTED", attributes = mapOf(
+                "requestId" to requestId,
                 "method" to method,
                 "origin" to SourceOriginPolicy.originOf(SourceOriginPolicy.requireInitialUrl(manifest, request.url)),
                 "requestBytes" to request.body.size.toString(),
                 "headerNames" to request.headers.keys.sorted().joinToString(","),
+                "timeoutMs" to request.timeoutMs.toString(),
+                "deadlineEpochMs" to (started + request.timeoutMs).toString(),
             )))
             require(request.timeoutMs in 100L..120_000L) { "SOURCE_NETWORK_TIMEOUT_INVALID" }
             val deadlineMs = started + request.timeoutMs
@@ -83,11 +93,22 @@ class OkHttpSourceNetworkBroker(
             }
         }.fold(
             onSuccess = { response ->
-                diagnostics.emit(networkEvent(manifest, request, "REQUEST_COMPLETED", durationMs = response.timing.totalDurationMs, attributes = mapOf(
+                diagnostics.emit(networkEvent(manifest, request, operationId, "REQUEST_COMPLETED", durationMs = response.timing.totalDurationMs, attributes = mapOf(
+                    "requestId" to requestId,
                     "status" to response.statusCode.toString(),
                     "redirects" to response.redirectChain.size.toString(),
                     "responseBytes" to response.body.size.toString(),
+                    "responseBodySha256" to sha256(response.body),
+                    "responseContentType" to response.headers.entries.firstOrNull {
+                        it.key.equals("content-type", true)
+                    }?.value?.firstOrNull().orEmpty().take(300),
+                    "responseCharset" to response.charsetName.orEmpty(),
                     "finalOrigin" to runCatching { SourceOriginPolicy.originOf(java.net.URI(response.finalUrl)) }.getOrDefault("invalid"),
+                    "redirectChain" to response.redirectChain.joinToString(" -> ") { hop ->
+                        val from = runCatching { SourceOriginPolicy.originOf(java.net.URI(hop.fromUrl)) }.getOrDefault("invalid")
+                        val to = runCatching { SourceOriginPolicy.originOf(java.net.URI(hop.toUrl)) }.getOrDefault("invalid")
+                        "$from-[${hop.statusCode}]->$to"
+                    }.take(4_000),
                     "resolvedAddresses" to response.resolvedAddresses.joinToString(","),
                     "tlsVersion" to response.tlsVersion.orEmpty(),
                     "cipherSuite" to response.cipherSuite.orEmpty(),
@@ -97,10 +118,11 @@ class OkHttpSourceNetworkBroker(
             },
             onFailure = { error ->
                 val code = mapError(error.message.orEmpty())
-                diagnostics.emit(networkEvent(manifest, request, "REQUEST_FAILED", DiagnosticSeverity.ERROR, clockMs() - started, mapOf(
+                diagnostics.emit(networkEvent(manifest, request, operationId, "REQUEST_FAILED", DiagnosticSeverity.ERROR, clockMs() - started, mapOf(
+                    "requestId" to requestId,
                     "code" to code.name,
                     "error" to (error.message ?: error.javaClass.simpleName),
-                )))
+                ) + DiagnosticThrowableFormatter.attributes(error)))
                 SourcePlatformResult.Failure(SourcePlatformFailure(code, error.message ?: "SOURCE_NETWORK_FAILED", request.traceId, error))
             },
         )
@@ -199,11 +221,32 @@ class OkHttpSourceNetworkBroker(
     private fun networkEvent(
         manifest: SourceManifest,
         request: SourceNetworkRequest,
+        operationId: String,
         name: String,
         severity: DiagnosticSeverity = DiagnosticSeverity.INFO,
         durationMs: Long? = null,
         attributes: Map<String, String> = emptyMap(),
-    ) = DiagnosticEvent(
+    ): DiagnosticEvent {
+        val state = when (name) {
+            "REQUEST_STARTED" -> DiagnosticOperationState.STARTED
+            "REQUEST_COMPLETED" -> DiagnosticOperationState.COMPLETED
+            "REQUEST_FAILED" -> if (attributes["code"]?.contains("TIMEOUT") == true) {
+                DiagnosticOperationState.TIMEOUT
+            } else {
+                DiagnosticOperationState.FAILED
+            }
+            else -> DiagnosticOperationState.STAGE
+        }
+        val operation = DiagnosticOperationContract.attributes(
+            id = operationId,
+            kind = request.method.uppercase(Locale.ROOT),
+            flow = "network",
+            state = state,
+            stage = name,
+            timeoutMs = attributes["timeoutMs"]?.toLongOrNull(),
+            deadlineEpochMs = attributes["deadlineEpochMs"]?.toLongOrNull(),
+        )
+        return DiagnosticEvent(
         timestampEpochMs = clockMs(),
         traceId = request.traceId,
         sourceId = manifest.id,
@@ -212,8 +255,9 @@ class OkHttpSourceNetworkBroker(
         name = name,
         severity = severity,
         durationMs = durationMs,
-        attributes = attributes,
-    )
+        attributes = operation + attributes,
+        )
+    }
 
     private fun mapError(message: String): SourceErrorCode = when {
         "PRIVATE_ADDRESS" in message || "DNS" in message -> SourceErrorCode.NETWORK_DNS_BLOCKED
@@ -229,6 +273,10 @@ class OkHttpSourceNetworkBroker(
         "CAPABILITY" in message -> SourceErrorCode.PERMISSION_DENIED
         else -> SourceErrorCode.NETWORK_IO_ERROR
     }
+
+    private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
+        .digest(bytes)
+        .joinToString("") { "%02x".format(Locale.ROOT, it.toInt() and 0xff) }
 
     companion object {
         const val DEFAULT_USER_AGENT = "NgheTruyen-SourcePlatform/2 Android"

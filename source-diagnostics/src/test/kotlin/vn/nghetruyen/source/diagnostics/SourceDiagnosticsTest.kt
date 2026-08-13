@@ -1,8 +1,12 @@
 package vn.nghetruyen.source.diagnostics
 
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.ByteArrayOutputStream
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 class SourceDiagnosticsTest {
     @Test fun redactsSecretsAndBoundsEvents() {
@@ -23,6 +27,41 @@ class SourceDiagnosticsTest {
         assertTrue(recorder.snapshot().isEmpty())
     }
 
+    @Test fun diagnosticsOffCanMirrorOnlyToAnExplicitDurablePolicySink() {
+        val mirrored = mutableListOf<DiagnosticEvent>()
+        val recorder = BoundedDiagnosticRecorder(
+            maxEvents = 20,
+            level = DiagnosticLevel.OFF,
+            alwaysMirror = DiagnosticSink(mirrored::add),
+        )
+        recorder.emit(DiagnosticEvent(
+            1, "install", "source", category = DiagnosticCategory.PACKAGE,
+            name = "SOURCE_EXTENSION_INSTALL_FAILED", severity = DiagnosticSeverity.ERROR,
+            attributes = mapOf("password" to "must-not-leak"),
+        ))
+
+        assertTrue(recorder.snapshot().isEmpty())
+        assertEquals(1, mirrored.size)
+        assertTrue(mirrored.single().attributes.getValue("password").startsWith("<redacted:"))
+    }
+
+    @Test fun explicitOperationContractRoundTripsWithoutEventNameGuessing() {
+        val event = DiagnosticEvent(
+            1, "trace", "source", category = DiagnosticCategory.RUNTIME, name = "ARBITRARY_NAME",
+            attributes = DiagnosticOperationContract.attributes(
+                id = "operation-1",
+                kind = "SEARCH",
+                flow = "native",
+                state = DiagnosticOperationState.TIMEOUT,
+                stage = "WAIT_SELECTOR",
+                timeoutMs = 5_000,
+                deadlineEpochMs = 6_000,
+            ),
+        )
+        assertEquals("operation-1", DiagnosticOperationContract.id(event))
+        assertEquals(DiagnosticOperationState.TIMEOUT, DiagnosticOperationContract.state(event))
+    }
+
     @Test fun basicDropsDebugWhileVerboseKeepsIt() {
         val basic = BoundedDiagnosticRecorder(20, DiagnosticLevel.BASIC)
         val verbose = BoundedDiagnosticRecorder(20, DiagnosticLevel.VERBOSE)
@@ -31,5 +70,42 @@ class SourceDiagnosticsTest {
         verbose.emit(debug)
         assertTrue(basic.snapshot().isEmpty())
         assertTrue(verbose.snapshot().single().name == "debug")
+    }
+
+    @Test fun throwableDetailKeepsBoundedFramesAndRedactsCredentials() {
+        val root = IllegalArgumentException("token=top-secret")
+        root.stackTrace = Array(140) { index -> StackTraceElement("Example$index", "run", "Example.kt", index + 1) }
+        val error = IllegalStateException("install failed", root)
+
+        val attributes = DiagnosticThrowableFormatter.attributes(error, maxFrames = 12, maxChars = 4_000)
+
+        assertEquals("java.lang.IllegalStateException", attributes["errorType"])
+        assertEquals("12", attributes["stackFrameCount"])
+        assertTrue(attributes.getValue("stackTraceTruncated").toBoolean())
+        assertTrue(attributes.getValue("stackTrace").contains("Example0.run"))
+        assertFalse(attributes.values.any { "top-secret" in it })
+    }
+
+    @Test fun artifactInspectorCorrelatesSafeIdentityAndZipShape() {
+        val bytes = ByteArrayOutputStream().also { output ->
+            ZipOutputStream(output).use { zip ->
+                listOf("plugin.json", "src/main.js").forEach { name ->
+                    zip.putNextEntry(ZipEntry(name))
+                    zip.write("{}".toByteArray())
+                    zip.closeEntry()
+                }
+            }
+        }.toByteArray()
+
+        val attributes = DiagnosticArtifactInspector.inspect(
+            bytes,
+            DiagnosticArtifactMetadata("../bad\u0000/name.zip", " application/zip\n", bytes.size.toLong()),
+        )
+
+        assertEquals("name.zip", attributes["fileName"])
+        assertEquals("application/zip", attributes["mimeType"])
+        assertEquals("ZIP", attributes["detectedContainer"])
+        assertEquals("2", attributes["zipEntryCount"])
+        assertEquals(64, attributes.getValue("contentSha256").length)
     }
 }

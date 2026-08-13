@@ -13,6 +13,7 @@ import kotlin.concurrent.withLock
 enum class DiagnosticLevel { OFF, BASIC, VERBOSE }
 enum class DiagnosticSeverity { DEBUG, INFO, WARN, ERROR }
 enum class DiagnosticCategory { PACKAGE, TRUST, STORE, RUNTIME, NETWORK, BROWSER, PARSER, REPLAY, SECURITY }
+enum class DiagnosticOperationState { STARTED, STAGE, COMPLETED, FAILED, CANCELLED, TIMEOUT }
 
 data class DiagnosticEvent(
     val timestampEpochMs: Long,
@@ -27,8 +28,50 @@ data class DiagnosticEvent(
 )
 
 /**
- * Legacy classification helper kept for source compatibility. DiagnosticLevel.OFF is now a true
- * off switch: recorders and the app diagnostic runtime do not retain any event while it is active.
+ * Stable operation metadata shared by every diagnostic producer.
+ *
+ * The Lua/XPK black box updates an explicit operation object. Keeping the same contract in the APK
+ * means reports do not have to guess operation state from event-name suffixes. Old events remain
+ * supported by the report layer, but all new instrumentation should populate this contract.
+ */
+object DiagnosticOperationContract {
+    const val ID = "operationId"
+    const val KIND = "operationKind"
+    const val FLOW = "operationFlow"
+    const val STATE = "operationState"
+    const val STAGE = "stage"
+    const val TIMEOUT_MS = "timeoutMs"
+    const val DEADLINE_EPOCH_MS = "deadlineEpochMs"
+
+    fun attributes(
+        id: String,
+        kind: String,
+        flow: String,
+        state: DiagnosticOperationState,
+        stage: String,
+        timeoutMs: Long? = null,
+        deadlineEpochMs: Long? = null,
+    ): Map<String, String> = buildMap {
+        put(ID, id.take(500))
+        put(KIND, kind.take(160))
+        put(FLOW, flow.take(80))
+        put(STATE, state.name)
+        put(STAGE, stage.take(300))
+        timeoutMs?.let { put(TIMEOUT_MS, it.coerceAtLeast(0L).toString()) }
+        deadlineEpochMs?.let { put(DEADLINE_EPOCH_MS, it.coerceAtLeast(0L).toString()) }
+    }
+
+    fun state(event: DiagnosticEvent): DiagnosticOperationState? = event.attributes[STATE]
+        ?.uppercase(Locale.ROOT)
+        ?.let { runCatching { DiagnosticOperationState.valueOf(it) }.getOrNull() }
+
+    fun id(event: DiagnosticEvent): String? = event.attributes[ID]?.takeIf(String::isNotBlank)
+}
+
+/**
+ * Legacy classification helper kept for source compatibility. DiagnosticLevel.OFF remains a true
+ * off switch for the recorder; an application may separately configure a filtered always-mirror
+ * sink for bounded, user-actionable install failures.
  */
 fun DiagnosticEvent.shouldRetainWhenDiagnosticsOff(): Boolean =
     severity == DiagnosticSeverity.ERROR ||
@@ -56,6 +99,7 @@ class BoundedDiagnosticRecorder(
     private val maxEvents: Int = 2_000,
     @Volatile var level: DiagnosticLevel = DiagnosticLevel.BASIC,
     private val mirror: DiagnosticSink = DiagnosticSink.NONE,
+    private val alwaysMirror: DiagnosticSink = DiagnosticSink.NONE,
 ) : DiagnosticSink {
     private val lock = ReentrantLock()
     private val events = ArrayDeque<DiagnosticEvent>(maxEvents.coerceAtLeast(1))
@@ -66,10 +110,12 @@ class BoundedDiagnosticRecorder(
     }
 
     override fun emit(event: DiagnosticEvent) {
-        // OFF is intentionally absolute. Do not keep hidden breadcrumbs behind an "off" UI.
+        val safe = event.copy(attributes = DiagnosticRedactor.redact(event.attributes))
+        // A filtered durable sink may retain a tiny set of user-actionable failures even while the
+        // main recorder is off. The normal recorder itself still obeys the absolute OFF contract.
+        runCatching { alwaysMirror.emit(safe) }
         if (level == DiagnosticLevel.OFF) return
         if (level == DiagnosticLevel.BASIC && event.severity == DiagnosticSeverity.DEBUG) return
-        val safe = event.copy(attributes = DiagnosticRedactor.redact(event.attributes))
         lock.withLock {
             while (events.size >= maxEvents) {
                 events.removeFirst()
@@ -239,6 +285,126 @@ object DiagnosticRedactor {
         .digest(value.toByteArray(StandardCharsets.UTF_8))
         .take(6)
         .joinToString("") { "%02x".format(Locale.ROOT, it) }
+}
+
+/**
+ * Bounded exception detail suitable for a user-shareable diagnostic bundle. Keeping stack frames
+ * is essential for host-side Android/Kotlin failures, but the output must remain small and pass
+ * through the same credential redaction as every other diagnostic attribute.
+ */
+object DiagnosticThrowableFormatter {
+    fun attributes(
+        error: Throwable,
+        maxCauses: Int = 8,
+        maxFrames: Int = 96,
+        maxChars: Int = 16_000,
+    ): Map<String, String> {
+        require(maxCauses in 1..16) { "DIAGNOSTIC_CAUSE_LIMIT_INVALID" }
+        require(maxFrames in 1..256) { "DIAGNOSTIC_FRAME_LIMIT_INVALID" }
+        require(maxChars in 512..64_000) { "DIAGNOSTIC_STACK_SIZE_INVALID" }
+
+        val causes = generateSequence(error) { current -> current.cause?.takeUnless { it === current } }
+            .take(maxCauses)
+            .toList()
+        var retainedFrames = 0
+        var truncated = false
+        val framesPerCause = (maxFrames / causes.size.coerceAtLeast(1)).coerceAtLeast(1)
+        val stack = buildString {
+            causes.forEachIndexed { index, cause ->
+                if (index > 0) append("Caused by: ")
+                append(cause.javaClass.name)
+                cause.message?.takeIf(String::isNotBlank)?.let { append(": ").append(it) }
+                appendLine()
+                val allowance = minOf(framesPerCause, maxFrames - retainedFrames)
+                cause.stackTrace.take(allowance).forEach { frame ->
+                    if (length >= maxChars) {
+                        truncated = true
+                        return@forEach
+                    }
+                    append("\tat ").append(frame).appendLine()
+                    retainedFrames += 1
+                }
+                if (cause.stackTrace.size > allowance) truncated = true
+            }
+        }.take(maxChars)
+        val chain = causes.joinToString(" -> ") { cause ->
+            "${cause.javaClass.simpleName}:${cause.message.orEmpty()}"
+        }.take(maxChars / 2)
+        return DiagnosticRedactor.redact(
+            mapOf(
+                "errorType" to error.javaClass.name,
+                "causeChain" to chain,
+                "stackTrace" to stack,
+                "stackFrameCount" to retainedFrames.toString(),
+                "stackTraceTruncated" to (truncated || stack.length >= maxChars).toString(),
+            ),
+        )
+    }
+}
+
+data class DiagnosticArtifactMetadata(
+    val displayName: String = "",
+    val mimeType: String = "",
+    val declaredSizeBytes: Long? = null,
+)
+
+/** Safe identity and format hints for correlating every probe of one user-selected file. */
+object DiagnosticArtifactInspector {
+    fun inspect(bytes: ByteArray, metadata: DiagnosticArtifactMetadata): Map<String, String> = buildMap {
+        put("fileName", safeDisplayName(metadata.displayName))
+        put("mimeType", metadata.mimeType.trim().replace(Regex("[\\p{Cntrl}\\s]+"), " ").take(160))
+        metadata.declaredSizeBytes?.takeIf { it >= 0L }?.let { put("declaredBytes", it.toString()) }
+        put("actualBytes", bytes.size.toString())
+        put("contentSha256", sha256(bytes))
+        put("magicHex", bytes.take(16).joinToString("") { "%02x".format(Locale.ROOT, it.toInt() and 0xff) })
+        put("detectedContainer", detectedContainer(bytes, metadata.displayName))
+        zipEntryCount(bytes)?.let {
+            put("zipEntryCount", it.toString())
+            put("zipEntryCountMethod", "central-directory-signature")
+        }
+    }
+
+    fun safeDisplayName(raw: String): String = raw
+        .substringAfterLast('/')
+        .substringAfterLast('\\')
+        .replace(Regex("[\\p{Cntrl}]+"), "_")
+        .trim()
+        .take(180)
+        .ifBlank { "unknown-file" }
+
+    private fun detectedContainer(bytes: ByteArray, displayName: String): String {
+        if (bytes.isEmpty()) return "EMPTY"
+        if (bytes.size >= 4 && bytes[0] == 0x50.toByte() && bytes[1] == 0x4b.toByte()) return "ZIP"
+        val sample = bytes.take(4_096).toByteArray().toString(Charsets.UTF_8).trimStart()
+        return when {
+            displayName.endsWith(".lua", true) || sample.startsWith("return ") || sample.startsWith("local ") -> "LUA_TEXT"
+            sample.startsWith("{") || sample.startsWith("[") -> "JSON_TEXT"
+            sample.isNotBlank() && sample.count { !it.isISOControl() || it == '\n' || it == '\r' || it == '\t' } >= sample.length * 9 / 10 -> "TEXT"
+            else -> "BINARY"
+        }
+    }
+
+    private fun zipEntryCount(bytes: ByteArray): Int? {
+        if (bytes.size < 4 || bytes[0] != 0x50.toByte() || bytes[1] != 0x4b.toByte()) return null
+        var count = 0
+        var index = 0
+        while (index <= bytes.size - 4) {
+            if (bytes[index] == 0x50.toByte() && bytes[index + 1] == 0x4b.toByte() &&
+                bytes[index + 2] == 0x01.toByte() && bytes[index + 3] == 0x02.toByte()
+            ) {
+                count += 1
+                if (count > MAX_ZIP_ENTRIES_TO_COUNT) return -1
+            }
+            index += 1
+        }
+        return count
+    }
+
+    private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
+        .digest(bytes)
+        .joinToString("") { "%02x".format(Locale.ROOT, it.toInt() and 0xff) }
+
+    private const val MAX_ZIP_ENTRIES_TO_COUNT = 4_096
 }
 
 object DiagnosticJsonExporter {

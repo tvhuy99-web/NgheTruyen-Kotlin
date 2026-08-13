@@ -13,6 +13,8 @@ import vn.nghetruyen.source.diagnostics.DiagnosticEvidenceSink
 import vn.nghetruyen.source.diagnostics.DiagnosticEvent
 import vn.nghetruyen.source.diagnostics.DiagnosticJsonExporter
 import vn.nghetruyen.source.diagnostics.DiagnosticLevel
+import vn.nghetruyen.source.diagnostics.DiagnosticOperationContract
+import vn.nghetruyen.source.diagnostics.DiagnosticOperationState
 import vn.nghetruyen.source.diagnostics.DiagnosticRedactor
 import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 import vn.nghetruyen.source.diagnostics.DiagnosticSink
@@ -27,9 +29,15 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 data class DiagnosticActiveOperation(
+    val operationId: String,
     val traceId: String,
     val sourceId: String,
     val category: DiagnosticCategory,
+    val kind: String,
+    val flow: String,
+    val stage: String,
+    val timeoutMs: Long?,
+    val deadlineEpochMs: Long?,
     val startedAtEpochMs: Long,
     val lastEventAtEpochMs: Long,
     val startEvent: String,
@@ -38,7 +46,7 @@ data class DiagnosticActiveOperation(
 
 /**
  * Three-mode diagnostic runtime:
- *  - off: absolutely no event/evidence recording;
+ *  - off: no session event/evidence recording; the last 100 install/import failures remain durable;
  *  - basic: full-fidelity diagnostics for the current screen/context, automatically reset on change;
  *  - advanced: continuous full-fidelity diagnostics persisted until the user explicitly clears it.
  *
@@ -48,6 +56,7 @@ data class DiagnosticActiveOperation(
 class SourceDiagnosticRuntime(private val context: Context) {
     private val prefs = context.getSharedPreferences("source_diagnostics", Context.MODE_PRIVATE)
     private val activityTracker = DiagnosticActivityTracker()
+    private val criticalStore = CriticalDiagnosticStore(context)
     private val continuousStore = ContinuousDiagnosticStore(context)
     private val mirror = DiagnosticSink { event ->
         activityTracker.emit(event)
@@ -58,6 +67,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
         maxEvents = MAX_IN_MEMORY_EVENTS,
         level = DiagnosticLevel.OFF,
         mirror = mirror,
+        alwaysMirror = criticalStore,
     )
     val evidence = BoundedDiagnosticEvidenceRecorder(
         maxBytes = 64L * 1024L * 1024L,
@@ -82,6 +92,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
         if (restoredMode == MODE_CONTINUOUS) {
             recorder.restore(continuousStore.restoreRecentEvents(MAX_IN_MEMORY_EVENTS))
         }
+        if (restoredMode != MODE_OFF) restoreCriticalHistory()
     }
 
     fun setMode(requested: String): String {
@@ -111,6 +122,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
                 clearCurrentSession()
                 applyMode(normalized)
                 recorder.restore(continuousStore.restoreRecentEvents(MAX_IN_MEMORY_EVENTS))
+                restoreCriticalHistory()
                 mark(
                     name = "DIAGNOSTICS_MODE_CHANGED",
                     category = DiagnosticCategory.RUNTIME,
@@ -122,6 +134,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
                 clearCurrentSession()
                 activeScreenKey = ""
                 applyMode(normalized)
+                restoreCriticalHistory()
                 mark(
                     name = "DIAGNOSTICS_MODE_CHANGED",
                     category = DiagnosticCategory.RUNTIME,
@@ -151,6 +164,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
         return when (mode) {
             MODE_SCREEN -> {
                 clearCurrentSession()
+                restoreCriticalHistory()
                 mark(
                     name = "DIAGNOSTIC_SCREEN_STARTED",
                     category = DiagnosticCategory.RUNTIME,
@@ -203,16 +217,23 @@ class SourceDiagnosticRuntime(private val context: Context) {
 
     fun activityLines(nowMs: Long = System.currentTimeMillis()): List<String> = activitySnapshot().map { operation ->
         val elapsed = (nowMs - operation.startedAtEpochMs).coerceAtLeast(0L)
-        "${operation.sourceId} • ${operation.category}/${operation.lastEvent} • ${elapsed}ms • trace=${operation.traceId.take(28)}"
+        val deadline = operation.deadlineEpochMs?.let { deadlineAt ->
+            val remaining = deadlineAt - nowMs
+            if (remaining >= 0L) " • còn=${remaining}ms" else " • ĐÃ QUÁ HẠN ${-remaining}ms"
+        }.orEmpty()
+        "${operation.sourceId} • ${operation.flow}/${operation.kind} • ${operation.stage} • ${elapsed}ms$deadline • op=${operation.operationId.take(36)}"
     }
 
-    /** Kept for UI-model compatibility; now represents the persistent continuous event count. */
-    fun persistentCriticalCount(): Int = continuousStore.eventCount.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    fun persistentCriticalCount(): Int = criticalStore.eventCount
+
+    /** Read-only durable install/import history, available even while session diagnostics are off. */
+    fun persistentCriticalSnapshot(): List<DiagnosticEvent> = criticalStore.snapshot()
 
     /** User-requested clear: this is the only action that deletes continuous history. */
     fun clearBlackBox() {
         clearCurrentSession()
         continuousStore.clear()
+        criticalStore.clear()
         if (mode == MODE_CONTINUOUS) continuousStore.enabled = true
     }
 
@@ -244,7 +265,11 @@ class SourceDiagnosticRuntime(private val context: Context) {
             zip.addText("report/operations.json", deepReport.operationsJson)
             zip.addText("report/flows.json", deepReport.flowsJson)
             zip.addText("report/browser_sessions.json", deepReport.browserSessionsJson)
-            zip.addText("report/data_loss.json", deepReport.dataLossJson)
+            zip.addText("report/data_loss.json", JSONObject(deepReport.dataLossJson).apply {
+                put("persistentDroppedEventSegments", continuousStore.droppedEventSegments)
+                put("persistentRejectedEvidence", continuousStore.rejectedEvidenceCount)
+            }.toString(2))
+            zip.addText("report/persistent_install_failures.json", DiagnosticJsonExporter.export(criticalStore.snapshot()).toString(Charsets.UTF_8))
             deepReport.flowLogs.forEach { (flow, log) ->
                 zip.addText("flows/${safePath(flow)}.log", log)
             }
@@ -268,8 +293,8 @@ class SourceDiagnosticRuntime(private val context: Context) {
                 }
             }
 
-            // In continuous mode this directory contains the append-only cross-process history.
-            // Files are never rotated away automatically; only the explicit Clear action removes it.
+            // Continuous history survives process restarts and is bounded by two rotated JSONL
+            // segments so leaving diagnostics enabled cannot grow storage without limit.
             if (mode == MODE_CONTINUOUS) {
                 continuousStore.filesForExport().forEach { (name, file) ->
                     zip.addFile("continuous/$name", file)
@@ -285,6 +310,15 @@ class SourceDiagnosticRuntime(private val context: Context) {
         evidence.clear()
         activityTracker.clear()
     }
+
+    private fun restoreCriticalHistory() {
+        val existing = recorder.snapshot().map(::eventIdentity).toHashSet()
+        recorder.restore(criticalStore.snapshot().filter { eventIdentity(it) !in existing })
+    }
+
+    private fun eventIdentity(event: DiagnosticEvent): String = listOf(
+        event.timestampEpochMs.toString(), event.traceId, event.sourceId, event.name,
+    ).joinToString("|")
 
     private fun applyMode(value: String) {
         recorder.level = when (value) {
@@ -311,6 +345,10 @@ class SourceDiagnosticRuntime(private val context: Context) {
         put("activeScreen", activeScreenKey)
         put("appVersionName", BuildConfig.VERSION_NAME)
         put("appVersionCode", BuildConfig.VERSION_CODE)
+        put("buildType", BuildConfig.BUILD_TYPE)
+        put("debugBuild", BuildConfig.DEBUG)
+        put("diagnosticBuildId", BuildConfig.DIAGNOSTIC_BUILD_ID)
+        put("symbolMappingIdentity", "${BuildConfig.VERSION_CODE}:${BuildConfig.DIAGNOSTIC_BUILD_ID}")
         put("androidSdk", Build.VERSION.SDK_INT)
         put("manufacturer", Build.MANUFACTURER)
         put("model", Build.MODEL)
@@ -329,14 +367,21 @@ class SourceDiagnosticRuntime(private val context: Context) {
         put("continuousEventCount", continuousStore.eventCount)
         put("continuousEvidenceBytes", continuousStore.evidenceBytes)
         put("continuousEvidenceRejected", continuousStore.rejectedEvidenceCount)
+        put("persistentInstallFailureCount", criticalStore.eventCount)
     }
 
     private fun activeOperationsJson(): JSONArray = JSONArray().apply {
         activityTracker.snapshot().forEach { operation ->
             put(JSONObject().apply {
                 put("traceId", operation.traceId)
+                put("operationId", operation.operationId)
                 put("sourceId", operation.sourceId)
                 put("category", operation.category.name)
+                put("kind", operation.kind)
+                put("flow", operation.flow)
+                put("stage", operation.stage)
+                put("timeoutMs", operation.timeoutMs ?: JSONObject.NULL)
+                put("deadlineEpochMs", operation.deadlineEpochMs ?: JSONObject.NULL)
                 put("startedAtEpochMs", operation.startedAtEpochMs)
                 put("lastEventAtEpochMs", operation.lastEventAtEpochMs)
                 put("startEvent", operation.startEvent)
@@ -413,24 +458,25 @@ class SourceDiagnosticRuntime(private val context: Context) {
         appendLine("Normal UI is intentionally a single readable log. This ZIP keeps the detailed structured evidence used for diagnosis.")
         appendLine()
         appendLine("Modes:")
-        appendLine("- off: records nothing, including fatal/warning breadcrumbs.")
+        appendLine("- off: records no session timeline/evidence; only the last 100 install/import failures are retained so package errors are never lost.")
         appendLine("- screen-scoped: verbose events/evidence are kept for the current logical screen and cleared automatically when that context changes.")
-        appendLine("- continuous: verbose events are appended across screens and process restarts until the user explicitly clears diagnostics.")
+        appendLine("- continuous: verbose events persist across screens and process restarts in a bounded two-segment history until explicitly cleared.")
         appendLine()
         appendLine("Contents:")
         appendLine("- report/log.txt: Lua-style readable timeline with cause and suggestion for failures.")
         appendLine("- report/events.json + report/traces.txt: structured events and trace summaries.")
-        appendLine("- report/operations.json: reconstructed operations, deadlines, stages, polling and current/terminal state.")
+        appendLine("- report/operations.json: explicit operations, deadlines, stages, polling and current/terminal state; legacy events use compatibility reconstruction.")
         appendLine("- report/flows.json + flows/*.log: latest state and raw timeline split by Lua-style diagnostic flow.")
         appendLine("- report/browser_sessions.json: browser counters, safe capability probes, late callbacks and last error state.")
         appendLine("- report/data_loss.json: explicit RAM eviction/truncation accounting so missing evidence is never silent.")
+        appendLine("- report/persistent_install_failures.json: the last 100 install/import failures, retained even when diagnostics were off.")
         appendLine("- evidence/current/: current browser/runtime/network/parser evidence captured in RAM.")
         appendLine("- evidence/sanitized/: sanitized HTML snapshots for inspection.")
-        appendLine("- continuous/: append-only persisted events/evidence when continuous mode has been used.")
+        appendLine("- continuous/: bounded persisted event history and evidence when continuous mode has been used.")
         appendLine("- environment/runtime/source/repository snapshots for reproduction context.")
         appendLine()
         appendLine("Sensitive credential-like fields, headers and values are redacted before storage/export where supported.")
-        appendLine("Persistent evidence is never evicted. To protect device storage, after ${ContinuousDiagnosticStore.MAX_PERSISTED_EVIDENCE_BYTES / (1024 * 1024)} MiB it stops accepting new binary evidence and reports the rejection count; existing evidence and event history are preserved until Clear is pressed.")
+        appendLine("Persistent binary evidence is never evicted; after ${ContinuousDiagnosticStore.MAX_PERSISTED_EVIDENCE_BYTES / (1024 * 1024)} MiB new evidence is rejected and counted. Event JSONL uses two 16 MiB segments and reports dropped rotations.")
     }
 
     private fun safePath(value: String): String = value
@@ -473,13 +519,21 @@ private class DiagnosticActivityTracker : DiagnosticSink {
         val traceId = event.traceId.trim()
         if (traceId.isBlank()) return@synchronized
         val name = event.name.uppercase()
-        val current = active[traceId]
+        val operationId = DiagnosticOperationContract.id(event) ?: traceId
+        val state = DiagnosticOperationContract.state(event)
+        val current = active[operationId]
         when {
-            isStart(name) && current == null -> {
-                active[traceId] = DiagnosticActiveOperation(
+            (state == DiagnosticOperationState.STARTED || state == null && isStart(name)) -> {
+                active[operationId] = DiagnosticActiveOperation(
+                    operationId = operationId,
                     traceId = traceId,
                     sourceId = event.sourceId,
                     category = event.category,
+                    kind = event.attributes[DiagnosticOperationContract.KIND] ?: operationStem(name),
+                    flow = event.attributes[DiagnosticOperationContract.FLOW] ?: event.attributes["flow"] ?: event.category.name.lowercase(),
+                    stage = event.attributes[DiagnosticOperationContract.STAGE] ?: event.name,
+                    timeoutMs = event.attributes[DiagnosticOperationContract.TIMEOUT_MS]?.toLongOrNull(),
+                    deadlineEpochMs = event.attributes[DiagnosticOperationContract.DEADLINE_EPOCH_MS]?.toLongOrNull(),
                     startedAtEpochMs = event.timestampEpochMs,
                     lastEventAtEpochMs = event.timestampEpochMs,
                     startEvent = event.name,
@@ -487,10 +541,17 @@ private class DiagnosticActivityTracker : DiagnosticSink {
                 )
                 while (active.size > 100) active.remove(active.entries.first().key)
             }
-            isTerminal(name) && current != null && operationStem(name) == operationStem(current.startEvent.uppercase()) -> active.remove(traceId)
-            current != null -> active[traceId] = current.copy(
+            state in TERMINAL_STATES -> active.remove(operationId)
+            state == null && isTerminal(name) && current != null && operationStem(name) == operationStem(current.startEvent.uppercase()) -> active.remove(operationId)
+            current != null -> active[operationId] = current.copy(
+                sourceId = event.sourceId.takeIf { it.isNotBlank() && it != "manual-import" } ?: current.sourceId,
                 lastEventAtEpochMs = event.timestampEpochMs,
                 lastEvent = event.name,
+                kind = event.attributes[DiagnosticOperationContract.KIND] ?: current.kind,
+                flow = event.attributes[DiagnosticOperationContract.FLOW] ?: event.attributes["flow"] ?: current.flow,
+                stage = event.attributes[DiagnosticOperationContract.STAGE] ?: event.attributes["stage"] ?: event.name,
+                timeoutMs = event.attributes[DiagnosticOperationContract.TIMEOUT_MS]?.toLongOrNull() ?: current.timeoutMs,
+                deadlineEpochMs = event.attributes[DiagnosticOperationContract.DEADLINE_EPOCH_MS]?.toLongOrNull() ?: current.deadlineEpochMs,
             )
         }
     }
@@ -509,14 +570,85 @@ private class DiagnosticActivityTracker : DiagnosticSink {
     companion object {
         private val START_SUFFIXES = listOf("_STARTED", "_START")
         private val TERMINAL_SUFFIXES = listOf("_COMPLETED", "_FAILED", "_ERROR", "_DONE", "_CANCELLED", "_STOPPED")
+        private val TERMINAL_STATES = setOf(
+            DiagnosticOperationState.COMPLETED,
+            DiagnosticOperationState.FAILED,
+            DiagnosticOperationState.CANCELLED,
+            DiagnosticOperationState.TIMEOUT,
+        )
     }
 }
 
-/** Append-only store for the user-facing continuous mode. Nothing is rotated or evicted. */
+internal object PersistentCriticalDiagnosticPolicy {
+    fun shouldPersist(event: DiagnosticEvent): Boolean {
+        if (event.severity !in setOf(DiagnosticSeverity.ERROR, DiagnosticSeverity.WARN)) return false
+        val name = event.name.uppercase()
+        return event.category in setOf(
+            DiagnosticCategory.PACKAGE,
+            DiagnosticCategory.TRUST,
+            DiagnosticCategory.STORE,
+            DiagnosticCategory.SECURITY,
+        ) || listOf("INSTALL", "IMPORT", "PACKAGE", "REPOSITORY").any(name::contains)
+    }
+}
+
+/** Lua-compatible bounded failure history that works even when the main diagnostic mode is off. */
+private class CriticalDiagnosticStore(context: Context) : DiagnosticSink {
+    private val lock = Any()
+    private val root = File(context.filesDir, "source-diagnostics-critical")
+    private val eventFile = File(root, "install-failures.jsonl")
+
+    @Volatile var eventCount: Int = 0
+        private set
+
+    init {
+        root.mkdirs()
+        eventCount = snapshot().size
+    }
+
+    override fun emit(event: DiagnosticEvent) {
+        if (!PersistentCriticalDiagnosticPolicy.shouldPersist(event)) return
+        synchronized(lock) {
+            root.mkdirs()
+            eventFile.appendText(DiagnosticJsonExporter.eventLine(event) + "\n")
+            eventCount += 1
+            if (eventCount > MAX_EVENTS) compact()
+        }
+    }
+
+    fun snapshot(): List<DiagnosticEvent> = synchronized(lock) {
+        if (!eventFile.isFile) return@synchronized emptyList()
+        eventFile.useLines { lines -> lines.mapNotNull(::parseDiagnosticEventLine).toList().takeLast(MAX_EVENTS) }
+    }
+
+    fun clear() = synchronized(lock) {
+        runCatching { eventFile.delete() }
+        eventCount = 0
+    }
+
+    private fun compact() {
+        val retained = eventFile.useLines { lines -> lines.toList().takeLast(MAX_EVENTS) }
+        val temporary = File(root, "install-failures.tmp")
+        temporary.writeText(retained.joinToString(separator = "\n", postfix = if (retained.isEmpty()) "" else "\n"))
+        if (eventFile.exists() && !eventFile.delete()) return
+        if (!temporary.renameTo(eventFile)) {
+            eventFile.writeText(retained.joinToString(separator = "\n", postfix = if (retained.isEmpty()) "" else "\n"))
+            temporary.delete()
+        }
+        eventCount = retained.size
+    }
+
+    companion object {
+        private const val MAX_EVENTS = 100
+    }
+}
+
+/** Cross-process store with bounded event history for the user-facing continuous mode. */
 private class ContinuousDiagnosticStore(private val context: Context) : DiagnosticSink, DiagnosticEvidenceSink {
     private val lock = Any()
     private val root = File(context.filesDir, "source-diagnostics-continuous")
     private val eventFile = File(root, "events.jsonl")
+    private val previousEventFile = File(root, "events.previous.jsonl")
     private val evidenceRoot = File(root, "evidence")
 
     @Volatile override var enabled: Boolean = false
@@ -525,6 +657,8 @@ private class ContinuousDiagnosticStore(private val context: Context) : Diagnost
     @Volatile var evidenceBytes: Long = 0
         private set
     @Volatile var rejectedEvidenceCount: Long = 0
+        private set
+    @Volatile var droppedEventSegments: Long = 0
         private set
     @Volatile private var lastEventEpochMs: Long = 0
 
@@ -573,13 +707,15 @@ private class ContinuousDiagnosticStore(private val context: Context) : Diagnost
     }
 
     fun restoreRecentEvents(limit: Int): List<DiagnosticEvent> = synchronized(lock) {
-        if (!eventFile.isFile || limit <= 0) return@synchronized emptyList()
+        if ((!eventFile.isFile && !previousEventFile.isFile) || limit <= 0) return@synchronized emptyList()
         val ring = ArrayDeque<DiagnosticEvent>(limit)
-        eventFile.useLines { lines ->
-            lines.forEach { line ->
-                parseEventLine(line)?.let { event ->
-                    while (ring.size >= limit) ring.removeFirst()
-                    ring.addLast(event)
+        listOf(previousEventFile, eventFile).filter(File::isFile).forEach { file ->
+            file.useLines { lines ->
+                lines.forEach { line ->
+                    parseDiagnosticEventLine(line)?.let { event ->
+                        while (ring.size >= limit) ring.removeFirst()
+                        ring.addLast(event)
+                    }
                 }
             }
         }
@@ -595,7 +731,10 @@ private class ContinuousDiagnosticStore(private val context: Context) : Diagnost
     }
 
     fun statusJson(): JSONObject = JSONObject().apply {
-        put("appendOnly", true)
+        put("appendOnly", false)
+        put("boundedRotation", true)
+        put("eventSegmentLimitBytes", MAX_EVENT_SEGMENT_BYTES)
+        put("droppedEventSegments", droppedEventSegments)
         put("eventCount", eventCount)
         put("lastEventEpochMs", lastEventEpochMs)
         put("evidenceBytes", evidenceBytes)
@@ -610,12 +749,16 @@ private class ContinuousDiagnosticStore(private val context: Context) : Diagnost
         eventCount = 0
         evidenceBytes = 0
         rejectedEvidenceCount = 0
+        droppedEventSegments = 0
         lastEventEpochMs = 0
     }
 
     private fun appendEvent(event: DiagnosticEvent) = synchronized(lock) {
         root.mkdirs()
-        eventFile.appendText(DiagnosticJsonExporter.eventLine(event) + "\n")
+        val line = DiagnosticJsonExporter.eventLine(event) + "\n"
+        val lineBytes = line.toByteArray(Charsets.UTF_8).size
+        if (eventFile.isFile && eventFile.length() + lineBytes > MAX_EVENT_SEGMENT_BYTES) rotateEvents()
+        eventFile.appendText(line)
         eventCount += 1
         lastEventEpochMs = maxOf(lastEventEpochMs, event.timestampEpochMs)
     }
@@ -623,11 +766,13 @@ private class ContinuousDiagnosticStore(private val context: Context) : Diagnost
     private fun rebuildStats() = synchronized(lock) {
         eventCount = 0
         lastEventEpochMs = 0
-        if (eventFile.isFile) {
-            eventFile.useLines { lines ->
+        listOf(previousEventFile, eventFile).filter(File::isFile).forEach { file ->
+            file.useLines { lines ->
                 lines.forEach { line ->
                     eventCount += 1
-                    parseEventLine(line)?.let { lastEventEpochMs = maxOf(lastEventEpochMs, it.timestampEpochMs) }
+                    parseDiagnosticEventLine(line)?.let {
+                        lastEventEpochMs = maxOf(lastEventEpochMs, it.timestampEpochMs)
+                    }
                 }
             }
         }
@@ -636,29 +781,20 @@ private class ContinuousDiagnosticStore(private val context: Context) : Diagnost
             .sumOf(File::length)
     }
 
-    private fun parseEventLine(line: String): DiagnosticEvent? = runCatching {
-        val json = JSONObject(line)
-        val attributes = buildMap<String, String> {
-            json.optJSONObject("attributes")?.let { raw ->
-                val keys = raw.keys()
-                while (keys.hasNext()) {
-                    val key = keys.next()
-                    put(key, raw.optString(key))
-                }
+    private fun rotateEvents() {
+        if (previousEventFile.isFile) {
+            val removed = previousEventFile.useLines { it.count().toLong() }
+            if (previousEventFile.delete()) {
+                eventCount = (eventCount - removed).coerceAtLeast(0L)
+                droppedEventSegments += 1
             }
         }
-        DiagnosticEvent(
-            timestampEpochMs = json.optLong("timestampEpochMs"),
-            traceId = json.optString("traceId"),
-            sourceId = json.optString("sourceId"),
-            sourceVersion = json.optString("sourceVersion").takeIf { it.isNotBlank() && it != "null" },
-            category = DiagnosticCategory.valueOf(json.optString("category")),
-            name = json.optString("name"),
-            severity = DiagnosticSeverity.valueOf(json.optString("severity")),
-            durationMs = if (json.has("durationMs") && !json.isNull("durationMs")) json.optLong("durationMs") else null,
-            attributes = attributes,
-        )
-    }.getOrNull()
+        if (eventFile.isFile && !eventFile.renameTo(previousEventFile)) {
+            val retained = eventFile.readBytes()
+            previousEventFile.writeBytes(retained)
+            eventFile.delete()
+        }
+    }
 
     private fun redactEvidenceForDisk(evidence: DiagnosticEvidence): ByteArray = when {
         evidence.contentType.contains("html", ignoreCase = true) -> DiagnosticRedactor.redactHtmlPreservingStructure(
@@ -673,6 +809,31 @@ private class ContinuousDiagnosticStore(private val context: Context) : Diagnost
     }
 
     companion object {
+        private const val MAX_EVENT_SEGMENT_BYTES = 16L * 1024L * 1024L
         const val MAX_PERSISTED_EVIDENCE_BYTES = 512L * 1024L * 1024L
     }
 }
+
+private fun parseDiagnosticEventLine(line: String): DiagnosticEvent? = runCatching {
+    val json = JSONObject(line)
+    val attributes = buildMap<String, String> {
+        json.optJSONObject("attributes")?.let { raw ->
+            val keys = raw.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                put(key, raw.optString(key))
+            }
+        }
+    }
+    DiagnosticEvent(
+        timestampEpochMs = json.optLong("timestampEpochMs"),
+        traceId = json.optString("traceId"),
+        sourceId = json.optString("sourceId"),
+        sourceVersion = json.optString("sourceVersion").takeIf { it.isNotBlank() && it != "null" },
+        category = DiagnosticCategory.valueOf(json.optString("category")),
+        name = json.optString("name"),
+        severity = DiagnosticSeverity.valueOf(json.optString("severity")),
+        durationMs = if (json.has("durationMs") && !json.isNull("durationMs")) json.optLong("durationMs") else null,
+        attributes = attributes,
+    )
+}.getOrNull()

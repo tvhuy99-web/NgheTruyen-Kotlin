@@ -4,6 +4,7 @@ import android.app.ActivityManager
 import android.app.Application
 import android.content.Intent
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.provider.Settings
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -102,6 +103,7 @@ import vn.nghetruyen.app.sources.SourceLoginActivity
 import vn.nghetruyen.app.sources.StorySearch
 import vn.nghetruyen.app.sources.SourceUiSurface
 import vn.nghetruyen.app.sourceplatform.SourceInstallPreview
+import vn.nghetruyen.app.sourceplatform.SourceImportFileMetadata
 import vn.nghetruyen.app.sourceplatform.SourceDiagnosticUi
 import vn.nghetruyen.app.sourceplatform.StoryCommentCache
 import vn.nghetruyen.app.sourceplatform.SourcePackUiInfo
@@ -121,6 +123,7 @@ import java.text.Normalizer
 import java.security.MessageDigest
 import java.util.Locale
 import java.util.UUID
+import vn.nghetruyen.source.diagnostics.DiagnosticEvent
 
 enum class RootTab { EXPLORE, LIBRARY, PERSONAL }
 enum class LibrarySection { READING, DOWNLOADED, BOOKMARKS, NOTES, FOLLOWING }
@@ -296,8 +299,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             sourceRepositories = container.sourcePlatformManager.repositories(),
             sourceRepositoryPackages = container.sourcePlatformManager.repositoryPackages(),
             sourceTrustKeys = container.sourcePlatformManager.trustKeys(),
-            sourceDiagnosticCount = container.sourcePlatformManager.diagnosticsSnapshot().size,
-            sourceDiagnostics = container.sourcePlatformManager.diagnosticSummaries(2_000),
+            sourceDiagnosticCount = visibleDiagnosticEvents().size,
+            sourceDiagnostics = visibleDiagnosticSummaries(),
             sourceTraces = container.sourcePlatformManager.diagnosticTraces(100),
             diagnosticsMode = container.sourceDiagnostics.mode,
             diagnosticActiveOperations = container.sourceDiagnostics.activityLines(),
@@ -429,14 +432,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun observeDiagnostics() {
         viewModelScope.launch {
             while (true) {
-                val events = container.sourcePlatformManager.diagnosticsSnapshot()
+                val events = visibleDiagnosticEvents()
                 mutableState.update { current ->
                     current.copy(
                         diagnosticsMode = container.sourceDiagnostics.mode,
                         diagnosticActiveOperations = container.sourceDiagnostics.activityLines(),
                         diagnosticPersistentCriticalCount = container.sourceDiagnostics.persistentCriticalCount(),
                         sourceDiagnosticCount = events.size,
-                        sourceDiagnostics = container.sourcePlatformManager.diagnosticSummaries(2_000),
+                        sourceDiagnostics = diagnosticSummaries(events),
                         sourceTraces = container.sourcePlatformManager.diagnosticTraces(100),
                     )
                 }
@@ -1255,28 +1258,26 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             val result = withContext(Dispatchers.IO) {
                 val resolver = getApplication<Application>().contentResolver
-                val signedAttempt = runCatching {
-                    resolver.openInputStream(uri)?.use { input ->
-                        container.sourcePlatformManager.prepareInstall(input).getOrThrow()
-                    } ?: error("Không mở được gói nguồn.")
-                }
-                if (signedAttempt.isSuccess) signedAttempt else {
-                    val vBookAttempt = runCatching {
-                        resolver.openInputStream(uri)?.use { input ->
-                            container.sourcePlatformManager.prepareVBookImport(input).getOrThrow()
-                        } ?: error("Không mở được gói vBook.")
-                    }
-                    if (vBookAttempt.isSuccess) vBookAttempt else runCatching {
-                        resolver.openInputStream(uri)?.use { input ->
-                            container.sourcePlatformManager.prepareNativeLuaImport(input).getOrThrow()
-                        } ?: error("Không mở được extension Lua Native Source API 2.")
-                    }.recoverCatching { luaError ->
-                        error(
-                            "Không nhận diện được .ntsource, vBook ZIP hoặc Lua Native Source API 2. " +
-                                "SourcePack: ${signedAttempt.exceptionOrNull()?.message.orEmpty()}; " +
-                                "vBook: ${vBookAttempt.exceptionOrNull()?.message.orEmpty()}; Lua: ${luaError.message}",
+                runCatching {
+                    val metadata = resolver.query(
+                        uri,
+                        arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE),
+                        null,
+                        null,
+                        null,
+                    )?.use { cursor ->
+                        if (!cursor.moveToFirst()) return@use SourceImportFileMetadata(mimeType = resolver.getType(uri).orEmpty())
+                        val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                        SourceImportFileMetadata(
+                            displayName = nameIndex.takeIf { it >= 0 }?.let(cursor::getString).orEmpty(),
+                            mimeType = resolver.getType(uri).orEmpty(),
+                            declaredSizeBytes = sizeIndex.takeIf { it >= 0 && !cursor.isNull(it) }?.let(cursor::getLong),
                         )
-                    }
+                    } ?: SourceImportFileMetadata(mimeType = resolver.getType(uri).orEmpty())
+                    resolver.openInputStream(uri)?.use { input ->
+                        container.sourcePlatformManager.prepareManualImport(input, metadata).getOrThrow()
+                    } ?: error("Không mở được tệp tiện ích đã chọn.")
                 }
             }
             if (result.isFailure) {
@@ -1492,14 +1493,48 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 sourceRepositories = container.sourcePlatformManager.repositories(),
                 sourceRepositoryPackages = container.sourcePlatformManager.repositoryPackages(),
                 sourceTrustKeys = container.sourcePlatformManager.trustKeys(),
-                sourceDiagnosticCount = container.sourcePlatformManager.diagnosticsSnapshot().size,
-                sourceDiagnostics = container.sourcePlatformManager.diagnosticSummaries(2_000),
+                sourceDiagnosticCount = visibleDiagnosticEvents().size,
+                sourceDiagnostics = visibleDiagnosticSummaries(),
                 sourceTraces = container.sourcePlatformManager.diagnosticTraces(100),
                 diagnosticActiveOperations = container.sourceDiagnostics.activityLines(),
                 diagnosticPersistentCriticalCount = container.sourceDiagnostics.persistentCriticalCount(),
             )
         }
     }
+
+    private fun visibleDiagnosticEvents(): List<DiagnosticEvent> {
+        val session = container.sourcePlatformManager.diagnosticsSnapshot()
+        val critical = container.sourceDiagnostics.persistentCriticalSnapshot()
+        return (session + critical)
+            .distinctBy { event ->
+                listOf(
+                    event.timestampEpochMs.toString(),
+                    event.traceId,
+                    event.name,
+                    event.attributes["operationId"].orEmpty(),
+                ).joinToString("|")
+            }
+            .sortedBy(DiagnosticEvent::timestampEpochMs)
+    }
+
+    private fun visibleDiagnosticSummaries(): List<SourceDiagnosticUi> =
+        diagnosticSummaries(visibleDiagnosticEvents())
+
+    private fun diagnosticSummaries(events: List<DiagnosticEvent>): List<SourceDiagnosticUi> = events
+        .takeLast(2_000)
+        .asReversed()
+        .map { event ->
+            SourceDiagnosticUi(
+                timestampEpochMs = event.timestampEpochMs,
+                traceId = event.traceId,
+                sourceId = event.sourceId,
+                category = event.category.name,
+                name = event.name,
+                severity = event.severity.name,
+                durationMs = event.durationMs,
+                detail = event.attributes.entries.joinToString(" • ") { (key, value) -> "$key=$value" },
+            )
+        }
 
     private fun diagnosticsRuntimeSnapshot(): Map<String, String> {
     val snapshot = state.value
@@ -1538,7 +1573,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             runCatching {
                 val payload = container.sourceDiagnostics.exportBundle(
-                events = container.sourcePlatformManager.diagnosticsSnapshot(),
+                events = visibleDiagnosticEvents(),
                 installed = container.sourcePlatformManager.installedPacks(),
                 repositories = container.sourcePlatformManager.repositories(),
                 runtimeState = diagnosticsRuntimeSnapshot(),

@@ -375,7 +375,8 @@ def main() -> None:
     )
     require_text(
         "app/src/main/java/vn/nghetruyen/app/ui/components/ReferenceDiagnosticsChrome.kt",
-        'if (state.diagnosticsMode == "off") return',
+        'if (state.diagnosticsMode == "off" && state.diagnosticPersistentCriticalCount == 0) return',
+        "LỖI CÀI ĐẶT",
         "ĐANG GHI NHẬT KÝ...",
         "XEM NHẬT KÝ",
         "CHƯA CÓ NHẬT KÝ",

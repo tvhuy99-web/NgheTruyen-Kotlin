@@ -10,11 +10,13 @@ import vn.nghetruyen.app.NgheTruyenApplication
 import vn.nghetruyen.source.lua.NativeLuaArchiveImporter
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.security.MessageDigest
+import java.util.zip.ZipInputStream
 
 @RunWith(AndroidJUnit4::class)
 class DefaultSourceExportRoundTripTest {
     @Test
-    fun allSevenDefaultSourcesExportAndReimport() {
+    fun allSevenDefaultSourcesExportAndReimportWithExactOriginalLua() {
         val app = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as NgheTruyenApplication
         val manager = app.container.sourcePlatformManager
 
@@ -24,9 +26,11 @@ class DefaultSourceExportRoundTripTest {
             val exported = output.toByteArray()
             assertTrue("${case.sourceId}: export must be a ZIP", exported.size >= 4 && exported[0] == 'P'.code.toByte() && exported[1] == 'K'.code.toByte())
 
+            val originalLua = exportedLua(exported)
+            assertEquals("${case.sourceId}: exact original Lua SHA-256", case.originalSha256, sha256(originalLua))
+
             val (imported, _) = NativeLuaArchiveImporter.import(ByteArrayInputStream(exported))
             assertEquals("${case.sourceId}: round-trip id", case.sourceId, imported.manifest.id)
-            assertEquals("${case.sourceId}: round-trip package hash", case.originalSha256, imported.packageSha256)
         }
     }
 
@@ -40,11 +44,29 @@ class DefaultSourceExportRoundTripTest {
         try {
             val output = ByteArrayOutputStream()
             manager.exportInstalledPack(case.sourceId, output).getOrThrow()
-            assertTrue("disabled builtin must still be exportable", output.size() > 0)
+            val exported = output.toByteArray()
+            assertTrue("disabled builtin must still be exportable", exported.isNotEmpty())
+            assertEquals(case.originalSha256, sha256(exportedLua(exported)))
         } finally {
             manager.setEnabled(case.sourceId, true).getOrThrow()
         }
     }
+
+    private fun exportedLua(zipBytes: ByteArray): ByteArray {
+        ZipInputStream(ByteArrayInputStream(zipBytes)).use { zip ->
+            while (true) {
+                val entry = zip.nextEntry ?: break
+                if (!entry.isDirectory && (entry.name == "native/source.lua" || entry.name == "legacy/source.lua")) {
+                    return zip.readBytes()
+                }
+            }
+        }
+        error("EXPORTED_DEFAULT_LUA_MISSING")
+    }
+
+    private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
+        .digest(bytes)
+        .joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
     private data class Case(val sourceId: String, val originalSha256: String)
 

@@ -59,6 +59,16 @@ fun ReferenceNgheTruyenApp(
         app.container.sourceDiagnostics.onScreenChanged(diagnosticScreenKey)
     }
 
+    fun activateExploreDiagnosticContext(
+        sourceId: String = state.selectedSourceId.orEmpty(),
+        mode: ExploreMode,
+        category: String? = null,
+    ) {
+        app.container.sourceDiagnostics.onScreenChanged(
+            listOf("explore", sourceId, mode.name, category.orEmpty()).joinToString(":"),
+        )
+    }
+
     BackHandler(enabled = state.destination != Destination.Root) {
         viewModel.back()
     }
@@ -95,14 +105,45 @@ fun ReferenceNgheTruyenApp(
                     RootTab.EXPLORE -> ExploreScreen(
                         state = state,
                         onQueryChange = viewModel::updateQuery,
-                        onSearch = { viewModel.search() },
-                        onSearchAllSourcesChange = viewModel::setSearchAllSources,
+                        onSearch = {
+                            val mode = if (state.query.trim().isBlank() && !state.searchAllSources) {
+                                ExploreMode.HOME
+                            } else {
+                                ExploreMode.SEARCH
+                            }
+                            activateExploreDiagnosticContext(mode = mode)
+                            viewModel.search()
+                        },
+                        onSearchAllSourcesChange = { enabled ->
+                            activateExploreDiagnosticContext(
+                                mode = if (enabled) ExploreMode.SEARCH else ExploreMode.HOME,
+                            )
+                            viewModel.setSearchAllSources(enabled)
+                        },
                         onSortModeChange = viewModel::setSearchSortMode,
                         onCancelSearch = viewModel::cancelSearch,
-                        onSourceSelected = viewModel::selectSource,
-                        onHomeSelected = viewModel::browseHome,
-                        onCategorySelected = viewModel::browseCategory,
-                        onSuggestionSelected = viewModel::selectSearchSuggestion,
+                        onSourceSelected = { sourceId ->
+                            activateExploreDiagnosticContext(
+                                sourceId = sourceId,
+                                mode = ExploreMode.HOME,
+                            )
+                            viewModel.selectSource(sourceId)
+                        },
+                        onHomeSelected = {
+                            activateExploreDiagnosticContext(mode = ExploreMode.HOME)
+                            viewModel.browseHome()
+                        },
+                        onCategorySelected = { category ->
+                            activateExploreDiagnosticContext(
+                                mode = ExploreMode.CATEGORY,
+                                category = category,
+                            )
+                            viewModel.browseCategory(category)
+                        },
+                        onSuggestionSelected = { suggestion ->
+                            activateExploreDiagnosticContext(mode = ExploreMode.SEARCH)
+                            viewModel.selectSearchSuggestion(suggestion)
+                        },
                         onLoadMore = viewModel::loadMoreStories,
                         onStoryClick = viewModel::openStory,
                         onOpenSourceLogin = viewModel::openSourceLogin,

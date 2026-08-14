@@ -350,21 +350,36 @@ class VBookJsRuntime(
                 val hookName = inputObject.propertyString("name") ?: error("NATIVE_LUA_HOOK_NAME_REQUIRED")
                 val sourceCode = resources.read("native/source.lua", 1024 * 1024)
                     ?: error("NATIVE_LUA_SOURCE_MISSING")
-                ScriptableObject.putProperty(scope, "__ngheNativeInput", inputObject)
-                val inputJson = Context.toString(cx.evaluateString(
-                    scope,
-                    "JSON.stringify({value:__ngheNativeInput.value,args:__ngheNativeInput.args||{},context:__ngheNativeInput.context||{}})",
-                    "native-hook-input",
-                    1,
-                    null,
-                ))
+                val bridgeInput = VBookNativeHookBridgeInputCodec.resolve(inputObject.propertyString("input")) {
+                    ScriptableObject.putProperty(scope, "__ngheNativeInput", inputObject)
+                    try {
+                        Context.toString(cx.evaluateString(
+                            scope,
+                            "JSON.stringify({value:__ngheNativeInput.value,args:__ngheNativeInput.args||{},context:__ngheNativeInput.context||{}})",
+                            "native-hook-input-legacy",
+                            1,
+                            null,
+                        ))
+                    } finally {
+                        ScriptableObject.deleteProperty(scope, "__ngheNativeInput")
+                    }
+                }
+                val inputJson = bridgeInput.json
                 diagnostics.emit(event(manifest, request, "VBOOK_BRIDGE_NATIVE_HOOK_STARTED", DiagnosticSeverity.DEBUG, attributes = mapOf(
                     "hook" to hookName.take(160),
+                    "bridgeInputMode" to bridgeInput.mode,
                     "inputBytes" to inputJson.toByteArray(Charsets.UTF_8).size.toString(),
                     "sourceBytes" to sourceCode.size.toString(),
                     "remainingMs" to (budget.deadlineMs - clockMs()).coerceAtLeast(0L).toString(),
                 )))
-                captureEvidence(manifest, request, "bridge-$hookName-input.json", "application/json", inputJson, mapOf("hook" to hookName))
+                captureEvidence(
+                    manifest,
+                    request,
+                    "bridge-$hookName-input.json",
+                    "application/json",
+                    inputJson,
+                    mapOf("hook" to hookName, "bridgeInputMode" to bridgeInput.mode),
+                )
                 val result = brokers.nativeHooks.execute(manifest, SourceNativeHookRequest(
                     sourceId = manifest.id,
                     sourceCode = sourceCode,

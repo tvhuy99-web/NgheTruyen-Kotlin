@@ -24,11 +24,34 @@ class DiagnosticActivityTrackerTest {
         assertTrue(tracker.snapshot().isEmpty())
     }
 
-    private fun event(name: String, traceId: String) = DiagnosticEvent(
+    @Test
+    fun packageVerifiedClosesPackageVerifyAcrossCategoryChange() {
+        val tracker = DiagnosticActivityTracker()
+        tracker.emit(event("PACKAGE_VERIFY_STARTED", "package-verify", DiagnosticCategory.PACKAGE))
+        assertEquals(1, tracker.snapshot().size)
+
+        tracker.emit(event("PACKAGE_VERIFIED", "package-verify", DiagnosticCategory.TRUST))
+
+        assertTrue(tracker.snapshot().isEmpty())
+    }
+
+    @Test
+    fun timeoutSuffixClosesLegacyOperation() {
+        val tracker = DiagnosticActivityTracker()
+        tracker.emit(event("BROWSER_WAIT_STARTED", "browser-wait", DiagnosticCategory.BROWSER))
+        tracker.emit(event("BROWSER_WAIT_TIMEOUT", "browser-wait", DiagnosticCategory.BROWSER))
+        assertTrue(tracker.snapshot().isEmpty())
+    }
+
+    private fun event(
+        name: String,
+        traceId: String,
+        category: DiagnosticCategory = DiagnosticCategory.RUNTIME,
+    ) = DiagnosticEvent(
         timestampEpochMs = 1L,
         traceId = traceId,
         sourceId = "source:test",
-        category = DiagnosticCategory.RUNTIME,
+        category = category,
         name = name,
         severity = DiagnosticSeverity.INFO,
         attributes = emptyMap(),

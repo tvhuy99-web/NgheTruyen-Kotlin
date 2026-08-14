@@ -1,5 +1,5 @@
 # Temporary self-removing workflow. It commits only after exact patching and focused regressions pass.
-# Triggered after workflow registration so GitHub executes it on the PR branch.
+# This diagnostic revision prints the JUnit failure payload if the live-size STV regression fails.
 name: Apply live diagnostics follow-up fix
 
 on:
@@ -35,7 +35,18 @@ jobs:
           python3 scripts/agent_live_diag_followup_fix.py
           sed -i 's/native\/\* bytes/native archive bytes/' source-lua/src/main/kotlin/vn/nghetruyen/source/lua/NativeLuaRuntimeOverlay.kt
 
-      - name: Run focused regressions
+      - name: Diagnose live-size STV regression
+        run: |
+          set +e
+          ./gradlew --no-daemon :source-lua:test --tests 'vn.nghetruyen.source.lua.SangTacVietTocBudgetRegressionTest'
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            echo '===== STV JUNIT XML ====='
+            find source-lua/build/test-results/test -type f -name '*SangTacVietTocBudgetRegressionTest*.xml' -print -exec cat {} \;
+            exit "$status"
+          fi
+
+      - name: Run remaining focused regressions
         run: ./gradlew --no-daemon :source-lua:test :source-vbook:test :app:testDebugUnitTest :app:compileDebugKotlin
 
       - name: Commit verified patch

@@ -13,6 +13,8 @@ internal data class VBookNativeHookBridgeInput(
  *
  * Current adapters send `{name, input: JSON.stringify({value,args,context})}`. Older callers may
  * still send `{name,value,args,context}` directly, so that shape remains a compatibility fallback.
+ * When packed input is present it is authoritative: malformed packed data must fail visibly instead
+ * of falling back and silently discarding `value`, which is what broke story -> TOC on STV.
  */
 internal object VBookNativeHookBridgeInputCodec {
     fun resolve(

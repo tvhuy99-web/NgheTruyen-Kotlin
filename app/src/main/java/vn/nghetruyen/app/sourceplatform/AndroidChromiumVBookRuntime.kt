@@ -126,9 +126,40 @@ class AndroidChromiumVBookRuntime(
         return evaluation.fold(
             onSuccess = { raw ->
                 runCatching {
-                    val normalized = ChromiumVBookDispatchDecoder.decode(raw)
-                    val bytes = JsonCodec.stringify(normalized).toByteArray(Charsets.UTF_8).size
-                    require(bytes <= action.maxOutputBytes) { "CHROMIUM_OUTPUT_TOO_LARGE" }
+                    diagnostics.emit(event(manifest, request, "CHROMIUM_RESULT_DECODE_START", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                        "flow" to "decode",
+                        "stage" to "decode-start",
+                        "rawChars" to raw.length.toString(),
+                    )))
+                    val normalized = ChromiumVBookDispatchDecoder.decode(raw) { name, decoderAttributes ->
+                        diagnostics.emit(event(
+                            manifest,
+                            request,
+                            name,
+                            DiagnosticSeverity.DEBUG,
+                            attributes = decoderAttributes + mapOf(
+                                "flow" to "decode",
+                                "stage" to name.lowercase(Locale.ROOT),
+                            ),
+                        ))
+                    }
+                    diagnostics.emit(event(manifest, request, "CHROMIUM_RESULT_DECODE_OK", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                        "flow" to "decode",
+                        "stage" to "decode-ok",
+                        "resultKeys" to normalized.values.size.toString(),
+                    )))
+                    diagnostics.emit(event(manifest, request, "CHROMIUM_PROCESS_DATA_START", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                        "flow" to "process",
+                        "stage" to "serialize-output",
+                    )))
+                    val outputBytes = JsonCodec.stringify(normalized).toByteArray(Charsets.UTF_8).size
+                    require(outputBytes <= action.maxOutputBytes) { "CHROMIUM_OUTPUT_TOO_LARGE" }
+                    diagnostics.emit(event(manifest, request, "CHROMIUM_PROCESS_DATA_OK", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                        "flow" to "process",
+                        "stage" to "output-validated",
+                        "outputBytes" to outputBytes.toString(),
+                        "maxOutputBytes" to action.maxOutputBytes.toString(),
+                    )))
                     SourceActionResponse(normalized, request.traceId, 0)
                 }.fold(
                     onSuccess = { response ->
@@ -225,17 +256,54 @@ class AndroidChromiumVBookRuntime(
                         defaultValue: String?,
                         result: JsPromptResult,
                     ): Boolean {
-                        if (message != bridgeToken) {
+                        val tokenMatches = message == bridgeToken
+                        diagnostics.emit(event(manifest, request, "CHROMIUM_BRIDGE_TOKEN_CHECK", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                            "flow" to "bridge",
+                            "stage" to "token-check",
+                            "tokenMatches" to tokenMatches.toString(),
+                            "messageChars" to message.length.toString(),
+                        )))
+                        if (!tokenMatches) {
+                            diagnostics.emit(event(manifest, request, "CHROMIUM_BRIDGE_TOKEN_REJECTED", DiagnosticSeverity.WARN, attributes = mapOf(
+                                "flow" to "bridge",
+                                "stage" to "token-rejected",
+                            )))
                             result.cancel()
                             return true
                         }
+                        diagnostics.emit(event(manifest, request, "CHROMIUM_BRIDGE_TOKEN_OK", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                            "flow" to "bridge",
+                            "stage" to "token-ok",
+                        )))
                         val raw = defaultValue.orEmpty()
                         engine.post {
                             val response = runCatching { bridge.handle(raw) }
                                 .getOrElse { error -> bridgeEnvelopeError(error.message ?: error.javaClass.simpleName) }
                             main.post {
-                                if (completed.get()) runCatching { result.cancel() }
-                                else runCatching { result.confirm(response) }
+                                if (completed.get()) {
+                                    diagnostics.emit(event(manifest, request, "CHROMIUM_BRIDGE_CONFIRM_STALE", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                                        "flow" to "bridge",
+                                        "stage" to "confirm-stale",
+                                        "responseBytes" to response.toByteArray(Charsets.UTF_8).size.toString(),
+                                    )))
+                                    runCatching { result.cancel() }
+                                } else {
+                                    runCatching { result.confirm(response) }
+                                        .onSuccess {
+                                            diagnostics.emit(event(manifest, request, "CHROMIUM_BRIDGE_CONFIRM_OK", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                                                "flow" to "bridge",
+                                                "stage" to "confirm-ok",
+                                                "responseBytes" to response.toByteArray(Charsets.UTF_8).size.toString(),
+                                            )))
+                                        }
+                                        .onFailure { error ->
+                                            diagnostics.emit(event(manifest, request, "CHROMIUM_BRIDGE_CONFIRM_FAILED", DiagnosticSeverity.WARN, attributes = mapOf(
+                                                "flow" to "bridge",
+                                                "stage" to "confirm-failed",
+                                                "error" to (error.message ?: error.javaClass.simpleName).take(800),
+                                            )))
+                                        }
+                                }
                             }
                         }
                         return true
@@ -261,6 +329,12 @@ class AndroidChromiumVBookRuntime(
 
                     override fun onPageFinished(view: WebView, url: String?) {
                         if (!evaluationStarted.compareAndSet(false, true) || completed.get()) return
+                        diagnostics.emit(event(manifest, request, "CHROMIUM_EVALUATE_START", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                            "flow" to "evaluate",
+                            "stage" to "evaluate-start",
+                            "pageUrl" to url.orEmpty().take(500),
+                            "programChars" to program.length.toString(),
+                        )))
                         val guardedProgram = """
                   (function(){
                     try {
@@ -271,19 +345,48 @@ class AndroidChromiumVBookRuntime(
                     }
                   })()
               """.trimIndent()
-              view.evaluateJavascript(guardedProgram) { encoded ->
+                        view.evaluateJavascript(guardedProgram) { encoded ->
+                            diagnostics.emit(event(manifest, request, "CHROMIUM_EVALUATE_CALLBACK_ENTER", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                                "flow" to "evaluate",
+                                "stage" to "callback-enter",
+                                "encodedChars" to encoded.orEmpty().length.toString(),
+                            )))
                             runCatching {
+                                diagnostics.emit(event(manifest, request, "CHROMIUM_EVALUATE_CALLBACK_JSON_START", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                                    "flow" to "evaluate",
+                                    "stage" to "callback-json-start",
+                                )))
                                 val decoded = JSONTokener(encoded ?: "null").nextValue()
+                                diagnostics.emit(event(manifest, request, "CHROMIUM_EVALUATE_CALLBACK_JSON_OK", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                                    "flow" to "evaluate",
+                                    "stage" to "callback-json-ok",
+                                    "valueType" to when (decoded) {
+                                        is String -> "string"
+                                        null -> "null"
+                                        else -> decoded.javaClass.simpleName.take(120)
+                                    },
+                                )))
                                 when (decoded) {
                                     is String -> decoded
                                     null -> error("CHROMIUM_RESULT_NULL")
                                     else -> decoded.toString()
+                                }.also { value ->
+                                    diagnostics.emit(event(manifest, request, "CHROMIUM_EVALUATE_CALLBACK_VALUE", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                                        "flow" to "evaluate",
+                                        "stage" to "callback-value",
+                                        "decodedChars" to value.length.toString(),
+                                    )))
                                 }
                             }.let(::finish)
                         }
                     }
 
                     override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                        diagnostics.emit(event(manifest, request, "CHROMIUM_RENDERER_GONE", DiagnosticSeverity.ERROR, attributes = mapOf(
+                            "flow" to "evaluate",
+                            "stage" to "renderer-gone",
+                            "didCrash" to detail.didCrash().toString(),
+                        )))
                         finish(Result.failure(IllegalStateException("CHROMIUM_RENDERER_GONE:${detail.didCrash()}")))
                         return true
                     }
@@ -293,6 +396,12 @@ class AndroidChromiumVBookRuntime(
         }
 
         if (!latch.await(timeoutMs + CALLBACK_GRACE_MS, TimeUnit.MILLISECONDS)) {
+            diagnostics.emit(event(manifest, request, "CHROMIUM_EVALUATE_TIMEOUT", DiagnosticSeverity.ERROR, attributes = mapOf(
+                "flow" to "evaluate",
+                "stage" to "timeout",
+                "timeoutMs" to timeoutMs.toString(),
+                "graceMs" to CALLBACK_GRACE_MS.toString(),
+            )))
             if (completed.compareAndSet(false, true)) {
                 destroyWebView()
                 latch.countDown()
@@ -317,10 +426,18 @@ class AndroidChromiumVBookRuntime(
             private set
 
         fun handle(raw: String): String {
+            checkpoint("CHROMIUM_BRIDGE_PARSE_ENTER", "parse-enter", mapOf(
+                "rawBytes" to raw.toByteArray(Charsets.UTF_8).size.toString(),
+                "remainingMs" to remainingMs().toString(),
+            ))
             require(raw.toByteArray(Charsets.UTF_8).size <= MAX_BRIDGE_BYTES) { "CHROMIUM_BRIDGE_INPUT_TOO_LARGE" }
             require(clockMs() <= deadlineMs) { "CHROMIUM_BRIDGE_TIMEOUT" }
+            checkpoint("CHROMIUM_BRIDGE_JSON_START", "json-start")
             val root = JsonCodec.parse(raw, maxDepth = 64, maxNodes = 50_000) as? JsonValue.Obj
                 ?: error("CHROMIUM_BRIDGE_REQUEST_OBJECT_REQUIRED")
+            checkpoint("CHROMIUM_BRIDGE_JSON_OK", "json-ok", mapOf(
+                "objectKeys" to root.values.size.toString(),
+            ))
             val operation = root.string("op")?.trim().orEmpty()
             val payload = root.obj("payload") ?: JsonValue.Obj()
             calls += 1
@@ -333,6 +450,11 @@ class AndroidChromiumVBookRuntime(
                 "requestId" to request.traceId,
             )))
             require(calls <= MAX_BRIDGE_CALLS) { "CHROMIUM_BRIDGE_CALL_LIMIT" }
+            checkpoint("CHROMIUM_BRIDGE_DISPATCH_START", "dispatch-start", mapOf(
+                "operation" to operation.take(120),
+                "bridgeCalls" to calls.toString(),
+                "payloadKeys" to payload.values.size.toString(),
+            ))
             val value = when (operation) {
                 "resource_read" -> resourceRead(payload)
                 "host_command" -> hostCommand(payload)
@@ -360,9 +482,32 @@ class AndroidChromiumVBookRuntime(
                 "native_hook" -> error("CHROMIUM_NATIVE_HOOK_UNAVAILABLE")
                 else -> error("CHROMIUM_BRIDGE_OPERATION_DENIED:$operation")
             }
+            checkpoint("CHROMIUM_BRIDGE_DISPATCH_OK", "dispatch-ok", mapOf(
+                "operation" to operation.take(120),
+                "bridgeCalls" to calls.toString(),
+                "valueType" to jsonValueType(value),
+            ))
             val encoded = bridgeEnvelopeSuccess(value)
-            require(encoded.toByteArray(Charsets.UTF_8).size <= MAX_BRIDGE_BYTES) { "CHROMIUM_BRIDGE_OUTPUT_TOO_LARGE" }
+            val encodedBytes = encoded.toByteArray(Charsets.UTF_8).size
+            checkpoint("CHROMIUM_BRIDGE_RESULT_ENCODED", "result-encoded", mapOf(
+                "operation" to operation.take(120),
+                "responseBytes" to encodedBytes.toString(),
+            ))
+            require(encodedBytes <= MAX_BRIDGE_BYTES) { "CHROMIUM_BRIDGE_OUTPUT_TOO_LARGE" }
             return encoded
+        }
+
+        private fun checkpoint(
+            name: String,
+            stage: String,
+            attributes: Map<String, String> = emptyMap(),
+        ) {
+            diagnostics.emit(event(manifest, request, name, DiagnosticSeverity.DEBUG, attributes = attributes + mapOf(
+                "flow" to "bridge",
+                "stage" to stage,
+                "bridgeCalls" to calls.toString(),
+                "requestId" to request.traceId,
+            )))
         }
 
         private fun resourceRead(payload: JsonValue.Obj): JsonValue {
@@ -807,6 +952,15 @@ private fun bridgeEnvelopeError(message: String): String = JsonCodec.stringify(J
     "ok" to JsonValue.Bool(false),
     "error" to JsonValue.Str(message.take(4_000)),
 )))
+
+private fun jsonValueType(value: JsonValue): String = when (value) {
+    is JsonValue.Obj -> "object"
+    is JsonValue.Arr -> "array"
+    is JsonValue.Str -> "string"
+    is JsonValue.Num -> "number"
+    is JsonValue.Bool -> "boolean"
+    JsonValue.Null -> "null"
+}
 
 private fun JsonValue.Obj.string(name: String): String? = (values[name] as? JsonValue.Str)?.value
 private fun JsonValue.Obj.obj(name: String): JsonValue.Obj? = values[name] as? JsonValue.Obj

@@ -33,14 +33,14 @@ data class JsSandboxPolicy(
     val maxInstructions: Long = 500_000,
     val wallClockTimeoutMs: Long = 2_000,
     val instructionObserverThreshold: Int = 1_000,
-    /** Hard runaway ceiling = maxInstructions * hardInstructionMultiplier. */
-    val hardInstructionMultiplier: Int = 16,
     /** Maximum positive heap growth observed during one execution. Null disables this guard. */
     val maxHeapGrowthBytes: Long? = null,
     val maxResultUnits: Int = 1_000_000,
     val maxCollectionItems: Int = 20_000,
     val maxValueDepth: Int = 64,
     val languageVersion: Int = Context.VERSION_ES6,
+    /** Hard runaway ceiling = maxInstructions * hardInstructionMultiplier. Kept last for source compatibility. */
+    val hardInstructionMultiplier: Int = 16,
 ) {
     val hardInstructionLimit: Long
         get() = if (maxInstructions > Long.MAX_VALUE / hardInstructionMultiplier) {
@@ -351,7 +351,6 @@ class SafeRhinoSandbox(
             )
         }
     }
-
 }
 
 private fun configureContext(context: Context, policy: JsSandboxPolicy) {

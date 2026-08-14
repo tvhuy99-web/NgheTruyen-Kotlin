@@ -1,3 +1,4 @@
+# Temporary self-removing patch workflow. The patch job deletes this file before committing.
 name: Apply native hook bridge fix
 
 on:

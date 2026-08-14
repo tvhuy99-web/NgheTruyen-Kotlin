@@ -148,6 +148,46 @@ class BoundedDiagnosticRecorder(
         }
     }
 
+    /**
+     * Atomically rotates a screen-scoped timeline while preserving every event that belongs to an
+     * operation still running at the boundary. The active set is reconstructed under the same lock
+     * used by [emit], so a START event cannot land between snapshot and clear and disappear.
+     *
+     * The returned trace ids let the evidence recorder retain the matching browser/network payloads.
+     */
+    fun retainActiveOperationTraces(): Set<String> = lock.withLock {
+        val active = linkedMapOf<String, String>()
+        events.forEach { event ->
+            val upper = event.name.uppercase(Locale.ROOT)
+            if (upper.startsWith("DIAGNOSTIC_SCREEN_") || upper.startsWith("DIAGNOSTICS_MODE_")) {
+                return@forEach
+            }
+            val operationId = DiagnosticOperationContract.id(event) ?: legacyOperationKey(event, upper)
+            when (DiagnosticOperationContract.state(event)) {
+                DiagnosticOperationState.STARTED -> active[operationId] = event.traceId
+                DiagnosticOperationState.COMPLETED,
+                DiagnosticOperationState.FAILED,
+                DiagnosticOperationState.CANCELLED,
+                DiagnosticOperationState.TIMEOUT -> active.remove(operationId)
+                DiagnosticOperationState.STAGE -> Unit
+                null -> when {
+                    LEGACY_START_SUFFIXES.any(upper::endsWith) -> active[operationId] = event.traceId
+                    LEGACY_TERMINAL_SUFFIXES.any(upper::endsWith) -> active.remove(operationId)
+                }
+            }
+        }
+
+        val activeOperationIds = active.keys.toSet()
+        val activeTraceIds = active.values.filter(String::isNotBlank).toSet()
+        val retained = events.filter { event ->
+            event.traceId in activeTraceIds ||
+                DiagnosticOperationContract.id(event)?.let(activeOperationIds::contains) == true
+        }
+        events.clear()
+        retained.forEach(events::addLast)
+        activeTraceIds
+    }
+
     fun clear(sourceId: String? = null) = lock.withLock {
         if (sourceId == null) {
             events.clear()
@@ -157,6 +197,19 @@ class BoundedDiagnosticRecorder(
             events.clear()
             retained.forEach(events::addLast)
         }
+    }
+
+    private fun legacyOperationKey(event: DiagnosticEvent, upperName: String): String {
+        val suffix = (LEGACY_START_SUFFIXES + LEGACY_TERMINAL_SUFFIXES).firstOrNull(upperName::endsWith)
+        val stem = suffix?.let(upperName::removeSuffix) ?: upperName
+        return "legacy:${event.traceId}:$stem"
+    }
+
+    companion object {
+        private val LEGACY_START_SUFFIXES = listOf("_STARTED", "_START")
+        private val LEGACY_TERMINAL_SUFFIXES = listOf(
+            "_COMPLETED", "_FAILED", "_ERROR", "_DONE", "_CANCELLED", "_STOPPED", "_TIMEOUT",
+        )
     }
 }
 
@@ -236,6 +289,16 @@ class BoundedDiagnosticEvidenceRecorder(
     }
 
     fun snapshot(): List<DiagnosticEvidence> = lock.withLock { items.toList() }
+
+    /** Keep only evidence attached to traces that crossed the current screen boundary. */
+    fun retainTraces(traceIds: Set<String>) = lock.withLock {
+        val retained = items.filter { it.traceId in traceIds }
+        items.clear()
+        retained.forEach(items::addLast)
+        retainedBytes = retained.sumOf { it.data.size.toLong() }
+        evictedItems = 0
+        truncatedItems = retained.count { it.attributes["truncated"].equals("true", ignoreCase = true) }.toLong()
+    }
 
     fun clear() = lock.withLock {
         items.clear()

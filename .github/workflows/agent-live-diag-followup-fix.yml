@@ -1,4 +1,5 @@
 # Temporary self-removing workflow. It commits only after exact patching and focused regressions pass.
+# Triggered after workflow registration so GitHub executes it on the PR branch.
 name: Apply live diagnostics follow-up fix
 
 on:

@@ -97,7 +97,7 @@ replace_exact(
                 if (spec.get("op").optjstring("") != "split") continue
                 if (spec.get("separator").optjstring("") != "-//-") continue
                 if (!spec.get("limit").isnil()) return emptyList()
-                spec.set("limit", LuaValue.valueOf("$vars.window.probe_end"))
+                spec.set("limit", LuaValue.valueOf("\$vars.window.probe_end"))
                 return listOf("stv-chapter-split-probe-window-v1")
             }
         }
@@ -129,7 +129,7 @@ replace_exact(
     }''',
     '''        assertTrue(toc.contains("page: url || \\\"\\\""))
         val core = requireNotNull(pack.entries["src/native_v2_core.js"]).toString(Charsets.UTF_8)
-        assertTrue("STV chapter split should be bounded by the page probe window", core.contains("\\\"limit\\\":\\\"$vars.window.probe_end\\\""))
+        assertTrue("STV chapter split should be bounded by the page probe window", core.contains("\\\"limit\\\":\\\"\\$vars.window.probe_end\\\""))
     }''',
 )
 

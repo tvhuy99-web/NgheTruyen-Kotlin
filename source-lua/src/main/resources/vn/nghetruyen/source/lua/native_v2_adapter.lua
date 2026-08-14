@@ -69,6 +69,7 @@ var PIPELINES=__NATIVE_V2_PIPELINES__;
 var BASE=__NATIVE_V2_BASE__;
 var PERMISSIONS=__NATIVE_V2_PERMISSIONS__;
 var RUNTIME_VERSION=__NATIVE_V2_RUNTIME_VERSION__;
+// NGHETRUYEN_NATIVE_V2_HOST_RUNTIME:2026-08-15.1
 var MAX_HOOK_INPUT_BYTES=__NATIVE_V2_MAX_HOOK_INPUT_BYTES__;
 function own(o,k){return Object.prototype.hasOwnProperty.call(o||{},k)}
 function isObj(v){return !!v&&typeof v==="object"&&!Array.isArray(v)}
@@ -404,7 +405,14 @@ function applyTransformOperation(value,rawOp,ctx,stage){
  if(op==="trim")return String(value==null?"":value).trim();if(op==="lower"||op==="lowercase")return String(value==null?"":value).toLowerCase();if(op==="upper"||op==="uppercase")return String(value==null?"":value).toUpperCase();
  if(op==="replace"){var pattern=String(resolveDynamic(ctx,opSpec.pattern,value)||""),rep=String(resolveDynamic(ctx,opSpec.replacement,value)||"");return opSpec.plain===true?String(value==null?"":value).split(pattern).join(rep):regexReplaceText(value,pattern,String(opSpec.flags||"g"),rep)}
  if(op==="regex_replace"){try{return regexReplaceText(value,String(opSpec.pattern||""),String(opSpec.flags||"g"),String(resolveDynamic(ctx,opSpec.replacement,value)||""))}catch(e){fail(stage,"regex_replace không hợp lệ",e.message||e)}}
- if(op==="split")return String(value==null?"":value).split(String(opSpec.separator!==undefined?opSpec.separator:(opSpec.delimiter||",")));
+ if(op==="split"){
+  var splitText=String(value==null?"":value),splitSep=String(opSpec.separator!==undefined?opSpec.separator:(opSpec.delimiter||","));
+  if(opSpec.limit===undefined)return splitText.split(splitSep);
+  var resolvedLimit=Number(resolveDynamic(ctx,opSpec.limit,value));
+  if(!isFinite(resolvedLimit))fail(stage,"split limit không hợp lệ",String(opSpec.limit));
+  resolvedLimit=Math.max(0,Math.min(20000,Math.floor(resolvedLimit)));
+  return splitText.split(splitSep,resolvedLimit);
+ }
  if(op==="join")return asArray(value).join(String(opSpec.separator!==undefined?opSpec.separator:(opSpec.delimiter||"")));
  if(op==="substring"||op==="slice_text"){var st=Number(opSpec.start||0)||0,en=opSpec.stop!==undefined?Number(opSpec.stop):(opSpec.end!==undefined?Number(opSpec.end):undefined);if(opSpec.length!==undefined)en=st+(Number(opSpec.length)||0);return String(value==null?"":value).slice(st,en)}
  if(op==="url_encode")return encodeURIComponent(String(value==null?"":value));if(op==="url_decode")try{return decodeURIComponent(String(value==null?"":value))}catch(e){warn(stage+".url_decode","URL decode thất bại",e&&e.message?e.message:e);return String(value==null?"":value)}

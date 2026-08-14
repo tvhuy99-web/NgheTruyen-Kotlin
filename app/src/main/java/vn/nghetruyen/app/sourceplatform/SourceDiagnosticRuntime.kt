@@ -42,6 +42,7 @@ data class DiagnosticActiveOperation(
     val lastEventAtEpochMs: Long,
     val startEvent: String,
     val lastEvent: String,
+    val screenGeneration: Long?,
 )
 
 /**
@@ -228,7 +229,9 @@ class SourceDiagnosticRuntime(private val context: Context) {
         )
     }
 
-    fun activitySnapshot(): List<DiagnosticActiveOperation> = activityTracker.snapshot()
+    fun activitySnapshot(): List<DiagnosticActiveOperation> =
+        if (mode == MODE_SCREEN) activityTracker.snapshot(recorder.currentScreenGeneration())
+        else activityTracker.snapshot()
 
     fun activityLines(nowMs: Long = System.currentTimeMillis()): List<String> = activitySnapshot().map { operation ->
         val elapsed = (nowMs - operation.startedAtEpochMs).coerceAtLeast(0L)
@@ -383,7 +386,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
         put("device", Build.DEVICE)
         put("product", Build.PRODUCT)
         put("eventCount", events.size)
-        put("activeOperationCount", activityTracker.snapshot().size)
+        put("activeOperationCount", activitySnapshot().size)
         val eventStats = recorder.stats()
         val stats = evidence.stats()
         put("ramEventItems", eventStats.itemCount)
@@ -401,7 +404,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
     }
 
     private fun activeOperationsJson(): JSONArray = JSONArray().apply {
-        activityTracker.snapshot().forEach { operation ->
+        activitySnapshot().forEach { operation ->
             put(JSONObject().apply {
                 put("traceId", operation.traceId)
                 put("operationId", operation.operationId)
@@ -416,6 +419,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
                 put("lastEventAtEpochMs", operation.lastEventAtEpochMs)
                 put("startEvent", operation.startEvent)
                 put("lastEvent", operation.lastEvent)
+                put("screenGeneration", operation.screenGeneration ?: JSONObject.NULL)
             })
         }
     }
@@ -570,6 +574,7 @@ internal class DiagnosticActivityTracker : DiagnosticSink {
                     lastEventAtEpochMs = event.timestampEpochMs,
                     startEvent = event.name,
                     lastEvent = event.name,
+                    screenGeneration = event.attributes["diagnosticScreenGeneration"]?.toLongOrNull(),
                 )
                 while (active.size > 100) active.remove(active.entries.first().key)
             }
@@ -588,8 +593,12 @@ internal class DiagnosticActivityTracker : DiagnosticSink {
         }
     }
 
-    fun snapshot(): List<DiagnosticActiveOperation> = synchronized(lock) {
-        active.values.sortedByDescending(DiagnosticActiveOperation::lastEventAtEpochMs)
+    fun snapshot(screenGeneration: Long? = null): List<DiagnosticActiveOperation> = synchronized(lock) {
+        active.values
+            .asSequence()
+            .filter { screenGeneration == null || it.screenGeneration == screenGeneration }
+            .sortedByDescending(DiagnosticActiveOperation::lastEventAtEpochMs)
+            .toList()
     }
 
     fun clear() = synchronized(lock) { active.clear() }
@@ -607,7 +616,7 @@ internal class DiagnosticActivityTracker : DiagnosticSink {
         private val START_SUFFIXES = listOf("_STARTED", "_START")
         private val TERMINAL_SUFFIXES = listOf(
             "_COMPLETED", "_FAILED", "_ERROR", "_DONE", "_CANCELLED", "_STOPPED", "_TIMEOUT",
-            "_VERIFIED", "_SUCCEEDED", "_SUCCESS", "_FINISHED",
+            "_VERIFIED", "_SUCCEEDED", "_SUCCESS", "_FINISHED", "_OK",
         )
         private val TERMINAL_STATES = setOf(
             DiagnosticOperationState.COMPLETED,

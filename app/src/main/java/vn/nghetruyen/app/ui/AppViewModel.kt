@@ -2103,8 +2103,27 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 mutableState.update { it.copy(loading = false, message = "Nguồn truyện không tồn tại.") }
                 return@launch
             }
+            val storyLoadStartedAt = System.currentTimeMillis()
+            val storyOriginGeneration = container.sourceDiagnostics.recorder.currentScreenGeneration()
             when (val result = source.story(story.url.ifBlank { story.id })) {
                 is AppResult.Success -> {
+                    val destinationStoryKey = "story:${result.value.story.id}"
+                    container.sourceDiagnostics.onScreenChanged(destinationStoryKey)
+                    container.sourceDiagnostics.mark(
+                        name = "STORY_SCREEN_READY",
+                        category = vn.nghetruyen.source.diagnostics.DiagnosticCategory.RUNTIME,
+                        severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.INFO,
+                        sourceId = result.value.story.sourceId,
+                        durationMs = (System.currentTimeMillis() - storyLoadStartedAt).coerceAtLeast(0L),
+                        attributes = mapOf(
+                            "action" to "STORY",
+                            "status" to "success",
+                            "chapterCount" to result.value.chapters.size.toString(),
+                            "hasNextChapterPage" to (!result.value.nextChapterPageUrl.isNullOrBlank()).toString(),
+                            "originScreenGeneration" to storyOriginGeneration.toString(),
+                            "handoff" to "source-action-to-story-screen",
+                        ),
+                    )
                     resetChapterPagination(result.value.story.id)
                     container.libraryRepository.rememberStory(result.value.story)
                     if (container.libraryRepository.getFollowing(result.value.story.id) != null) {

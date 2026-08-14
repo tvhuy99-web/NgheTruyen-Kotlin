@@ -31,10 +31,28 @@ class SangTacVietTocBudgetRegressionTest {
         val oldInstalledManifest = pack.manifest.copy(
             runtime = pack.manifest.runtime.copy(memoryBudgetBytes = 32 * 1024 * 1024),
         )
+        val currentCore = requireNotNull(pack.entries["src/native_v2_core.js"]).toString(Charsets.UTF_8)
+        assertTrue(currentCore.contains(NativeLuaRuntimeOverlay.HOST_RUNTIME_MARKER))
+        val stalePack = pack.copy(entries = LinkedHashMap(pack.entries).apply {
+            put(
+                "src/native_v2_core.js",
+                currentCore.replace(NativeLuaRuntimeOverlay.HOST_RUNTIME_MARKER, "STALE_NATIVE_V2_HOST_RUNTIME")
+                    .toByteArray(Charsets.UTF_8),
+            )
+        })
+        val overlay = NativeLuaRuntimeOverlay.refresh(stalePack)
+        assertTrue("old installed NativeV2 core must be refreshed", overlay.refreshed)
+        assertTrue(
+            requireNotNull(overlay.entries["src/native_v2_core.js"]).toString(Charsets.UTF_8)
+                .contains(NativeLuaRuntimeOverlay.HOST_RUNTIME_MARKER),
+        )
 
         val responseBody = realisticChapterApiResponse()
         val responseBytes = responseBody.toByteArray(Charsets.UTF_8)
-        assertTrue("fixture should resemble the 55-69 KiB device response: ${responseBytes.size}", responseBytes.size in 50 * 1024..90 * 1024)
+        assertTrue(
+            "fixture should resemble the 167,907-byte live device response: ${responseBytes.size}",
+            responseBytes.size in 155 * 1024..180 * 1024,
+        )
 
         val network = SourceNetworkBroker { _, request ->
             SourcePlatformResult.Success(SourceNetworkResponse(
@@ -62,7 +80,7 @@ class SangTacVietTocBudgetRegressionTest {
             traceId = "stv-toc-budget-regression",
         )
 
-        val result = runtime.execute(oldInstalledManifest, MapSourceResourceProvider(pack.entries), request)
+        val result = runtime.execute(oldInstalledManifest, MapSourceResourceProvider(overlay.entries), request)
         assertTrue(
             when (result) {
                 is SourcePlatformResult.Success -> "success"
@@ -73,13 +91,15 @@ class SangTacVietTocBudgetRegressionTest {
         val response = (result as SourcePlatformResult.Success).value
         val encoded = JsonCodec.stringify(response.value)
         assertTrue("expected first chapter in normalized output", encoded.contains("Chương 1"))
-        assertTrue("expected last chapter in normalized output", encoded.contains("Chương 100"))
+        assertTrue("expected last chapter on page 1", encoded.contains("Chương 100"))
+        assertTrue("page 1 must not eagerly materialize chapter 101", !encoded.contains("Chương 101"))
+        assertTrue("expected next page token", encoded.contains("__vbook_stv_toc=2"))
         assertTrue("expected chapter URL rooted at the story", encoded.contains(storyUrl))
     }
 
     private fun realisticChapterApiResponse(): String {
-        val padding = "x".repeat(250)
-        val records = (1..100).joinToString("-//-") { index ->
+        val padding = "x".repeat(70)
+        val records = (1..1_000).joinToString("-//-") { index ->
             "$padding-/-$index-/-Chương $index-/-$padding"
         }
         return JsonCodec.stringify(JsonValue.Obj(linkedMapOf(

@@ -43,6 +43,7 @@ internal class DiagnosticStorySource(
             "page" to page.toString(),
             "category" to safeText(category, 160),
         ),
+        screenCategory = category,
     ) { delegate.category(category, page) }
 
     override suspend fun story(url: String): AppResult<StoryDetail> = trace(
@@ -112,10 +113,12 @@ internal class DiagnosticStorySource(
     private suspend fun <T> trace(
         action: String,
         attributes: Map<String, String> = emptyMap(),
+        screenCategory: String? = null,
         block: suspend () -> AppResult<T>,
     ): AppResult<T> {
         if (diagnostics.mode == SourceDiagnosticRuntime.MODE_OFF) return block()
 
+        prepareExploreScreenContext(action, screenCategory)
         val operationId = "source-action:${descriptor.id.take(120)}:${action.lowercase()}:${UUID.randomUUID()}"
         val startedAt = System.currentTimeMillis()
         val base = baseAttributes(action) + attributes
@@ -204,6 +207,28 @@ internal class DiagnosticStorySource(
         }
     }
 
+    private fun prepareExploreScreenContext(action: String, category: String?) {
+        if (diagnostics.mode != SourceDiagnosticRuntime.MODE_SCREEN) return
+        val currentScreen = diagnostics.recorder.snapshot()
+            .lastOrNull()
+            ?.attributes
+            ?.get("screen")
+            .orEmpty()
+        if (!ExploreDiagnosticScreenContext.shouldActivate(
+                currentScreen = currentScreen,
+                sourceId = descriptor.id,
+                action = action,
+                category = category,
+            )
+        ) return
+
+        ExploreDiagnosticScreenContext.target(
+            sourceId = descriptor.id,
+            action = action,
+            category = category,
+        )?.let(diagnostics::onScreenChanged)
+    }
+
     private fun operationAttributes(
         operationId: String,
         action: String,
@@ -250,6 +275,44 @@ internal class DiagnosticStorySource(
 
     private fun elapsedSince(startedAt: Long): Long =
         (System.currentTimeMillis() - startedAt).coerceAtLeast(0L)
+}
+
+internal object ExploreDiagnosticScreenContext {
+    fun target(sourceId: String, action: String, category: String? = null): String? {
+        val mode = when (action.uppercase()) {
+            "HOME" -> "HOME"
+            "SEARCH" -> "SEARCH"
+            "CATEGORY" -> "CATEGORY"
+            else -> return null
+        }
+        return listOf("explore", sourceId, mode, category.orEmpty()).joinToString(":")
+    }
+
+    fun shouldActivate(
+        currentScreen: String,
+        sourceId: String,
+        action: String,
+        category: String? = null,
+    ): Boolean {
+        val normalizedAction = action.uppercase()
+        val target = target(sourceId, normalizedAction, category) ?: return false
+        val current = currentScreen.trim()
+        if (current == target) return false
+
+        val parts = current.split(':')
+        val root = parts.getOrNull(0).orEmpty()
+        val currentSourceId = parts.getOrNull(1).orEmpty()
+        val currentMode = parts.getOrNull(2).orEmpty()
+
+        return when {
+            current.isBlank() -> normalizedAction != "SEARCH"
+            root == "explore" && normalizedAction == "SEARCH" ->
+                currentMode != "SEARCH" && currentSourceId == sourceId
+            root == "explore" -> true
+            root == "story" && normalizedAction == "CATEGORY" -> true
+            else -> false
+        }
+    }
 }
 
 internal fun StorySource.withDiagnostics(diagnostics: SourceDiagnosticRuntime?): StorySource = when {

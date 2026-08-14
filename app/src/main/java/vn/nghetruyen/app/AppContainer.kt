@@ -38,6 +38,7 @@ import vn.nghetruyen.app.transfer.LegacyXpkDeepRepairCoordinator
 import vn.nghetruyen.app.transfer.LegacyXpkEverythingRestoreCoordinator
 import vn.nghetruyen.app.transfer.LegacyXpkVerifiedRestoreCoordinator
 import vn.nghetruyen.app.transfer.VietPhraseTransferManager
+import vn.nghetruyen.source.diagnostics.ScreenScopedDiagnosticEvidenceSink
 
 class AppContainer(context: Context) {
     private val appContext = context.applicationContext
@@ -47,6 +48,10 @@ class AppContainer(context: Context) {
     val libraryRepository: LibraryRepository by lazy { LibraryRepository(database) }
     val sourceSessionStore: EncryptedSourceSessionStore by lazy { EncryptedSourceSessionStore(appContext) }
     val sourceDiagnostics: SourceDiagnosticRuntime = SourceDiagnosticRuntime(appContext)
+    private val screenScopedSourceEvidence = ScreenScopedDiagnosticEvidenceSink(
+        scope = sourceDiagnostics.recorder,
+        delegate = sourceDiagnostics.evidence,
+    )
 
     private val vBookQuickTranslationInstalled: Unit by lazy {
         AndroidVBookQuickTranslationRegistry.install(libraryRepository)
@@ -59,7 +64,7 @@ class AppContainer(context: Context) {
             sourceSessionStore,
             aiServices,
             diagnostics = sourceDiagnostics.recorder,
-            evidence = sourceDiagnostics.evidence,
+            evidence = screenScopedSourceEvidence,
         )
     }
 
@@ -71,7 +76,7 @@ class AppContainer(context: Context) {
         VBookRepositoryClient(
             cache = vBookRepositoryCacheStore,
             diagnostics = sourceDiagnostics.recorder,
-            evidence = sourceDiagnostics.evidence,
+            evidence = screenScopedSourceEvidence,
         )
     }
 
@@ -88,7 +93,7 @@ class AppContainer(context: Context) {
             vBookSourcePlatform = vBookSourcePlatform,
             onVBookChanged = { refreshSourceRegistry() },
             diagnostics = sourceDiagnostics.recorder,
-            evidence = sourceDiagnostics.evidence,
+            evidence = screenScopedSourceEvidence,
         )
     }
 

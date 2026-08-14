@@ -90,6 +90,8 @@ class SangTacVietTocBudgetRegressionTest {
         )
         val response = (result as SourcePlatformResult.Success).value
         val encoded = JsonCodec.stringify(response.value)
+        // A full live-size response is intentionally supplied above, but page 1 may materialize
+        // only its 100 visible chapters plus the single record needed to determine a next page.
         assertTrue("expected first chapter in normalized output", encoded.contains("Chương 1"))
         assertTrue("expected last chapter on page 1", encoded.contains("Chương 100"))
         assertTrue("page 1 must not eagerly materialize chapter 101", !encoded.contains("Chương 101"))

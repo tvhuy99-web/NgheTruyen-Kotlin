@@ -340,6 +340,15 @@ object DiagnosticDeepBlackBox {
 
     private fun isTerminal(name: String): Boolean {
         val upper = name.uppercase(Locale.ROOT)
-        return listOf("_COMPLETED", "_FAILED", "_ERROR", "_DONE", "_CANCELLED", "_STOPPED", "_TIMEOUT").any(upper::endsWith)
+        return listOf(
+            "_COMPLETED",
+            "_FAILED",
+            "_ERROR",
+            "_DONE",
+            "_CANCELLED",
+            "_STOPPED",
+            "_TIMEOUT",
+            "_VERIFIED",
+        ).any(upper::endsWith)
     }
 }

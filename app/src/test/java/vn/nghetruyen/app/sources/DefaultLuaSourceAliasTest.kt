@@ -2,6 +2,7 @@ package vn.nghetruyen.app.sources
 
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Test
 import vn.nghetruyen.app.core.common.AppResult
@@ -31,6 +32,47 @@ class DefaultLuaSourceAliasTest {
 
         val detail = selected.story("https://example.com/story") as AppResult.Success
         assertEquals("truyenfull", detail.value.story.sourceId)
+    }
+
+    @Test
+    fun registryNormalizesRawBundledLuaSourceWithoutCallerHelp() = runBlocking {
+        val legacy = FakeSource("sangtacviet", priority = 100)
+        val nativeId = "vn.nghetruyen.native.sangtacviet-native-instant-fast-v50"
+        val native = FakeSource(nativeId, priority = 50)
+        val registry = SourceRegistry(
+            sources = listOf(legacy),
+            sourcePackSources = listOf(native),
+        )
+
+        val selected = requireNotNull(registry.get("sangtacviet"))
+        assertEquals(250, selected.selectionPriority)
+        assertEquals("sangtacviet", selected.descriptor.id)
+        assertNull(registry.get(nativeId))
+
+        val search = selected.search("x") as AppResult.Success
+        assertEquals("sangtacviet", search.value.single().sourceId)
+        assertEquals(nativeId, search.value.single().title)
+    }
+
+    @Test
+    fun uiStyleRefreshCannotRestoreLegacyAdapterOverBundledLua() = runBlocking {
+        val legacy = FakeSource("sangtacviet", priority = 100)
+        val nativeId = "vn.nghetruyen.native.sangtacviet-native-instant-fast-v50"
+        val native = FakeSource(nativeId, priority = 50)
+        val registry = SourceRegistry(
+            sources = listOf(legacy),
+            sourcePackSources = listOf(native.withStableDefaultLuaId()),
+        )
+
+        // AppViewModel refreshSourcePlatformState() supplies raw activeStorySources(). The registry
+        // must normalize that boundary again instead of allowing the Kotlin adapter to win back.
+        registry.refreshSourcePacks(listOf(native))
+
+        val selected = requireNotNull(registry.get("sangtacviet"))
+        assertEquals(250, selected.selectionPriority)
+        val search = selected.search("x") as AppResult.Success
+        assertEquals(nativeId, search.value.single().title)
+        assertEquals("sangtacviet", search.value.single().sourceId)
     }
 
     @Test
@@ -71,7 +113,7 @@ class DefaultLuaSourceAliasTest {
         private fun summary() = StorySummary(
             id = "story",
             sourceId = descriptor.id,
-            title = "Story",
+            title = descriptor.id,
             url = "https://example.com/story",
         )
 

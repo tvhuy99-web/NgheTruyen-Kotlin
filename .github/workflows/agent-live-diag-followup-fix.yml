@@ -1,5 +1,4 @@
 # Temporary self-removing workflow. It commits only after exact patching and focused regressions pass.
-# This diagnostic revision prints the JUnit failure payload if the live-size STV regression fails.
 name: Apply live diagnostics follow-up fix
 
 on:
@@ -34,6 +33,64 @@ jobs:
         run: |
           python3 scripts/agent_live_diag_followup_fix.py
           sed -i 's/native\/\* bytes/native archive bytes/' source-lua/src/main/kotlin/vn/nghetruyen/source/lua/NativeLuaRuntimeOverlay.kt
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt')
+          s = p.read_text()
+          old = '''                    "effectiveMemoryBudgetBytes" to (if (manifest.runtime.mode == SourceRuntimeMode.NATIVE_LUA_COMPAT) maxOf(manifest.runtime.memoryBudgetBytes, 64 * 1024 * 1024) else manifest.runtime.memoryBudgetBytes).toString(),
+                    "hardInstructionLimit" to (manifest.runtime.instructionBudget.toLong() * if (manifest.runtime.mode == SourceRuntimeMode.NATIVE_LUA_COMPAT) 64L else 16L).toString(),'''
+          new = '''                    "effectiveMemoryBudgetBytes" to effectiveRhinoHeapBudgetBytes(manifest).toString(),
+                    "nativeLuaHostHeapOverheadBytes" to (if (manifest.runtime.mode == SourceRuntimeMode.NATIVE_LUA_COMPAT) NATIVE_LUA_HOST_HEAP_OVERHEAD_BYTES else 0).toString(),
+                    "hardInstructionLimit" to (manifest.runtime.instructionBudget.toLong() * if (manifest.runtime.mode == SourceRuntimeMode.NATIVE_LUA_COMPAT) 64L else 16L).toString(),'''
+          if s.count(old) != 1:
+              raise SystemExit(f'expected one diagnostic heap expression, got {s.count(old)}')
+          s = s.replace(old, new)
+          old = '''    private fun sandboxExecutor(manifest: SourceManifest, timeoutMs: Long): SafeRhinoExecutor = SafeRhinoExecutor(
+        policy = JsSandboxPolicy(
+            maxInstructions = manifest.runtime.instructionBudget.toLong(),
+            wallClockTimeoutMs = timeoutMs,
+            instructionObserverThreshold = 1_000,
+            maxHeapGrowthBytes = (if (manifest.runtime.mode == SourceRuntimeMode.NATIVE_LUA_COMPAT) maxOf(manifest.runtime.memoryBudgetBytes, 64 * 1024 * 1024) else manifest.runtime.memoryBudgetBytes).toLong(),
+            maxResultUnits = (if (manifest.runtime.mode == SourceRuntimeMode.NATIVE_LUA_COMPAT) maxOf(manifest.runtime.memoryBudgetBytes, 64 * 1024 * 1024) else manifest.runtime.memoryBudgetBytes).coerceAtLeast(1),'''
+          new = '''    private fun effectiveRhinoHeapBudgetBytes(manifest: SourceManifest): Int {
+        if (manifest.runtime.mode != SourceRuntimeMode.NATIVE_LUA_COMPAT) return manifest.runtime.memoryBudgetBytes
+        val sourceBudget = maxOf(manifest.runtime.memoryBudgetBytes, NATIVE_LUA_MIN_SOURCE_HEAP_BYTES)
+        return (sourceBudget.toLong() + NATIVE_LUA_HOST_HEAP_OVERHEAD_BYTES)
+            .coerceAtMost(Int.MAX_VALUE.toLong())
+            .toInt()
+    }
+
+    private fun sandboxExecutor(manifest: SourceManifest, timeoutMs: Long): SafeRhinoExecutor = SafeRhinoExecutor(
+        policy = JsSandboxPolicy(
+            maxInstructions = manifest.runtime.instructionBudget.toLong(),
+            wallClockTimeoutMs = timeoutMs,
+            instructionObserverThreshold = 1_000,
+            maxHeapGrowthBytes = effectiveRhinoHeapBudgetBytes(manifest).toLong(),
+            // Host-adapter overhead must not enlarge the source result budget.
+            maxResultUnits = (if (manifest.runtime.mode == SourceRuntimeMode.NATIVE_LUA_COMPAT) maxOf(manifest.runtime.memoryBudgetBytes, NATIVE_LUA_MIN_SOURCE_HEAP_BYTES) else manifest.runtime.memoryBudgetBytes).coerceAtLeast(1),'''
+          if s.count(old) != 1:
+              raise SystemExit(f'expected one sandbox heap expression, got {s.count(old)}')
+          s = s.replace(old, new)
+          anchor = '''    companion object {
+'''
+          if s.count(anchor) != 1:
+              raise SystemExit(f'expected one companion object, got {s.count(anchor)}')
+          s = s.replace(anchor, '''    companion object {
+        private const val NATIVE_LUA_MIN_SOURCE_HEAP_BYTES = 64 * 1024 * 1024
+        // NativeV2 is host-generated JS layered on top of the source. Keep its transient Rhino
+        // allocations outside the source's own 64 MiB budget while preserving result/output caps.
+        private const val NATIVE_LUA_HOST_HEAP_OVERHEAD_BYTES = 32 * 1024 * 1024
+''', 1)
+          p.write_text(s)
+
+          t = Path('source-lua/src/test/kotlin/vn/nghetruyen/source/lua/SangTacVietTocBudgetRegressionTest.kt')
+          x = t.read_text()
+          old = 'assertTrue("expected last chapter in normalized output", encoded.contains("Chương 100"))'
+          new = 'assertTrue("expected last chapter in normalized output", encoded.contains("Chương 1000"))'
+          if x.count(old) != 1:
+              raise SystemExit(f'expected one last-chapter assertion, got {x.count(old)}')
+          t.write_text(x.replace(old, new))
+          PY
 
       - name: Diagnose live-size STV regression
         run: |

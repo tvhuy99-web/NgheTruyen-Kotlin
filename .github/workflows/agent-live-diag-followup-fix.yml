@@ -1,5 +1,5 @@
 # Temporary self-removing workflow. It commits only after exact patching and focused regressions pass.
-name: Verify live-size STV delimiter fast path
+name: Verify bounded STV chapter migration
 
 on:
   push:
@@ -29,11 +29,11 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Apply exact live diagnostics and delimiter patches
+      - name: Apply exact live diagnostics and bounded split migration
         run: |
           python3 scripts/agent_live_diag_followup_fix.py
           sed -i 's/native\/\* bytes/native archive bytes/' source-lua/src/main/kotlin/vn/nghetruyen/source/lua/NativeLuaRuntimeOverlay.kt
-          python3 scripts/agent_native_delimited_regex_fastpath.py
+          python3 scripts/agent_stv_split_limit_migration.py
 
       - name: Run live-size STV regression at existing guards
         run: |
@@ -54,10 +54,11 @@ jobs:
           rm scripts/agent_live_diag_followup_fix.py
           rm scripts/agent_native_heap_overhead_patch.py
           rm scripts/agent_native_delimited_regex_fastpath.py
+          rm scripts/agent_stv_split_limit_migration.py
           rm .github/workflows/agent-live-diag-followup-fix.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git diff --cached --check
-          git commit -m "fix(runtime): refresh installed Native Lua diagnostics"
+          git commit -m "fix(runtime): bound installed Native Lua chapter work"
           git push origin HEAD:fix/diagnostics-screen-runtime-parity

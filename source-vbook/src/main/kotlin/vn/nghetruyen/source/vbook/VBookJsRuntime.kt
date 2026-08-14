@@ -92,6 +92,8 @@ class VBookJsRuntime(
                     "timeoutMs" to timeoutMs.toString(),
                     "instructionBudget" to manifest.runtime.instructionBudget.toString(),
                     "memoryBudgetBytes" to manifest.runtime.memoryBudgetBytes.toString(),
+                    "effectiveMemoryBudgetBytes" to (if (manifest.runtime.mode == SourceRuntimeMode.NATIVE_LUA_COMPAT) maxOf(manifest.runtime.memoryBudgetBytes, 64 * 1024 * 1024) else manifest.runtime.memoryBudgetBytes).toString(),
+                    "hardInstructionLimit" to (manifest.runtime.instructionBudget.toLong() * if (manifest.runtime.mode == SourceRuntimeMode.NATIVE_LUA_COMPAT) 64L else 16L).toString(),
                 )))
                 VBookSafeRhinoBoundary.installCurrentContext()
                 installHostApi(cx, scope, manifest, resources, request, budget)
@@ -202,11 +204,12 @@ class VBookJsRuntime(
             maxInstructions = manifest.runtime.instructionBudget.toLong(),
             wallClockTimeoutMs = timeoutMs,
             instructionObserverThreshold = 1_000,
-            maxHeapGrowthBytes = manifest.runtime.memoryBudgetBytes.toLong(),
-            maxResultUnits = manifest.runtime.memoryBudgetBytes.coerceAtLeast(1),
+            maxHeapGrowthBytes = (if (manifest.runtime.mode == SourceRuntimeMode.NATIVE_LUA_COMPAT) maxOf(manifest.runtime.memoryBudgetBytes, 64 * 1024 * 1024) else manifest.runtime.memoryBudgetBytes).toLong(),
+            maxResultUnits = (if (manifest.runtime.mode == SourceRuntimeMode.NATIVE_LUA_COMPAT) maxOf(manifest.runtime.memoryBudgetBytes, 64 * 1024 * 1024) else manifest.runtime.memoryBudgetBytes).coerceAtLeast(1),
             maxCollectionItems = 20_000,
             maxValueDepth = 96,
             languageVersion = Context.VERSION_ES6,
+            hardInstructionMultiplier = if (manifest.runtime.mode == SourceRuntimeMode.NATIVE_LUA_COMPAT) 64 else 16,
         ),
         clockMs = clockMs,
     )

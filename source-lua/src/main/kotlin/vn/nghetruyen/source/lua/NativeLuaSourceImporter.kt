@@ -118,7 +118,7 @@ object NativeLuaSourceImporter {
             mode = SourceRuntimeMode.NATIVE_LUA_COMPAT,
             entry = "native/source.lua",
             instructionBudget = 500_000,
-            memoryBudgetBytes = 32 * 1024 * 1024,
+            memoryBudgetBytes = 64 * 1024 * 1024,
             actionTimeoutMs = 50_000,
         )
         val manifest = SourceFullAuthorityPolicy.apply(

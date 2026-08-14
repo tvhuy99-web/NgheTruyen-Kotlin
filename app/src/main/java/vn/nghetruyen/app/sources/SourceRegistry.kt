@@ -37,12 +37,13 @@ class SourceRegistry(
      */
     @Synchronized
     fun refreshSourcePacks(sourcePackSources: List<StorySource>) {
-        val incomingIds = sourcePackSources.mapTo(linkedSetOf()) { it.descriptor.id }
+        val normalizedSources = normalizeExternalSources(sourcePackSources)
+        val incomingIds = normalizedSources.mapTo(linkedSetOf()) { it.descriptor.id }
         val preservedVBook = byId.values.filter { source ->
             source.descriptor.implementationKind == SourceImplementationKind.VBOOK &&
                 source.descriptor.id !in incomingIds
         }
-        byId = merge(sourcePackSources + preservedVBook)
+        byId = merge(normalizedSources + preservedVBook)
     }
 
     /** Full external-runtime refresh. Callers supply every active external ecosystem. */
@@ -54,13 +55,13 @@ class SourceRegistry(
     private fun merge(sourcePackSources: List<StorySource>): Map<String, StorySource> {
         val selected = linkedMapOf<String, StorySource>()
         val builtInsById = legacySources.associateBy { it.descriptor.id }
+        val normalizedSources = normalizeExternalSources(sourcePackSources)
 
-        // Built-in adapters are considered first. A certified SourcePack may attach
-        // itself to the matching adapter, but only when source-info.json names the
-        // same stable legacy id. This gives the pack full website fidelity without
-        // letting an arbitrary package redirect to a different built-in source.
+        // Normalize bundled Lua/vBook package identities at the registry boundary. Some callers
+        // refresh with raw activeStorySources(), so doing this only in AppContainer allows a later
+        // UI refresh to reintroduce the legacy Kotlin adapter for the same stable source id.
         legacySources.forEach { selected[it.descriptor.id] = it }
-        sourcePackSources.distinctBy { it.descriptor.id }.forEach { rawCandidate ->
+        normalizedSources.distinctBy { it.descriptor.id }.forEach { rawCandidate ->
             val candidate = if (rawCandidate is BuiltInSourcePackBridge) {
                 val delegateId = rawCandidate.builtInDelegateId
                 val delegate = delegateId?.let(builtInsById::get)
@@ -81,6 +82,9 @@ class SourceRegistry(
             source.withExecutionAndDiagnostics(diagnosticRuntime)
         }
     }
+
+    private fun normalizeExternalSources(sources: List<StorySource>): List<StorySource> =
+        sources.map { source -> source.withStableDefaultLuaId() }
 
     companion object {
         private fun defaultSources(sessionStore: SourceSessionStore): List<StorySource> = listOf(

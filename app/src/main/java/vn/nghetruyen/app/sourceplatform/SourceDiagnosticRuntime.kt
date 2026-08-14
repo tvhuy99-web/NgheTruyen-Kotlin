@@ -47,7 +47,8 @@ data class DiagnosticActiveOperation(
 /**
  * Three-mode diagnostic runtime:
  *  - off: no session event/evidence recording; the last 100 install/import failures remain durable;
- *  - basic: full-fidelity diagnostics for the current screen/context, automatically reset on change;
+ *  - basic: full-fidelity diagnostics for the current screen/context; completed old-screen work is
+ *    rotated out while in-flight operation traces survive the boundary atomically;
  *  - advanced: continuous full-fidelity diagnostics persisted until the user explicitly clears it.
  *
  * The string values basic/advanced are intentionally retained to migrate existing preferences and
@@ -80,6 +81,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
         private set
 
     @Volatile private var activeScreenKey: String = ""
+    @Volatile private var activeScreenSessionId: String = ""
 
     /** Detailed capture is enabled for both user-visible debugging modes. */
     val advanced: Boolean get() = mode != MODE_OFF
@@ -120,6 +122,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
                 // events that were already persisted during an earlier continuous session.
                 continuousStore.seedMissing(currentEvents)
                 clearCurrentSession()
+                activeScreenSessionId = UUID.randomUUID().toString()
                 applyMode(normalized)
                 recorder.restore(continuousStore.restoreRecentEvents(MAX_IN_MEMORY_EVENTS))
                 restoreCriticalHistory()
@@ -133,6 +136,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
             MODE_SCREEN -> {
                 clearCurrentSession()
                 activeScreenKey = ""
+                activeScreenSessionId = ""
                 applyMode(normalized)
                 mark(
                     name = "DIAGNOSTICS_MODE_CHANGED",
@@ -144,6 +148,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
             else -> {
                 clearCurrentSession()
                 activeScreenKey = ""
+                activeScreenSessionId = ""
                 applyMode(MODE_OFF)
             }
         }
@@ -151,23 +156,30 @@ class SourceDiagnosticRuntime(private val context: Context) {
     }
 
     /**
-     * Called by app navigation. In screen mode only, a new logical screen/context discards the old
-     * in-memory events/evidence. Dialogs do not call this method, so opening a dialog does not reset
-     * the session. Continuous mode records the boundary but never clears history.
+     * Called by app navigation. Screen mode rotates the old logical context without destroying an
+     * operation that is still running. The recorder reconstructs active operations and performs the
+     * retain/drop mutation under its own emit lock, closing the START-vs-screen-reset race. Matching
+     * browser/network evidence follows the same active trace ids. Dialogs do not call this method.
      */
     fun onScreenChanged(screenKey: String): Boolean {
         val next = screenKey.trim().take(500).ifBlank { "unknown" }
         if (next == activeScreenKey) return false
         val previous = activeScreenKey
         activeScreenKey = next
+        activeScreenSessionId = UUID.randomUUID().toString()
         return when (mode) {
             MODE_SCREEN -> {
-                clearCurrentSession()
+                val carriedTraceIds = recorder.retainActiveOperationTraces()
+                evidence.retainTraces(carriedTraceIds)
                 mark(
                     name = "DIAGNOSTIC_SCREEN_STARTED",
                     category = DiagnosticCategory.RUNTIME,
                     severity = DiagnosticSeverity.INFO,
-                    attributes = mapOf("screen" to next, "previousScreen" to previous),
+                    attributes = mapOf(
+                        "screen" to next,
+                        "previousScreen" to previous,
+                        "carriedActiveTraceCount" to carriedTraceIds.size.toString(),
+                    ),
                 )
                 true
             }
@@ -206,6 +218,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
                 attributes = attributes + mapOf(
                     "diagnosticsMode" to mode,
                     "screen" to activeScreenKey,
+                    "screenSessionId" to activeScreenSessionId,
                 ),
             ),
         )
@@ -276,6 +289,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
                 zip.addText("flows/${safePath(flow)}.log", log)
             }
             if (activeScreenKey.isNotBlank()) zip.addText("report/current_screen.txt", activeScreenKey)
+            if (activeScreenSessionId.isNotBlank()) zip.addText("report/current_screen_session.txt", activeScreenSessionId)
             if (backupLogTail.isNotBlank()) {
                 zip.addText("report/backup_tail.log", DiagnosticRedactor.redactLongText(backupLogTail, 64_000))
             }
@@ -341,6 +355,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
         put("screenScoped", mode == MODE_SCREEN)
         put("continuous", mode == MODE_CONTINUOUS)
         put("activeScreen", activeScreenKey)
+        put("activeScreenSessionId", activeScreenSessionId)
         put("appVersionName", BuildConfig.VERSION_NAME)
         put("appVersionCode", BuildConfig.VERSION_CODE)
         put("buildType", BuildConfig.BUILD_TYPE)
@@ -457,7 +472,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
         appendLine()
         appendLine("Modes:")
         appendLine("- off: records no session timeline/evidence; only the last 100 install/import failures are retained so package errors are never lost.")
-        appendLine("- screen-scoped: verbose events/evidence are kept for the current logical screen and cleared automatically when that context changes.")
+        appendLine("- screen-scoped: completed old-screen events are rotated out, but any operation still running keeps its complete trace and matching evidence across the boundary.")
         appendLine("- continuous: verbose events persist across screens and process restarts in a bounded two-segment history until explicitly cleared.")
         appendLine()
         appendLine("Contents:")
@@ -468,7 +483,8 @@ class SourceDiagnosticRuntime(private val context: Context) {
         appendLine("- report/browser_sessions.json: browser counters, safe capability probes, late callbacks and last error state.")
         appendLine("- report/data_loss.json: explicit RAM eviction/truncation accounting so missing evidence is never silent.")
         appendLine("- report/persistent_install_failures.json: the last 100 install/import failures, retained even when diagnostics were off.")
-        appendLine("- evidence/current/: current browser/runtime/network/parser evidence captured in RAM.")
+        appendLine("- report/current_screen_session.txt: opaque id for the current screen-scoped diagnostic session.")
+        appendLine("- evidence/current/: current or carried in-flight browser/runtime/network/parser evidence captured in RAM.")
         appendLine("- evidence/sanitized/: sanitized HTML snapshots for inspection.")
         appendLine("- continuous/: bounded persisted event history and evidence when continuous mode has been used.")
         appendLine("- environment/runtime/source/repository snapshots for reproduction context.")

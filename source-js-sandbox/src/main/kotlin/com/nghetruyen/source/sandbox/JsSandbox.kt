@@ -22,9 +22,19 @@ sealed interface JsValue {
 }
 
 data class JsSandboxPolicy(
+    /**
+     * Compatibility/telemetry threshold, not the immediate kill switch.
+     *
+     * Real vBook sources can legitimately cross the historical 500k Rhino observer count while
+     * still completing quickly. Treating this number as a hard limit made the Kotlin host reject
+     * sources that complete in the Lua host. The actual runaway breaker is derived by
+     * [hardInstructionMultiplier] and is still combined with the wall-clock deadline.
+     */
     val maxInstructions: Long = 500_000,
     val wallClockTimeoutMs: Long = 2_000,
     val instructionObserverThreshold: Int = 1_000,
+    /** Hard runaway ceiling = maxInstructions * hardInstructionMultiplier. */
+    val hardInstructionMultiplier: Int = 16,
     /** Maximum positive heap growth observed during one execution. Null disables this guard. */
     val maxHeapGrowthBytes: Long? = null,
     val maxResultUnits: Int = 1_000_000,
@@ -32,10 +42,18 @@ data class JsSandboxPolicy(
     val maxValueDepth: Int = 64,
     val languageVersion: Int = Context.VERSION_ES6,
 ) {
+    val hardInstructionLimit: Long
+        get() = if (maxInstructions > Long.MAX_VALUE / hardInstructionMultiplier) {
+            Long.MAX_VALUE
+        } else {
+            maxInstructions * hardInstructionMultiplier
+        }
+
     init {
         require(maxInstructions > 0)
         require(wallClockTimeoutMs > 0)
         require(instructionObserverThreshold > 0)
+        require(hardInstructionMultiplier >= 2)
         require(maxHeapGrowthBytes == null || maxHeapGrowthBytes > 0)
         require(maxResultUnits > 0)
         require(maxCollectionItems > 0)
@@ -67,6 +85,7 @@ data class JsSandboxResult(
     val value: JsValue,
     val elapsedMs: Long,
     val observedInstructions: Long,
+    val softInstructionLimitExceeded: Boolean = false,
 )
 
 enum class JsSandboxFailure {
@@ -95,6 +114,7 @@ data class RhinoExecutionResult<T>(
     val elapsedMs: Long,
     val observedInstructions: Long,
     val peakHeapGrowthBytes: Long,
+    val softInstructionLimitExceeded: Boolean = false,
 )
 
 /**
@@ -103,6 +123,11 @@ data class RhinoExecutionResult<T>(
  * Engines install their own ABI inside [block], while context hardening and budgets remain shared.
  * The heap guard is deliberately conservative: it observes positive process-heap growth at every
  * instruction/host charge boundary and never exposes JVM objects to the script scope.
+ *
+ * Instruction accounting is deliberately two-tiered. [JsSandboxPolicy.maxInstructions] is a soft
+ * compatibility threshold used for diagnostics; execution is aborted only at the derived hard
+ * runaway ceiling or the wall-clock/heap deadline. This preserves sandbox safety without making
+ * Rhino observer counts an accidental incompatibility with the Lua host.
  */
 class SafeRhinoExecutor(
     private val policy: JsSandboxPolicy = JsSandboxPolicy(),
@@ -135,6 +160,7 @@ class SafeRhinoExecutor(
                 elapsedMs = (clockMs() - started).coerceAtLeast(0L),
                 observedInstructions = budget.instructions,
                 peakHeapGrowthBytes = budget.peakHeapGrowthBytes,
+                softInstructionLimitExceeded = budget.softInstructionLimitExceeded,
             )
         } catch (e: BudgetExceededException) {
             throw JsSandboxException(e.failure, e.message ?: e.failure.name, e)
@@ -152,10 +178,16 @@ class RhinoExecutionBudget internal constructor(
 ) {
     private var baselineHeapBytes: Long? = null
 
+    val softInstructionLimit: Long get() = policy.maxInstructions
+    val hardInstructionLimit: Long get() = policy.hardInstructionLimit
+
     var instructions: Long = 0
         private set
 
     var peakHeapGrowthBytes: Long = 0
+        private set
+
+    var softInstructionLimitExceeded: Boolean = false
         private set
 
     fun charge(value: Int) {
@@ -170,15 +202,21 @@ class RhinoExecutionBudget internal constructor(
 
     fun checkpoint() {
         if (instructions > policy.maxInstructions) {
+            softInstructionLimitExceeded = true
+        }
+        if (instructions > policy.hardInstructionLimit) {
             throw BudgetExceededException(
                 JsSandboxFailure.INSTRUCTION_LIMIT,
-                "JavaScript exceeded ${policy.maxInstructions} observed instructions",
+                "JavaScript exceeded hard runaway limit ${policy.hardInstructionLimit} observed instructions " +
+                    "(soft compatibility budget ${policy.maxInstructions}, observed $instructions)",
             )
         }
         if (clockMs() > deadlineMs) {
             throw BudgetExceededException(
                 JsSandboxFailure.TIMEOUT,
-                "JavaScript exceeded ${policy.wallClockTimeoutMs} ms",
+                "JavaScript exceeded ${policy.wallClockTimeoutMs} ms " +
+                    "(observedInstructions=$instructions, softInstructionBudget=${policy.maxInstructions}, " +
+                    "hardInstructionLimit=${policy.hardInstructionLimit})",
             )
         }
         val baseline = baselineHeapBytes ?: memoryUsageBytes().also { baselineHeapBytes = it }
@@ -188,7 +226,8 @@ class RhinoExecutionBudget internal constructor(
         if (limit != null && growth > limit) {
             throw BudgetExceededException(
                 JsSandboxFailure.MEMORY_LIMIT,
-                "JavaScript exceeded $limit bytes of observed heap growth",
+                "JavaScript exceeded $limit bytes of observed heap growth " +
+                    "(observedInstructions=$instructions, peakHeapGrowthBytes=$peakHeapGrowthBytes)",
             )
         }
     }
@@ -216,6 +255,7 @@ class SafeRhinoSandbox(
             value = execution.value,
             elapsedMs = execution.elapsedMs,
             observedInstructions = execution.observedInstructions,
+            softInstructionLimitExceeded = execution.softInstructionLimitExceeded,
         )
     }
 

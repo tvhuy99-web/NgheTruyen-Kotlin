@@ -93,8 +93,17 @@ fun interface DiagnosticSink {
 data class DiagnosticRecorderStats(
     val itemCount: Int,
     val evictedEvents: Long,
+    val staleScreenEventsDropped: Long = 0,
 )
 
+/**
+ * Bounded diagnostic timeline with immutable screen-generation ownership.
+ *
+ * A trace/operation is bound to the generation in which it first starts. When screen mode rotates,
+ * the visible timeline is cleared but those origin bindings intentionally survive. A callback from
+ * an older generation is therefore still mirrored to lifecycle/critical sinks (so operations can
+ * close correctly) but is never appended to the new screen's timeline.
+ */
 class BoundedDiagnosticRecorder(
     private val maxEvents: Int = 2_000,
     @Volatile var level: DiagnosticLevel = DiagnosticLevel.BASIC,
@@ -103,27 +112,65 @@ class BoundedDiagnosticRecorder(
 ) : DiagnosticSink {
     private val lock = ReentrantLock()
     private val events = ArrayDeque<DiagnosticEvent>(maxEvents.coerceAtLeast(1))
+    private val operationOrigins = linkedMapOf<String, Long>()
+    private val traceOrigins = linkedMapOf<String, Long>()
     private var evictedEvents: Long = 0
+    private var screenGeneration: Long = 0
+    private var staleScreenEventsDropped: Long = 0
 
     init {
         require(maxEvents in 1..100_000) { "DIAGNOSTIC_CAPACITY_INVALID" }
     }
 
     override fun emit(event: DiagnosticEvent) {
-        val safe = event.copy(attributes = DiagnosticRedactor.redact(event.attributes))
-        // A filtered durable sink may retain a tiny set of user-actionable failures even while the
-        // main recorder is off. The normal recorder itself still obeys the absolute OFF contract.
-        runCatching { alwaysMirror.emit(safe) }
-        if (level == DiagnosticLevel.OFF) return
-        if (level == DiagnosticLevel.BASIC && event.severity == DiagnosticSeverity.DEBUG) return
+        emitScoped(event, explicitOriginGeneration = null)
+    }
+
+    /**
+     * Emits an event whose producer already captured a generation. The event is always delivered to
+     * mirror/critical lifecycle sinks, but only the current generation may enter the visible RAM
+     * timeline. Most callers can use [emit]; this overload is useful for explicit async boundaries.
+     */
+    fun emitScoped(event: DiagnosticEvent, originGeneration: Long) {
+        emitScoped(event, explicitOriginGeneration = originGeneration)
+    }
+
+    private fun emitScoped(event: DiagnosticEvent, explicitOriginGeneration: Long?) {
+        val redacted = event.copy(attributes = DiagnosticRedactor.redact(event.attributes))
+        var scoped = redacted
+        var retainInTimeline = false
+
         lock.withLock {
-            while (events.size >= maxEvents) {
-                events.removeFirst()
-                evictedEvents += 1
-            }
-            events.addLast(safe)
+            val inferredOrigin = explicitOriginGeneration ?: inferOriginGenerationLocked(redacted)
+            val currentGeneration = screenGeneration
+            scoped = redacted.copy(
+                attributes = redacted.attributes + mapOf(
+                    "diagnosticScreenGeneration" to inferredOrigin.toString(),
+                    "diagnosticScreenDisposition" to if (inferredOrigin == currentGeneration) "current" else "stale",
+                ),
+            )
+            updateOriginBindingsLocked(scoped, inferredOrigin)
+            retainInTimeline = inferredOrigin == currentGeneration
         }
-        runCatching { mirror.emit(safe) }
+
+        // Critical/actionable failures and active-operation lifecycle tracking must still see stale
+        // callbacks; only the screen-scoped visible recorder suppresses them.
+        runCatching { alwaysMirror.emit(scoped) }
+        if (level == DiagnosticLevel.OFF) return
+        if (level == DiagnosticLevel.BASIC && scoped.severity == DiagnosticSeverity.DEBUG) return
+
+        lock.withLock {
+            if (retainInTimeline && scoped.attributes["diagnosticScreenGeneration"] == screenGeneration.toString()) {
+                while (events.size >= maxEvents) {
+                    events.removeFirst()
+                    evictedEvents += 1
+                }
+                events.addLast(scoped)
+            } else {
+                staleScreenEventsDropped += 1
+            }
+        }
+        runCatching { mirror.emit(scoped) }
     }
 
     /** Restore already-redacted persisted events without mirroring them back to disk. */
@@ -139,7 +186,7 @@ class BoundedDiagnosticRecorder(
     }
 
     fun stats(): DiagnosticRecorderStats = lock.withLock {
-        DiagnosticRecorderStats(events.size, evictedEvents)
+        DiagnosticRecorderStats(events.size, evictedEvents, staleScreenEventsDropped)
     }
 
     fun snapshot(sourceId: String? = null, traceId: String? = null): List<DiagnosticEvent> = lock.withLock {
@@ -148,50 +195,36 @@ class BoundedDiagnosticRecorder(
         }
     }
 
+    fun currentScreenGeneration(): Long = lock.withLock { screenGeneration }
+
+    fun originGenerationForTrace(traceId: String): Long? = lock.withLock {
+        traceOrigins[traceId.trim().takeIf(String::isNotBlank)]
+    }
+
     /**
-     * Atomically rotates a screen-scoped timeline while preserving every event that belongs to an
-     * operation still running at the boundary. The active set is reconstructed under the same lock
-     * used by [emit], so a START event cannot land between snapshot and clear and disappear.
+     * Screen-mode rotation now has strict Lua-style provenance: nothing from the previous screen is
+     * copied into the new screen. Origin bindings remain so late callbacks can be identified and
+     * suppressed from the new timeline while still reaching lifecycle mirrors.
      *
-     * The returned trace ids let the evidence recorder retain the matching browser/network payloads.
+     * The historical method name is retained for source compatibility. It intentionally returns an
+     * empty set so legacy callers also clear, rather than carry, browser/network evidence.
      */
     fun retainActiveOperationTraces(): Set<String> = lock.withLock {
-        val active = linkedMapOf<String, String>()
-        events.forEach { event ->
-            val upper = event.name.uppercase(Locale.ROOT)
-            if (upper.startsWith("DIAGNOSTIC_SCREEN_") || upper.startsWith("DIAGNOSTICS_MODE_")) {
-                return@forEach
-            }
-            val operationId = DiagnosticOperationContract.id(event) ?: legacyOperationKey(event, upper)
-            when (DiagnosticOperationContract.state(event)) {
-                DiagnosticOperationState.STARTED -> active[operationId] = event.traceId
-                DiagnosticOperationState.COMPLETED,
-                DiagnosticOperationState.FAILED,
-                DiagnosticOperationState.CANCELLED,
-                DiagnosticOperationState.TIMEOUT -> active.remove(operationId)
-                DiagnosticOperationState.STAGE -> Unit
-                null -> when {
-                    LEGACY_START_SUFFIXES.any(upper::endsWith) -> active[operationId] = event.traceId
-                    LEGACY_TERMINAL_SUFFIXES.any(upper::endsWith) -> active.remove(operationId)
-                }
-            }
-        }
-
-        val activeOperationIds = active.keys.toSet()
-        val activeTraceIds = active.values.filter(String::isNotBlank).toSet()
-        val retained = events.filter { event ->
-            event.traceId in activeTraceIds ||
-                DiagnosticOperationContract.id(event)?.let(activeOperationIds::contains) == true
-        }
+        screenGeneration = if (screenGeneration == Long.MAX_VALUE) 1L else screenGeneration + 1L
         events.clear()
-        retained.forEach(events::addLast)
-        activeTraceIds
+        evictedEvents = 0
+        staleScreenEventsDropped = 0
+        emptySet()
     }
 
     fun clear(sourceId: String? = null) = lock.withLock {
         if (sourceId == null) {
             events.clear()
+            operationOrigins.clear()
+            traceOrigins.clear()
             evictedEvents = 0
+            staleScreenEventsDropped = 0
+            screenGeneration = 0
         } else {
             val retained = events.filterNot { it.sourceId == sourceId }
             events.clear()
@@ -199,16 +232,80 @@ class BoundedDiagnosticRecorder(
         }
     }
 
+    private fun inferOriginGenerationLocked(event: DiagnosticEvent): Long {
+        val traceId = event.traceId.trim()
+        val upper = event.name.uppercase(Locale.ROOT)
+        val state = DiagnosticOperationContract.state(event)
+        val explicitId = DiagnosticOperationContract.id(event)
+        val operationId = explicitId ?: legacyOperationKey(event, upper)
+        val isStart = state == DiagnosticOperationState.STARTED || state == null && isLegacyStart(upper)
+
+        if (isStart) {
+            if (operationId.isNotBlank()) rememberOrigin(operationOrigins, operationId, screenGeneration)
+            if (traceId.isNotBlank()) rememberOrigin(traceOrigins, traceId, screenGeneration, overwrite = true)
+            return screenGeneration
+        }
+
+        return operationOrigins[operationId]
+            ?: traceOrigins[traceId]
+            ?: screenGeneration
+    }
+
+    private fun updateOriginBindingsLocked(event: DiagnosticEvent, origin: Long) {
+        val traceId = event.traceId.trim()
+        val upper = event.name.uppercase(Locale.ROOT)
+        val state = DiagnosticOperationContract.state(event)
+        val operationId = DiagnosticOperationContract.id(event) ?: legacyOperationKey(event, upper)
+
+        if (traceId.isNotBlank()) rememberOrigin(traceOrigins, traceId, origin)
+        if (operationId.isNotBlank() && state !in TERMINAL_STATES && !(state == null && isLegacyTerminal(upper))) {
+            rememberOrigin(operationOrigins, operationId, origin)
+        }
+
+        if (state in TERMINAL_STATES || state == null && isLegacyTerminal(upper)) {
+            operationOrigins.remove(operationId)
+        }
+    }
+
     private fun legacyOperationKey(event: DiagnosticEvent, upperName: String): String {
-        val suffix = (LEGACY_START_SUFFIXES + LEGACY_TERMINAL_SUFFIXES).firstOrNull(upperName::endsWith)
-        val stem = suffix?.let(upperName::removeSuffix) ?: upperName
-        return "legacy:${event.traceId}:$stem"
+        val traceId = event.traceId.trim()
+        if (traceId.isBlank()) return ""
+        val stem = legacyOperationStem(upperName)
+        return "legacy:$traceId:$stem"
+    }
+
+    private fun legacyOperationStem(name: String): String {
+        if (name.endsWith("_VERIFIED")) return name.removeSuffix("_VERIFIED") + "_VERIFY"
+        val suffix = (LEGACY_START_SUFFIXES + LEGACY_TERMINAL_SUFFIXES).firstOrNull(name::endsWith)
+        return suffix?.let(name::removeSuffix) ?: name
+    }
+
+    private fun isLegacyStart(name: String): Boolean = LEGACY_START_SUFFIXES.any(name::endsWith)
+    private fun isLegacyTerminal(name: String): Boolean = LEGACY_TERMINAL_SUFFIXES.any(name::endsWith)
+
+    private fun rememberOrigin(
+        map: LinkedHashMap<String, Long>,
+        key: String,
+        generation: Long,
+        overwrite: Boolean = false,
+    ) {
+        if (key.isBlank()) return
+        if (overwrite || key !in map) map[key] = generation
+        while (map.size > MAX_ORIGIN_BINDINGS) map.remove(map.entries.first().key)
     }
 
     companion object {
+        private const val MAX_ORIGIN_BINDINGS = 8_192
         private val LEGACY_START_SUFFIXES = listOf("_STARTED", "_START")
         private val LEGACY_TERMINAL_SUFFIXES = listOf(
             "_COMPLETED", "_FAILED", "_ERROR", "_DONE", "_CANCELLED", "_STOPPED", "_TIMEOUT",
+            "_VERIFIED", "_SUCCEEDED", "_SUCCESS", "_FINISHED",
+        )
+        private val TERMINAL_STATES = setOf(
+            DiagnosticOperationState.COMPLETED,
+            DiagnosticOperationState.FAILED,
+            DiagnosticOperationState.CANCELLED,
+            DiagnosticOperationState.TIMEOUT,
         )
     }
 }
@@ -241,6 +338,7 @@ data class DiagnosticEvidenceStats(
     val retainedBytes: Long,
     val evictedItems: Long,
     val truncatedItems: Long,
+    val staleScreenItemsDropped: Long = 0,
 )
 
 class BoundedDiagnosticEvidenceRecorder(
@@ -254,6 +352,7 @@ class BoundedDiagnosticEvidenceRecorder(
     private var retainedBytes: Long = 0
     private var evictedItems: Long = 0
     private var truncatedItems: Long = 0
+    private var staleScreenItemsDropped: Long = 0
     @Volatile override var enabled: Boolean = false
 
     init {
@@ -288,9 +387,13 @@ class BoundedDiagnosticEvidenceRecorder(
         runCatching { mirror.capture(stored) }
     }
 
+    fun noteStaleScreenDrop() = lock.withLock {
+        staleScreenItemsDropped += 1
+    }
+
     fun snapshot(): List<DiagnosticEvidence> = lock.withLock { items.toList() }
 
-    /** Keep only evidence attached to traces that crossed the current screen boundary. */
+    /** Legacy screen-rotation API. Passing an empty set clears all previous-screen evidence. */
     fun retainTraces(traceIds: Set<String>) = lock.withLock {
         val retained = items.filter { it.traceId in traceIds }
         items.clear()
@@ -298,6 +401,7 @@ class BoundedDiagnosticEvidenceRecorder(
         retainedBytes = retained.sumOf { it.data.size.toLong() }
         evictedItems = 0
         truncatedItems = retained.count { it.attributes["truncated"].equals("true", ignoreCase = true) }.toLong()
+        staleScreenItemsDropped = 0
     }
 
     fun clear() = lock.withLock {
@@ -305,10 +409,37 @@ class BoundedDiagnosticEvidenceRecorder(
         retainedBytes = 0
         evictedItems = 0
         truncatedItems = 0
+        staleScreenItemsDropped = 0
     }
 
     fun stats(): DiagnosticEvidenceStats = lock.withLock {
-        DiagnosticEvidenceStats(items.size, retainedBytes, evictedItems, truncatedItems)
+        DiagnosticEvidenceStats(items.size, retainedBytes, evictedItems, truncatedItems, staleScreenItemsDropped)
+    }
+}
+
+/**
+ * Evidence companion for [BoundedDiagnosticRecorder]'s immutable trace ownership. Evidence from a
+ * trace that originated on an older screen is dropped instead of being attached to the new screen.
+ */
+class ScreenScopedDiagnosticEvidenceSink(
+    private val scope: BoundedDiagnosticRecorder,
+    private val delegate: BoundedDiagnosticEvidenceRecorder,
+) : DiagnosticEvidenceSink {
+    override val enabled: Boolean get() = delegate.enabled
+
+    override fun capture(evidence: DiagnosticEvidence) {
+        if (!delegate.enabled) return
+        val current = scope.currentScreenGeneration()
+        val origin = scope.originGenerationForTrace(evidence.traceId) ?: current
+        if (origin != current) {
+            delegate.noteStaleScreenDrop()
+            return
+        }
+        delegate.capture(
+            evidence.copy(
+                attributes = evidence.attributes + ("diagnosticScreenGeneration" to origin.toString()),
+            ),
+        )
     }
 }
 

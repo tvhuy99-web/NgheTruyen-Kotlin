@@ -38,6 +38,7 @@ class NativeLuaFullAuthorityTest {
         assertTrue(capabilities.websocket.enabled)
 
         val info = JsonCodec.parse(requireNotNull(result.entries["data/native-source-info.json"]).toString(Charsets.UTF_8)) as JsonValue.Obj
+        assertEquals("FULL_IN_APP", SourceFullAuthorityPolicy.AUTHORITY_ID)
         assertEquals("FULL_IN_APP", (info["authority"] as JsonValue.Str).value)
         assertTrue((info["fullInternalAuthority"] as JsonValue.Bool).value)
         assertTrue((info["browser"] as JsonValue.Bool).value)
@@ -75,7 +76,36 @@ class NativeLuaFullAuthorityTest {
 
         assertTrue(result is SourcePlatformResult.Success)
         val output = (result as SourcePlatformResult.Success).value
-        assertEquals("cba:ok", (JsonCodec.parse(output) as JsonValue.Str).value)
+        val adapterJson = (JsonCodec.parse(output) as JsonValue.Str).value
+        assertEquals("cba:ok", (JsonCodec.parse(adapterJson) as JsonValue.Str).value)
+    }
+
+    @Test
+    fun javascriptHookPayloadSurvivesNativeVBookWireLayer() {
+        val source = nativeSource(withHook = true)
+        val imported = NativeLuaSourceImporter.import(source)
+        val script = "(function(){return 'stv-ok';})()"
+        val input = JsonCodec.stringify(JsonValue.Obj(linkedMapOf(
+            "value" to JsonValue.Str(script),
+            "args" to JsonValue.Obj(linkedMapOf("passthrough" to JsonValue.Bool(true))),
+            "context" to JsonValue.Obj(),
+        )))
+
+        val result = LuaNativeHookBroker().execute(
+            imported.manifest,
+            SourceNativeHookRequest(
+                sourceId = imported.manifest.id,
+                sourceCode = source,
+                hookName = "decode",
+                inputJson = input,
+                instructionBudget = imported.manifest.runtime.instructionBudget,
+                timeoutMs = imported.manifest.runtime.actionTimeoutMs,
+                memoryBudgetBytes = imported.manifest.runtime.memoryBudgetBytes,
+            ),
+        ) as SourcePlatformResult.Success
+
+        val adapterJson = (JsonCodec.parse(result.value) as JsonValue.Str).value
+        assertEquals(script, (JsonCodec.parse(adapterJson) as JsonValue.Str).value)
     }
 
     @Test
@@ -112,6 +142,7 @@ class NativeLuaFullAuthorityTest {
             """
                 hooks = {
                   decode = function(context, value, args)
+                    if args.passthrough then return tostring(value or "") end
                     return string.reverse(tostring(value or "")) .. ":" .. tostring(args.suffix or "")
                   end
                 },

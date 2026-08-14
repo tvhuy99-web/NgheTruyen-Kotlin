@@ -31,7 +31,9 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Apply exact live diagnostics patch
-        run: python3 scripts/agent_live_diag_followup_fix.py
+        run: |
+          python3 scripts/agent_live_diag_followup_fix.py
+          sed -i 's/native\/\* bytes/native archive bytes/' source-lua/src/main/kotlin/vn/nghetruyen/source/lua/NativeLuaRuntimeOverlay.kt
 
       - name: Run focused regressions
         run: ./gradlew --no-daemon :source-lua:test :source-vbook:test :app:testDebugUnitTest :app:compileDebugKotlin

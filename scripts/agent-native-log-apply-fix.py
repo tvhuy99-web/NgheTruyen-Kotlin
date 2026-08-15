@@ -2,6 +2,7 @@ from pathlib import Path
 
 runtime_path = Path("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt")
 text = runtime_path.read_text(encoding="utf-8")
+
 start = text.index("    private fun diagnosticLogObject")
 end = text.index("\n    private fun storageObject", start)
 section = text[start:end]
@@ -10,10 +11,8 @@ needle = '''                true
             ScriptableObject.putProperty(obj, "d", logger(DiagnosticSeverity.DEBUG))'''
 replacement = '''                true
             }.apply {
-                // NativeV2 uses Log.log.apply(...). A host BaseFunction without the normal
-                // Function prototype has no apply/call helpers in Rhino, and the adapter's
-                // compatibility logger intentionally swallows that failure. Keep this logger a
-                // real Rhino function so Native Lua micro-checkpoints reach diagnostics.
+                // NativeV2 uses Log.log.apply(...). Give the host logger the normal Function
+                // prototype so JavaScript apply/call helpers remain available in Rhino.
                 parentScope = scope
                 prototype = ScriptableObject.getFunctionPrototype(scope)
             }
@@ -22,6 +21,20 @@ if section.count(needle) != 1:
     raise SystemExit(f"expected exactly one diagnostic logger tail, found {section.count(needle)}")
 section = section.replace(needle, replacement, 1)
 text = text[:start] + section + text[end:]
+
+host_old = '''    private fun hostFunction(block: (Array<out Any>) -> Any?): BaseFunction = object : BaseFunction() {
+        override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<out Any>): Any? = block(args)
+    }
+'''
+host_new = '''    private fun hostFunction(block: (Array<out Any>) -> Any?): BaseFunction = object : BaseFunction() {
+        // Function.prototype.apply(null, args) is valid JavaScript and Rhino forwards a null
+        // thisObj. Kotlin must not insert a non-null check before the host callback can run.
+        override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable?, args: Array<out Any>): Any? = block(args)
+    }
+'''
+if text.count(host_old) != 1:
+    raise SystemExit(f"expected exactly one hostFunction helper, found {text.count(host_old)}")
+text = text.replace(host_old, host_new, 1)
 runtime_path.write_text(text, encoding="utf-8")
 
 test_path = Path("source-vbook/src/test/kotlin/vn/nghetruyen/source/vbook/VBookNativeLogApplyIntegrationTest.kt")
@@ -96,9 +109,6 @@ class VBookNativeLogApplyIntegrationTest {
             ),
         )
 
-        // This regression isolates the host logging contract. The synthetic action result is not
-        // the subject of the test: if Log.log.apply reaches the host, these events must exist even
-        // if a later result-normalization rule rejects this intentionally tiny fixture.
         val nativeEvents = events.filter { it.name.startsWith("NATIVE_V2_TRANSFORM_") }
         assertEquals(
             "runtime=$result allEvents=${events.map(DiagnosticEvent::name)}",
@@ -115,4 +125,4 @@ class VBookNativeLogApplyIntegrationTest {
 }
 ''', encoding="utf-8")
 
-print("patched diagnostic logger prototype and wrote NativeV2 apply integration regression")
+print("patched nullable host thisObj, diagnostic logger prototype, and NativeV2 apply regression")

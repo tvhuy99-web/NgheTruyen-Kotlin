@@ -186,9 +186,12 @@ class JcaSourceCryptoBroker(
             SourceCryptoOperation.HMAC_SHA512 -> hmac(manifest, request, SourceCryptoCapability.HMAC_SHA512, "HmacSHA512")
             SourceCryptoOperation.AES_GCM_ENCRYPT -> {
                 require(SourceCryptoCapability.AES_GCM_SECRET in manifest.capabilities.crypto) { "SOURCE_CRYPTO_CAPABILITY_REQUIRED" }
-                val iv = ByteArray(12).also(random::nextBytes)
                 val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-                cipher.init(Cipher.ENCRYPT_MODE, secretKeyProvider.keyFor(manifest.id), GCMParameterSpec(128, iv))
+                // Android Keystore must generate the IV for randomized-encryption keys. Supplying
+                // GCMParameterSpec here fails on-device with "Caller-provided IV not permitted".
+                cipher.init(Cipher.ENCRYPT_MODE, secretKeyProvider.keyFor(manifest.id), random)
+                val iv = cipher.iv ?: error("SOURCE_CRYPTO_IV_UNAVAILABLE")
+                require(iv.size == 12) { "SOURCE_CRYPTO_IV_INVALID" }
                 if (request.associatedData.isNotEmpty()) cipher.updateAAD(request.associatedData)
                 iv + cipher.doFinal(request.payload)
             }

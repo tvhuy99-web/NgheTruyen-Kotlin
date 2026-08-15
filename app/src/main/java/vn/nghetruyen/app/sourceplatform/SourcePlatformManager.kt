@@ -855,46 +855,10 @@ class SourcePlatformManager(
     }
 
     private fun bootstrapBuiltinPack() {
-        bootstrapSignedBuiltinPack(DEMO_BUILTIN_SOURCEPACK_ASSET)
+        // The old signed demo pack was a development fixture, not a user-facing source. Remove a
+        // persisted copy during upgrade and never bootstrap it again.
+        store.remove(OBSOLETE_DEMO_SOURCE_ID)
         BUILTIN_LUA_SOURCES.forEach(::bootstrapLuaBuiltin)
-    }
-
-    private fun bootstrapSignedBuiltinPack(assetName: String) {
-        runCatching {
-            appContext.assets.open("sourcepacks/$assetName").use { input ->
-                val pack = when (val result = verifier.verify(input, trustRegistry.allKeys())) {
-                    is SourcePlatformResult.Success -> result.value
-                    is SourcePlatformResult.Failure -> error("${result.error.code}: ${result.error.message}")
-                }
-                builtinSourceIds += pack.manifest.id
-                if (isBuiltinRemoved(pack.manifest.id)) return@use
-                validateCompatibility(pack)
-                selfTest(pack)
-                val existing = store.load(pack.manifest.id)
-                val shouldInstall = existing?.versions?.none { it.manifest.version == pack.manifest.version } != false
-                if (shouldInstall) {
-                    when (val result = store.install(pack, activate = true)) {
-                        is SourcePlatformResult.Success -> Unit
-                        is SourcePlatformResult.Failure -> error("${result.error.code}: ${result.error.message}")
-                    }
-                }
-            }
-        }.onFailure { error ->
-            diagnostics.emit(
-                DiagnosticEvent(
-                    timestampEpochMs = System.currentTimeMillis(),
-                    traceId = "bootstrap-sourcepack:$assetName",
-                    sourceId = "builtin:$assetName",
-                    category = DiagnosticCategory.STORE,
-                    name = "BUILTIN_SOURCEPACK_BOOTSTRAP_FAILED",
-                    severity = DiagnosticSeverity.ERROR,
-                    attributes = mapOf(
-                        "asset" to assetName,
-                        "error" to (error.message ?: error.javaClass.simpleName),
-                    ),
-                ),
-            )
-        }
     }
 
     private fun bootstrapLuaBuiltin(spec: BuiltinLuaSourceSpec) {
@@ -1376,7 +1340,7 @@ class SourcePlatformManager(
         private const val REPOSITORY_INDEX_FILE = "index.json"
         private const val REPOSITORY_URL_FILE = "url.txt"
         private const val MANUAL_VBOOK_REPOSITORY_ID = "manual.vbook.local"
-        private const val DEMO_BUILTIN_SOURCEPACK_ASSET = "demo.ntsource"
+        private const val OBSOLETE_DEMO_SOURCE_ID = "vn.nghetruyen.sources.demo"
         private const val MAX_BUILTIN_LUA_BYTES = 1024 * 1024
         private const val MAX_MANUAL_IMPORT_BYTES = 64 * 1024 * 1024
         private const val BUILTIN_REMOVAL_PREFERENCES = "source_platform_builtin_removals"

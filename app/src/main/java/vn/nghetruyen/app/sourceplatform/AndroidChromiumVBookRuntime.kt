@@ -23,6 +23,7 @@ import vn.nghetruyen.source.api.SourceActionResponse
 import vn.nghetruyen.source.api.SourceBrowserAction
 import vn.nghetruyen.source.api.SourceBrowserRequest
 import vn.nghetruyen.source.api.SourceCapabilityBrokers
+import vn.nghetruyen.source.api.SourceCookieMode
 import vn.nghetruyen.source.api.SourceCryptoOperation
 import vn.nghetruyen.source.api.SourceCryptoRequest
 import vn.nghetruyen.source.api.SourceErrorCode
@@ -79,6 +80,7 @@ class AndroidChromiumVBookRuntime(
     private val diagnostics: DiagnosticSink = DiagnosticSink.NONE,
     private val evidence: DiagnosticEvidenceSink = DiagnosticEvidenceSink.NONE,
     private val clockMs: () -> Long = System::currentTimeMillis,
+    private val webViewCookieReader: SourceWebViewCookieReader? = null,
 ) : VBookActionRuntime, AutoCloseable {
     private val appContext = context.applicationContext
     private val engineThread = HandlerThread("NgheTruyen-VBook-Chromium").apply { start() }
@@ -530,7 +532,8 @@ class AndroidChromiumVBookRuntime(
         }
 
         private fun networkFetch(payload: JsonValue.Obj): JsonValue {
-            val url = payload.string("url").orEmpty()
+            val url = ChromiumVBookNetworkCompatibility.normalizeUrl(payload.string("url").orEmpty())
+            syncBrowserSharedCookies(manifest, url)
             val headers = payload.obj("headers")?.values.orEmpty().mapNotNull { (key, value) ->
                 (value as? JsonValue.Str)?.value?.let { key to it }
             }.toMap(LinkedHashMap())
@@ -850,6 +853,18 @@ class AndroidChromiumVBookRuntime(
         private fun remainingMs(): Long = (deadlineMs - clockMs()).coerceAtLeast(100L)
     }
 
+    private fun syncBrowserSharedCookies(manifest: SourceManifest, url: String) {
+        if (manifest.capabilities.cookies != SourceCookieMode.BROWSER_SHARED || !url.startsWith("https://", ignoreCase = true)) return
+        val header = webViewCookieReader?.readWebViewCookieHeader(manifest.id, url).orEmpty()
+        if (header.isBlank()) return
+        val cookies = header.split(';')
+            .map(String::trim)
+            .filter { it.isNotBlank() && it.contains('=') }
+            .take(128)
+            .map { "$it; Path=/; Secure; SameSite=Lax" }
+        if (cookies.isNotEmpty()) brokers.cookies.mergeSetCookieHeaders(manifest.id, url, cookies)
+    }
+
     private fun deriveOpenSsl(passphrase: String, salt: ByteArray): Pair<ByteArray, ByteArray> {
         val output = ArrayList<Byte>(48)
         var previous = ByteArray(0)
@@ -974,3 +989,16 @@ private fun JsonValue.Obj.stringMap(): Map<String, String> = values.mapNotNull {
 }.toMap(LinkedHashMap())
 private fun number(value: Number): JsonValue.Num = JsonValue.Num(value.toDouble(), value.toString())
 private fun JsonValue?.orNull(): JsonValue = this ?: JsonValue.Null
+
+internal object ChromiumVBookNetworkCompatibility {
+    fun normalizeUrl(raw: String): String {
+        val schemeEnd = raw.indexOf("://")
+        if (schemeEnd <= 0 || raw.substring(0, schemeEnd).lowercase(Locale.ROOT) !in setOf("http", "https")) return raw
+        val authorityStart = schemeEnd + 3
+        val pathStart = raw.indexOfAny(charArrayOf('/', '?', '#'), authorityStart)
+        if (pathStart < 0 || raw[pathStart] != '/') return raw
+        var duplicateEnd = pathStart
+        while (duplicateEnd + 1 < raw.length && raw[duplicateEnd + 1] == '/') duplicateEnd += 1
+        return if (duplicateEnd == pathStart) raw else raw.removeRange(pathStart + 1, duplicateEnd + 1)
+    }
+}

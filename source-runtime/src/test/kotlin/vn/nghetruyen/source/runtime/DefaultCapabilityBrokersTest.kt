@@ -55,8 +55,20 @@ class DefaultCapabilityBrokersTest {
     @Test fun `crypto encrypt decrypt hashes and hmacs`() {
         val broker = JcaSourceCryptoBroker()
         val m = manifest()
-        val encrypted = (broker.execute(m, SourceCryptoRequest(m.id, SourceCryptoOperation.AES_GCM_ENCRYPT, "secret".toByteArray())) as SourcePlatformResult.Success).value
-        val plain = (broker.execute(m, SourceCryptoRequest(m.id, SourceCryptoOperation.AES_GCM_DECRYPT, encrypted)) as SourcePlatformResult.Success).value
+        val aad = "source-boundary".toByteArray()
+        val encrypted = (broker.execute(m, SourceCryptoRequest(
+            m.id,
+            SourceCryptoOperation.AES_GCM_ENCRYPT,
+            "secret".toByteArray(),
+            associatedData = aad,
+        )) as SourcePlatformResult.Success).value
+        val plain = (broker.execute(m, SourceCryptoRequest(
+            m.id,
+            SourceCryptoOperation.AES_GCM_DECRYPT,
+            encrypted,
+            associatedData = aad,
+        )) as SourcePlatformResult.Success).value
+        assertTrue(encrypted.size > 12)
         assertTrue("secret".toByteArray().contentEquals(plain))
         val payload = "x".toByteArray()
         val key = "k".toByteArray()

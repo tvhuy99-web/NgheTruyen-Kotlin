@@ -11,12 +11,15 @@ import vn.nghetruyen.source.api.SemanticVersion
 import vn.nghetruyen.source.api.SourceCapabilities
 import vn.nghetruyen.source.api.SourceCapabilityBrokers
 import vn.nghetruyen.source.api.SourceContentType
+import vn.nghetruyen.source.api.SourceCookieMode
+import vn.nghetruyen.source.api.SourceCookiePartition
 import vn.nghetruyen.source.api.SourceCryptoBroker
 import vn.nghetruyen.source.api.SourceCryptoOperation
 import vn.nghetruyen.source.api.SourceHostCommand
 import vn.nghetruyen.source.api.SourceHostKernelBroker
 import vn.nghetruyen.source.api.SourceManifest
 import vn.nghetruyen.source.api.SourceNetworkBroker
+import vn.nghetruyen.source.api.SourceNetworkCapability
 import vn.nghetruyen.source.api.SourceNetworkResponse
 import vn.nghetruyen.source.api.SourceNetworkTiming
 import vn.nghetruyen.source.api.SourcePlatformResult
@@ -30,6 +33,7 @@ import vn.nghetruyen.source.vbook.VBookContractProfile
 import vn.nghetruyen.source.vbook.VBookScriptRole
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicReference
 
 @RunWith(AndroidJUnit4::class)
 class AndroidChromiumVBookRuntimeTest {
@@ -202,6 +206,91 @@ class AndroidChromiumVBookRuntimeTest {
         assertEquals(1, networkCalls)
     }
 
+    @Test
+    fun browserSharedFetchNormalizesUrlAndProjectsWebViewCookiesToTheRequestHost() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val projectedUrl = AtomicReference<String>()
+        val projectedHeader = AtomicReference<String>()
+        val cookiePartition = object : SourceCookiePartition {
+            override fun readCookieHeader(sourceId: String): String? = projectedHeader.get()
+
+            override fun readCookieHeader(sourceId: String, requestUrl: String): String? =
+                projectedHeader.get()?.takeIf { projectedUrl.get() == requestUrl }
+
+            override fun mergeSetCookieHeaders(sourceId: String, setCookieHeaders: List<String>) {
+                projectedHeader.set(setCookieHeaders.joinToString("; ") { it.substringBefore(';') })
+            }
+
+            override fun mergeSetCookieHeaders(sourceId: String, responseUrl: String, setCookieHeaders: List<String>) {
+                projectedUrl.set(responseUrl)
+                mergeSetCookieHeaders(sourceId, setCookieHeaders)
+            }
+
+            override fun clear(sourceId: String) {
+                projectedUrl.set(null)
+                projectedHeader.set(null)
+            }
+        }
+        val capturedNetworkUrl = AtomicReference<String>()
+        val network = SourceNetworkBroker { manifest, request ->
+            capturedNetworkUrl.set(request.url)
+            val cookieHeader = cookiePartition.readCookieHeader(manifest.id, request.url).orEmpty()
+            SourcePlatformResult.Success(SourceNetworkResponse(
+                statusCode = 200,
+                finalUrl = request.url,
+                headers = mapOf("Content-Type" to listOf("text/plain; charset=utf-8")),
+                body = cookieHeader.toByteArray(),
+                charsetName = "UTF-8",
+                timing = SourceNetworkTiming(1L, 2L),
+                traceId = request.traceId,
+                statusText = "OK",
+                requestUrl = request.url,
+            ))
+        }
+        val cookieReadUrl = AtomicReference<String>()
+        val chromium = AndroidChromiumVBookRuntime(
+            context = context,
+            brokers = SourceCapabilityBrokers(network = network, cookies = cookiePartition),
+            webViewCookieReader = SourceWebViewCookieReader { _, url ->
+                cookieReadUrl.set(url)
+                "_csrfToken=test-token; fu=1257514207"
+            },
+        )
+        chromium.use {
+            val runtime = VBookCompatibilityRuntime(chromium)
+            val resources = resources(
+                CURRENT_PLUGIN,
+                mapOf(
+                    "src/search.js" to """
+                        function execute(query, page) {
+                          var response = fetch('https://m.qidian.test//majax/rank/yuepiaolist?pageNum=1');
+                          return Response.success([{body:response.text(), url:response.url}], '');
+                        }
+                    """.trimIndent(),
+                    "src/explore.js" to "function execute(){return Response.success([]);}",
+                ),
+            )
+            val result = runtime.executeDeclared(
+                sourceManifest = browserSharedManifest(),
+                resources = resources,
+                role = VBookScriptRole.SEARCH,
+                input = "q",
+                traceId = "chromium-browser-cookie-projection",
+            )
+
+            assertTrue(
+                (result as? SourcePlatformResult.Failure)?.let { "${it.error.code}:${it.error.message}" } ?: "expected success",
+                result is SourcePlatformResult.Success,
+            )
+            val row = ((result as SourcePlatformResult.Success).value.data as JsonValue.Arr).values.first() as JsonValue.Obj
+            val expectedUrl = "https://m.qidian.test/majax/rank/yuepiaolist?pageNum=1"
+            assertEquals(expectedUrl, cookieReadUrl.get())
+            assertEquals(expectedUrl, capturedNetworkUrl.get())
+            assertEquals(expectedUrl, row.string("url"))
+            assertEquals("_csrfToken=test-token; fu=1257514207", row.string("body"))
+        }
+    }
+
     private fun manifest(): SourceManifest = SourceManifest(
         schemaVersion = 2,
         id = "test.vbook.chromium",
@@ -212,6 +301,22 @@ class AndroidChromiumVBookRuntimeTest {
         runtime = SourceRuntimePolicy(mode = SourceRuntimeMode.VBOOK_JS_COMPAT),
         origins = setOf("https://x.example"),
         capabilities = SourceCapabilities(),
+        actions = emptyMap(),
+    )
+
+    private fun browserSharedManifest(): SourceManifest = SourceManifest(
+        schemaVersion = 2,
+        id = "test.vbook.chromium.cookies",
+        name = "Chromium vBook cookie fixture",
+        version = SemanticVersion(1, 0, 0),
+        apiVersion = 2,
+        contentType = SourceContentType.NOVEL,
+        runtime = SourceRuntimePolicy(mode = SourceRuntimeMode.VBOOK_JS_COMPAT),
+        origins = setOf("https://m.qidian.test"),
+        capabilities = SourceCapabilities(
+            network = SourceNetworkCapability(methods = setOf("GET")),
+            cookies = SourceCookieMode.BROWSER_SHARED,
+        ),
         actions = emptyMap(),
     )
 

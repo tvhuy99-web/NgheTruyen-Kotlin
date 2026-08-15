@@ -8,6 +8,8 @@ import vn.nghetruyen.app.sourceplatform.ChromiumVBookBrowserReplayRuntime
 import vn.nghetruyen.app.sourceplatform.ChromiumVBookDispatcherParityRuntime
 import vn.nghetruyen.app.sourceplatform.ChromiumVBookReplayCoordinator
 import vn.nghetruyen.app.sourceplatform.DiagnosticScreenRestoreLifecycleCallbacks
+import vn.nghetruyen.app.sourceplatform.SourceBrowserViewportHost
+import vn.nghetruyen.app.sourceplatform.SourceWebViewCookieReader
 import vn.nghetruyen.app.sourceplatform.replayAwareChromiumDiagnostics
 import vn.nghetruyen.source.api.SourceErrorCode
 import vn.nghetruyen.source.api.SourcePlatformFailure
@@ -24,6 +26,7 @@ class NgheTruyenApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         registerActivityLifecycleCallbacks(DiagnosticScreenRestoreLifecycleCallbacks())
+        SourceBrowserViewportHost.initialize(this)
         VBookActionRuntimeRegistry.install { brokers, diagnostics ->
             if (WebView.getCurrentWebViewPackage() == null) {
                 VBookActionRuntime { _, _, request ->
@@ -46,6 +49,7 @@ class NgheTruyenApplication : Application() {
                             network = replay.networkBroker,
                         ),
                         diagnostics = replayAwareChromiumDiagnostics(diagnostics),
+                        webViewCookieReader = brokers.browser as? SourceWebViewCookieReader,
                     )
                     ChromiumVBookDispatcherParityRuntime(
                         ChromiumVBookBrowserReplayRuntime(

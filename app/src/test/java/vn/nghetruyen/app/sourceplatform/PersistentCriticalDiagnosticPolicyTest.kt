@@ -35,12 +35,25 @@ class PersistentCriticalDiagnosticPolicyTest {
             category = DiagnosticCategory.BROWSER,
             severity = DiagnosticSeverity.ERROR,
         )))
+        val obsoleteDemoFailure = event(
+            name = "BUILTIN_SOURCEPACK_BOOTSTRAP_FAILED",
+            category = DiagnosticCategory.PACKAGE,
+            severity = DiagnosticSeverity.ERROR,
+            sourceId = "builtin:demo.ntsource",
+        )
+        assertTrue(PersistentCriticalDiagnosticPolicy.isObsolete(obsoleteDemoFailure))
+        assertFalse(PersistentCriticalDiagnosticPolicy.shouldPersist(obsoleteDemoFailure))
     }
 
-    private fun event(name: String, category: DiagnosticCategory, severity: DiagnosticSeverity) = DiagnosticEvent(
+    private fun event(
+        name: String,
+        category: DiagnosticCategory,
+        severity: DiagnosticSeverity,
+        sourceId: String = "source",
+    ) = DiagnosticEvent(
         timestampEpochMs = 1,
         traceId = "trace",
-        sourceId = "source",
+        sourceId = sourceId,
         category = category,
         name = name,
         severity = severity,

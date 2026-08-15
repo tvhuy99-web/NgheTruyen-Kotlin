@@ -177,14 +177,13 @@ object DiagnosticHumanFormatter {
             get() = first(attributes, "code", "errorCode", "error_code")?.takeIf(String::isNotBlank) ?: code
 
         private val problem: Boolean
-            get() = severity.equals("ERROR", true) || severity.equals("WARN", true) ||
-                effectiveCode.contains("FAILED", true) || effectiveCode.contains("ERROR", true)
+            get() = severity.equals("ERROR", true) || severity.equals("WARN", true)
 
         fun render(): String = buildString {
             val timestamp = TIME_FORMAT.get().format(Date(timestampEpochMs))
             val action = actionLabel(effectiveCode, category)
             val prefix = when {
-                severity.equals("ERROR", true) || effectiveCode.contains("FAILED", true) -> "LỖI"
+                severity.equals("ERROR", true) -> "LỖI"
                 severity.equals("WARN", true) -> "CẢNH BÁO"
                 else -> "MỐC"
             }
@@ -218,7 +217,6 @@ object DiagnosticHumanFormatter {
 
     private fun actionLabel(code: String, category: String): String = when {
         code.contains("BUILTIN_LUA_SOURCE_CONFLICT", true) -> "Đồng bộ nguồn tích hợp"
-        code.contains("BUILTIN_SOURCEPACK_BOOTSTRAP", true) -> "Khởi tạo nguồn tích hợp"
         code.contains("INSTALL", true) -> "Cài đặt tiện ích"
         code.contains("PACKAGE", true) || code.contains("FETCH", true) -> "Tải dữ liệu"
         code.contains("NETWORK", true) || code.contains("HTTP", true) || category == "NETWORK" -> "Kết nối mạng"

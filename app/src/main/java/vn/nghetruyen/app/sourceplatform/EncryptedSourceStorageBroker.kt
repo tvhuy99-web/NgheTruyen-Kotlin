@@ -125,9 +125,13 @@ class EncryptedSourceStorageBroker(
     }
 
     private fun encrypt(sourceId: String, key: String, plaintext: ByteArray): ByteArray {
-        val iv = ByteArray(IV_BYTES).also(random::nextBytes)
         val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, secretKeyProvider.keyFor(sourceId), GCMParameterSpec(TAG_BITS, iv))
+        // Android Keystore keys created with randomizedEncryptionRequired reject a caller-supplied
+        // GCM IV during encryption. Let the provider generate it, then persist that IV beside the
+        // ciphertext. Decryption still receives the stored IV explicitly.
+        cipher.init(Cipher.ENCRYPT_MODE, secretKeyProvider.keyFor(sourceId), random)
+        val iv = cipher.iv ?: error("SOURCE_STORAGE_IV_UNAVAILABLE")
+        require(iv.size == IV_BYTES) { "SOURCE_STORAGE_IV_INVALID" }
         cipher.updateAAD(associatedData(sourceId, key))
         return MAGIC + iv + cipher.doFinal(plaintext)
     }

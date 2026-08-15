@@ -9,24 +9,22 @@ import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 
 class DiagnosticHumanFormatterTest {
     @Test
-    fun failedSuffixDoesNotMasqueradeAsAi() {
+    fun storeFailureSuffixDoesNotMasqueradeAsAi() {
         val report = DiagnosticHumanFormatter.formatEvents(
             events = listOf(
                 event(
-                    name = "BUILTIN_SOURCEPACK_BOOTSTRAP_FAILED",
+                    name = "SOURCE_STORE_INSTALL_FAILED",
                     category = DiagnosticCategory.STORE,
                     attributes = mapOf(
-                        "asset" to "demo.ntsource",
-                        "error" to "SOURCE_FIXTURE_FAILED: Tìm truyện mẫu=RUNTIME_INVALID_PROGRAM:RUNTIME_FAILED",
+                        "error" to "SOURCE_PACKAGE_INVALID:RUNTIME_FAILED",
                     ),
                 ),
             ),
             mode = "basic",
         )
 
-        assertTrue(report.contains("Khởi tạo nguồn tích hợp"))
-        assertTrue(report.contains("SOURCE_FIXTURE_FAILED"))
-        assertTrue(report.contains("RUNTIME_INVALID_PROGRAM"))
+        assertTrue(report.contains("SOURCE_PACKAGE_INVALID"))
+        assertTrue(report.contains("RUNTIME_FAILED"))
         assertFalse(report.contains("AI / chuyển ngữ"))
         assertFalse(report.contains("nhà cung cấp, model"))
     }
@@ -86,6 +84,23 @@ class DiagnosticHumanFormatterTest {
         assertTrue(report.contains("cảnh báo bảo toàn"))
         assertFalse(report.contains("Thao tác kết thúc bất thường"))
         assertFalse(report.contains("AI / chuyển ngữ"))
+    }
+
+    @Test
+    fun debugCheckpointWithErrorInItsNameStaysAMilestone() {
+        val report = DiagnosticHumanFormatter.formatEvents(
+            events = listOf(event(
+                name = "CHROMIUM_DECODE_EVAL_ERROR_CHECK",
+                category = DiagnosticCategory.RUNTIME,
+                severity = DiagnosticSeverity.DEBUG,
+                attributes = mapOf("present" to "false"),
+            )),
+            mode = "basic",
+        )
+
+        assertTrue(report.contains("• MỐC •"))
+        assertFalse(report.contains("Mã lỗi:"))
+        assertFalse(report.contains("Thao tác kết thúc bất thường"))
     }
 
     private fun event(

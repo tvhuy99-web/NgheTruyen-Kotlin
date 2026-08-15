@@ -399,10 +399,19 @@ internal fun replayAwareChromiumDiagnostics(delegate: DiagnosticSink): Diagnosti
     val isReplayYield = event.name == "CHROMIUM_ACTION_FAILED" &&
         event.attributes["error"].orEmpty().contains(CHROMIUM_BROWSER_REPLAY_REQUIRED)
     if (isReplayYield) {
+        val replayIndex = event.attributes["error"].orEmpty()
+            .substringAfter("$CHROMIUM_BROWSER_REPLAY_REQUIRED:", "")
+            .substringBefore('\n')
+            .trim()
         delegate.emit(event.copy(
             category = DiagnosticCategory.REPLAY,
             name = "CHROMIUM_BROWSER_REPLAY_YIELDED",
             severity = DiagnosticSeverity.DEBUG,
+            attributes = event.attributes
+                .filterKeys { it !in setOf("code", "error", "cause", "stack") } + mapOf(
+                "replayIndex" to replayIndex,
+                "yieldReason" to "browser-action",
+            ),
         ))
     } else {
         delegate.emit(event)

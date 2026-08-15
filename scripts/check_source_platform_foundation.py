@@ -97,8 +97,17 @@ def main() -> None:
     ]
     for module in required:
         assert (ROOT / module / "build.gradle.kts").is_file(), module
-    asset = ROOT / "app/src/main/assets/sourcepacks/demo.ntsource"
-    assert asset.is_file() and asset.stat().st_size > 1000
+    sourcepack_assets = ROOT / "app/src/main/assets/sourcepacks"
+    assert not (sourcepack_assets / "demo.ntsource").exists()
+    platform_manager = (
+        ROOT / "app/src/main/java/vn/nghetruyen/app/sourceplatform/SourcePlatformManager.kt"
+    ).read_text(encoding="utf-8")
+    removed_bootstrap_error = "BUILTIN_SOURCEPACK_" + "BOOTSTRAP_FAILED"
+    assert removed_bootstrap_error not in platform_manager
+    assert "bootstrapSignedBuiltinPack" not in platform_manager
+    assert "store.remove(OBSOLETE_DEMO_SOURCE_ID)" in platform_manager
+    production_asset = sourcepack_assets / "truyenfull.ntsource"
+    assert production_asset.is_file() and production_asset.stat().st_size > 1000
     assert not list(ROOT.rglob("*.pem")), "Private/signing PEM material must never ship in the project"
 
     wiring = {

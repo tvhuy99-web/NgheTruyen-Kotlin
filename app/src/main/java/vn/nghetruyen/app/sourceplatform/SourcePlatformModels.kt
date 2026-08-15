@@ -177,14 +177,13 @@ object DiagnosticHumanFormatter {
             get() = first(attributes, "code", "errorCode", "error_code")?.takeIf(String::isNotBlank) ?: code
 
         private val problem: Boolean
-            get() = severity.equals("ERROR", true) || severity.equals("WARN", true) ||
-                effectiveCode.contains("FAILED", true) || effectiveCode.contains("ERROR", true)
+            get() = severity.equals("ERROR", true) || severity.equals("WARN", true)
 
         fun render(): String = buildString {
             val timestamp = TIME_FORMAT.get().format(Date(timestampEpochMs))
             val action = actionLabel(effectiveCode, category)
             val prefix = when {
-                severity.equals("ERROR", true) || effectiveCode.contains("FAILED", true) -> "LỖI"
+                severity.equals("ERROR", true) -> "LỖI"
                 severity.equals("WARN", true) -> "CẢNH BÁO"
                 else -> "MỐC"
             }

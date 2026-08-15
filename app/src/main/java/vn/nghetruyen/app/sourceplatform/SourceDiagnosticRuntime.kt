@@ -655,6 +655,7 @@ internal class DiagnosticActivityTracker : DiagnosticSink {
 
 internal object PersistentCriticalDiagnosticPolicy {
     fun shouldPersist(event: DiagnosticEvent): Boolean {
+        if (isObsolete(event)) return false
         if (event.severity !in setOf(DiagnosticSeverity.ERROR, DiagnosticSeverity.WARN)) return false
         val name = event.name.uppercase()
         return event.category in setOf(
@@ -664,6 +665,10 @@ internal object PersistentCriticalDiagnosticPolicy {
             DiagnosticCategory.SECURITY,
         ) || listOf("INSTALL", "IMPORT", "PACKAGE", "REPOSITORY").any(name::contains)
     }
+
+    fun isObsolete(event: DiagnosticEvent): Boolean =
+        event.name == "BUILTIN_SOURCEPACK_BOOTSTRAP_FAILED" &&
+            event.sourceId == "builtin:demo.ntsource"
 }
 
 private class CriticalDiagnosticStore(context: Context) : DiagnosticSink {
@@ -676,6 +681,7 @@ private class CriticalDiagnosticStore(context: Context) : DiagnosticSink {
 
     init {
         root.mkdirs()
+        purgeObsoleteEvents()
         eventCount = snapshot().size
     }
 
@@ -701,6 +707,19 @@ private class CriticalDiagnosticStore(context: Context) : DiagnosticSink {
 
     private fun compact() {
         val retained = eventFile.useLines { lines -> lines.toList().takeLast(MAX_EVENTS) }
+        rewrite(retained)
+    }
+
+    private fun purgeObsoleteEvents() = synchronized(lock) {
+        if (!eventFile.isFile) return@synchronized
+        val existing = eventFile.useLines { it.toList() }
+        val retained = existing.filterNot { line ->
+            parseDiagnosticEventLine(line)?.let(PersistentCriticalDiagnosticPolicy::isObsolete) == true
+        }
+        if (retained.size != existing.size) rewrite(retained.takeLast(MAX_EVENTS))
+    }
+
+    private fun rewrite(retained: List<String>) {
         val temporary = File(root, "install-failures.tmp")
         temporary.writeText(retained.joinToString(separator = "\n", postfix = if (retained.isEmpty()) "" else "\n"))
         if (eventFile.exists() && !eventFile.delete()) return

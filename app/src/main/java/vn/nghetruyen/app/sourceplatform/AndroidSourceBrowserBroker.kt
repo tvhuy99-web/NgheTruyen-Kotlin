@@ -203,7 +203,7 @@ class AndroidSourceBrowserBroker(
                         error.message?.contains("SELECTOR") == true -> SourceErrorCode.BROWSER_SELECTOR_NOT_FOUND
                         error.message?.contains("RENDERER") == true -> SourceErrorCode.BROWSER_RENDERER_GONE
                         error.message?.contains("OUTPUT_TOO_LARGE") == true -> SourceErrorCode.BROWSER_OUTPUT_TOO_LARGE
-                        error.message?.contains("TIMEOUT") == true -> SourceErrorCode.BROWSER_TIMEOUT
+                        error.message?.contains("TIMEOUT") == true || error.message?.contains("CHALLENGE") == true -> SourceErrorCode.BROWSER_TIMEOUT
                         else -> SourceErrorCode.BROWSER_UNAVAILABLE
                     }
                     diagnostics.emit(event(manifest, request, "BROWSER_ACTION_FAILED", DiagnosticSeverity.ERROR, clockMs() - started, mapOf(
@@ -376,6 +376,9 @@ class AndroidSourceBrowserBroker(
                     "acceptCookies" to manager.acceptCookie().toString(),
                     "acceptThirdPartyCookies" to manager.acceptThirdPartyCookies(session.webView).toString(),
                     "cookieCount" to cookieHeader.split(';').count { it.contains('=') }.toString(),
+                    "viewportAttached" to (session.viewportAttachment?.attachedToWindow == true).toString(),
+                    "viewportWidthPx" to (session.viewportAttachment?.widthPx ?: session.webView.width).toString(),
+                    "viewportHeightPx" to (session.viewportAttachment?.heightPx ?: session.webView.height).toString(),
                 )
             }
         }.getOrElse { error ->
@@ -505,6 +508,7 @@ class AndroidSourceBrowserBroker(
 
             override fun onProgressChanged(view: WebView, newProgress: Int) {
                 val session = sessionRef.get() ?: return
+                session.markProgress(newProgress, clockMs())
                 val previous = session.lastProgressLogged
                 if (newProgress == 100 || previous < 0 || kotlin.math.abs(newProgress - previous) >= 10) {
                     session.lastProgressLogged = newProgress
@@ -607,6 +611,7 @@ class AndroidSourceBrowserBroker(
                 sessionRef.get()?.apply {
                     val late = pageLatch == null
                     if (late) lateCallbacks += 1
+                    markPageStarted(clockMs())
                     pageStartedCount += 1
                     updateLogicalPageUrlFromWebView(url)
                     recordUrl(url)
@@ -626,6 +631,7 @@ class AndroidSourceBrowserBroker(
                 sessionRef.get()?.apply {
                     val late = pageLatch == null
                     if (late) lateCallbacks += 1
+                    markPageFinished(clockMs())
                     pageFinishedCount += 1
                     updateLogicalPageUrlFromWebView(url)
                     recordUrl(url)
@@ -749,6 +755,8 @@ class AndroidSourceBrowserBroker(
                     rendererGone = true
                     pendingError.compareAndSet(null, "SOURCE_BROWSER_RENDERER_GONE:${detail.didCrash()}")
                     pageLatch?.countDown()
+                    SourceBrowserViewportHost.detach(view, viewportAttachment)
+                    viewportAttachment = null
                 }
                 recoveredSources += manifest.id
                 runCatching { view.destroy() }
@@ -757,6 +765,12 @@ class AndroidSourceBrowserBroker(
         }
         val session = Session(manifest, webView)
         sessionRef.set(session)
+        session.viewportAttachment = try {
+            SourceBrowserViewportHost.attach(webView)
+        } catch (error: Throwable) {
+            webView.destroy()
+            throw error
+        }
         return session
     }
 
@@ -773,12 +787,11 @@ class AndroidSourceBrowserBroker(
         session.pageLatch = latch
         session.pendingError.set(null)
         session.logicalPageUrl = url
+        session.beginPageLoad(clockMs())
         session.beginTrustedNavigation(approved.transportIdentity)
         return try {
             runOnMain(5_000) { session.webView.loadUrl(url) }
-            if (!latch.await(request.timeoutMs, TimeUnit.MILLISECONDS)) error("SOURCE_BROWSER_TIMEOUT")
-            session.pendingError.get()?.let(::error)
-            reconcileLogicalPageUrl(session, snapshotWebView(session))
+            awaitStablePage(session, request)
         } finally {
             session.pageLatch = null
             session.clearTrustedNavigation(session.navigationGeneration)
@@ -800,14 +813,163 @@ class AndroidSourceBrowserBroker(
         session.pendingError.set(null)
         session.logicalPageUrl = baseUrl
         session.trustedLoadHtmlInFlight = true
+        session.beginPageLoad(clockMs())
         try {
             runOnMain(5_000) { session.webView.loadDataWithBaseURL(baseUrl, html, "text/html", "utf-8", null) }
-            if (!latch.await(request.timeoutMs, TimeUnit.MILLISECONDS)) error("SOURCE_BROWSER_TIMEOUT")
-            session.pendingError.get()?.let(::error)
-            return baseUrl
+            return awaitStablePage(session, request) ?: baseUrl
         } finally {
             session.trustedLoadHtmlInFlight = false
             session.pageLatch = null
+        }
+    }
+
+    private fun awaitStablePage(session: Session, request: SourceBrowserRequest): String? {
+        val startedAt = clockMs()
+        val deadline = startedAt + request.timeoutMs
+        val policy = BrowserPageStabilityPolicy(deadline)
+        var probeCount = 0
+        var lastUrl: String? = session.logicalPageUrl
+        while (true) {
+            session.pendingError.get()?.let(::error)
+            if (session.rendererGone) error("SOURCE_BROWSER_RENDERER_GONE")
+            val now = clockMs()
+            val remaining = deadline - now
+            if (remaining <= 0L) {
+                val code = if (session.challengeReported) {
+                    "SOURCE_BROWSER_CHALLENGE_UNRESOLVED"
+                } else {
+                    "SOURCE_BROWSER_TIMEOUT"
+                }
+                diagnostics.emit(event(session.manifest, request, "BROWSER_PAGE_SETTLE_TIMEOUT", DiagnosticSeverity.WARN, attributes = mapOf(
+                    "flow" to "browser",
+                    "stage" to "dom_stability_timeout",
+                    "code" to code,
+                    "probes" to probeCount.toString(),
+                    "challenge" to session.challengeReported.toString(),
+                    "url" to diagnosticUrl(lastUrl.orEmpty()),
+                )))
+                error(code)
+            }
+
+            val rawResult = runCatching {
+                evaluate(session, PAGE_STABILITY_SCRIPT, minOf(1_200L, remaining.coerceAtLeast(100L)))
+            }
+            if (rawResult.isFailure) {
+                val probeError = rawResult.exceptionOrNull()
+                diagnostics.emit(event(session.manifest, request, "BROWSER_DOM_STABILITY_PROBE_FAILED", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                    "flow" to "browser",
+                    "stage" to "dom_stability_probe",
+                    "error" to (probeError?.message ?: probeError?.javaClass?.simpleName ?: "SOURCE_BROWSER_STABILITY_EVALUATE_FAILED").take(500),
+                    "remainingMs" to remaining.toString(),
+                )))
+                Thread.sleep(minOf(BrowserPageStabilityPolicy.PROBE_INTERVAL_MS, remaining.coerceAtLeast(1L)))
+                continue
+            }
+            val raw = rawResult.getOrThrow()
+            val json = runCatching { JSONObject(raw) }.getOrNull()
+            if (json == null || json.has("error")) {
+                diagnostics.emit(event(session.manifest, request, "BROWSER_DOM_STABILITY_PROBE_FAILED", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                    "flow" to "browser",
+                    "stage" to "dom_stability_probe",
+                    "error" to (json?.optString("error") ?: "SOURCE_BROWSER_STABILITY_JSON_INVALID").take(500),
+                    "remainingMs" to remaining.toString(),
+                )))
+                Thread.sleep(minOf(BrowserPageStabilityPolicy.PROBE_INTERVAL_MS, remaining.coerceAtLeast(1L)))
+                continue
+            }
+
+            val probeNow = clockMs()
+            val readyState = json.optString("readyState")
+            val progress = session.currentProgress
+            if (session.lastPageFinishedAtMs == 0L &&
+                probeNow - session.loadStartedAtMs >= BrowserPageStabilityPolicy.DOCUMENT_READY_FALLBACK_MS &&
+                readyState in setOf("interactive", "complete") && progress >= 100
+            ) {
+                session.markDocumentReadyFallback(probeNow)
+                diagnostics.emit(event(session.manifest, request, "BROWSER_DOCUMENT_READY_FALLBACK", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                    "flow" to "browser",
+                    "stage" to "document_ready_fallback",
+                    "readyState" to readyState,
+                    "progress" to progress.toString(),
+                )))
+            }
+            lastUrl = json.optString("url").takeIf(String::isNotBlank) ?: lastUrl
+            val probe = BrowserPageStabilityPolicy.Probe(
+                nowMs = probeNow,
+                url = lastUrl.orEmpty(),
+                readyState = readyState,
+                progress = progress,
+                loading = session.pageLoading,
+                lastPageFinishedAtMs = session.lastPageFinishedAtMs,
+                lastPageEventAtMs = session.lastPageEventAtMs,
+                lastProgressAtMs = session.lastProgressAtMs,
+                htmlLength = json.optInt("htmlLength"),
+                textLength = json.optInt("textLength"),
+                elementCount = json.optInt("elementCount"),
+                scrollHeight = json.optInt("scrollHeight"),
+                mutationAgeMs = json.optLong("mutationAgeMs"),
+                challenge = json.optBoolean("challenge"),
+            )
+            probeCount += 1
+            val decision = policy.evaluate(probe)
+            val matching = when (decision) {
+                is BrowserPageStabilityPolicy.Decision.Continue -> decision.matchingProbes
+                is BrowserPageStabilityPolicy.Decision.Stable -> decision.matchingProbes
+                is BrowserPageStabilityPolicy.Decision.Timeout -> 0
+            }
+            diagnostics.emit(event(session.manifest, request, "BROWSER_DOM_STABILITY_PROBE", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                "flow" to "browser",
+                "stage" to "dom_stability_probe",
+                "probe" to probeCount.toString(),
+                "readyState" to probe.readyState,
+                "progress" to probe.progress.toString(),
+                "loading" to probe.loading.toString(),
+                "htmlLength" to probe.htmlLength.toString(),
+                "textLength" to probe.textLength.toString(),
+                "elementCount" to probe.elementCount.toString(),
+                "mutationAgeMs" to probe.mutationAgeMs.toString(),
+                "challenge" to probe.challenge.toString(),
+                "matchingProbes" to matching.toString(),
+                "remainingMs" to (deadline - probeNow).coerceAtLeast(0L).toString(),
+                "url" to diagnosticUrl(lastUrl.orEmpty()),
+            )))
+            if (probe.challenge && !session.challengeReported) {
+                session.challengeReported = true
+                diagnostics.emit(event(session.manifest, request, "BROWSER_CHALLENGE_DETECTED", DiagnosticSeverity.INFO, attributes = mapOf(
+                    "flow" to "browser",
+                    "stage" to "challenge_wait",
+                    "url" to diagnosticUrl(lastUrl.orEmpty()),
+                    "htmlLength" to probe.htmlLength.toString(),
+                )))
+            }
+
+            when (decision) {
+                is BrowserPageStabilityPolicy.Decision.Stable -> {
+                    diagnostics.emit(event(session.manifest, request, "BROWSER_DOM_STABLE", DiagnosticSeverity.INFO, attributes = mapOf(
+                        "flow" to "browser",
+                        "stage" to "dom_stable",
+                        "probes" to probeCount.toString(),
+                        "matchingProbes" to decision.matchingProbes.toString(),
+                        "elapsedMs" to (probeNow - startedAt).toString(),
+                        "url" to diagnosticUrl(lastUrl.orEmpty()),
+                    )))
+                    if (!lastUrl.isNullOrBlank() && isHttpUrl(lastUrl.orEmpty())) session.logicalPageUrl = lastUrl
+                    return lastUrl
+                }
+                is BrowserPageStabilityPolicy.Decision.Timeout -> {
+                    diagnostics.emit(event(session.manifest, request, "BROWSER_PAGE_SETTLE_TIMEOUT", DiagnosticSeverity.WARN, attributes = mapOf(
+                        "flow" to "browser",
+                        "stage" to "dom_stability_timeout",
+                        "code" to decision.code,
+                        "probes" to probeCount.toString(),
+                        "challenge" to session.challengeReported.toString(),
+                        "url" to diagnosticUrl(lastUrl.orEmpty()),
+                    )))
+                    error(decision.code)
+                }
+                is BrowserPageStabilityPolicy.Decision.Continue -> Unit
+            }
+            Thread.sleep(minOf(BrowserPageStabilityPolicy.PROBE_INTERVAL_MS, (deadline - clockMs()).coerceAtLeast(1L)))
         }
     }
 
@@ -1143,6 +1305,7 @@ class AndroidSourceBrowserBroker(
                             main.post {
                                 if (active === session && session.navigationGeneration == generation && !session.rendererGone) {
                                     session.logicalPageUrl = url
+                                    session.markPageStarted(clockMs())
                                     session.webView.loadUrl(url)
                                 }
                             }
@@ -1265,7 +1428,16 @@ class AndroidSourceBrowserBroker(
         val session = active ?: return
         val currentUrl = session.logicalPageUrl ?: runCatching { reconcileLogicalPageUrl(session, snapshotWebView(session)) }.getOrNull()
         syncCookiesFromWebView(session.manifest, currentUrl)
-        runCatching { runOnMain(10_000) { session.webView.stopLoading(); session.webView.loadUrl("about:blank"); session.webView.clearHistory(); session.webView.clearCache(true); session.webView.removeAllViews(); session.webView.destroy() } }
+        runCatching { runOnMain(10_000) {
+            session.webView.stopLoading()
+            session.webView.loadUrl("about:blank")
+            session.webView.clearHistory()
+            session.webView.clearCache(true)
+            session.webView.removeAllViews()
+            SourceBrowserViewportHost.detach(session.webView, session.viewportAttachment)
+            session.viewportAttachment = null
+            session.webView.destroy()
+        } }
         active = null
         if (clearCookies) cookiePartition.clear(session.manifest.id)
     }
@@ -1383,6 +1555,7 @@ class AndroidSourceBrowserBroker(
         val metadata = ArrayDeque<SourceBrowserRequestMetadata>()
         val dialogs = ArrayDeque<SourceBrowserDialog>()
         @Volatile var currentTraceId: String = ""
+        @Volatile var viewportAttachment: SourceBrowserViewportHost.Attachment? = null
         val pendingError = AtomicReference<String?>()
         private val dialogSequence = AtomicLong()
         @Volatile var pageLatch: CountDownLatch? = null
@@ -1400,6 +1573,13 @@ class AndroidSourceBrowserBroker(
         @Volatile var pageFinishedCount: Int = 0
         @Volatile var navigationGeneration: Long = 0
         @Volatile var lastProgressLogged: Int = -1
+        @Volatile var currentProgress: Int = 0
+        @Volatile var loadStartedAtMs: Long = 0L
+        @Volatile var lastPageEventAtMs: Long = 0L
+        @Volatile var lastPageFinishedAtMs: Long = 0L
+        @Volatile var lastProgressAtMs: Long = 0L
+        @Volatile var pageLoading: Boolean = false
+        @Volatile var challengeReported: Boolean = false
         val approvedHosts: MutableSet<String> = ConcurrentHashMap.newKeySet()
         private val pendingDnsIdentities: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
@@ -1409,6 +1589,39 @@ class AndroidSourceBrowserBroker(
             pendingDnsIdentities.clear()
             trustedNavigationIdentity = null
             trustedNavigationGeneration = -1L
+            challengeReported = false
+        }
+
+        fun beginPageLoad(nowMs: Long) {
+            loadStartedAtMs = nowMs
+            lastPageEventAtMs = nowMs
+            lastPageFinishedAtMs = 0L
+            lastProgressAtMs = nowMs
+            currentProgress = 0
+            pageLoading = true
+        }
+
+        fun markPageStarted(nowMs: Long) {
+            lastPageEventAtMs = nowMs
+            lastPageFinishedAtMs = 0L
+            pageLoading = true
+        }
+
+        fun markPageFinished(nowMs: Long) {
+            lastPageEventAtMs = nowMs
+            lastPageFinishedAtMs = nowMs
+            pageLoading = false
+        }
+
+        fun markDocumentReadyFallback(nowMs: Long) {
+            if (lastPageFinishedAtMs == 0L) lastPageFinishedAtMs = nowMs
+            lastPageEventAtMs = nowMs
+            pageLoading = false
+        }
+
+        fun markProgress(progress: Int, nowMs: Long) {
+            if (progress != currentProgress) lastProgressAtMs = nowMs
+            currentProgress = progress.coerceIn(0, 100)
         }
 
         fun approve(decision: BrowserNavigationPolicy.Decision.Allowed) {
@@ -1509,5 +1722,30 @@ class AndroidSourceBrowserBroker(
     private companion object {
         const val INTERNAL_DIAGNOSTIC_REQUEST_ID = "__nghetruyenDiagnosticRequestId"
         const val INTERNAL_DIAGNOSTIC_OPERATION_ID = "__nghetruyenDiagnosticOperationId"
+        val PAGE_STABILITY_SCRIPT = """
+            (()=>{try{
+              const now=Date.now();
+              if(!window.__nghePageStabilityWatch){
+                window.__nghePageStabilityWatch={lastMutation:now};
+                try{
+                  const observer=new MutationObserver(()=>{window.__nghePageStabilityWatch.lastMutation=Date.now();});
+                  observer.observe(document.documentElement||document,{subtree:true,childList:true,characterData:true,attributes:true});
+                  window.__nghePageStabilityWatch.observer=observer;
+                }catch(_ignored){}
+              }
+              const root=document.documentElement,body=document.body;
+              const html=root&&root.outerHTML?root.outerHTML:'';
+              const lower=html.toLowerCase();
+              const challenge=(html.length<4096&&lower.indexOf('probe.js')>=0&&(lower.indexOf('buid')>=0||lower.indexOf('waf')>=0))||/buid\s*=\s*["']f{8,}/i.test(html);
+              return JSON.stringify({
+                url:String(location.href||''),readyState:String(document.readyState||''),
+                htmlLength:html.length,textLength:body&&body.innerText?body.innerText.length:0,
+                elementCount:document.getElementsByTagName?document.getElementsByTagName('*').length:0,
+                scrollHeight:root?root.scrollHeight:0,
+                mutationAgeMs:Math.max(0,now-(window.__nghePageStabilityWatch.lastMutation||now)),
+                challenge:!!challenge
+              });
+            }catch(error){return JSON.stringify({error:String(error&&error.message?error.message:error)});}})()
+        """.trimIndent()
     }
 }

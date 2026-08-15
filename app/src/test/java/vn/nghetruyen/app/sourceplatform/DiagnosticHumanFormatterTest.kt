@@ -86,6 +86,23 @@ class DiagnosticHumanFormatterTest {
         assertFalse(report.contains("AI / chuyển ngữ"))
     }
 
+    @Test
+    fun debugCheckpointWithErrorInItsNameStaysAMilestone() {
+        val report = DiagnosticHumanFormatter.formatEvents(
+            events = listOf(event(
+                name = "CHROMIUM_DECODE_EVAL_ERROR_CHECK",
+                category = DiagnosticCategory.RUNTIME,
+                severity = DiagnosticSeverity.DEBUG,
+                attributes = mapOf("present" to "false"),
+            )),
+            mode = "basic",
+        )
+
+        assertTrue(report.contains("• MỐC •"))
+        assertFalse(report.contains("Mã lỗi:"))
+        assertFalse(report.contains("Thao tác kết thúc bất thường"))
+    }
+
     private fun event(
         name: String,
         category: DiagnosticCategory,

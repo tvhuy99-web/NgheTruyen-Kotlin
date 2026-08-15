@@ -24,10 +24,42 @@ import vn.nghetruyen.source.api.SourceNetworkTiming
 import vn.nghetruyen.source.api.SourcePlatformResult
 import vn.nghetruyen.source.api.SourceRuntimeMode
 import vn.nghetruyen.source.api.SourceRuntimePolicy
+import vn.nghetruyen.source.diagnostics.DiagnosticCategory
+import vn.nghetruyen.source.diagnostics.DiagnosticEvent
+import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
+import vn.nghetruyen.source.diagnostics.DiagnosticSink
 import vn.nghetruyen.source.runtime.SourceResourceProvider
 import vn.nghetruyen.source.vbook.VBookActionRuntime
 
 class ChromiumVBookBrowserReplayRuntimeTest {
+    @Test
+    fun expectedReplayYieldIsDebugAndDoesNotKeepFailureAttributes() {
+        val captured = mutableListOf<DiagnosticEvent>()
+        val sink = replayAwareChromiumDiagnostics(DiagnosticSink { captured += it })
+
+        sink.emit(DiagnosticEvent(
+            timestampEpochMs = 1L,
+            traceId = "trace",
+            sourceId = "source",
+            category = DiagnosticCategory.RUNTIME,
+            name = "CHROMIUM_ACTION_FAILED",
+            severity = DiagnosticSeverity.ERROR,
+            attributes = mapOf(
+                "code" to "VBOOK_SCRIPT_ERROR",
+                "error" to "CHROMIUM_EVAL_ERROR:$CHROMIUM_BROWSER_REPLAY_REQUIRED:2\nstack",
+                "bridgeCalls" to "12",
+            ),
+        ))
+
+        val event = captured.single()
+        assertEquals("CHROMIUM_BROWSER_REPLAY_YIELDED", event.name)
+        assertEquals(DiagnosticSeverity.DEBUG, event.severity)
+        assertEquals("2", event.attributes["replayIndex"])
+        assertEquals("12", event.attributes["bridgeCalls"])
+        assertFalse(event.attributes.containsKey("code"))
+        assertFalse(event.attributes.containsKey("error"))
+    }
+
     @Test
     fun browserActionsRunAfterDelegateYieldsAndEarlierNetworkCallIsCached() {
         var now = 1_000L

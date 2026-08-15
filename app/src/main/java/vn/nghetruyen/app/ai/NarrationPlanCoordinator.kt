@@ -3,6 +3,8 @@ package vn.nghetruyen.app.ai
 import org.json.JSONArray
 import org.json.JSONObject
 import vn.nghetruyen.app.core.common.AppResult
+import vn.nghetruyen.app.audio.AudioAssetClassifier
+import vn.nghetruyen.app.audio.AudioAssetKind
 import vn.nghetruyen.app.core.model.ChapterContent
 import vn.nghetruyen.app.core.model.GLOBAL_VOICE_PROFILE_STORY_ID
 import vn.nghetruyen.app.data.local.ChapterTransformEntity
@@ -43,7 +45,10 @@ class NarrationPlanCoordinator(
         if (!voiceAllowed) {
             return Result(false, false, listOf("Phân vai TTS đang tắt cho truyện này."))
         }
-        val tracks = if (music) library.listEnabledSceneMusicTracks() else emptyList()
+        val tracks = if (music) {
+            library.listEnabledSceneMusicTracks()
+                .filter { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }
+        } else emptyList()
         val voiceNeeded = needsVoicePlan(content, force)
         val musicNeeded = music && needsMusicPlan(content, tracks, force)
         if (!voiceNeeded && !musicNeeded) return Result(false, false, emptyList())

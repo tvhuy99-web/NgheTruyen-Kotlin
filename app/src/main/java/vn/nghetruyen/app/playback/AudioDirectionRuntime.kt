@@ -15,6 +15,7 @@ import vn.nghetruyen.app.ai.NarrationPlanCoordinator
 import vn.nghetruyen.app.audio.AmbienceSfxPlan
 import vn.nghetruyen.app.audio.AudioAssetClassifier
 import vn.nghetruyen.app.audio.AudioAssetKind
+import vn.nghetruyen.app.audio.AudioAssetVariantFamily
 import vn.nghetruyen.app.audio.AudioDirectionAsset
 import vn.nghetruyen.app.audio.AudioDirectionLimits
 import vn.nghetruyen.app.audio.AudioDirectionPreferences
@@ -42,6 +43,7 @@ class AudioDirectionRuntime(
     private var failedSignature = ""
     private var failedAtMillis = 0L
     private var assetsById: Map<String, AudioDirectionAsset> = emptyMap()
+    private var ambienceVariantsById: Map<String, List<AudioDirectionAsset>> = emptyMap()
     private var ambienceByUnitId: Map<String, List<String>> = emptyMap()
     private var sfxByUnitId: Map<String, String> = emptyMap()
     private var lastTriggeredSfxKey = ""
@@ -117,6 +119,7 @@ class AudioDirectionRuntime(
                 (settings.soundEffectsEnabled && asset.kind == AudioAssetKind.SFX)
         }
         assetsById = allAssets.associateBy(AudioDirectionAsset::id)
+        ambienceVariantsById = buildAmbienceVariants(allAssets)
 
         val validUnits = snapshot.speechChunks.map { it.unitId }.filter(String::isNotBlank)
         val signature = ChapterAiWorkflow.sha256(
@@ -217,6 +220,9 @@ class AudioDirectionRuntime(
         }
         ambienceController.play(
             assets = assets,
+            variantsByAssetId = assets.associate { asset ->
+                asset.id to ambienceVariantsById[asset.id].orEmpty()
+            },
             masterVolume = settings.ambienceMasterVolume,
             crossfadeMillis = settings.ambienceCrossfadeMillis,
             overlapMinMillis = settings.ambienceLoopOverlapMinMillis,
@@ -250,7 +256,24 @@ class AudioDirectionRuntime(
             val cutoff = now - settings.sameEffectCooldownMillis * 2
             lastEffectAtMillis.entries.removeAll { it.value < cutoff }
         }
+
+        // SFX cues are intentionally sparse and semantic; each accepted cue is therefore treated as
+        // an important foreground event and briefly ducks the two background buses, never narration.
+        ambienceController.duckForImportantSfx(SFX_DUCK_FACTOR, SFX_DUCK_HOLD_MS)
+        SceneMusicSfxDuckBus.duck(SFX_DUCK_FACTOR, SFX_DUCK_HOLD_MS)
         sfxController.play(asset, settings.soundEffectsMasterVolume, settings.maxConcurrentSfx)
+    }
+
+    private fun buildAmbienceVariants(allAssets: List<AudioDirectionAsset>): Map<String, List<AudioDirectionAsset>> {
+        val ambience = allAssets.filter { it.kind == AudioAssetKind.AMBIENCE }
+        val groups = ambience.groupBy { AudioAssetVariantFamily.key(it.title) }
+        return buildMap {
+            ambience.forEach { asset ->
+                val key = AudioAssetVariantFamily.key(asset.title)
+                val family = groups[key].orEmpty()
+                put(asset.id, if (family.size > 1) family else listOf(asset))
+            }
+        }
     }
 
     private fun markFailure(signature: String) {
@@ -268,6 +291,7 @@ class AudioDirectionRuntime(
         preparedSignature = ""
         clearFailure()
         assetsById = emptyMap()
+        ambienceVariantsById = emptyMap()
         ambienceByUnitId = emptyMap()
         sfxByUnitId = emptyMap()
         lastTriggeredSfxKey = ""
@@ -279,5 +303,7 @@ class AudioDirectionRuntime(
         const val KIND_AUDIO_DIRECTION = NarrationPlanCoordinator.KIND_AUDIO_DIRECTION
         private const val FAILURE_RETRY_COOLDOWN_MS = 60_000L
         private const val MAX_EFFECT_HISTORY = 64
+        private const val SFX_DUCK_FACTOR = 0.72f
+        private const val SFX_DUCK_HOLD_MS = 650L
     }
 }

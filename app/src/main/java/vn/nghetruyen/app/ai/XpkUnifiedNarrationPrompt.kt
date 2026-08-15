@@ -91,7 +91,14 @@ object XpkUnifiedNarrationPrompt {
         previousChapterTail: String,
         incomingAmbienceId: String?,
     ): String {
-        val validIncoming = incomingAmbienceId?.trim()?.takeIf { id -> tracks.any { it.id == id } } ?: "NONE"
+        val allowed = tracks.map(SceneMusicTrackOption::id).toHashSet()
+        val validIncoming = incomingAmbienceId.orEmpty()
+            .split('|')
+            .map(String::trim)
+            .filter { it.isNotBlank() && it in allowed }
+            .distinct()
+            .take(2)
+        val incomingText = validIncoming.ifEmpty { listOf("NONE") }.joinToString(" | ")
         return """
             MODULE AMBIENCE — ÂM THANH MÔI TRƯỜNG / ÂM THANH KÉO DÀI:
             Mục tiêu: tạo lớp không gian âm thanh kéo dài khi cảnh thực sự cần nó. Khoảng im lặng hoàn toàn hợp lệ và thường tốt hơn một ambience gượng ép.
@@ -105,11 +112,11 @@ object XpkUnifiedNarrationPrompt {
             7. Hiện tượng/hành động kéo dài không được giả lập bằng cách lặp một SFX ngắn. Nếu catalog có asset được đánh dấu continuous/ambience phù hợp, ưu tiên lớp ambience kéo dài; nếu không có thì bỏ thay vì loop một one-shot không tự nhiên.
             8. Không suy diễn từ phép so sánh, hồi tưởng hay lời kể gián tiếp. Ví dụ “kiếm khí như sấm”, “nhớ tiếng mưa năm xưa”, “giọng hắn như cuồng phong” không tự động tạo ambience sấm/mưa/gió ở hiện tại.
             9. Hai cảnh ambience liền nhau dùng cùng ambience_id và nối tiếp nhau phải được gộp thành một khoảng liên tục. Không đổi qua biến thể khác chỉ để tạo cảm giác mới nếu môi trường không thực sự thay đổi.
-            10. INCOMING_AMBIENCE_ID chỉ là phương án nối chương. Giữ khi cùng môi trường thật sự tiếp tục; bỏ ngay khi phần mở đầu chương đã sang không gian khác.
+            10. INCOMING_AMBIENCE_IDS là tối đa hai lớp đang hoạt động ở cuối chương trước. Đánh giá từng lớp độc lập: giữ lớp nào vẫn đúng với phần mở đầu, bỏ lớp nào không còn đúng, và chỉ thêm lớp mới khi cảnh hiện tại thực sự cần. Không tắt rồi bật lại một lớp vẫn liên tục qua ranh giới chương.
             11. Chỉ dùng ambience_id có trong AMBIENCE_CATALOG. Không tạo ID/tên file/URI/đường dẫn; không trả volume, mood, genre, intensity, confidence, reason hay trường phụ.
             12. PREVIOUS_CHAPTER_TAIL chỉ dùng làm ngữ cảnh, tuyệt đối không lấy ID từ đó làm cue chương hiện tại.
 
-            INCOMING_AMBIENCE_ID: $validIncoming
+            INCOMING_AMBIENCE_IDS: $incomingText
             PREVIOUS_CHAPTER_TAIL:
             ${previousChapterTail.trim().ifBlank { "Không có ngữ cảnh chương trước." }.takeLast(3_500)}
 

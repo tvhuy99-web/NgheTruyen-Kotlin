@@ -54,9 +54,11 @@ music_dialog = section(
 assert 'Text("Bật nhạc nền", Modifier.weight(1f))' in music_dialog
 assert "AudioDirectionLayerSwitches(" in music_dialog
 assert music_dialog.find('Text("Bật nhạc nền"') < music_dialog.find("AudioDirectionLayerSwitches(")
+assert "musicTrackCount = musicTracks.size" in music_dialog
+assert "onManageMusic = {" in music_dialog
 assert 'Text("Chế độ phát"' in music_dialog
 assert 'ReaderFloatSlider("Giảm nhạc khi giọng đọc phát"' in music_dialog
-assert music_dialog.count('ReaderMenuButton("QUẢN LÝ DANH SÁCH NHẠC")') == 1
+assert 'ReaderMenuButton("QUẢN LÝ DANH SÁCH NHẠC")' not in music_dialog
 
 for removed in (
     "CÂN BẰNG ÂM THANH",
@@ -76,8 +78,11 @@ required_component_tokens = (
     'title = "Attack"',
     'title = "Release"',
     'label = "CHUẨN HÓA TOÀN BỘ KHO NHẠC"',
+    'label = "QUẢN LÝ NHẠC ($musicTrackCount)"',
     'label = "QUẢN LÝ ÂM THANH MÔI TRƯỜNG',
     'label = "QUẢN LÝ HIỆU ỨNG ÂM THANH',
+    'label = { Text("Tên") }',
+    'label = { Text("Mô tả") }',
     'Text("THÊM TỆP")',
     '"NGHE THỬ"',
     '"NGHE LẠI"',
@@ -87,11 +92,15 @@ required_component_tokens = (
     'Text("XÓA")',
     'Text("ĐÓNG")',
     "ActivityResultContracts.OpenMultipleDocuments()",
+    "tagsWithDescription(kind, description)",
 )
 for token in required_component_tokens:
-    assert token in component, f"missing compact audio UI token: {token}"
+    assert token in component, f"missing complete audio UI token: {token}"
 
-assert 'label = "QUẢN LÝ NHẠC' not in component, "duplicate music manager must not return to embedded audio controls"
+music_manager = component.find('label = "QUẢN LÝ NHẠC ($musicTrackCount)"')
+ambience_manager = component.find('label = "QUẢN LÝ ÂM THANH MÔI TRƯỜNG')
+sfx_manager = component.find('label = "QUẢN LÝ HIỆU ỨNG ÂM THANH')
+assert 0 <= music_manager < ambience_manager < sfx_manager, "three audio managers must stay together in Music/Ambience/SFX order"
 
 for removed in (
     'text = "ÂM THANH AI"',
@@ -102,9 +111,8 @@ for removed in (
     "SFX là âm one-shot",
     "Mỗi trình quản lý cho phép chọn nhiều tệp",
     "Mô tả cho AI",
-    "description: String",
 ):
-    assert removed not in component, f"obsolete audio description still visible: {removed}"
+    assert removed not in component, f"obsolete explanatory audio prose still visible: {removed}"
 
 music_library = section(reader, "    if (showMusicLibrary) {", "    selectedMusicTrackId?.let")
 for removed in (
@@ -113,10 +121,45 @@ for removed in (
     'Text("DÁN MÔ TẢ")',
     'Text("SAO CHÉP MÔ TẢ")',
 ):
-    assert removed not in music_library, f"obsolete music-list description/control remains: {removed}"
-assert 'Text("THÊM BÀI")' in music_library
-assert 'Text("LƯU DANH SÁCH")' in music_library
-assert 'Text("HỦY")' in music_library
+    assert removed not in music_library, f"obsolete music-list explanation/control remains: {removed}"
+for token in (
+    'Text("THÊM BÀI")',
+    'Text("MÔ TẢ HÀNG LOẠT")',
+    'Text("XÓA TẤT CẢ")',
+    'Text("LƯU DANH SÁCH")',
+    'Text("HỦY")',
+):
+    assert token in music_library, f"music-list footer action missing: {token}"
+
+list_text_start = music_library.find('text = { Column(Modifier.heightIn(max = 620.dp).verticalScroll(rememberScrollState()))')
+list_footer_start = music_library.find('confirmButton = { Column(Modifier.fillMaxWidth())')
+assert 0 <= list_text_start < list_footer_start, "music list/body-footer structure missing"
+scrolling_music_list = music_library[list_text_start:list_footer_start]
+for action in ('Text("THÊM BÀI")', 'Text("MÔ TẢ HÀNG LOẠT")', 'Text("XÓA TẤT CẢ")', 'Text("LƯU DANH SÁCH")'):
+    assert action not in scrolling_music_list, f"music action must stay outside scrollable list: {action}"
+
+music_track_actions = section(reader, "    selectedMusicTrackId?.let", "    editingTrack?.let")
+for token in (
+    'Text("Mô tả: ${description.ifBlank { "—" }}")',
+    'ReaderMenuButton("NGHE THỬ")',
+    'ReaderMenuButton("CHUẨN HÓA")',
+    'ReaderMenuButton("SỬA TÊN / MÔ TẢ")',
+    '"TẮT BÀI NÀY"',
+    '"BẬT BÀI NÀY"',
+    'ReaderMenuButton("DI CHUYỂN LÊN")',
+    'ReaderMenuButton("DI CHUYỂN XUỐNG")',
+    'ReaderMenuButton("XÓA KHỎI DANH SÁCH")',
+):
+    assert token in music_track_actions, f"music track action missing: {token}"
+
+music_editor = section(reader, "    editingTrack?.let", "    if (showMusicBulkDialog) {")
+for token in (
+    'title = { Text("CHỈNH SỬA BÀI NHẠC") }',
+    'label = { Text("Tên") }',
+    'label = { Text("Mô tả") }',
+    "musicTagsWithDescription(description)",
+):
+    assert token in music_editor, f"music metadata editor missing: {token}"
 
 assert "bringIntoViewRequester" not in component
 assert "BuildConfig.DIAGNOSTIC_BUILD_ID" not in component

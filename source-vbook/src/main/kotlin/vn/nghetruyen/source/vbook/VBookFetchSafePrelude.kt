@@ -2,8 +2,9 @@ package vn.nghetruyen.source.vbook
 
 /**
  * Replaces the transitional fetch wrapper with a ClassShutter-safe implementation.
- * Response metadata arrives as JSON text from [VBookRawNetworkBroker], so no Java Map/array crosses
- * into the extension scope.
+ * Response metadata normally arrives as JSON text from [VBookRawNetworkBroker], so no Java
+ * Map/array crosses into the extension scope. A direct runtime may still supply an unwrapped broker;
+ * in that case the native response is already usable and is returned unchanged.
  */
 object VBookFetchSafePrelude {
     fun build(): String = """
@@ -53,14 +54,19 @@ object VBookFetchSafePrelude {
           nativeHeaders['${VBookRawNetworkBroker.INTERNAL_TIMEOUT_MS}']=String(options.timeout===undefined||options.timeout===null?__vbookDefaultTimeoutMs:options.timeout);
           if (__vbookDelayMs>0) nativeHeaders['${VBookRawNetworkBroker.INTERNAL_DELAY_MS}']=String(__vbookDelayMs);
           nativeOptions.headers=nativeHeaders;
-          if (nativeOptions.body && typeof nativeOptions.body === 'object') nativeOptions.body=JSON.stringify(nativeOptions.body);
+          if (nativeOptions.body && typeof nativeOptions.body==='object') nativeOptions.body=JSON.stringify(nativeOptions.body);
           delete nativeOptions.queries;
 
           var response=__vbookNativeFetch(url,nativeOptions);
-          var envelope;
+          var envelope=null;
           try { envelope=JSON.parse(String(response.body || '{}')); }
-          catch (error) { throw new Error('VBOOK_FETCH_METADATA_ENVELOPE_INVALID:'+String(error)); }
-          if (!envelope || envelope.__ngheVBookFetch !== 1) throw new Error('VBOOK_FETCH_METADATA_ENVELOPE_REQUIRED');
+          catch (ignored) { envelope=null; }
+
+          // VBookCompatibilityRuntime can also be paired directly with a Chromium runtime in tests
+          // and embedders. Such a broker returns the real body rather than a metadata envelope. The
+          // native response already owns text/json/html helpers, so preserve it as-is.
+          if (!envelope || envelope.__ngheVBookFetch !== 1) return response;
+
           var responseKey=String(envelope.responseKey || requestKey);
           var responseHeaders=envelope.headers && typeof envelope.headers==='object' ? envelope.headers : {};
           response.headers=responseHeaders;

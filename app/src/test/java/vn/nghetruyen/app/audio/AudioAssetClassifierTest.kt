@@ -42,6 +42,14 @@ class AudioAssetClassifierTest {
     }
 
     @Test
+    fun numberedVariantsShareFamilyButPlainTitlesStayDistinct() {
+        assertEquals("forest", AudioAssetVariantFamily.key("forest_01.wav"))
+        assertEquals("forest", AudioAssetVariantFamily.key("Forest-v2.ogg"))
+        assertEquals("rain heavy", AudioAssetVariantFamily.key("Rain Heavy (3).mp3"))
+        assertEquals("forest night", AudioAssetVariantFamily.key("Forest Night.wav"))
+    }
+
+    @Test
     fun descriptiveWordsDoNotAccidentallyChangeKind() {
         assertEquals(
             AudioAssetKind.MUSIC,

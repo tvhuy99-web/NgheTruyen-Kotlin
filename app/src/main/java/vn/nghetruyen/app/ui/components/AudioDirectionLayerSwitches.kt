@@ -16,9 +16,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -34,8 +32,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import vn.nghetruyen.app.NgheTruyenApplication
@@ -45,10 +41,9 @@ import vn.nghetruyen.app.audio.AudioDirectionPreferences
 import vn.nghetruyen.app.audio.SceneMusicAnalysisWorker
 import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
 
-/** Independent opt-in switches plus separate MUSIC / AMBIENCE / SFX asset managers. */
 @Composable
 fun AudioDirectionLayerSwitches(modifier: Modifier = Modifier) {
-    val context = LocalContext.current
+    val context = androidx.compose.ui.platform.LocalContext.current
     val application = context.applicationContext as NgheTruyenApplication
     val repository = application.container.libraryRepository
     val settingsRepository = application.container.settingsRepository
@@ -71,71 +66,39 @@ fun AudioDirectionLayerSwitches(modifier: Modifier = Modifier) {
         musicEnabled = settingsRepository.snapshot().autoSceneMusicEnabled
     }
 
-    Card(modifier = modifier.fillMaxWidth()) {
-        Column(Modifier.fillMaxWidth().padding(16.dp)) {
-            Text(
-                text = "ÂM THANH AI",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = "Tình trạng: Nhạc cảnh ${if (musicEnabled) "BẬT" else "TẮT"} • Môi trường ${if (snapshot.ambienceEnabled) "BẬT" else "TẮT"} • SFX ${if (snapshot.soundEffectsEnabled) "BẬT" else "TẮT"}",
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(top = 2.dp, bottom = 6.dp),
-            )
-            AudioLayerSwitchRow(
-                title = "Nhạc cảnh AI",
-                description = "AI giữ hoặc đổi nhạc theo cảnh/UNIT; hoạt động độc lập với công tắc nhạc nền thủ công.",
-                checked = musicEnabled,
-                onCheckedChange = { enabled ->
-                    musicEnabled = enabled
-                    scope.launch { settingsRepository.setAutoSceneMusicEnabled(enabled) }
-                },
-            )
-            AudioLayerSwitchRow(
-                title = "Âm thanh môi trường AI",
-                description = "Ambience là nền môi trường kéo dài theo khoảng UNIT; khoảng im lặng được phép khi môi trường không rõ.",
-                checked = snapshot.ambienceEnabled,
-                onCheckedChange = preferences::setAmbienceEnabled,
-            )
-            AudioLayerSwitchRow(
-                title = "Hiệu ứng âm thanh AI",
-                description = "SFX là âm one-shot thưa và đúng sự kiện quan trọng; không tạo hiệu ứng cho mọi hành động.",
-                checked = snapshot.soundEffectsEnabled,
-                onCheckedChange = preferences::setSoundEffectsEnabled,
-            )
+    Column(modifier = modifier.fillMaxWidth()) {
+        AudioLayerSwitchRow(
+            title = "Nhạc cảnh AI",
+            checked = musicEnabled,
+            onCheckedChange = { enabled ->
+                musicEnabled = enabled
+                scope.launch { settingsRepository.setAutoSceneMusicEnabled(enabled) }
+            },
+        )
+        AudioLayerSwitchRow(
+            title = "Âm thanh môi trường AI",
+            checked = snapshot.ambienceEnabled,
+            onCheckedChange = preferences::setAmbienceEnabled,
+        )
+        AudioLayerSwitchRow(
+            title = "Hiệu ứng âm thanh AI",
+            checked = snapshot.soundEffectsEnabled,
+            onCheckedChange = preferences::setSoundEffectsEnabled,
+        )
 
-            HorizontalDivider(Modifier.padding(vertical = 8.dp))
-            Text("NGUYÊN TẮC", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-            Text(
-                text = "• Music, Ambience và SFX bật/tắt độc lập.\n• Các lớp đang bật dùng chung một kế hoạch/một yêu cầu AI cho chương.\n• Lớp tắt không gửi prompt, catalog, schema, ví dụ hay ID asset cho AI.\n• AI chỉ được chọn ID có trong thư viện tương ứng.",
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
-            )
-            HorizontalDivider(Modifier.padding(vertical = 4.dp))
-            Text(
-                text = "Thư viện âm thanh",
-                style = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.padding(bottom = 4.dp),
-            )
-            AudioManagerButton(
-                label = "QUẢN LÝ NHẠC (${tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }})",
-                onClick = { managerKind = AudioAssetKind.MUSIC },
-            )
-            AudioManagerButton(
-                label = "QUẢN LÝ ÂM THANH MÔI TRƯỜNG (${tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.AMBIENCE }})",
-                onClick = { managerKind = AudioAssetKind.AMBIENCE },
-            )
-            AudioManagerButton(
-                label = "QUẢN LÝ HIỆU ỨNG ÂM THANH (${tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.SFX }})",
-                onClick = { managerKind = AudioAssetKind.SFX },
-            )
-            Text(
-                text = "Mỗi trình quản lý cho phép chọn nhiều tệp trong một lần. URI, LUFS, gain chuẩn hóa và trạng thái bật/tắt dùng chung một lõi dữ liệu.",
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(top = 4.dp),
-            )
-        }
+        HorizontalDivider(Modifier.padding(vertical = 6.dp))
+        AudioManagerButton(
+            label = "QUẢN LÝ NHẠC (${tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }})",
+            onClick = { managerKind = AudioAssetKind.MUSIC },
+        )
+        AudioManagerButton(
+            label = "QUẢN LÝ ÂM THANH MÔI TRƯỜNG (${tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.AMBIENCE }})",
+            onClick = { managerKind = AudioAssetKind.AMBIENCE },
+        )
+        AudioManagerButton(
+            label = "QUẢN LÝ HIỆU ỨNG ÂM THANH (${tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.SFX }})",
+            onClick = { managerKind = AudioAssetKind.SFX },
+        )
     }
 
     managerKind?.let { kind ->
@@ -161,7 +124,7 @@ private fun AudioAssetManagerDialog(
     tracks: List<SceneMusicTrackEntity>,
     onDismiss: () -> Unit,
 ) {
-    val context = LocalContext.current
+    val context = androidx.compose.ui.platform.LocalContext.current
     val application = context.applicationContext as NgheTruyenApplication
     val repository = application.container.libraryRepository
     val scope = rememberCoroutineScope()
@@ -200,13 +163,8 @@ private fun AudioAssetManagerDialog(
                     onClick = { launcher.launch(arrayOf("audio/*")) },
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("THÊM NHIỀU TỆP") }
-                Text(
-                    text = "Đã có ${tracks.size} tệp. Chuẩn hóa mục tiêu: ${normalizationTarget(kind)} LUFS.",
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(vertical = 6.dp),
-                )
                 if (tracks.isEmpty()) {
-                    Text("Chưa có tệp nào trong nhóm này.", modifier = Modifier.padding(vertical = 10.dp))
+                    Text("Chưa có tệp nào.", modifier = Modifier.padding(vertical = 10.dp))
                 } else {
                     tracks.sortedWith(compareBy<SceneMusicTrackEntity> { it.orderIndex }.thenBy { it.title.lowercase() })
                         .forEach { track ->
@@ -222,7 +180,7 @@ private fun AudioAssetManagerDialog(
 
 @Composable
 private fun AudioAssetEditorRow(track: SceneMusicTrackEntity, kind: AudioAssetKind) {
-    val context = LocalContext.current
+    val context = androidx.compose.ui.platform.LocalContext.current
     val application = context.applicationContext as NgheTruyenApplication
     val repository = application.container.libraryRepository
     val scope = rememberCoroutineScope()
@@ -239,7 +197,6 @@ private fun AudioAssetEditorRow(track: SceneMusicTrackEntity, kind: AudioAssetKi
                     AudioAssetKind.AMBIENCE -> "AMBIENCE"
                     AudioAssetKind.SFX -> "SFX"
                 },
-                style = MaterialTheme.typography.labelMedium,
                 modifier = Modifier.weight(1f),
             )
             Switch(
@@ -259,13 +216,8 @@ private fun AudioAssetEditorRow(track: SceneMusicTrackEntity, kind: AudioAssetKi
         OutlinedTextField(
             value = description,
             onValueChange = { description = it.take(260) },
-            label = { Text("Mô tả ngắn cho AI") },
+            label = { Text("Mô tả cho AI") },
             modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-        )
-        Text(
-            text = "LUFS ${"%.1f".format(track.loudnessLufsEstimate)} • gain ${"%+.1f".format(track.normalizationGainDb)} dB",
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.padding(top = 4.dp),
         )
         Row(
             modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
@@ -295,7 +247,6 @@ private fun AudioAssetEditorRow(track: SceneMusicTrackEntity, kind: AudioAssetKi
 @Composable
 private fun AudioLayerSwitchRow(
     title: String,
-    description: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
 ) {
@@ -304,10 +255,7 @@ private fun AudioLayerSwitchRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
-            Text(description, style = MaterialTheme.typography.bodySmall)
-        }
+        Text(title, modifier = Modifier.weight(1f))
         Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }

@@ -48,6 +48,12 @@ jobs:
           --tests vn.nghetruyen.source.vbook.VBookNativeLogApplyIntegrationTest
           --stacktrace
 
+      - name: Print exact regression XML on failure
+        if: failure()
+        run: |
+          echo '--- NativeV2 regression XML ---'
+          find source-vbook/build/test-results/test -type f -name '*.xml' -maxdepth 1 -print -exec cat {} \; || true
+
       - name: Run source and app regression suite
         run: >-
           ./gradlew

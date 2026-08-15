@@ -47,7 +47,7 @@ for marker in [
     'label = "QUẢN LÝ HIỆU ỨNG ÂM THANH',
     'label = { Text("Tên") }',
     'label = { Text("Mô tả") }',
-    'Text("THÊM TỆP")',
+    'Text("THÊM NHIỀU TỆP")',
     '"NGHE THỬ"',
     '"NGHE LẠI"',
     'Text("DỪNG")',

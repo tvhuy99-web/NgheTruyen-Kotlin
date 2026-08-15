@@ -457,10 +457,6 @@ fun ReaderScreen(
                         Text("${activeIndex + 1}/${content.paragraphs.size}", modifier = Modifier.padding(horizontal = 8.dp), color = palette.text)
                         ReaderButton("ĐOẠN SAU", { onParagraphSelected((activeIndex + 1).coerceAtMost(content.paragraphs.lastIndex)) }, Modifier.weight(1f), enabled = activeIndex < content.paragraphs.lastIndex, minHeight = 52.dp)
                     }
-                    Row(Modifier.fillMaxWidth()) {
-                        ReaderButton("TRƯỚC", onPreviousChapter, Modifier.weight(1f), minHeight = 56.dp)
-                        ReaderButton("SAU", onNextChapter, Modifier.weight(1f), minHeight = 56.dp)
-                    }
                 }
                 Row(Modifier.fillMaxWidth()) {
                     ReaderButton("TRƯỚC", onPreviousChapter, Modifier.weight(1f), minHeight = 56.dp)

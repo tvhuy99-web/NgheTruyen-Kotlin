@@ -28,6 +28,7 @@ python3 scripts/m0_preflight.py \
 
 STATIC_GATES=(
   scripts/validate_release.py
+  scripts/check_version_policy.py
   scripts/check_lua_deep_diagnostics_parity.py
   scripts/check_source_platform_foundation.py
   scripts/check_vbook_chromium_static.py

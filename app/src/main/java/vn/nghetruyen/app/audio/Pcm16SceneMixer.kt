@@ -97,9 +97,15 @@ object Pcm16SceneMixer {
         val sampleRate: Int,
     ) {
         private val totalFrames = pcm.size / blockAlign
-        private val boundaryFadeFrames = if (layer.looping) {
+        private val layerFrames = (layer.endFrameExclusive - layer.startFrame)
+            .coerceAtMost(Int.MAX_VALUE.toLong())
+            .toInt()
+            .coerceAtLeast(1)
+        private val requestedBoundaryFadeFrames = if (layer.looping) {
             maxOf(layer.fadeFrames, (sampleRate * MIN_LOOPING_FADE_MILLIS / 1_000L).toInt())
         } else layer.fadeFrames
+        private val boundaryFadeFrames = requestedBoundaryFadeFrames
+            .coerceAtMost((layerFrames / 2).coerceAtLeast(1))
         private val loopBlendFrames = if (layer.looping && totalFrames > 8) {
             boundaryFadeFrames
                 .coerceAtLeast(1)

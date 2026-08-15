@@ -97,7 +97,6 @@ required = {
         'label = "QUẢN LÝ HIỆU ỨNG ÂM THANH',
         'label = { Text("Tên") }',
         'label = { Text("Mô tả") }',
-        'Text("CHUẨN HÓA")',
         'Text("LƯU")',
         'Text("XÓA")',
     ],
@@ -113,6 +112,14 @@ for name, tokens in required.items():
     for token in tokens:
         if token not in texts[name]:
             raise SystemExit(f"{name}: missing reference control token: {token}")
+
+# The legacy inline editor rendered the normalize action as Text inside a button. The canonical
+# unified manager represents the same control as a named action component. Both are valid parity.
+if not any(token in component for token in [
+    'Text("CHUẨN HÓA")',
+    'UnifiedAssetActionButton("CHUẨN HÓA")',
+]):
+    raise SystemExit("Audio audio-manager normalize control is missing")
 
 for token in [
     'Text("CHẬM")', 'Text("NHANH")', 'Text("TRẦM")', 'Text("CAO")',

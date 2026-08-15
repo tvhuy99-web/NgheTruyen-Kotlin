@@ -164,9 +164,9 @@ class MainActivity : ComponentActivity() {
                 }
             }
             val sceneMusicLauncher = rememberLauncherForActivityResult(
-                contract = ActivityResultContracts.OpenDocument(),
-            ) { uri ->
-                if (uri != null) {
+                contract = ActivityResultContracts.OpenMultipleDocuments(),
+            ) { uris ->
+                uris.distinct().forEach { uri ->
                     runCatching { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
                     viewModel.addSceneMusicTrack(uri)
                 }

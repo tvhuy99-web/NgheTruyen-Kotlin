@@ -47,7 +47,8 @@ class AudioDirectionRuntime(
     private var collectorJob: Job? = null
     private var preparedChapterId = ""
     private var preparedSourceHash = ""
-    private var plan = AmbienceSfxPlan()
+    private var failedSourceHash = ""
+    private var failedAtMillis = 0L
     private var assetsById: Map<String, AudioDirectionAsset> = emptyMap()
     private var ambienceByUnitId: Map<String, String> = emptyMap()
     private var sfxByUnitId: Map<String, String> = emptyMap()
@@ -132,6 +133,11 @@ class AudioDirectionRuntime(
                 ),
         )
         if (!force && preparedChapterId == snapshot.chapterId && preparedSourceHash == sourceHash) return true
+        if (!force && failedSourceHash == sourceHash &&
+            System.currentTimeMillis() - failedAtMillis < FAILURE_RETRY_COOLDOWN_MS
+        ) {
+            return false
+        }
 
         val validAmbienceIds = ambienceAssets.map(AudioDirectionAsset::id).toSet()
         val validSfxIds = sfxAssets.map(AudioDirectionAsset::id).toSet()
@@ -148,6 +154,7 @@ class AudioDirectionRuntime(
                 )
             }.getOrNull()
             if (cachedPlan != null) {
+                clearFailure()
                 installPlan(snapshot.chapterId, sourceHash, validUnits, cachedPlan)
                 return true
             }
@@ -158,6 +165,7 @@ class AudioDirectionRuntime(
         if (!needsAmbienceAi && !needsSfxAi) {
             val empty = AmbienceSfxPlan()
             persistPlan(snapshot, sourceHash, empty, "local", "no-assets")
+            clearFailure()
             installPlan(snapshot.chapterId, sourceHash, validUnits, empty)
             return true
         }
@@ -182,7 +190,10 @@ class AudioDirectionRuntime(
             incomingAmbienceId = ambienceController.activeId(),
         )
         return when (val response = aiServices.direct(snapshot.storyId, prompt)) {
-            is AppResult.Failure -> false
+            is AppResult.Failure -> {
+                markFailure(sourceHash)
+                false
+            }
             is AppResult.Success -> {
                 val parsed = runCatching {
                     XpkAmbienceSfxDirector.parseAndValidate(
@@ -193,10 +204,16 @@ class AudioDirectionRuntime(
                         needsAmbienceAi,
                         needsSfxAi,
                     )
-                }.getOrNull() ?: return false
-                persistPlan(snapshot, sourceHash, parsed, response.value.provider, response.value.model)
-                installPlan(snapshot.chapterId, sourceHash, validUnits, parsed)
-                true
+                }.getOrNull()
+                if (parsed == null) {
+                    markFailure(sourceHash)
+                    false
+                } else {
+                    persistPlan(snapshot, sourceHash, parsed, response.value.provider, response.value.model)
+                    clearFailure()
+                    installPlan(snapshot.chapterId, sourceHash, validUnits, parsed)
+                    true
+                }
             }
         }
     }
@@ -244,7 +261,6 @@ class AudioDirectionRuntime(
             val end = order[scene.endUnitId] ?: return@forEach
             for (index in start..end) ambienceMap[validUnits[index]] = scene.ambienceId
         }
-        plan = newPlan
         ambienceByUnitId = ambienceMap
         sfxByUnitId = newPlan.soundEffectCues.associate { it.unitId to it.effectId }
         preparedChapterId = chapterId
@@ -286,10 +302,20 @@ class AudioDirectionRuntime(
         sfxController.play(asset, settings.soundEffectsMasterVolume, settings.maxConcurrentSfx)
     }
 
+    private fun markFailure(sourceHash: String) {
+        failedSourceHash = sourceHash
+        failedAtMillis = System.currentTimeMillis()
+    }
+
+    private fun clearFailure() {
+        failedSourceHash = ""
+        failedAtMillis = 0L
+    }
+
     private fun clearPreparedPlan() {
         preparedChapterId = ""
         preparedSourceHash = ""
-        plan = AmbienceSfxPlan()
+        clearFailure()
         assetsById = emptyMap()
         ambienceByUnitId = emptyMap()
         sfxByUnitId = emptyMap()
@@ -298,5 +324,6 @@ class AudioDirectionRuntime(
 
     companion object {
         const val KIND_AUDIO_DIRECTION = "AUDIO_DIRECTION"
+        private const val FAILURE_RETRY_COOLDOWN_MS = 60_000L
     }
 }

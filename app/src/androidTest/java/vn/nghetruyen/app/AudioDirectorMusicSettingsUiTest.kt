@@ -1,11 +1,8 @@
 package vn.nghetruyen.app
 
-import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onNode
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -24,7 +21,7 @@ class AudioDirectorMusicSettingsUiTest {
         composeRule.onNodeWithText("CÁ NHÂN", useUnmergedTree = true).performClick()
         composeRule.onNodeWithText("Cài đặt", useUnmergedTree = true).performClick()
         composeRule
-            .onNode(hasText("NHẠC NỀN & NHẠC CẢNH"), useUnmergedTree = true)
+            .onNodeWithText("NHẠC NỀN & NHẠC CẢNH", useUnmergedTree = true)
             .performScrollTo()
             .performClick()
 
@@ -34,9 +31,16 @@ class AudioDirectorMusicSettingsUiTest {
         }
 
         composeRule.onNodeWithText("Nhạc nền cục bộ", useUnmergedTree = true).assertIsDisplayed()
-        composeRule.onNodeWithText("ÂM THANH AI", useUnmergedTree = true).assertDoesNotExist()
-        composeRule.onNodeWithText("Nhạc cảnh AI", useUnmergedTree = true).assertDoesNotExist()
-        composeRule.onNodeWithText("Âm thanh môi trường AI", useUnmergedTree = true).assertDoesNotExist()
-        composeRule.onNodeWithText("Hiệu ứng âm thanh AI", useUnmergedTree = true).assertDoesNotExist()
+        assertTextDoesNotExist("ÂM THANH AI")
+        assertTextDoesNotExist("Nhạc cảnh AI")
+        assertTextDoesNotExist("Âm thanh môi trường AI")
+        assertTextDoesNotExist("Hiệu ứng âm thanh AI")
+    }
+
+    private fun assertTextDoesNotExist(text: String) {
+        check(
+            composeRule.onAllNodesWithText(text, useUnmergedTree = true)
+                .fetchSemanticsNodes().isEmpty(),
+        ) { "Unexpected duplicate audio control: $text" }
     }
 }

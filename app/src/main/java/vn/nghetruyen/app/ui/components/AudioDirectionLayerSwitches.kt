@@ -40,11 +40,13 @@ import vn.nghetruyen.app.audio.AudioAssetClassifier
 import vn.nghetruyen.app.audio.AudioAssetKind
 import vn.nghetruyen.app.audio.AudioDirectionPreferences
 import vn.nghetruyen.app.audio.SceneMusicAnalysisWorker
-import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
 
 /**
  * Reader audio-layer controls. MUSIC, AMBIENCE and SFX deliberately route to the same asset manager
  * so all three libraries expose an identical UI and identical actions.
+ *
+ * [onManageMusic] is retained only for source compatibility with the existing ReaderScreen call.
+ * MUSIC no longer invokes a separate legacy dialog; it uses [UnifiedAudioAssetManagerDialog].
  */
 @Suppress("UNUSED_PARAMETER")
 @Composable

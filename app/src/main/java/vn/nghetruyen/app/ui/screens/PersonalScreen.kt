@@ -387,12 +387,8 @@ fun PersonalScreen(
                 onVolumeChange = onBackgroundMusicVolumeChange,
                 onDuckChange = onBackgroundMusicDuckChange,
             )
-            SceneMusicLibraryCard(
-                tracks = state.sceneMusicTracks,
-                onSelect = onSelectSceneMusic,
-                onUpdate = onUpdateSceneMusic,
-                onEnabledChange = onSceneMusicEnabledChange,
-                onDelete = onDeleteSceneMusic,
+            vn.nghetruyen.app.ui.components.AudioDirectionLayerSwitches(
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
             )
         }
         "settings_following" -> PersonalSubPage("THEO DÕI CHƯƠNG MỚI") {
@@ -1001,7 +997,7 @@ private fun extensionSubsequenceScore(needle: String, haystack: String): Int? {
     var firstMatch = -1
     var lastMatch = -1
     haystack.forEachIndexed { index, char ->
-        if (needleIndex < needle.length && char == needle[needleIndex]) {
+        if (needleIndex < needle.length && char == haystack[index]) {
             if (firstMatch < 0) firstMatch = index
             lastMatch = index
             needleIndex += 1
@@ -1079,8 +1075,6 @@ private fun InstalledSourcesSection(
     var logPackId by remember { mutableStateOf<String?>(null) }
     var installedQuery by remember { mutableStateOf("") }
 
-    // Kept in the signature because the runtime still supports them, but the primary action
-    // surface intentionally follows the Lua menu and therefore does not expose these here.
     @Suppress("UNUSED_VARIABLE")
     val retainedRuntimeActions = listOf(onRollback, onLogin)
 
@@ -1127,7 +1121,6 @@ private fun InstalledSourcesSection(
             )
         }
     }
-
 
     selectedPackId?.let { selectedId ->
         state.sourcePacks.firstOrNull { it.id == selectedId }?.let { pack ->
@@ -1537,7 +1530,6 @@ private fun SourceRepositorySection(
         }
     }
 
-
     if (selectedRepository != null && selectedPackageId != null) {
         val item = state.sourceRepositoryPackages.firstOrNull {
             it.repositoryId == selectedRepository.id && it.sourceId == selectedPackageId
@@ -1916,9 +1908,6 @@ private fun PlaybackAutomationCard(
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             SettingSwitch("Tự phân vai AI", state.autoVoiceCastEnabled, onAutoVoiceCastChange)
             SettingSwitch("Tự lập nhạc cảnh", state.autoSceneMusicEnabled, onAutoSceneMusicChange)
-            vn.nghetruyen.app.ui.components.AudioDirectionLayerSwitches(
-                modifier = Modifier.padding(top = 4.dp),
-            )
             SettingSwitch("Chuẩn bị AI trước", state.prefetchNarrationPlansEnabled, onPrefetchNarrationPlansChange)
             ReferenceIntSettingsSlider(
                 label = "Chuẩn bị trước",

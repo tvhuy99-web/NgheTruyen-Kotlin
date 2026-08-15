@@ -35,6 +35,7 @@ def main() -> None:
     boundary = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookRhinoValues.kt")
     importer = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookPluginImporter.kt")
     browser = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidSourceBrowserBroker.kt")
+    browser_policy = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/BrowserNavigationPolicy.kt")
     webview_authority = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/ExtensionWebViewAuthority.kt")
     config_service = read("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookConfigService.kt")
     config_store = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidVBookConfigStore.kt")
@@ -172,7 +173,9 @@ def main() -> None:
     require(
         browser,
         "Android browser broker",
-        "PublicAddressPolicy.requirePublic",
+        "navigationPolicy.preflightInitial",
+        "navigationPolicy.evaluateRedirect",
+        "scheduleRedirectDns",
         "WebStorage.getInstance().deleteAllData()",
         "ExtensionWebViewAuthority.apply(appContext, webView)",
         "BROWSER_POPUP_CREATED",
@@ -181,6 +184,15 @@ def main() -> None:
         "allowsTrustedLoadHtmlInternalNavigation",
         '"about" -> url.equals("about:blank", ignoreCase = true)',
         '"data" -> url.startsWith("data:text/html", ignoreCase = true)',
+    )
+    require(
+        browser_policy,
+        "Android browser navigation policy",
+        "SourceOriginPolicy.requireInitialUrl",
+        "SourceOriginPolicy.requireRedirectUrl",
+        "PublicAddressPolicy.requirePublic",
+        "Decision.NeedsDns",
+        "stripFragment(rawUrl)",
     )
     require(
         webview_authority,

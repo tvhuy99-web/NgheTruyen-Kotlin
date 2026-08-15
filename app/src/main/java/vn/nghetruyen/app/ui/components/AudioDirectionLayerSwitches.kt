@@ -19,6 +19,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -27,6 +28,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -56,6 +58,9 @@ fun AudioDirectionLayerSwitches(
     val tracks by repository.observeSceneMusicTracks().collectAsState(initial = emptyList())
     var snapshot by remember(preferences) { mutableStateOf(preferences.snapshot()) }
     var musicEnabled by remember { mutableStateOf(false) }
+    var normalizationTarget by remember { mutableStateOf(-24f) }
+    var attackMillis by remember { mutableIntStateOf(1850) }
+    var releaseMillis by remember { mutableIntStateOf(2050) }
     var managerKind by remember { mutableStateOf<AudioAssetKind?>(null) }
 
     DisposableEffect(preferences) {
@@ -67,7 +72,11 @@ fun AudioDirectionLayerSwitches(
     }
 
     LaunchedEffect(settingsRepository) {
-        musicEnabled = settingsRepository.snapshot().autoSceneMusicEnabled
+        val settings = settingsRepository.snapshot()
+        musicEnabled = settings.autoSceneMusicEnabled
+        normalizationTarget = settings.sceneMusicTargetLufs.coerceIn(-36f, -18f)
+        attackMillis = settings.backgroundMusicAttackMillis.coerceIn(0, 2_000)
+        releaseMillis = settings.backgroundMusicReleaseMillis.coerceIn(0, 5_000)
     }
 
     Column(modifier = modifier.fillMaxWidth()) {
@@ -88,6 +97,43 @@ fun AudioDirectionLayerSwitches(
             title = "Hiệu ứng âm thanh AI",
             checked = snapshot.soundEffectsEnabled,
             onCheckedChange = preferences::setSoundEffectsEnabled,
+        )
+
+        HorizontalDivider(Modifier.padding(vertical = 6.dp))
+        AudioFloatSlider(
+            title = "Mức chuẩn hóa",
+            value = normalizationTarget,
+            range = -36f..-18f,
+            shown = { "%.0f LUFS".format(it) },
+            onValueChange = { value ->
+                normalizationTarget = value
+                scope.launch { settingsRepository.setSceneMusicTargetLufs(value) }
+            },
+        )
+        AudioIntSlider(
+            title = "Attack",
+            value = attackMillis,
+            maximum = 2_000,
+            onValueChange = { value ->
+                attackMillis = value
+                scope.launch { settingsRepository.setBackgroundMusicAttackMillis(value) }
+            },
+        )
+        AudioIntSlider(
+            title = "Release",
+            value = releaseMillis,
+            maximum = 5_000,
+            onValueChange = { value ->
+                releaseMillis = value
+                scope.launch { settingsRepository.setBackgroundMusicReleaseMillis(value) }
+            },
+        )
+        AudioManagerButton(
+            label = "CHUẨN HÓA TOÀN BỘ KHO NHẠC",
+            onClick = {
+                tracks.filter { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }
+                    .forEach { track -> SceneMusicAnalysisWorker.enqueue(context, track.id, normalizationTarget) }
+            },
         )
 
         HorizontalDivider(Modifier.padding(vertical = 6.dp))
@@ -122,6 +168,43 @@ private fun AudioManagerButton(label: String, onClick: () -> Unit) {
         onClick = onClick,
         modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
     ) { Text(label) }
+}
+
+@Composable
+private fun AudioFloatSlider(
+    title: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    shown: (Float) -> String,
+    onValueChange: (Float) -> Unit,
+) {
+    val safe = value.coerceIn(range.start, range.endInclusive)
+    Text("$title: ${shown(safe)}")
+    Slider(
+        value = safe,
+        onValueChange = onValueChange,
+        valueRange = range,
+        steps = 17,
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+@Composable
+private fun AudioIntSlider(
+    title: String,
+    value: Int,
+    maximum: Int,
+    onValueChange: (Int) -> Unit,
+) {
+    val safe = value.coerceIn(0, maximum)
+    Text("$title: $safe ms")
+    Slider(
+        value = safe.toFloat(),
+        onValueChange = { onValueChange(it.toInt().coerceIn(0, maximum)) },
+        valueRange = 0f..maximum.toFloat(),
+        steps = ((maximum / 10) - 1).coerceAtLeast(0),
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 @Composable

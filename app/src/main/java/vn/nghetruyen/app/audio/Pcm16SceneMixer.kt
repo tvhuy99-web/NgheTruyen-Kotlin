@@ -7,22 +7,22 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
-import java.io.RandomAccessFile
 import kotlin.math.min
 
-/** One loopable PCM16 music layer positioned on the narration timeline. */
+/**
+ * One PCM16 audio layer positioned on the narration timeline.
+ * MUSIC/AMBIENCE use [looping]=true; SFX uses [looping]=false and naturally ends with its source.
+ */
 data class SceneMixLayer(
     val sourceWav: File,
     val startFrame: Long,
     val endFrameExclusive: Long,
     val volume: Float = 0.18f,
     val fadeFrames: Int = 0,
+    val looping: Boolean = true,
 )
 
-/**
- * Streaming narration/music mixer. Music must already be decoded to PCM16 WAV
- * with the same sample rate and channel count as narration.
- */
+/** Streaming narration + MUSIC + AMBIENCE + SFX mixer. */
 object Pcm16SceneMixer {
     private const val BLOCK_FRAMES = 2_048
     private const val MAX_LAYER_BYTES = 64L * 1024 * 1024
@@ -35,13 +35,13 @@ object Pcm16SceneMixer {
         val narration = WaveFileAssembler.inspect(narrationWav)
         requirePcm16(narration)
         val prepared = layers.map { layer ->
-            require(layer.startFrame >= 0L && layer.endFrameExclusive > layer.startFrame) { "Khoảng nhạc cảnh không hợp lệ." }
+            require(layer.startFrame >= 0L && layer.endFrameExclusive > layer.startFrame) { "Khoảng lớp âm thanh không hợp lệ." }
             val segment = WaveFileAssembler.inspect(layer.sourceWav)
             requirePcm16(segment)
             if (segment.sampleRate != narration.sampleRate || segment.channelCount != narration.channelCount) {
-                throw IOException("Nhạc cảnh phải cùng sample rate và số kênh với lời đọc.")
+                throw IOException("Lớp âm thanh phải cùng sample rate và số kênh với lời đọc.")
             }
-            if (segment.dataLength > MAX_LAYER_BYTES) throw IOException("Một bản nhạc cảnh vượt giới hạn 64 MiB PCM.")
+            if (segment.dataLength > MAX_LAYER_BYTES) throw IOException("Một lớp âm thanh vượt giới hạn 64 MiB PCM.")
             PreparedLayer(layer, readPcm(segment), narration.blockAlign)
         }
         val tempData = File(destination.parentFile ?: narrationWav.parentFile, "${destination.name}.pcm.tmp")
@@ -85,12 +85,19 @@ object Pcm16SceneMixer {
 
     private data class PreparedLayer(val layer: SceneMixLayer, val pcm: ByteArray, val blockAlign: Int) {
         private val totalFrames = pcm.size / blockAlign
+
         fun sample(frame: Long, channel: Int, channels: Int): Int {
             if (frame !in layer.startFrame until layer.endFrameExclusive || totalFrames <= 0) return 0
             val local = frame - layer.startFrame
-            val loopFrame = (local % totalFrames).toInt()
-            val gain = layer.volume.coerceIn(0f, 1f) * fadeGain(local, layer.endFrameExclusive - frame, layer.fadeFrames)
-            val offset = loopFrame * blockAlign + channel.coerceAtMost(channels - 1) * 2
+            if (!layer.looping && local >= totalFrames) return 0
+            val sourceFrame = if (layer.looping) (local % totalFrames).toInt() else local.toInt()
+            val audibleRemaining = if (layer.looping) {
+                layer.endFrameExclusive - frame
+            } else {
+                min(layer.endFrameExclusive - frame, totalFrames.toLong() - local)
+            }
+            val gain = layer.volume.coerceIn(0f, 1f) * fadeGain(local, audibleRemaining, layer.fadeFrames)
+            val offset = sourceFrame * blockAlign + channel.coerceAtMost(channels - 1) * 2
             return (sample16(pcm, offset) * gain).toInt()
         }
     }
@@ -115,7 +122,7 @@ object Pcm16SceneMixer {
             var offset = 0
             while (offset < data.size) {
                 val read = input.read(data, offset, data.size - offset)
-                if (read < 0) throw EOFException("Nhạc cảnh bị cắt ngắn.")
+                if (read < 0) throw EOFException("Lớp âm thanh bị cắt ngắn.")
                 offset += read
             }
         }

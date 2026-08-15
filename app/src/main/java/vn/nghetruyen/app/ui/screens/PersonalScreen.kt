@@ -1916,6 +1916,9 @@ private fun PlaybackAutomationCard(
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             SettingSwitch("Tự phân vai AI", state.autoVoiceCastEnabled, onAutoVoiceCastChange)
             SettingSwitch("Tự lập nhạc cảnh", state.autoSceneMusicEnabled, onAutoSceneMusicChange)
+            vn.nghetruyen.app.ui.components.AudioDirectionLayerSwitches(
+                modifier = Modifier.padding(top = 4.dp),
+            )
             SettingSwitch("Chuẩn bị AI trước", state.prefetchNarrationPlansEnabled, onPrefetchNarrationPlansChange)
             ReferenceIntSettingsSlider(
                 label = "Chuẩn bị trước",

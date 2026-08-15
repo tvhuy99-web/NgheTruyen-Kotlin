@@ -25,6 +25,7 @@ internal class AndroidVBookBrowserSessionBridge(
         if (sourceId.isBlank() || !responseUrl.startsWith("https://", ignoreCase = true) || setCookies.isEmpty()) return
         val write = {
             val manager = CookieManager.getInstance()
+            manager.setAcceptCookie(true)
             setCookies.take(128).filter(String::isNotBlank).forEach { cookie ->
                 manager.setCookie(responseUrl, cookie)
             }

@@ -20,7 +20,7 @@ def section(text: str, start: str, end: str) -> str:
     return text[start_index:end_index]
 
 
-# Personal > Music must remain the legacy/manual music surface. The AI controls belong to Reader options.
+# Personal > Music remains the legacy/manual surface and must not duplicate the Reader AI controls.
 music_page = section(
     personal,
     '"settings_music" -> PersonalSubPage("NHẠC NỀN & NHẠC CẢNH")',
@@ -28,7 +28,7 @@ music_page = section(
 )
 assert "BackgroundMusicCard(" in music_page, "music settings must keep local background music controls"
 assert "SceneMusicLibraryCard(" in music_page, "music settings must keep the existing scene-music library"
-assert "AudioDirectionLayerSwitches(" not in music_page, "AI sound controls must not render on settings_music"
+assert "AudioDirectionLayerSwitches(" not in music_page, "AI sound controls must not duplicate on settings_music"
 
 playback_card = section(
     personal,
@@ -38,23 +38,23 @@ playback_card = section(
 assert "AudioDirectionLayerSwitches(" not in playback_card, "AI sound asset managers must not live in playback automation"
 assert 'SettingSwitch("Tự lập nhạc cảnh"' not in playback_card, "Music AI switch must not be duplicated in playback automation"
 
-# Reader > TÙY CHỌN > TÙY CHỌN ĐỌC is the single control surface requested by the product flow.
+# Reader options keep one Background Music entry; the AI audio controls live inside that dialog.
 reader_options = section(
     reader,
     "    if (showReaderOptions) {",
     "    if (showReaderModeDialog) {",
 )
 assert 'title = { Text("TÙY CHỌN ĐỌC") }' in reader_options, "reader options dialog must keep its existing title"
-assert 'ReaderMenuButton("NHẠC NỀN")' in reader_options, "manual background-music entry must remain in reader options"
-assert "AudioDirectionLayerSwitches(" in reader_options, "AI sound controls must render directly inside reader options"
+assert 'ReaderMenuButton("NHẠC NỀN")' in reader_options, "background-music entry must remain in reader options"
+assert "AudioDirectionLayerSwitches(" not in reader_options, "AI sound controls must not spill into reader options"
 
 music_dialog = section(
     reader,
     "    if (showMusicDialog) {",
     "    if (showMusicNormalizationProgress) {",
 )
-assert "Trao toàn quyền giữ và đổi nhạc cho AI" not in music_dialog, "Music AI switch must not be duplicated in the manual music dialog"
-assert "setAutoSceneMusicEnabled" not in music_dialog, "manual music dialog must not mutate the Music AI switch"
+assert "AudioDirectionLayerSwitches(" in music_dialog, "AI sound controls must render inside Background Music"
+assert music_dialog.find("AudioDirectionLayerSwitches(") < music_dialog.find("Bật nhạc nền khi đọc bằng TTS"), "AI audio block should be grouped at the top of Background Music"
 
 # Music AI must be independent from the manual backgroundMusicEnabled switch.
 assert "music = appSettings.autoSceneMusicEnabled," in coordinator, "Music AI must follow its own switch"
@@ -75,11 +75,12 @@ required_component_tokens = (
 for token in required_component_tokens:
     assert token in component, f"missing embedded AI audio UI token: {token}"
 
-assert "bringIntoViewRequester" not in component, "reader-embedded component must not auto-scroll another settings page"
-assert "BuildConfig.DIAGNOSTIC_BUILD_ID" not in component, "reader-embedded component must not expose debug build markers"
-assert "Nghe Truyện • AI Sound Director" in debug_strings, "debug APK must be visibly distinguishable from the normal app"
+assert "bringIntoViewRequester" not in component, "embedded component must not auto-scroll another settings page"
+assert "BuildConfig.DIAGNOSTIC_BUILD_ID" not in component, "embedded component must not expose debug build markers"
+assert '<string name="app_name">Nghe Truyện</string>' in debug_strings, "debug APK must keep the product name Nghe Truyện"
+assert "AI Sound Director" not in debug_strings, "feature labels must not be appended to the app name"
 
-# Instrumentation keeps guarding the old Music page so the AI block cannot regress back there.
+# Instrumentation keeps guarding Personal > Music so the Reader AI block cannot be duplicated there.
 for token in (
     'onNodeWithText("CÁ NHÂN"',
     'onNodeWithText("Cài đặt"',

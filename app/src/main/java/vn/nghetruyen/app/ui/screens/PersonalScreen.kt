@@ -387,8 +387,12 @@ fun PersonalScreen(
                 onVolumeChange = onBackgroundMusicVolumeChange,
                 onDuckChange = onBackgroundMusicDuckChange,
             )
-            vn.nghetruyen.app.ui.components.AudioDirectionLayerSwitches(
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+            SceneMusicLibraryCard(
+                tracks = state.sceneMusicTracks,
+                onSelect = onSelectSceneMusic,
+                onUpdate = onUpdateSceneMusic,
+                onEnabledChange = onSceneMusicEnabledChange,
+                onDelete = onDeleteSceneMusic,
             )
         }
         "settings_following" -> PersonalSubPage("THEO DÕI CHƯƠNG MỚI") {
@@ -1911,7 +1915,6 @@ private fun PlaybackAutomationCard(
             SettingSwitch("Khôi phục phiên nghe", state.restorePlaybackAfterProcessDeath, onRestorePlaybackChange)
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             SettingSwitch("Tự phân vai AI", state.autoVoiceCastEnabled, onAutoVoiceCastChange)
-            SettingSwitch("Tự lập nhạc cảnh", state.autoSceneMusicEnabled, onAutoSceneMusicChange)
             SettingSwitch("Chuẩn bị AI trước", state.prefetchNarrationPlansEnabled, onPrefetchNarrationPlansChange)
             ReferenceIntSettingsSlider(
                 label = "Chuẩn bị trước",

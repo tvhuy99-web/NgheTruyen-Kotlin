@@ -245,7 +245,6 @@ fun ReaderScreen(
     var ttsLoading by remember { mutableStateOf(false) }
 
     var musicEnabled by remember { mutableStateOf(state.backgroundMusicEnabled) }
-    var musicAi by remember { mutableStateOf(state.autoSceneMusicEnabled) }
     var musicMode by remember { mutableStateOf(state.sceneMusicPlaybackMode) }
     var musicTargetLufs by remember { mutableStateOf(state.sceneMusicTargetLufs.coerceIn(-36f, -18f)) }
     var musicDuckDb by remember { mutableStateOf((-20.0 * log10(state.backgroundMusicDuckFactor.coerceAtLeast(0.0630957f).toDouble())).toFloat().coerceIn(0f, 24f)) }
@@ -299,7 +298,6 @@ fun ReaderScreen(
         if (showMusicDialog) {
             val settings = app.container.settingsRepository.snapshot()
             musicEnabled = settings.backgroundMusicEnabled
-            musicAi = settings.autoSceneMusicEnabled
             musicMode = if (settings.sceneMusicPlaybackMode == SceneMusicPlaybackMode.SHUFFLE) SceneMusicPlaybackMode.SHUFFLE else SceneMusicPlaybackMode.SEQUENTIAL
             musicTargetLufs = settings.sceneMusicTargetLufs.coerceIn(-36f, -18f)
             musicDuckDb = (-20.0 * log10(settings.backgroundMusicDuckFactor.coerceAtLeast(0.0630957f).toDouble())).toFloat().coerceIn(0f, 24f)
@@ -539,6 +537,11 @@ fun ReaderScreen(
                 if (textMode) ReaderMenuButton("HIỂN THỊ VĂN BẢN") { showReaderOptions = false; showDisplayDialog = true }
                 ReaderMenuButton("HẸN GIỜ NGỦ - ${state.sleepTimerStatus}") { showReaderOptions = false; showSleepDialog = true }
                 ReaderMenuButton("NHẠC NỀN") { showReaderOptions = false; showMusicDialog = true }
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                vn.nghetruyen.app.ui.components.AudioDirectionLayerSwitches(
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 ReaderMenuButton(if (textMode) "XUẤT ÂM THANH (CẦN CHẾ ĐỘ TTS)" else "XUẤT ÂM THANH") {
                     showReaderOptions = false
                     if (textMode) onMessage("Hãy chuyển sang chế độ TTS trước khi xuất âm thanh.") else showExportDialog = true
@@ -750,9 +753,6 @@ fun ReaderScreen(
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text("Bật nhạc nền khi đọc bằng TTS", Modifier.weight(1f)); Switch(musicEnabled, { musicEnabled = it })
                 }
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Trao toàn quyền giữ và đổi nhạc cho AI", Modifier.weight(1f)); Switch(musicAi, { musicAi = it })
-                }
                 Text("Chế độ phát khi không dùng nhạc theo cảnh", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
                 Button(onClick = { musicModeExpanded = true }, modifier = Modifier.fillMaxWidth()) {
                     Text(if (musicMode == SceneMusicPlaybackMode.SHUFFLE) "Phát ngẫu nhiên" else "Phát lần lượt")
@@ -809,11 +809,10 @@ fun ReaderScreen(
             } },
             confirmButton = { TextButton(onClick = {
                 val activeCount = state.sceneMusicTracks.count { it.enabled }
-                if ((musicEnabled || musicAi) && activeCount == 0) onMessage("Hãy bật ít nhất một bài trong danh sách nhạc trước.")
+                if (musicEnabled && activeCount == 0) onMessage("Hãy bật ít nhất một bài trong danh sách nhạc trước.")
                 else scope.launch {
                     val settings = app.container.settingsRepository
                     settings.setBackgroundMusicEnabled(musicEnabled)
-                    settings.setAutoSceneMusicEnabled(musicAi)
                     settings.setSceneMusicPlaybackMode(musicMode)
                     settings.setSceneMusicTargetLufs(musicTargetLufs)
                     settings.setBackgroundMusicDuckFactor(10.0.pow(-musicDuckDb / 20.0).toFloat())

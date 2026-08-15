@@ -13,8 +13,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.relocation.BringIntoViewRequester
-import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -39,9 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import vn.nghetruyen.app.BuildConfig
 import vn.nghetruyen.app.NgheTruyenApplication
 import vn.nghetruyen.app.audio.AudioAssetClassifier
 import vn.nghetruyen.app.audio.AudioAssetKind
@@ -58,7 +54,6 @@ fun AudioDirectionLayerSwitches(modifier: Modifier = Modifier) {
     val settingsRepository = application.container.settingsRepository
     val preferences = remember(context) { AudioDirectionPreferences(context) }
     val scope = rememberCoroutineScope()
-    val bringIntoViewRequester = remember { BringIntoViewRequester() }
     val tracks by repository.observeSceneMusicTracks().collectAsState(initial = emptyList())
     var snapshot by remember(preferences) { mutableStateOf(preferences.snapshot()) }
     var musicEnabled by remember { mutableStateOf(false) }
@@ -74,37 +69,23 @@ fun AudioDirectionLayerSwitches(modifier: Modifier = Modifier) {
 
     LaunchedEffect(settingsRepository) {
         musicEnabled = settingsRepository.snapshot().autoSceneMusicEnabled
-        // The legacy local-background card is tall on phones. Bring this new block into the
-        // viewport automatically so opening Music settings cannot look identical to old builds.
-        delay(180)
-        runCatching { bringIntoViewRequester.bringIntoView() }
     }
 
-    Card(
-        modifier = modifier
-            .bringIntoViewRequester(bringIntoViewRequester)
-            .fillMaxWidth(),
-    ) {
+    Card(modifier = modifier.fillMaxWidth()) {
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
             Text(
-                text = "AI SOUND DIRECTOR",
+                text = "ÂM THANH AI",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
             )
             Text(
-                text = "Music • Ambience • SFX — mỗi lớp bật/tắt độc lập; lớp tắt không được gửi prompt/catalog cho AI.",
+                text = "Tình trạng: Nhạc cảnh ${if (musicEnabled) "BẬT" else "TẮT"} • Môi trường ${if (snapshot.ambienceEnabled) "BẬT" else "TẮT"} • SFX ${if (snapshot.soundEffectsEnabled) "BẬT" else "TẮT"}",
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(top = 2.dp, bottom = 6.dp),
             )
-            Text(
-                text = "Build ${BuildConfig.VERSION_NAME} • ${BuildConfig.DIAGNOSTIC_BUILD_ID.take(8)}",
-                style = MaterialTheme.typography.labelSmall,
-                modifier = Modifier.padding(bottom = 8.dp),
-            )
-
             AudioLayerSwitchRow(
                 title = "Nhạc cảnh AI",
-                description = "Music theo UNIT do AI chọn từ thư viện nhạc. Mặc định tắt.",
+                description = "AI giữ hoặc đổi nhạc theo cảnh/UNIT; hoạt động độc lập với công tắc nhạc nền thủ công.",
                 checked = musicEnabled,
                 onCheckedChange = { enabled ->
                     musicEnabled = enabled
@@ -113,18 +94,25 @@ fun AudioDirectionLayerSwitches(modifier: Modifier = Modifier) {
             )
             AudioLayerSwitchRow(
                 title = "Âm thanh môi trường AI",
-                description = "Ambience kéo dài theo khoảng UNIT. Mặc định tắt.",
+                description = "Ambience là nền môi trường kéo dài theo khoảng UNIT; khoảng im lặng được phép khi môi trường không rõ.",
                 checked = snapshot.ambienceEnabled,
                 onCheckedChange = preferences::setAmbienceEnabled,
             )
             AudioLayerSwitchRow(
                 title = "Hiệu ứng âm thanh AI",
-                description = "SFX one-shot tại UNIT do AI chọn. Mặc định tắt.",
+                description = "SFX là âm one-shot thưa và đúng sự kiện quan trọng; không tạo hiệu ứng cho mọi hành động.",
                 checked = snapshot.soundEffectsEnabled,
                 onCheckedChange = preferences::setSoundEffectsEnabled,
             )
 
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            Text("NGUYÊN TẮC", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text(
+                text = "• Music, Ambience và SFX bật/tắt độc lập.\n• Các lớp đang bật dùng chung một kế hoạch/một yêu cầu AI cho chương.\n• Lớp tắt không gửi prompt, catalog, schema, ví dụ hay ID asset cho AI.\n• AI chỉ được chọn ID có trong thư viện tương ứng.",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
+            )
+            HorizontalDivider(Modifier.padding(vertical = 4.dp))
             Text(
                 text = "Thư viện âm thanh",
                 style = MaterialTheme.typography.titleSmall,

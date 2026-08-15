@@ -59,7 +59,7 @@ class NarrationPlanCoordinator(
         return ensurePlans(
             content = content,
             voice = shouldAutoVoiceCast(content.chapter.storyId),
-            music = appSettings.backgroundMusicEnabled && appSettings.autoSceneMusicEnabled,
+            music = appSettings.autoSceneMusicEnabled,
             force = force,
             activeTrackId = activeTrackId,
         )

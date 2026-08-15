@@ -36,11 +36,15 @@ for marker in [
     'title = "Release"',
     'label = "CHUẨN HÓA TOÀN BỘ KHO NHẠC"',
     'Text("THÊM TỆP")',
-    'Text("NGHE THỬ")',
+    '"NGHE THỬ"',
+    '"NGHE LẠI"',
     'Text("LƯU")',
 ]:
     if marker not in component:
         raise SystemExit("XPK_FINAL_UI compact audio manager marker missing: " + marker)
+
+if 'label = "QUẢN LÝ NHẠC' in component:
+    raise SystemExit("XPK_FINAL_UI duplicate embedded music manager remains")
 
 exact_guidance = "AI xử lý phân vai và ba thông số phần trăm trong cùng một lượt. Không dùng nhãn buồn, vui hay tức giận. Chỉ lời thoại trực tiếp được đổi giọng và thông số; lời kể cùng nội tâm luôn giữ giọng Người kể chuyện ở thông số gốc. Mức AI trả về được áp trực tiếp trong giới hạn bên dưới. Âm lượng chỉ có thể tăng khi mức gốc còn dưới 100%."
 if exact_guidance not in story:

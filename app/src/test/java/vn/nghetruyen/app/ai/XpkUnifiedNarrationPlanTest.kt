@@ -6,23 +6,24 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class XpkUnifiedNarrationPlanTest {
+    private fun base(): XpkVoiceCastPrompt.Bundle = XpkVoiceCastPrompt.build(
+        title = "Chương thử",
+        body = "Trời bắt đầu mưa.\nMột tiếng sấm vang lên.",
+        profiles = emptyList(),
+        storyNote = "",
+        expressiveAdjustment = false,
+        speedLimitPct = 0,
+        pitchLimitPct = 0,
+        volumeLimitPct = 0,
+        expressionPrompt = "",
+        includeVoiceCast = false,
+        includeSceneMusic = false,
+    )
+
     @Test
-    fun audioOnlyPromptStillUsesCanonicalXpkTimelineAndFourOutputArrays() {
-        val base = XpkVoiceCastPrompt.build(
-            title = "Chương thử",
-            body = "Trời bắt đầu mưa.\nMột tiếng sấm vang lên.",
-            profiles = emptyList(),
-            storyNote = "",
-            expressiveAdjustment = false,
-            speedLimitPct = 0,
-            pitchLimitPct = 0,
-            volumeLimitPct = 0,
-            expressionPrompt = "",
-            includeVoiceCast = false,
-            includeSceneMusic = false,
-        )
+    fun audioOnlyPromptUsesCanonicalTimelineAndOnlyEnabledModules() {
         val prompt = XpkUnifiedNarrationPrompt.compose(
-            base = base,
+            base = base(),
             title = "Chương thử",
             includeVoiceCast = false,
             includeSceneMusic = false,
@@ -36,8 +37,8 @@ class XpkUnifiedNarrationPlanTest {
             ),
         )
 
-        assertTrue(prompt.contains("\"assignments\""))
-        assertTrue(prompt.contains("\"music_scenes\""))
+        assertFalse(prompt.contains("\"assignments\""))
+        assertFalse(prompt.contains("\"music_scenes\""))
         assertTrue(prompt.contains("\"ambience_scenes\""))
         assertTrue(prompt.contains("\"sfx_cues\""))
         assertTrue(prompt.contains("[UNIT id="))
@@ -46,6 +47,66 @@ class XpkUnifiedNarrationPlanTest {
         assertFalse(prompt.contains("\"time\":"))
         assertFalse(prompt.contains("\"uri\":"))
         assertFalse(prompt.contains("\"volume\":"))
+    }
+
+    @Test
+    fun disabledAmbienceContributesNoPromptCatalogOrSchema() {
+        val prompt = XpkUnifiedNarrationPrompt.compose(
+            base = base(),
+            title = "Chương thử",
+            includeVoiceCast = false,
+            includeSceneMusic = false,
+            includeAmbience = false,
+            includeSoundEffects = true,
+            ambienceTracks = listOf(SceneMusicTrackOption("a-secret", "Mưa.wav", emptyList(), "mưa")),
+            soundEffectTracks = listOf(SceneMusicTrackOption("s1", "Sấm.wav", emptyList(), "sấm")),
+        )
+
+        assertFalse(prompt.contains("MODULE AMBIENCE"))
+        assertFalse(prompt.contains("AMBIENCE_CATALOG"))
+        assertFalse(prompt.contains("ambience_scenes"))
+        assertFalse(prompt.contains("a-secret"))
+        assertTrue(prompt.contains("MODULE SFX"))
+        assertTrue(prompt.contains("sfx_cues"))
+    }
+
+    @Test
+    fun disabledSfxContributesNoPromptCatalogOrSchema() {
+        val prompt = XpkUnifiedNarrationPrompt.compose(
+            base = base(),
+            title = "Chương thử",
+            includeVoiceCast = false,
+            includeSceneMusic = false,
+            includeAmbience = true,
+            includeSoundEffects = false,
+            ambienceTracks = listOf(SceneMusicTrackOption("a1", "Rừng đêm.wav", emptyList(), "rừng đêm")),
+            soundEffectTracks = listOf(SceneMusicTrackOption("s-secret", "Kiếm.wav", emptyList(), "rút kiếm")),
+        )
+
+        assertTrue(prompt.contains("MODULE AMBIENCE"))
+        assertTrue(prompt.contains("ambience_scenes"))
+        assertFalse(prompt.contains("MODULE SFX"))
+        assertFalse(prompt.contains("SFX_CATALOG"))
+        assertFalse(prompt.contains("sfx_cues"))
+        assertFalse(prompt.contains("s-secret"))
+    }
+
+    @Test
+    fun musicPromptIsNotPresentWhenMusicIsDisabled() {
+        val prompt = XpkUnifiedNarrationPrompt.compose(
+            base = base(),
+            title = "Chương thử",
+            includeVoiceCast = false,
+            includeSceneMusic = false,
+            includeAmbience = true,
+            includeSoundEffects = false,
+            ambienceTracks = listOf(SceneMusicTrackOption("a1", "Mưa.wav", emptyList(), "mưa")),
+            soundEffectTracks = emptyList(),
+        )
+
+        assertFalse(prompt.contains("TRACK_CATALOG"))
+        assertFalse(prompt.contains("INCOMING_TRACK_ID"))
+        assertFalse(prompt.contains("music_scenes"))
     }
 
     @Test
@@ -93,6 +154,60 @@ class XpkUnifiedNarrationPlanTest {
     }
 
     @Test
+    fun parserDoesNotRequireDisabledSfxKey() {
+        val raw = """
+            {
+              "ambience_scenes": [
+                {"start_id":"P0001-U01","end_id":"P0001-U01","ambience_id":"a1"}
+              ]
+            }
+        """.trimIndent()
+        val plan = AiLineProtocol.parseXpkNarration(
+            raw,
+            AiLineProtocol.XpkParseOptions(
+                validDialogueIds = emptyList(),
+                validUnitIds = listOf("P0001-U01"),
+                validVoiceIds = emptyList(),
+                validAmbienceIds = setOf("a1"),
+                includeVoiceCast = false,
+                includeSceneMusic = false,
+                includeAmbience = true,
+                includeSoundEffects = false,
+            ),
+        )
+        assertEquals("a1", plan.ambienceScenes.single().ambienceId)
+        assertTrue(plan.soundEffectCues.isEmpty())
+        assertTrue(plan.audioDirectionError.isBlank())
+    }
+
+    @Test
+    fun parserDoesNotRequireDisabledAmbienceKey() {
+        val raw = """
+            {
+              "sfx_cues": [
+                {"unit_id":"P0001-U01","effect_id":"s1"}
+              ]
+            }
+        """.trimIndent()
+        val plan = AiLineProtocol.parseXpkNarration(
+            raw,
+            AiLineProtocol.XpkParseOptions(
+                validDialogueIds = emptyList(),
+                validUnitIds = listOf("P0001-U01"),
+                validVoiceIds = emptyList(),
+                validSfxIds = setOf("s1"),
+                includeVoiceCast = false,
+                includeSceneMusic = false,
+                includeAmbience = false,
+                includeSoundEffects = true,
+            ),
+        )
+        assertTrue(plan.ambienceScenes.isEmpty())
+        assertEquals("s1", plan.soundEffectCues.single().effectId)
+        assertTrue(plan.audioDirectionError.isBlank())
+    }
+
+    @Test
     fun invalidAudioDoesNotDestroyValidVoiceAndMusicPortions() {
         val raw = """
             {
@@ -104,8 +219,7 @@ class XpkUnifiedNarrationPlanTest {
               ],
               "ambience_scenes": [
                 {"start_id":"P0001-U01","end_id":"P0001-U01","ambience_id":"missing"}
-              ],
-              "sfx_cues": []
+              ]
             }
         """.trimIndent()
 

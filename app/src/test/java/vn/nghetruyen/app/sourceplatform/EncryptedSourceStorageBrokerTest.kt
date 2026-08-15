@@ -2,6 +2,7 @@ package vn.nghetruyen.app.sourceplatform
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import vn.nghetruyen.source.api.SemanticVersion
@@ -33,6 +34,20 @@ class EncryptedSourceStorageBrokerTest {
         assertTrue(broker.put(manifest, SourceStorageRequest(manifest.id, "rest", "1234".toByteArray())) is SourcePlatformResult.Success)
         val quota = broker.put(manifest, SourceStorageRequest(manifest.id, "extra", byteArrayOf(1))) as SourcePlatformResult.Failure
         assertTrue(quota.error.code == SourceErrorCode.STORAGE_QUOTA_EXCEEDED)
+    }
+
+    @Test
+    fun `provider generates a fresh iv for every stored value`() {
+        val root = Files.createTempDirectory("vbook-encrypted-storage-iv").toFile()
+        val broker = EncryptedSourceStorageBroker(root, InMemorySourceSecretKeyProvider())
+        val manifest = manifest(storageBytes = 128)
+
+        assertTrue(broker.put(manifest, SourceStorageRequest(manifest.id, "first", "same".toByteArray())) is SourcePlatformResult.Success)
+        assertTrue(broker.put(manifest, SourceStorageRequest(manifest.id, "second", "same".toByteArray())) is SourcePlatformResult.Success)
+
+        val payloads = root.walkTopDown().filter { it.isFile }.map { it.readBytes() }.toList()
+        assertTrue(payloads.size == 2)
+        assertNotEquals(payloads[0].toList(), payloads[1].toList())
     }
 
     private fun manifest(storageBytes: Int) = SourceManifest(

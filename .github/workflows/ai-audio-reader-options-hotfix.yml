@@ -22,17 +22,15 @@ jobs:
           python3 <<'PY'
           from pathlib import Path
 
-          def replace_once(text, old, new, label):
+          def one(text, old, new, label):
               count = text.count(old)
               if count != 1:
-                  raise SystemExit(f"{label}: expected exactly 1 match, got {count}")
+                  raise SystemExit(f"{label}: expected 1 match, got {count}")
               return text.replace(old, new, 1)
 
-          # Reader: put AI audio controls directly in the existing TÙY CHỌN ĐỌC dialog.
-          p = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt')
-          s = p.read_text()
-          s = replace_once(
-              s,
+          reader_path = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt')
+          s = reader_path.read_text()
+          s = one(s,
               '                ReaderMenuButton("NHẠC NỀN") { showReaderOptions = false; showMusicDialog = true }\n',
               '                ReaderMenuButton("NHẠC NỀN") { showReaderOptions = false; showMusicDialog = true }\n'
               '                HorizontalDivider(Modifier.padding(vertical = 8.dp))\n'
@@ -40,27 +38,24 @@ jobs:
               '                    modifier = Modifier.fillMaxWidth(),\n'
               '                )\n'
               '                HorizontalDivider(Modifier.padding(vertical = 8.dp))\n',
-              'reader options placement',
-          )
-          s = replace_once(s, '    var musicAi by remember { mutableStateOf(state.autoSceneMusicEnabled) }\n', '', 'reader musicAi state')
-          s = replace_once(s, '            musicAi = settings.autoSceneMusicEnabled\n', '', 'reader musicAi refresh')
-          s = replace_once(
-              s,
+              'reader options placement')
+          s = one(s, '    var musicAi by remember { mutableStateOf(state.autoSceneMusicEnabled) }\n', '', 'reader musicAi state')
+          s = one(s, '            musicAi = settings.autoSceneMusicEnabled\n', '', 'reader musicAi refresh')
+          s = one(s,
               '                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {\n'
               '                    Text("Trao toàn quyền giữ và đổi nhạc cho AI", Modifier.weight(1f)); Switch(musicAi, { musicAi = it })\n'
               '                }\n',
-              '',
-              'reader duplicate music AI switch',
-          )
-          s = replace_once(s, '                if ((musicEnabled || musicAi) && activeCount == 0) onMessage("Hãy bật ít nhất một bài trong danh sách nhạc trước.")\n', '                if (musicEnabled && activeCount == 0) onMessage("Hãy bật ít nhất một bài trong danh sách nhạc trước.")\n', 'reader manual music validation')
-          s = replace_once(s, '                    settings.setAutoSceneMusicEnabled(musicAi)\n', '', 'reader duplicate music AI save')
-          p.write_text(s)
+              '', 'reader duplicate music AI row')
+          s = one(s,
+              '                if ((musicEnabled || musicAi) && activeCount == 0) onMessage("Hãy bật ít nhất một bài trong danh sách nhạc trước.")\n',
+              '                if (musicEnabled && activeCount == 0) onMessage("Hãy bật ít nhất một bài trong danh sách nhạc trước.")\n',
+              'reader manual validation')
+          s = one(s, '                    settings.setAutoSceneMusicEnabled(musicAi)\n', '', 'reader duplicate music AI save')
+          reader_path.write_text(s)
 
-          # Personal/Music page: restore the existing scene-music library instead of the new AI settings block.
-          p = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt')
-          s = p.read_text()
-          s = replace_once(
-              s,
+          personal_path = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt')
+          s = personal_path.read_text()
+          s = one(s,
               '            vn.nghetruyen.app.ui.components.AudioDirectionLayerSwitches(\n'
               '                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),\n'
               '            )\n',
@@ -71,153 +66,96 @@ jobs:
               '                onEnabledChange = onSceneMusicEnabledChange,\n'
               '                onDelete = onDeleteSceneMusic,\n'
               '            )\n',
-              'personal music page restore',
-          )
-          s = replace_once(
-              s,
+              'restore personal music library')
+          s = one(s,
               '            SettingSwitch("Tự lập nhạc cảnh", state.autoSceneMusicEnabled, onAutoSceneMusicChange)\n',
-              '',
-              'playback duplicate music AI switch',
-          )
-          p.write_text(s)
+              '', 'remove playback duplicate music AI')
+          personal_path.write_text(s)
 
-          # Coordinator: Music AI is independent from the local/manual background-music toggle.
-          p = Path('app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt')
-          s = p.read_text()
-          s = replace_once(
-              s,
+          coordinator_path = Path('app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt')
+          s = coordinator_path.read_text()
+          s = one(s,
               '            music = appSettings.backgroundMusicEnabled && appSettings.autoSceneMusicEnabled,\n',
               '            music = appSettings.autoSceneMusicEnabled,\n',
-              'coordinator music gating',
-          )
-          p.write_text(s)
+              'decouple music AI')
+          coordinator_path.write_text(s)
 
-          # Embedded AI audio section: no separate settings page, explicit status + operating principles.
-          p = Path('app/src/main/java/vn/nghetruyen/app/ui/components/AudioDirectionLayerSwitches.kt')
-          s = p.read_text()
-          start = s.index('/** Independent opt-in switches plus separate MUSIC / AMBIENCE / SFX asset managers. */')
-          end = s.index('@Composable\nprivate fun AudioManagerButton', start)
-          replacement = r'''/** Embedded AI audio controls for Reader > TÙY CHỌN ĐỌC. */
-@Composable
-fun AudioDirectionLayerSwitches(modifier: Modifier = Modifier) {
-    val context = LocalContext.current
-    val application = context.applicationContext as NgheTruyenApplication
-    val repository = application.container.libraryRepository
-    val settingsRepository = application.container.settingsRepository
-    val preferences = remember(context) { AudioDirectionPreferences(context) }
-    val scope = rememberCoroutineScope()
-    val tracks by repository.observeSceneMusicTracks().collectAsState(initial = emptyList())
-    var snapshot by remember(preferences) { mutableStateOf(preferences.snapshot()) }
-    var musicEnabled by remember { mutableStateOf(false) }
-    var managerKind by remember { mutableStateOf<AudioAssetKind?>(null) }
-
-    DisposableEffect(preferences) {
-        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
-            snapshot = preferences.snapshot()
-        }
-        preferences.addChangeListener(listener)
-        onDispose { preferences.removeChangeListener(listener) }
-    }
-
-    LaunchedEffect(settingsRepository) {
-        musicEnabled = settingsRepository.snapshot().autoSceneMusicEnabled
-    }
-
-    Card(modifier = modifier.fillMaxWidth()) {
-        Column(Modifier.fillMaxWidth().padding(16.dp)) {
-            Text(
-                text = "ÂM THANH AI",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = "Tình trạng: Nhạc cảnh ${if (musicEnabled) "BẬT" else "TẮT"} • Môi trường ${if (snapshot.ambienceEnabled) "BẬT" else "TẮT"} • SFX ${if (snapshot.soundEffectsEnabled) "BẬT" else "TẮT"}",
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(top = 2.dp, bottom = 8.dp),
-            )
-
-            AudioLayerSwitchRow(
-                title = "Nhạc cảnh AI",
-                description = "AI giữ hoặc đổi nhạc theo cảnh/UNIT; hoạt động độc lập với công tắc nhạc nền thủ công.",
-                checked = musicEnabled,
-                onCheckedChange = { enabled ->
-                    musicEnabled = enabled
-                    scope.launch { settingsRepository.setAutoSceneMusicEnabled(enabled) }
-                },
-            )
-            AudioLayerSwitchRow(
-                title = "Âm thanh môi trường AI",
-                description = "Ambience là nền môi trường kéo dài theo khoảng UNIT; có thể để khoảng im lặng khi không có môi trường rõ ràng.",
-                checked = snapshot.ambienceEnabled,
-                onCheckedChange = preferences::setAmbienceEnabled,
-            )
-            AudioLayerSwitchRow(
-                title = "Hiệu ứng âm thanh AI",
-                description = "SFX là âm one-shot thưa và đúng sự kiện quan trọng; không tạo hiệu ứng cho mọi hành động.",
-                checked = snapshot.soundEffectsEnabled,
-                onCheckedChange = preferences::setSoundEffectsEnabled,
-            )
-
-            HorizontalDivider(Modifier.padding(vertical = 8.dp))
-            Text("NGUYÊN TẮC", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-            Text(
-                text = "• Music, Ambience và SFX bật/tắt độc lập.\n• Các lớp đang bật dùng chung một kế hoạch/một yêu cầu AI cho chương.\n• Lớp tắt không gửi prompt, catalog, schema, ví dụ hay ID asset cho AI.\n• AI chỉ được chọn ID có trong thư viện tương ứng.",
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
-            )
-
-            HorizontalDivider(Modifier.padding(vertical = 4.dp))
-            Text(
-                text = "Thư viện âm thanh",
-                style = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.padding(bottom = 4.dp),
-            )
-            AudioManagerButton(
-                label = "QUẢN LÝ NHẠC (${tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }})",
-                onClick = { managerKind = AudioAssetKind.MUSIC },
-            )
-            AudioManagerButton(
-                label = "QUẢN LÝ ÂM THANH MÔI TRƯỜNG (${tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.AMBIENCE }})",
-                onClick = { managerKind = AudioAssetKind.AMBIENCE },
-            )
-            AudioManagerButton(
-                label = "QUẢN LÝ HIỆU ỨNG ÂM THANH (${tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.SFX }})",
-                onClick = { managerKind = AudioAssetKind.SFX },
-            )
-            Text(
-                text = "Mỗi trình quản lý cho phép chọn nhiều tệp trong một lần. URI, LUFS, gain chuẩn hóa và trạng thái bật/tắt dùng chung một lõi dữ liệu.",
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(top = 4.dp),
-            )
-        }
-    }
-
-    managerKind?.let { kind ->
-        AudioAssetManagerDialog(
-            kind = kind,
-            tracks = tracks.filter { AudioAssetClassifier.classify(it) == kind },
-            onDismiss = { managerKind = null },
-        )
-    }
-}
-
-'''
-          s = s[:start] + replacement + s[end:]
-          # Imports used only by the old auto-scroll/build marker are removed to keep the source clean.
-          for line in [
+          component_path = Path('app/src/main/java/vn/nghetruyen/app/ui/components/AudioDirectionLayerSwitches.kt')
+          s = component_path.read_text()
+          for line in (
               'import androidx.compose.foundation.relocation.BringIntoViewRequester\n',
               'import androidx.compose.foundation.relocation.bringIntoViewRequester\n',
               'import kotlinx.coroutines.delay\n',
               'import vn.nghetruyen.app.BuildConfig\n',
-          ]:
-              s = s.replace(line, '')
-          p.write_text(s)
+          ):
+              if line not in s:
+                  raise SystemExit(f'missing old import: {line!r}')
+              s = s.replace(line, '', 1)
+          s = one(s, '    val bringIntoViewRequester = remember { BringIntoViewRequester() }\n', '', 'remove bring requester')
+          s = one(s,
+              '    LaunchedEffect(settingsRepository) {\n'
+              '        musicEnabled = settingsRepository.snapshot().autoSceneMusicEnabled\n'
+              '        // The legacy local-background card is tall on phones. Bring this new block into the\n'
+              '        // viewport automatically so opening Music settings cannot look identical to old builds.\n'
+              '        delay(180)\n'
+              '        runCatching { bringIntoViewRequester.bringIntoView() }\n'
+              '    }\n',
+              '    LaunchedEffect(settingsRepository) {\n'
+              '        musicEnabled = settingsRepository.snapshot().autoSceneMusicEnabled\n'
+              '    }\n',
+              'remove old auto scroll')
+          s = one(s,
+              '    Card(\n'
+              '        modifier = modifier\n'
+              '            .bringIntoViewRequester(bringIntoViewRequester)\n'
+              '            .fillMaxWidth(),\n'
+              '    ) {\n',
+              '    Card(modifier = modifier.fillMaxWidth()) {\n',
+              'embedded card modifier')
+          s = one(s, '                text = "AI SOUND DIRECTOR",\n', '                text = "ÂM THANH AI",\n', 'embedded title')
+          s = one(s,
+              '                text = "Music • Ambience • SFX — mỗi lớp bật/tắt độc lập; lớp tắt không được gửi prompt/catalog cho AI.",\n',
+              '                text = "Tình trạng: Nhạc cảnh ${if (musicEnabled) "BẬT" else "TẮT"} • Môi trường ${if (snapshot.ambienceEnabled) "BẬT" else "TẮT"} • SFX ${if (snapshot.soundEffectsEnabled) "BẬT" else "TẮT"}",\n',
+              'status line')
+          s = one(s,
+              '            Text(\n'
+              '                text = "Build ${BuildConfig.VERSION_NAME} • ${BuildConfig.DIAGNOSTIC_BUILD_ID.take(8)}",\n'
+              '                style = MaterialTheme.typography.labelSmall,\n'
+              '                modifier = Modifier.padding(bottom = 8.dp),\n'
+              '            )\n\n',
+              '', 'remove old build marker')
+          s = one(s,
+              '                description = "Music theo UNIT do AI chọn từ thư viện nhạc. Mặc định tắt.",\n',
+              '                description = "AI giữ hoặc đổi nhạc theo cảnh/UNIT; hoạt động độc lập với công tắc nhạc nền thủ công.",\n',
+              'music principle')
+          s = one(s,
+              '                description = "Ambience kéo dài theo khoảng UNIT. Mặc định tắt.",\n',
+              '                description = "Ambience là nền môi trường kéo dài theo khoảng UNIT; khoảng im lặng được phép khi môi trường không rõ.",\n',
+              'ambience principle')
+          s = one(s,
+              '                description = "SFX one-shot tại UNIT do AI chọn. Mặc định tắt.",\n',
+              '                description = "SFX là âm one-shot thưa và đúng sự kiện quan trọng; không tạo hiệu ứng cho mọi hành động.",\n',
+              'sfx principle')
+          marker = ('            HorizontalDivider(Modifier.padding(vertical = 8.dp))\n'
+                    '            Text(\n'
+                    '                text = "Thư viện âm thanh",\n')
+          insertion = ('            HorizontalDivider(Modifier.padding(vertical = 8.dp))\n'
+                       '            Text("NGUYÊN TẮC", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)\n'
+                       '            Text(\n'
+                       '                text = "• Music, Ambience và SFX bật/tắt độc lập.\\n• Các lớp đang bật dùng chung một kế hoạch/một yêu cầu AI cho chương.\\n• Lớp tắt không gửi prompt, catalog, schema, ví dụ hay ID asset cho AI.\\n• AI chỉ được chọn ID có trong thư viện tương ứng.",\n'
+                       '                style = MaterialTheme.typography.bodySmall,\n'
+                       '                modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),\n'
+                       '            )\n'
+                       '            HorizontalDivider(Modifier.padding(vertical = 4.dp))\n'
+                       '            Text(\n'
+                       '                text = "Thư viện âm thanh",\n')
+          s = one(s, marker, insertion, 'principles block')
+          component_path.write_text(s)
 
-          # Guardrails: fail rather than silently produce the wrong placement.
-          reader = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt').read_text()
-          personal = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt').read_text()
-          coordinator = Path('app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt').read_text()
-          component = Path('app/src/main/java/vn/nghetruyen/app/ui/components/AudioDirectionLayerSwitches.kt').read_text()
+          reader = reader_path.read_text()
+          personal = personal_path.read_text()
+          coordinator = coordinator_path.read_text()
+          component = component_path.read_text()
           assert reader.count('AudioDirectionLayerSwitches(') == 1
           assert 'Trao toàn quyền giữ và đổi nhạc cho AI' not in reader
           assert 'var musicAi' not in reader
@@ -228,16 +166,12 @@ fun AudioDirectionLayerSwitches(modifier: Modifier = Modifier) {
           assert 'backgroundMusicEnabled && appSettings.autoSceneMusicEnabled' not in coordinator
           assert 'Tình trạng:' in component and 'NGUYÊN TẮC' in component
           PY
-
       - name: Commit hotfix
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt \
-                  app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt \
-                  app/src/main/java/vn/nghetruyen/app/ui/components/AudioDirectionLayerSwitches.kt \
-                  app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt
+          git add app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt app/src/main/java/vn/nghetruyen/app/ui/components/AudioDirectionLayerSwitches.kt app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt
           git diff --cached --check
           git diff --cached --quiet && exit 0
           git commit -m "fix: move AI audio controls into reader options"

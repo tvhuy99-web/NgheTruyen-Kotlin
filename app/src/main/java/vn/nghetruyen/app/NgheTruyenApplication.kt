@@ -2,7 +2,6 @@ package vn.nghetruyen.app
 
 import android.app.Application
 import android.webkit.WebView
-import vn.nghetruyen.app.ai.AudioDirectionAiServices
 import vn.nghetruyen.app.ai.vietphrase.ReferenceVietPhraseRuntime
 import vn.nghetruyen.app.audio.AudioDirectionPreferences
 import vn.nghetruyen.app.playback.AudioDirectionRuntime
@@ -67,12 +66,7 @@ class NgheTruyenApplication : Application() {
             context = this,
             libraryRepository = container.libraryRepository,
             preferences = audioPreferences,
-            aiServices = AudioDirectionAiServices(
-                settingsRepository = container.settingsRepository,
-                credentialStore = container.aiCredentialStore,
-                requestGovernor = container.aiRequestGovernor,
-                libraryRepository = container.libraryRepository,
-            ),
+            narrationPlanCoordinator = container.narrationPlanCoordinator,
         ).also(AudioDirectionRuntime::start)
     }
 }

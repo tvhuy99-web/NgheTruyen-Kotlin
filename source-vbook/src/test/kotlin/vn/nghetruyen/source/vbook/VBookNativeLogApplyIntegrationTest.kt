@@ -19,6 +19,7 @@ import vn.nghetruyen.source.runtime.SourceResourceProvider
 
 class VBookNativeLogApplyIntegrationTest {
     @Test
+    // Keep the null receiver explicit: native_v2_adapter.lua intentionally uses apply(null, args).
     fun nativeAdapterApplyStyleLogEmitsTransformMicroCheckpoints() {
         val events = mutableListOf<DiagnosticEvent>()
         val runtime = VBookJsRuntime(diagnostics = DiagnosticSink { events += it })

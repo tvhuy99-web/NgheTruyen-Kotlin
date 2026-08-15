@@ -11,6 +11,7 @@ import vn.nghetruyen.app.sourceplatform.ChromiumVBookReplayCoordinator
 import vn.nghetruyen.app.sourceplatform.DiagnosticScreenRestoreLifecycleCallbacks
 import vn.nghetruyen.app.sourceplatform.SourceBrowserViewportHost
 import vn.nghetruyen.app.sourceplatform.SourceWebViewCookieReader
+import vn.nghetruyen.app.sourceplatform.VBookBrowserSessionDiagnosticMirror
 import vn.nghetruyen.app.sourceplatform.VBookBrowserSessionNetworkBroker
 import vn.nghetruyen.app.sourceplatform.VBookHttpParityDiagnosticSink
 import vn.nghetruyen.app.sourceplatform.VBookSuspiciousResponseFailFastBroker
@@ -42,9 +43,9 @@ class NgheTruyenApplication : Application() {
                 }
             } else synchronized(chromiumRuntimeLock) {
                 chromiumRuntimes[brokers.storage] ?: run {
-                    val parityDiagnostics = VBookHttpParityDiagnosticSink(
-                        replayAwareChromiumDiagnostics(diagnostics),
-                    )
+                    val replayDiagnostics = replayAwareChromiumDiagnostics(diagnostics)
+                    val browserLinkedDiagnostics = VBookBrowserSessionDiagnosticMirror(replayDiagnostics)
+                    val parityDiagnostics = VBookHttpParityDiagnosticSink(browserLinkedDiagnostics)
                     val webViewCookieReader = brokers.browser as? SourceWebViewCookieReader
                     val browserSessionBridge = AndroidVBookBrowserSessionBridge(this, webViewCookieReader)
                     val browserSessionNetwork = VBookBrowserSessionNetworkBroker(

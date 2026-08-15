@@ -18,7 +18,6 @@ required_reader = [
     "PHÂN VAI TTS CHO TRUYỆN NÀY",
     "StoryReferenceAdvancedDialogs(",
     "AudioDirectionLayerSwitches(",
-    "CHUẨN HÓA TOÀN BỘ KHO NHẠC",
     "QUẢN LÝ DANH SÁCH NHẠC",
     "displayFontSizeDraft",
     "displayLineHeightDraft",
@@ -32,8 +31,10 @@ reader_options_end = reader.find('    if (showReaderModeDialog) {', reader_optio
 if reader_options_start < 0 or reader_options_end < 0:
     raise SystemExit("REFERENCE_WORKFLOW standard Reader options block missing")
 reader_options = reader[reader_options_start:reader_options_end]
-if "AudioDirectionLayerSwitches(" not in reader_options:
-    raise SystemExit("REFERENCE_WORKFLOW AI audio controls must live directly in standard Reader options")
+if "AudioDirectionLayerSwitches(" in reader_options:
+    raise SystemExit("REFERENCE_WORKFLOW AI audio controls must not spill into standard Reader options")
+if 'ReaderMenuButton("NHẠC NỀN")' not in reader_options:
+    raise SystemExit("REFERENCE_WORKFLOW Reader options must keep the Background Music entry")
 for extra in [
     'Text("MỞ RỘNG"',
     'ĐÁNH DẤU ĐOẠN',
@@ -48,13 +49,34 @@ for extra in [
     if extra in reader_options:
         raise SystemExit("REFERENCE_WORKFLOW Kotlin-only action leaked into standard Reader options: " + extra)
 
+music_start = reader.find('    if (showMusicDialog) {')
+music_end = reader.find('    if (showMusicNormalizationProgress) {', music_start)
+if music_start < 0 or music_end < 0:
+    raise SystemExit("REFERENCE_WORKFLOW Background Music dialog missing")
+music_dialog = reader[music_start:music_end]
+for marker in [
+    'Text("Bật nhạc nền", Modifier.weight(1f))',
+    "AudioDirectionLayerSwitches(",
+    'Text("Chế độ phát"',
+    'ReaderFloatSlider("Giảm nhạc khi giọng đọc phát"',
+    'ReaderMenuButton("QUẢN LÝ DANH SÁCH NHẠC")',
+]:
+    if marker not in music_dialog:
+        raise SystemExit("REFERENCE_WORKFLOW compact music control missing: " + marker)
+if music_dialog.find('Text("Bật nhạc nền"') > music_dialog.find("AudioDirectionLayerSwitches("):
+    raise SystemExit("REFERENCE_WORKFLOW master Background Music switch must be first")
 for obsolete in [
+    'ReaderMenuButton("CHUẨN HÓA TOÀN BỘ KHO NHẠC")',
+    'ReaderFloatSlider("Mức chuẩn hóa"',
+    'ReaderIntSlider("Attack"',
+    'ReaderIntSlider("Release"',
+    "CÂN BẰNG ÂM THANH",
     'title = { Text("AI & CHUYỂN NGỮ") }',
     'title = { Text("KHÁC") }',
     "musicAdvanced",
     "Trao toàn quyền giữ và đổi nhạc cho AI",
 ]:
-    if obsolete in reader:
+    if obsolete in music_dialog or obsolete in reader_options:
         raise SystemExit("REFERENCE_WORKFLOW obsolete Reader navigation/control: " + obsolete)
 
 start = vm.find("private fun openStoryAdvancedOptions")

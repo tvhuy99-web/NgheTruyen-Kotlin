@@ -13,9 +13,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -24,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,8 +37,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import vn.nghetruyen.app.BuildConfig
 import vn.nghetruyen.app.NgheTruyenApplication
 import vn.nghetruyen.app.audio.AudioAssetClassifier
 import vn.nghetruyen.app.audio.AudioAssetKind
@@ -48,9 +55,13 @@ fun AudioDirectionLayerSwitches(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val application = context.applicationContext as NgheTruyenApplication
     val repository = application.container.libraryRepository
+    val settingsRepository = application.container.settingsRepository
     val preferences = remember(context) { AudioDirectionPreferences(context) }
+    val scope = rememberCoroutineScope()
+    val bringIntoViewRequester = remember { BringIntoViewRequester() }
     val tracks by repository.observeSceneMusicTracks().collectAsState(initial = emptyList())
     var snapshot by remember(preferences) { mutableStateOf(preferences.snapshot()) }
+    var musicEnabled by remember { mutableStateOf(false) }
     var managerKind by remember { mutableStateOf<AudioAssetKind?>(null) }
 
     DisposableEffect(preferences) {
@@ -61,42 +72,82 @@ fun AudioDirectionLayerSwitches(modifier: Modifier = Modifier) {
         onDispose { preferences.removeChangeListener(listener) }
     }
 
-    Column(modifier = modifier.fillMaxWidth()) {
-        AudioLayerSwitchRow(
-            title = "Âm thanh môi trường AI",
-            description = "Ambience kéo dài theo khoảng UNIT. Mặc định tắt.",
-            checked = snapshot.ambienceEnabled,
-            onCheckedChange = preferences::setAmbienceEnabled,
-        )
-        AudioLayerSwitchRow(
-            title = "Hiệu ứng âm thanh AI",
-            description = "SFX one-shot tại UNIT do AI chọn. Mặc định tắt.",
-            checked = snapshot.soundEffectsEnabled,
-            onCheckedChange = preferences::setSoundEffectsEnabled,
-        )
+    LaunchedEffect(settingsRepository) {
+        musicEnabled = settingsRepository.snapshot().autoSceneMusicEnabled
+        // The legacy local-background card is tall on phones. Bring this new block into the
+        // viewport automatically so opening Music settings cannot look identical to old builds.
+        delay(180)
+        runCatching { bringIntoViewRequester.bringIntoView() }
+    }
 
-        Text(
-            text = "Thư viện âm thanh",
-            style = MaterialTheme.typography.titleSmall,
-            modifier = Modifier.padding(top = 10.dp, bottom = 4.dp),
-        )
-        AudioManagerButton(
-            label = "QUẢN LÝ NHẠC (${tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }})",
-            onClick = { managerKind = AudioAssetKind.MUSIC },
-        )
-        AudioManagerButton(
-            label = "QUẢN LÝ ÂM THANH MÔI TRƯỜNG (${tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.AMBIENCE }})",
-            onClick = { managerKind = AudioAssetKind.AMBIENCE },
-        )
-        AudioManagerButton(
-            label = "QUẢN LÝ HIỆU ỨNG ÂM THANH (${tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.SFX }})",
-            onClick = { managerKind = AudioAssetKind.SFX },
-        )
-        Text(
-            text = "Mỗi trình quản lý cho phép chọn nhiều tệp trong một lần. URI, LUFS, gain chuẩn hóa và trạng thái bật/tắt dùng chung một lõi dữ liệu.",
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.padding(top = 4.dp),
-        )
+    Card(
+        modifier = modifier
+            .bringIntoViewRequester(bringIntoViewRequester)
+            .fillMaxWidth(),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            Text(
+                text = "AI SOUND DIRECTOR",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = "Music • Ambience • SFX — mỗi lớp bật/tắt độc lập; lớp tắt không được gửi prompt/catalog cho AI.",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 2.dp, bottom = 6.dp),
+            )
+            Text(
+                text = "Build ${BuildConfig.VERSION_NAME} • ${BuildConfig.DIAGNOSTIC_BUILD_ID.take(8)}",
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+
+            AudioLayerSwitchRow(
+                title = "Nhạc cảnh AI",
+                description = "Music theo UNIT do AI chọn từ thư viện nhạc. Mặc định tắt.",
+                checked = musicEnabled,
+                onCheckedChange = { enabled ->
+                    musicEnabled = enabled
+                    scope.launch { settingsRepository.setAutoSceneMusicEnabled(enabled) }
+                },
+            )
+            AudioLayerSwitchRow(
+                title = "Âm thanh môi trường AI",
+                description = "Ambience kéo dài theo khoảng UNIT. Mặc định tắt.",
+                checked = snapshot.ambienceEnabled,
+                onCheckedChange = preferences::setAmbienceEnabled,
+            )
+            AudioLayerSwitchRow(
+                title = "Hiệu ứng âm thanh AI",
+                description = "SFX one-shot tại UNIT do AI chọn. Mặc định tắt.",
+                checked = snapshot.soundEffectsEnabled,
+                onCheckedChange = preferences::setSoundEffectsEnabled,
+            )
+
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            Text(
+                text = "Thư viện âm thanh",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+            AudioManagerButton(
+                label = "QUẢN LÝ NHẠC (${tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }})",
+                onClick = { managerKind = AudioAssetKind.MUSIC },
+            )
+            AudioManagerButton(
+                label = "QUẢN LÝ ÂM THANH MÔI TRƯỜNG (${tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.AMBIENCE }})",
+                onClick = { managerKind = AudioAssetKind.AMBIENCE },
+            )
+            AudioManagerButton(
+                label = "QUẢN LÝ HIỆU ỨNG ÂM THANH (${tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.SFX }})",
+                onClick = { managerKind = AudioAssetKind.SFX },
+            )
+            Text(
+                text = "Mỗi trình quản lý cho phép chọn nhiều tệp trong một lần. URI, LUFS, gain chuẩn hóa và trạng thái bật/tắt dùng chung một lõi dữ liệu.",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
     }
 
     managerKind?.let { kind ->

@@ -9,6 +9,9 @@ import android.content.SharedPreferences
  * Scene music keeps using AppSettings.autoSceneMusicEnabled so the existing switch remains the
  * authoritative music switch. Ambience and one-shot sound effects are deliberately opt-in and
  * default to OFF on every install/restore that has never written these keys.
+ *
+ * [currentSnapshot] is process-local shared state so the narration coordinator and playback/export
+ * runtime read exactly the same switches without creating a second settings system.
  */
 class AudioDirectionPreferences(context: Context) {
     data class Snapshot(
@@ -25,33 +28,45 @@ class AudioDirectionPreferences(context: Context) {
         Context.MODE_PRIVATE,
     )
 
-    fun snapshot(): Snapshot = Snapshot(
-        ambienceEnabled = preferences.getBoolean(KEY_AMBIENCE_ENABLED, false),
-        soundEffectsEnabled = preferences.getBoolean(KEY_SFX_ENABLED, false),
-        ambienceMasterVolume = preferences.getFloat(KEY_AMBIENCE_VOLUME, DEFAULT_AMBIENCE_VOLUME)
-            .coerceIn(0f, 1f),
-        soundEffectsMasterVolume = preferences.getFloat(KEY_SFX_VOLUME, DEFAULT_SFX_VOLUME)
-            .coerceIn(0f, 1f),
-        minimumSfxGapMillis = preferences.getLong(KEY_MIN_SFX_GAP_MS, DEFAULT_MIN_SFX_GAP_MS)
-            .coerceIn(500L, 15_000L),
-        maxConcurrentSfx = preferences.getInt(KEY_MAX_CONCURRENT_SFX, DEFAULT_MAX_CONCURRENT_SFX)
-            .coerceIn(1, 4),
-    )
+    init {
+        snapshot()
+    }
+
+    fun snapshot(): Snapshot {
+        val value = Snapshot(
+            ambienceEnabled = preferences.getBoolean(KEY_AMBIENCE_ENABLED, false),
+            soundEffectsEnabled = preferences.getBoolean(KEY_SFX_ENABLED, false),
+            ambienceMasterVolume = preferences.getFloat(KEY_AMBIENCE_VOLUME, DEFAULT_AMBIENCE_VOLUME)
+                .coerceIn(0f, 1f),
+            soundEffectsMasterVolume = preferences.getFloat(KEY_SFX_VOLUME, DEFAULT_SFX_VOLUME)
+                .coerceIn(0f, 1f),
+            minimumSfxGapMillis = preferences.getLong(KEY_MIN_SFX_GAP_MS, DEFAULT_MIN_SFX_GAP_MS)
+                .coerceIn(500L, 15_000L),
+            maxConcurrentSfx = preferences.getInt(KEY_MAX_CONCURRENT_SFX, DEFAULT_MAX_CONCURRENT_SFX)
+                .coerceIn(1, 4),
+        )
+        latestSnapshot = value
+        return value
+    }
 
     fun setAmbienceEnabled(enabled: Boolean) {
         preferences.edit().putBoolean(KEY_AMBIENCE_ENABLED, enabled).apply()
+        snapshot()
     }
 
     fun setSoundEffectsEnabled(enabled: Boolean) {
         preferences.edit().putBoolean(KEY_SFX_ENABLED, enabled).apply()
+        snapshot()
     }
 
     fun setAmbienceMasterVolume(value: Float) {
         preferences.edit().putFloat(KEY_AMBIENCE_VOLUME, value.coerceIn(0f, 1f)).apply()
+        snapshot()
     }
 
     fun setSoundEffectsMasterVolume(value: Float) {
         preferences.edit().putFloat(KEY_SFX_VOLUME, value.coerceIn(0f, 1f)).apply()
+        snapshot()
     }
 
     fun addChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener) {
@@ -70,6 +85,11 @@ class AudioDirectionPreferences(context: Context) {
         private const val KEY_SFX_VOLUME = "sound_effects_master_volume"
         private const val KEY_MIN_SFX_GAP_MS = "minimum_sfx_gap_ms"
         private const val KEY_MAX_CONCURRENT_SFX = "max_concurrent_sfx"
+
+        @Volatile
+        private var latestSnapshot: Snapshot = Snapshot()
+
+        fun currentSnapshot(): Snapshot = latestSnapshot
 
         const val DEFAULT_AMBIENCE_VOLUME = 0.24f
         const val DEFAULT_SFX_VOLUME = 0.42f

@@ -7,105 +7,13 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: build-apk-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  patch-reader-music-ui:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'feat/ai-sound-director'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout feature branch
-        uses: actions/checkout@v4
-        with:
-          ref: feat/ai-sound-director
-          fetch-depth: 2
-
-      - name: Nest AI audio controls under Background Music
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          reader_path = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt')
-          reader = reader_path.read_text(encoding='utf-8')
-
-          outside = '''                ReaderMenuButton("NHẠC NỀN") { showReaderOptions = false; showMusicDialog = true }
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                vn.nghetruyen.app.ui.components.AudioDirectionLayerSwitches(
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
-'''
-          if reader.count(outside) != 1:
-              raise SystemExit(f'Expected one outer AI-audio block, found {reader.count(outside)}')
-          reader = reader.replace(
-              outside,
-              '''                ReaderMenuButton("NHẠC NỀN") { showReaderOptions = false; showMusicDialog = true }
-''',
-              1,
-          )
-
-          anchor = '''            title = { Text("NHẠC NỀN") },
-            text = { Column(Modifier.heightIn(max = 620.dp).verticalScroll(rememberScrollState())) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-'''
-          nested = '''            title = { Text("NHẠC NỀN") },
-            text = { Column(Modifier.heightIn(max = 620.dp).verticalScroll(rememberScrollState())) {
-                vn.nghetruyen.app.ui.components.AudioDirectionLayerSwitches(
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-'''
-          if reader.count(anchor) != 1:
-              raise SystemExit(f'Expected one Background Music dialog anchor, found {reader.count(anchor)}')
-          reader = reader.replace(anchor, nested, 1)
-          reader_path.write_text(reader, encoding='utf-8')
-
-          check_path = Path('scripts/check_audio_direction_ui_wiring.py')
-          check = check_path.read_text(encoding='utf-8')
-          check = check.replace(
-              '# Personal > Music must remain the legacy/manual music surface. The AI controls belong to Reader options.',
-              '# Personal > Music remains the legacy/manual surface. AI audio controls live inside Reader > Background Music.',
-          )
-          check = check.replace(
-              '# Reader > TÙY CHỌN > TÙY CHỌN ĐỌC is the single control surface requested by the product flow.',
-              '# Reader options keep a single Background Music entry; AI audio controls are nested inside that dialog.',
-          )
-          check = check.replace(
-              'assert "AudioDirectionLayerSwitches(" in reader_options, "AI sound controls must render directly inside reader options"',
-              'assert "AudioDirectionLayerSwitches(" not in reader_options, "AI sound controls must not spill into reader options"',
-          )
-          old_music_checks = '''assert "Trao toàn quyền giữ và đổi nhạc cho AI" not in music_dialog, "Music AI switch must not be duplicated in the manual music dialog"
-assert "setAutoSceneMusicEnabled" not in music_dialog, "manual music dialog must not mutate the Music AI switch"
-'''
-          new_music_checks = '''assert "AudioDirectionLayerSwitches(" in music_dialog, "AI sound controls must render inside Background Music"
-assert music_dialog.find("AudioDirectionLayerSwitches(") < music_dialog.find("Bật nhạc nền khi đọc bằng TTS"), "AI audio block should be grouped at the top of Background Music"
-'''
-          if old_music_checks not in check:
-              raise SystemExit('Could not locate old music-dialog wiring assertions')
-          check = check.replace(old_music_checks, new_music_checks, 1)
-          check = check.replace(
-              'assert "Nghe Truyện • AI Sound Director" in debug_strings, "debug APK must be visibly distinguishable from the normal app"',
-              'assert "<string name=\\\"app_name\\\">Nghe Truyện</string>" in debug_strings, "debug APK must keep the product name Nghe Truyện"\nassert "AI Sound Director" not in debug_strings, "feature labels must not be appended to the app name"',
-          )
-          check_path.write_text(check, encoding='utf-8')
-          PY
-
-      - name: Restore workflow and commit product fix
-        shell: bash
-        run: |
-          git show HEAD^:.github/workflows/build-apk.yml > .github/workflows/build-apk.yml
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt scripts/check_audio_direction_ui_wiring.py .github/workflows/build-apk.yml
-          git commit -m "fix: nest AI audio controls inside background music"
-          git push origin HEAD:feat/ai-sound-director
-
   build-debug-apk:
     runs-on: ubuntu-latest
     timeout-minutes: 20

@@ -7,6 +7,7 @@ import org.json.JSONObject
 import vn.nghetruyen.app.audio.AmbienceSfxPlan
 import vn.nghetruyen.app.audio.AudioAssetClassifier
 import vn.nghetruyen.app.audio.AudioAssetKind
+import vn.nghetruyen.app.audio.AudioDirectionLimits
 import vn.nghetruyen.app.audio.AudioDirectionPreferences
 import vn.nghetruyen.app.core.common.AppResult
 import vn.nghetruyen.app.core.model.ChapterContent
@@ -116,8 +117,10 @@ class NarrationPlanCoordinator(
         }
 
         val baseContext = buildContinuityContext(content, activeTrackId, musicTracks)
+        val incomingAmbienceIds = buildIncomingAmbienceIds(content, ambienceTracks)
         val context = baseContext.copy(
-            incomingAmbienceId = buildIncomingAmbienceId(content, ambienceTracks),
+            incomingAmbienceId = incomingAmbienceIds.firstOrNull(),
+            incomingAmbienceIds = incomingAmbienceIds,
         )
         return when (
             val outcome = ai.planNarration(
@@ -482,21 +485,31 @@ class NarrationPlanCoordinator(
         )
     }
 
-    private suspend fun buildIncomingAmbienceId(
+    private suspend fun buildIncomingAmbienceIds(
         content: ChapterContent,
         ambienceTracks: List<SceneMusicTrackEntity>,
-    ): String? {
-        if (ambienceTracks.isEmpty()) return null
+    ): List<String> {
+        if (ambienceTracks.isEmpty()) return emptyList()
         val allowed = ambienceTracks.map(SceneMusicTrackEntity::id).toSet()
-        val previous = library.loadPreviousCachedChapter(content.chapter.storyId, content.chapter.index) ?: return null
-        val transform = library.getChapterTransform(previous.chapter.id, KIND_AUDIO_DIRECTION) ?: return null
+        val previous = library.loadPreviousCachedChapter(content.chapter.storyId, content.chapter.index) ?: return emptyList()
+        val transform = library.getChapterTransform(previous.chapter.id, KIND_AUDIO_DIRECTION) ?: return emptyList()
+        if (!isCurrentTimelineTransform(transform.transformedText, XpkAmbienceSfxDirector.ENGINE, previous)) return emptyList()
+        val finalUnitId = XpkVoiceCastSplitter.buildUnits(previous.chapter.title, chapterBody(previous))
+            .lastOrNull()
+            ?.id
+            ?: return emptyList()
         return runCatching {
-            val scenes = JSONObject(transform.transformedText).optJSONArray("ambience_scenes") ?: return@runCatching null
-            scenes.optJSONObject(scenes.length() - 1)
-                ?.optString("ambience_id")
-                ?.trim()
-                ?.takeIf { it in allowed }
-        }.getOrNull()
+            val scenes = JSONObject(transform.transformedText).optJSONArray("ambience_scenes") ?: return@runCatching emptyList()
+            buildList {
+                for (index in 0 until scenes.length()) {
+                    val row = scenes.optJSONObject(index) ?: continue
+                    if (row.optString("end_id").trim() != finalUnitId) continue
+                    val ambienceId = row.optString("ambience_id").trim()
+                    if (ambienceId in allowed && ambienceId !in this) add(ambienceId)
+                    if (size >= AudioDirectionLimits.MAX_CONCURRENT_AMBIENCE) break
+                }
+            }
+        }.getOrDefault(emptyList())
     }
 
     private fun isCurrentTimelineTransform(
@@ -553,7 +566,15 @@ class NarrationPlanCoordinator(
         .filterNot { line ->
             val lower = line.trim().lowercase()
             lower.startsWith("type:") || lower.startsWith("type=") ||
-                lower in setOf("[music]", "[ambience]", "[environment]", "[sfx]")
+                lower in setOf(
+                    "[music]",
+                    "[ambience]",
+                    "[environment]",
+                    "[sfx]",
+                    "[continuous]",
+                    "[sfx_continuous]",
+                    "[sfx-continuous]",
+                )
         }
         .joinToString(" ")
         .trim()

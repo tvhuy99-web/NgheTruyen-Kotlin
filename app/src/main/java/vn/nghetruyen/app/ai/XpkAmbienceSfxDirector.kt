@@ -30,13 +30,20 @@ object XpkAmbienceSfxDirector {
         musicScenesContext: String,
         incomingAmbienceId: String?,
     ): String {
-        val units = snapshot.speechChunks.filter { it.unitId.isNotBlank() }
-        require(units.isNotEmpty()) { "Timeline XPK không có UNIT để đạo diễn âm thanh." }
+        val playbackUnits = snapshot.speechChunks.filter { it.unitId.isNotBlank() }
+        require(playbackUnits.isNotEmpty()) { "Timeline XPK không có UNIT để đạo diễn âm thanh." }
+        val canonicalUnits = XpkVoiceCastSplitter.buildUnits(
+            snapshot.chapterTitle,
+            snapshot.paragraphs.joinToString("\n"),
+        )
+        require(canonicalUnits.map { it.id } == playbackUnits.map { it.unitId }) {
+            "Timeline đạo diễn âm thanh không khớp timeline playback XPK."
+        }
 
         val ambience = if (ambienceEnabled) ambienceAssets.take(MAX_ASSETS_PER_KIND) else emptyList()
         val sfx = if (soundEffectsEnabled) soundEffectAssets.take(MAX_ASSETS_PER_KIND) else emptyList()
         val validIncoming = incomingAmbienceId?.trim()?.takeIf { id -> ambience.any { it.id == id } } ?: "NONE"
-        val maxSfx = maxSfxForUnits(units.size)
+        val maxSfx = maxSfxForUnits(playbackUnits.size)
 
         fun catalog(items: List<AudioDirectionAsset>): String = items.joinToString("\n") { asset ->
             val name = stripAudioExtension(oneLine(asset.title)).take(160)
@@ -47,11 +54,9 @@ object XpkAmbienceSfxDirector {
             }
         }.ifBlank { "DISABLED_OR_EMPTY" }
 
-        val timeline = units.joinToString("\n") { unit ->
-            val kind = unit.unitKind.ifBlank { "unknown" }
-            val text = oneLine(unit.text).let { value -> if (value.length <= 720) value else value.take(720) }
-            "[UNIT id=${unit.unitId} | kind=$kind] $text"
-        }
+        // Reuse the exact scene-music transcript formatter so AI receives the same UNIT/DIALOGUE
+        // boundaries, speaker hints, dialogue groups and before/after context as the mature music path.
+        val timeline = XpkVoiceCastPrompt.unitsForScenePrompt(canonicalUnits)
 
         return """
             Bạn là AI SOUND DIRECTOR cho truyện đọc. Hãy đọc TOÀN BỘ timeline trước khi quyết định âm thanh.

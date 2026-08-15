@@ -11,10 +11,9 @@ import vn.nghetruyen.app.sourceplatform.ChromiumVBookReplayCoordinator
 import vn.nghetruyen.app.sourceplatform.DiagnosticScreenRestoreLifecycleCallbacks
 import vn.nghetruyen.app.sourceplatform.SourceBrowserViewportHost
 import vn.nghetruyen.app.sourceplatform.SourceWebViewCookieReader
+import vn.nghetruyen.app.sourceplatform.VBookBrowserHttpParityBroker
 import vn.nghetruyen.app.sourceplatform.VBookBrowserSessionDiagnosticMirror
-import vn.nghetruyen.app.sourceplatform.VBookBrowserSessionNetworkBroker
 import vn.nghetruyen.app.sourceplatform.VBookHttpParityDiagnosticSink
-import vn.nghetruyen.app.sourceplatform.VBookSuspiciousResponseFailFastBroker
 import vn.nghetruyen.app.sourceplatform.replayAwareChromiumDiagnostics
 import vn.nghetruyen.source.api.SourceErrorCode
 import vn.nghetruyen.source.api.SourcePlatformFailure
@@ -48,7 +47,7 @@ class NgheTruyenApplication : Application() {
                     val parityDiagnostics = VBookHttpParityDiagnosticSink(browserLinkedDiagnostics)
                     val webViewCookieReader = brokers.browser as? SourceWebViewCookieReader
                     val browserSessionBridge = AndroidVBookBrowserSessionBridge(this, webViewCookieReader)
-                    val browserSessionNetwork = VBookBrowserSessionNetworkBroker(
+                    val browserHttpParity = VBookBrowserHttpParityBroker(
                         delegate = brokers.network,
                         cookies = brokers.cookies,
                         browserCookieReader = browserSessionBridge::readCookies,
@@ -56,14 +55,9 @@ class NgheTruyenApplication : Application() {
                         browserUserAgent = browserSessionBridge::userAgent,
                         diagnostics = parityDiagnostics,
                     )
-                    val failFastNetwork = VBookSuspiciousResponseFailFastBroker(
-                        delegate = browserSessionNetwork,
-                        cookies = brokers.cookies,
-                        browserCookieReader = browserSessionBridge::readCookies,
-                    )
                     val replay = ChromiumVBookReplayCoordinator(
                         browserDelegate = brokers.browser,
-                        networkDelegate = failFastNetwork,
+                        networkDelegate = browserHttpParity,
                     )
                     val chromium = AndroidChromiumVBookRuntime(
                         context = this,

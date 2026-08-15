@@ -13,6 +13,7 @@ import vn.nghetruyen.app.sourceplatform.SourceBrowserViewportHost
 import vn.nghetruyen.app.sourceplatform.SourceWebViewCookieReader
 import vn.nghetruyen.app.sourceplatform.VBookBrowserSessionNetworkBroker
 import vn.nghetruyen.app.sourceplatform.VBookHttpParityDiagnosticSink
+import vn.nghetruyen.app.sourceplatform.VBookSuspiciousResponseFailFastBroker
 import vn.nghetruyen.app.sourceplatform.replayAwareChromiumDiagnostics
 import vn.nghetruyen.source.api.SourceErrorCode
 import vn.nghetruyen.source.api.SourcePlatformFailure
@@ -52,9 +53,13 @@ class NgheTruyenApplication : Application() {
                         browserUserAgent = browserSessionBridge::userAgent,
                         diagnostics = parityDiagnostics,
                     )
+                    val failFastNetwork = VBookSuspiciousResponseFailFastBroker(
+                        delegate = browserSessionNetwork,
+                        cookies = brokers.cookies,
+                    )
                     val replay = ChromiumVBookReplayCoordinator(
                         browserDelegate = brokers.browser,
-                        networkDelegate = browserSessionNetwork,
+                        networkDelegate = failFastNetwork,
                     )
                     val chromium = AndroidChromiumVBookRuntime(
                         context = this,

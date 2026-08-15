@@ -43,8 +43,6 @@ import vn.nghetruyen.source.diagnostics.DiagnosticOperationState
 import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 import vn.nghetruyen.source.diagnostics.DiagnosticSink
 import vn.nghetruyen.source.diagnostics.DiagnosticThrowableFormatter
-import vn.nghetruyen.source.network.SourceOriginPolicy
-import vn.nghetruyen.source.network.PublicAddressPolicy
 import org.json.JSONTokener
 import org.json.JSONObject
 import vn.nghetruyen.source.api.SourceBrowserDialog
@@ -53,6 +51,9 @@ import java.net.InetAddress
 import java.util.ArrayDeque
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.atomic.AtomicBoolean
@@ -72,28 +73,34 @@ class AndroidSourceBrowserBroker(
     private val cookiePartition: SourceCookiePartition,
     private val diagnostics: DiagnosticSink = DiagnosticSink.NONE,
     private val clockMs: () -> Long = System::currentTimeMillis,
-    private val resolver: (String) -> List<InetAddress> = { host -> InetAddress.getAllByName(host).toList() },
+    resolver: (String) -> List<InetAddress> = { host -> InetAddress.getAllByName(host).toList() },
     private val evidence: DiagnosticEvidenceSink = DiagnosticEvidenceSink.NONE,
 ) : SourceBrowserBroker {
     private val appContext = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
     private val operationLock = Any()
-    private var active: Session? = null
+    private val navigationPolicy = BrowserNavigationPolicy(resolver)
+    private val dnsExecutor: ExecutorService = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "source-browser-dns").apply { isDaemon = true }
+    }
+    @Volatile private var active: Session? = null
     private val recoveredSources = linkedSetOf<String>()
 
     init {
         runCatching {
             ServiceWorkerController.getInstance().setServiceWorkerClient(object : ServiceWorkerClient() {
                 override fun shouldInterceptRequest(request: WebResourceRequest): WebResourceResponse? {
-                    return synchronized(operationLock) {
-                        val session = active ?: return@synchronized blockedResponse()
-                        if (!isAllowedRedirect(session.manifest, request.url.toString())) {
-                            session.record(request, resourceType = "service-worker-blocked")
-                            blockedResponse()
-                        } else {
+                    val session = active ?: return blockedResponse()
+                    return when (val decision = evaluateWithBackgroundDns(session, request.url.toString())) {
+                        is BrowserNavigationPolicy.Decision.Allowed -> {
                             session.takeIf { it.manifest.capabilities.browser.serviceWorkerCapture }
                                 ?.record(request, resourceType = "service-worker")
                             null
+                        }
+                        else -> {
+                            session.record(request, resourceType = "service-worker-blocked")
+                            emitUrlPolicyDecision(session, "service_worker", decision, DiagnosticSeverity.WARN)
+                            blockedResponse()
                         }
                     }
                 }
@@ -120,7 +127,7 @@ class AndroidSourceBrowserBroker(
                 requireCapability(manifest, request.action)
                 val session = ensureSession(manifest, request.url)
                 if (request.action == SourceBrowserAction.NAVIGATE || request.action == SourceBrowserAction.LOAD_HTML) {
-                    session.navigationGeneration += 1
+                    session.startNavigationGeneration()
                 }
                 session.currentTraceId = request.traceId
                 captureBrowserEnvironment(session, request)
@@ -434,11 +441,19 @@ class AndroidSourceBrowserBroker(
                 popup.webViewClient = object : WebViewClient() {
                     override fun shouldOverrideUrlLoading(popupView: WebView, request: WebResourceRequest): Boolean {
                         val url = request.url.toString()
-                        if (isAllowedRedirect(manifest, url)) {
-                            session.record(request, resourceType = "popup-navigation")
-                            session.webView.loadUrl(url)
-                        } else {
-                            session.record(request, resourceType = "popup-blocked")
+                        when (val decision = navigationPolicy.evaluateRedirect(manifest, url, session.approvedHosts)) {
+                            is BrowserNavigationPolicy.Decision.Allowed -> {
+                                session.record(request, resourceType = "popup-navigation")
+                                session.webView.loadUrl(url)
+                            }
+                            is BrowserNavigationPolicy.Decision.NeedsDns -> {
+                                session.record(request, resourceType = "popup-dns-pending")
+                                scheduleRedirectDns(session, manifest, url, "popup", resumeMainFrame = true)
+                            }
+                            is BrowserNavigationPolicy.Decision.Denied -> {
+                                session.record(request, resourceType = "popup-blocked")
+                                emitUrlPolicyDecision(session, "popup", decision, DiagnosticSeverity.WARN)
+                            }
                         }
                         popupView.destroy()
                         return true
@@ -557,17 +572,35 @@ class AndroidSourceBrowserBroker(
                 val session = sessionRef.get()
                 val url = request.url.toString()
                 if (session?.allowsTrustedLoadHtmlInternalNavigation(url, request.isForMainFrame) == true) return false
-                if (isAllowedRedirect(manifest, url)) return false
-                session?.apply {
-                    pendingError.compareAndSet(null, "SOURCE_BROWSER_NAVIGATION_DENIED")
-                    if (request.isForMainFrame) pageLatch?.countDown()
-                    record(request, resourceType = "navigation-blocked")
-                    diagnostics.emit(sessionEvent(manifest, this, "BROWSER_NAVIGATION_BLOCKED", DiagnosticSeverity.WARN, DiagnosticCategory.SECURITY, mapOf(
+                val identity = navigationPolicy.transportIdentity(url)
+                if (session?.allowsTrustedNavigation(identity, request.isForMainFrame) == true) {
+                    diagnostics.emit(sessionEvent(manifest, session, "BROWSER_TRUSTED_NAVIGATION_ALLOWED", DiagnosticSeverity.DEBUG, attributes = mapOf(
                         "url" to diagnosticUrl(url),
                         "mainFrame" to request.isForMainFrame.toString(),
+                        "transportIdentityMatched" to "true",
                     )))
+                    return false
                 }
-                return true
+                if (session == null) return true
+                return when (val decision = navigationPolicy.evaluateRedirect(manifest, url, session.approvedHosts)) {
+                    is BrowserNavigationPolicy.Decision.Allowed -> false
+                    is BrowserNavigationPolicy.Decision.NeedsDns -> {
+                        session.record(request, resourceType = "navigation-dns-pending")
+                        emitUrlPolicyDecision(session, "redirect_dns_pending", decision, DiagnosticSeverity.DEBUG)
+                        scheduleRedirectDns(
+                            session = session,
+                            manifest = manifest,
+                            url = url,
+                            phase = "webview_redirect",
+                            resumeMainFrame = request.isForMainFrame,
+                        )
+                        true
+                    }
+                    is BrowserNavigationPolicy.Decision.Denied -> {
+                        blockNavigation(session, manifest, request, url, decision)
+                        true
+                    }
+                }
             }
 
             override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
@@ -690,21 +723,20 @@ class AndroidSourceBrowserBroker(
                     return blockedResponse()
                 }
                 if (session?.allowsTrustedLoadHtmlInternalNavigation(url, request.isForMainFrame) == true) return null
-                if (!isAllowedRedirect(manifest, url)) {
-                    session?.record(request, resourceType = "resource-blocked")
-                    if (session != null) {
-                        diagnostics.emit(sessionEvent(manifest, session, "BROWSER_RESOURCE_ORIGIN_BLOCKED", DiagnosticSeverity.WARN, DiagnosticCategory.SECURITY, mapOf(
-                            "url" to diagnosticUrl(url),
-                            "mainFrame" to request.isForMainFrame.toString(),
-                        )))
-                    }
+                if (session == null) return blockedResponse()
+                val decision = evaluateWithBackgroundDns(session, url)
+                if (decision !is BrowserNavigationPolicy.Decision.Allowed) {
+                    session.record(request, resourceType = "resource-blocked")
+                    emitUrlPolicyDecision(session, "resource", decision, DiagnosticSeverity.WARN)
+                    diagnostics.emit(sessionEvent(manifest, session, "BROWSER_RESOURCE_ORIGIN_BLOCKED", DiagnosticSeverity.WARN, DiagnosticCategory.SECURITY,
+                        mapOf("url" to diagnosticUrl(url), "mainFrame" to request.isForMainFrame.toString()) + decisionAttributes(decision)))
                     if (request.isForMainFrame) {
-                        session?.pendingError?.compareAndSet(null, "SOURCE_BROWSER_NAVIGATION_DENIED")
-                        session?.pageLatch?.countDown()
+                        session.pendingError.compareAndSet(null, navigationDeniedMessage(decision))
+                        session.pageLatch?.countDown()
                     }
                     return blockedResponse()
                 }
-                session?.record(request, null)
+                session.record(request, null)
                 return null
             }
 
@@ -730,22 +762,37 @@ class AndroidSourceBrowserBroker(
 
     private fun navigate(session: Session, manifest: SourceManifest, request: SourceBrowserRequest): String? {
         val url = request.url ?: error("SOURCE_BROWSER_NAVIGATION_URL_REQUIRED")
-        require(isAllowedInitial(manifest, url)) { "SOURCE_BROWSER_NAVIGATION_DENIED" }
+        val approved = requireApprovedNavigation(
+            navigationPolicy.preflightInitial(manifest, url),
+            phase = "initial_navigation",
+            session = session,
+        )
+        session.approve(approved)
         importCookiesIntoWebView(manifest, url)
         val latch = CountDownLatch(1)
         session.pageLatch = latch
         session.pendingError.set(null)
         session.logicalPageUrl = url
-        runOnMain(5_000) { session.webView.loadUrl(url) }
-        if (!latch.await(request.timeoutMs, TimeUnit.MILLISECONDS)) error("SOURCE_BROWSER_TIMEOUT")
-        session.pageLatch = null
-        session.pendingError.get()?.let(::error)
-        return reconcileLogicalPageUrl(session, snapshotWebView(session))
+        session.beginTrustedNavigation(approved.transportIdentity)
+        return try {
+            runOnMain(5_000) { session.webView.loadUrl(url) }
+            if (!latch.await(request.timeoutMs, TimeUnit.MILLISECONDS)) error("SOURCE_BROWSER_TIMEOUT")
+            session.pendingError.get()?.let(::error)
+            reconcileLogicalPageUrl(session, snapshotWebView(session))
+        } finally {
+            session.pageLatch = null
+            session.clearTrustedNavigation(session.navigationGeneration)
+        }
     }
 
     private fun loadHtml(session: Session, manifest: SourceManifest, request: SourceBrowserRequest): String? {
         val baseUrl = request.url ?: manifest.origins.firstOrNull() ?: error("SOURCE_BROWSER_BASE_URL_REQUIRED")
-        require(isAllowedInitial(manifest, baseUrl)) { "SOURCE_BROWSER_NAVIGATION_DENIED" }
+        val approved = requireApprovedNavigation(
+            navigationPolicy.preflightInitial(manifest, baseUrl),
+            phase = "load_html_base",
+            session = session,
+        )
+        session.approve(approved)
         val html = request.value ?: error("SOURCE_BROWSER_HTML_REQUIRED")
         require(html.toByteArray(Charsets.UTF_8).size <= request.maxOutputBytes) { "SOURCE_BROWSER_OUTPUT_TOO_LARGE" }
         val latch = CountDownLatch(1)
@@ -1028,17 +1075,169 @@ class AndroidSourceBrowserBroker(
         Uri.parse(url).scheme?.lowercase() in setOf("http", "https")
     }.getOrDefault(false)
 
-    private fun isAllowedInitial(manifest: SourceManifest, url: String): Boolean = runCatching {
-        val uri = SourceOriginPolicy.requireInitialUrl(manifest, url)
-        PublicAddressPolicy.requirePublic(resolver(uri.host))
-        true
-    }.getOrDefault(false)
+    private fun evaluateWithBackgroundDns(
+        session: Session,
+        url: String,
+    ): BrowserNavigationPolicy.Decision {
+        val cached = navigationPolicy.evaluateRedirect(session.manifest, url, session.approvedHosts)
+        if (cached !is BrowserNavigationPolicy.Decision.NeedsDns) return cached
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            return BrowserNavigationPolicy.Decision.Denied(
+                code = "SOURCE_BROWSER_DNS_ON_MAIN_PREVENTED",
+                causeType = null,
+                decisionThread = Thread.currentThread().name,
+                shape = cached.shape,
+            )
+        }
+        return navigationPolicy.preflightRedirect(session.manifest, url).also { decision ->
+            if (decision is BrowserNavigationPolicy.Decision.Allowed) session.approve(decision)
+        }
+    }
 
-    private fun isAllowedRedirect(manifest: SourceManifest, url: String): Boolean = runCatching {
-        val uri = SourceOriginPolicy.requireRedirectUrl(manifest, url)
-        PublicAddressPolicy.requirePublic(resolver(uri.host))
-        true
-    }.getOrDefault(false)
+    private fun requireApprovedNavigation(
+        decision: BrowserNavigationPolicy.Decision,
+        phase: String,
+        session: Session,
+    ): BrowserNavigationPolicy.Decision.Allowed {
+        emitUrlPolicyDecision(
+            session = session,
+            phase = phase,
+            decision = decision,
+            severity = if (decision is BrowserNavigationPolicy.Decision.Allowed) DiagnosticSeverity.DEBUG else DiagnosticSeverity.WARN,
+        )
+        return decision as? BrowserNavigationPolicy.Decision.Allowed
+            ?: error(navigationDeniedMessage(decision))
+    }
+
+    private fun scheduleRedirectDns(
+        session: Session,
+        manifest: SourceManifest,
+        url: String,
+        phase: String,
+        resumeMainFrame: Boolean,
+    ) {
+        val identity = navigationPolicy.transportIdentity(url) ?: run {
+            if (resumeMainFrame) {
+                session.pendingError.compareAndSet(null, "SOURCE_BROWSER_NAVIGATION_DENIED:SOURCE_NETWORK_URL_INVALID")
+                session.pageLatch?.countDown()
+            }
+            return
+        }
+        if (!session.markDnsPending(identity)) return
+        val generation = session.navigationGeneration
+        dnsExecutor.execute dnsTask@{
+            try {
+                val decision = navigationPolicy.preflightRedirect(manifest, url)
+                emitUrlPolicyDecision(
+                    session = session,
+                    phase = phase,
+                    decision = decision,
+                    severity = if (decision is BrowserNavigationPolicy.Decision.Allowed) DiagnosticSeverity.DEBUG else DiagnosticSeverity.WARN,
+                )
+                if (active !== session || session.navigationGeneration != generation || session.rendererGone) return@dnsTask
+                when (decision) {
+                    is BrowserNavigationPolicy.Decision.Allowed -> {
+                        session.approve(decision)
+                        if (resumeMainFrame) {
+                            session.beginTrustedNavigation(decision.transportIdentity)
+                            main.post {
+                                if (active === session && session.navigationGeneration == generation && !session.rendererGone) {
+                                    session.logicalPageUrl = url
+                                    session.webView.loadUrl(url)
+                                }
+                            }
+                        }
+                    }
+                    else -> if (resumeMainFrame) {
+                        session.pendingError.compareAndSet(null, navigationDeniedMessage(decision))
+                        session.pageLatch?.countDown()
+                    }
+                }
+            } finally {
+                session.clearDnsPending(identity)
+            }
+        }
+    }
+
+    private fun blockNavigation(
+        session: Session,
+        manifest: SourceManifest,
+        request: WebResourceRequest,
+        url: String,
+        decision: BrowserNavigationPolicy.Decision,
+    ) {
+        if (request.isForMainFrame) {
+            session.pendingError.compareAndSet(null, navigationDeniedMessage(decision))
+            session.pageLatch?.countDown()
+        }
+        session.record(request, resourceType = "navigation-blocked")
+        diagnostics.emit(sessionEvent(
+            manifest,
+            session,
+            "BROWSER_NAVIGATION_BLOCKED",
+            DiagnosticSeverity.WARN,
+            DiagnosticCategory.SECURITY,
+            mapOf(
+                "url" to diagnosticUrl(url),
+                "mainFrame" to request.isForMainFrame.toString(),
+            ) + decisionAttributes(decision),
+        ))
+    }
+
+    private fun navigationDeniedMessage(decision: BrowserNavigationPolicy.Decision): String = when (decision) {
+        is BrowserNavigationPolicy.Decision.Denied -> "SOURCE_BROWSER_NAVIGATION_DENIED:${decision.code}"
+        is BrowserNavigationPolicy.Decision.NeedsDns -> "SOURCE_BROWSER_NAVIGATION_DENIED:SOURCE_BROWSER_DNS_PREFLIGHT_REQUIRED"
+        is BrowserNavigationPolicy.Decision.Allowed -> "SOURCE_BROWSER_NAVIGATION_DENIED:SOURCE_BROWSER_POLICY_STATE_INVALID"
+    }
+
+    private fun emitUrlPolicyDecision(
+        session: Session,
+        phase: String,
+        decision: BrowserNavigationPolicy.Decision,
+        severity: DiagnosticSeverity,
+    ) {
+        diagnostics.emit(sessionEvent(
+            manifest = session.manifest,
+            session = session,
+            name = "BROWSER_URL_POLICY_DECISION",
+            severity = severity,
+            category = DiagnosticCategory.SECURITY,
+            attributes = mapOf("phase" to phase) + decisionAttributes(decision),
+        ))
+    }
+
+    private fun decisionAttributes(decision: BrowserNavigationPolicy.Decision): Map<String, String> {
+        val shape = decision.shape
+        val base = linkedMapOf(
+            "decision" to when (decision) {
+                is BrowserNavigationPolicy.Decision.Allowed -> "allowed"
+                is BrowserNavigationPolicy.Decision.NeedsDns -> "dns_required"
+                is BrowserNavigationPolicy.Decision.Denied -> "denied"
+            },
+            "scheme" to shape?.scheme.orEmpty(),
+            "host" to shape?.host.orEmpty(),
+            "port" to (shape?.port ?: -1).toString(),
+            "hasQuery" to (shape?.hasQuery == true).toString(),
+            "hasFragment" to (shape?.hasFragment == true).toString(),
+        )
+        when (decision) {
+            is BrowserNavigationPolicy.Decision.Allowed -> base += mapOf(
+                "resolutionSource" to decision.resolutionSource,
+                "resolvedAddressKinds" to decision.resolvedAddressKinds.sorted().joinToString(","),
+                "decisionThread" to decision.decisionThread,
+            )
+            is BrowserNavigationPolicy.Decision.NeedsDns -> base += mapOf(
+                "policyCode" to "SOURCE_BROWSER_DNS_PREFLIGHT_REQUIRED",
+                "decisionThread" to Thread.currentThread().name,
+            )
+            is BrowserNavigationPolicy.Decision.Denied -> base += mapOf(
+                "policyCode" to decision.code,
+                "causeType" to decision.causeType.orEmpty(),
+                "decisionThread" to decision.decisionThread,
+            )
+        }
+        return base
+    }
 
     private fun blockedResponse(): WebResourceResponse = WebResourceResponse(
         "text/plain",
@@ -1192,6 +1391,8 @@ class AndroidSourceBrowserBroker(
         @Volatile var blockPatterns: List<String> = emptyList()
         @Volatile var dialogPolicy: DialogPolicy = DialogPolicy("dismiss", "")
         @Volatile var trustedLoadHtmlInFlight: Boolean = false
+        @Volatile private var trustedNavigationIdentity: String? = null
+        @Volatile private var trustedNavigationGeneration: Long = -1L
         @Volatile var logicalPageUrl: String? = null
         @Volatile var environmentCaptured: Boolean = false
         @Volatile var lateCallbacks: Int = 0
@@ -1199,6 +1400,43 @@ class AndroidSourceBrowserBroker(
         @Volatile var pageFinishedCount: Int = 0
         @Volatile var navigationGeneration: Long = 0
         @Volatile var lastProgressLogged: Int = -1
+        val approvedHosts: MutableSet<String> = ConcurrentHashMap.newKeySet()
+        private val pendingDnsIdentities: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+        fun startNavigationGeneration() {
+            navigationGeneration += 1
+            approvedHosts.clear()
+            pendingDnsIdentities.clear()
+            trustedNavigationIdentity = null
+            trustedNavigationGeneration = -1L
+        }
+
+        fun approve(decision: BrowserNavigationPolicy.Decision.Allowed) {
+            approvedHosts += decision.host
+        }
+
+        fun beginTrustedNavigation(transportIdentity: String) {
+            trustedNavigationIdentity = transportIdentity
+            trustedNavigationGeneration = navigationGeneration
+        }
+
+        fun clearTrustedNavigation(generation: Long) {
+            if (trustedNavigationGeneration == generation) {
+                trustedNavigationIdentity = null
+                trustedNavigationGeneration = -1L
+            }
+        }
+
+        fun allowsTrustedNavigation(transportIdentity: String?, mainFrame: Boolean): Boolean =
+            mainFrame && transportIdentity != null &&
+                trustedNavigationGeneration == navigationGeneration &&
+                trustedNavigationIdentity == transportIdentity
+
+        fun markDnsPending(transportIdentity: String): Boolean = pendingDnsIdentities.add(transportIdentity)
+
+        fun clearDnsPending(transportIdentity: String) {
+            pendingDnsIdentities.remove(transportIdentity)
+        }
 
         fun record(request: WebResourceRequest, resourceType: String?) {
             if (!manifest.capabilities.browser.requestMetadata && resourceType == null) return

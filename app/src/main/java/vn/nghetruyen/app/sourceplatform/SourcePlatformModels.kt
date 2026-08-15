@@ -218,7 +218,6 @@ object DiagnosticHumanFormatter {
 
     private fun actionLabel(code: String, category: String): String = when {
         code.contains("BUILTIN_LUA_SOURCE_CONFLICT", true) -> "Đồng bộ nguồn tích hợp"
-        code.contains("BUILTIN_SOURCEPACK_BOOTSTRAP", true) -> "Khởi tạo nguồn tích hợp"
         code.contains("INSTALL", true) -> "Cài đặt tiện ích"
         code.contains("PACKAGE", true) || code.contains("FETCH", true) -> "Tải dữ liệu"
         code.contains("NETWORK", true) || code.contains("HTTP", true) || category == "NETWORK" -> "Kết nối mạng"

@@ -9,24 +9,22 @@ import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 
 class DiagnosticHumanFormatterTest {
     @Test
-    fun failedSuffixDoesNotMasqueradeAsAi() {
+    fun storeFailureSuffixDoesNotMasqueradeAsAi() {
         val report = DiagnosticHumanFormatter.formatEvents(
             events = listOf(
                 event(
-                    name = "BUILTIN_SOURCEPACK_BOOTSTRAP_FAILED",
+                    name = "SOURCE_STORE_INSTALL_FAILED",
                     category = DiagnosticCategory.STORE,
                     attributes = mapOf(
-                        "asset" to "demo.ntsource",
-                        "error" to "SOURCE_FIXTURE_FAILED: Tìm truyện mẫu=RUNTIME_INVALID_PROGRAM:RUNTIME_FAILED",
+                        "error" to "SOURCE_PACKAGE_INVALID:RUNTIME_FAILED",
                     ),
                 ),
             ),
             mode = "basic",
         )
 
-        assertTrue(report.contains("Khởi tạo nguồn tích hợp"))
-        assertTrue(report.contains("SOURCE_FIXTURE_FAILED"))
-        assertTrue(report.contains("RUNTIME_INVALID_PROGRAM"))
+        assertTrue(report.contains("SOURCE_PACKAGE_INVALID"))
+        assertTrue(report.contains("RUNTIME_FAILED"))
         assertFalse(report.contains("AI / chuyển ngữ"))
         assertFalse(report.contains("nhà cung cấp, model"))
     }

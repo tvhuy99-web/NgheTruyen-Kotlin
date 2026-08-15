@@ -23,7 +23,6 @@ app/proguard-rules.pro
 app/schemas/.gitkeep
 app/src/androidTest/java/vn/nghetruyen/app/data/local/AppDatabaseMigrationTest.kt
 app/src/main/AndroidManifest.xml
-app/src/main/assets/sourcepacks/demo.ntsource
 app/src/main/assets/sourcepacks/sangtacviet.ntsource
 app/src/main/assets/sourcepacks/truyencom.ntsource
 app/src/main/assets/sourcepacks/truyencv.ntsource
@@ -112,6 +111,7 @@ app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidSourceBrowserBroker.kt
 app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidSourceGraphicsBroker.kt
 app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidSourceSecretKeyProvider.kt
 app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidSourceTranslationBroker.kt
+app/src/main/java/vn/nghetruyen/app/sourceplatform/BrowserNavigationPolicy.kt
 app/src/main/java/vn/nghetruyen/app/sourceplatform/EncryptedSourceCookiePersistence.kt
 app/src/main/java/vn/nghetruyen/app/sourceplatform/GenericStoryCommentLoader.kt
 app/src/main/java/vn/nghetruyen/app/sourceplatform/SourcePackActionExecutor.kt

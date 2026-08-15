@@ -4,7 +4,6 @@ Tạo ngày: 2026-08-04
 
 | Gói | Source ID | Phiên bản | Runtime | Khóa ký | Kích thước | SHA-256 |
 |---|---|---:|---|---|---:|---|
-| `demo.ntsource` | `vn.nghetruyen.sources.demo` | `1.0.0` | `DECLARATIVE` | `nghe-truyen-builtin-p256-v1` | 4706 byte | `efbaafa94c4c1472d86ea0b358200ed8a383437285514d3c988a95119d4a0138` |
 | `sangtacviet.ntsource` | `vn.nghetruyen.sources.sangtacviet` | `1.0.0` | `DECLARATIVE` | `nghe-truyen-m2-sources-p256-v1` | 9059 byte | `64d6edafcd1e9fbf358293f40083f36d7531da0411153bba6f815925b91728b6` |
 | `truyencom.ntsource` | `vn.nghetruyen.sources.truyencom` | `1.0.0` | `DECLARATIVE` | `nghe-truyen-m2-sources-p256-v1` | 8879 byte | `347e1238444691a2241ea00599f90da2528f96f9ad8133ad363821880e9288ac` |
 | `truyencv.ntsource` | `vn.nghetruyen.sources.truyencv` | `1.0.0` | `DECLARATIVE` | `nghe-truyen-m2-sources-p256-v1` | 8855 byte | `30beb2b34521110a94746da722e88be04c95e880ed11172aa969c39d48c752b9` |

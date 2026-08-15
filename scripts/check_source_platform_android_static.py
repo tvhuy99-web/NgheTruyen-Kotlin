@@ -21,11 +21,17 @@ def require(relative: str, tokens: list[str], forbidden: list[str] | None = None
 
 
 def main() -> None:
+    browser_broker = (
+        ROOT / "app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidSourceBrowserBroker.kt"
+    ).read_text(encoding="utf-8")
     require(
         "app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidSourceBrowserBroker.kt",
         [
-            "SourceOriginPolicy.requireInitialUrl",
-            "SourceOriginPolicy.requireRedirectUrl",
+            "BrowserNavigationPolicy(resolver)",
+            "navigationPolicy.preflightInitial",
+            "navigationPolicy.evaluateRedirect",
+            "scheduleRedirectDns",
+            'Thread(task, "source-browser-dns")',
             "shouldOverrideUrlLoading",
             "shouldInterceptRequest",
             "service-worker-blocked",
@@ -36,8 +42,30 @@ def main() -> None:
             "removeAllCookies",
             "degradedIsolation = true",
         ],
-        ["addJavascriptInterface"],
+        [
+            "addJavascriptInterface",
+            "SourceOriginPolicy.requireInitialUrl",
+            "SourceOriginPolicy.requireRedirectUrl",
+        ],
     )
+    require(
+        "app/src/main/java/vn/nghetruyen/app/sourceplatform/BrowserNavigationPolicy.kt",
+        [
+            "SourceOriginPolicy.requireInitialUrl",
+            "SourceOriginPolicy.requireRedirectUrl",
+            "PublicAddressPolicy.requirePublic",
+            "Decision.NeedsDns",
+            "stripFragment(rawUrl)",
+            'resolutionSource = "session-cache"',
+        ],
+    )
+    callback_sections = browser_broker.split("override fun shouldOverrideUrlLoading")[1:]
+    assert len(callback_sections) >= 2, "WebView and popup navigation callbacks must both be guarded"
+    for callback in callback_sections:
+        callback_body = callback.split("override fun", 1)[0]
+        assert "preflightInitial" not in callback_body, "initial DNS preflight must not run in WebView callback"
+        assert "preflightRedirect" not in callback_body, "redirect DNS preflight must not run in WebView callback"
+        assert "resolver(" not in callback_body, "DNS resolver must not run in WebView callback"
     require(
         "app/src/main/java/vn/nghetruyen/app/sourceplatform/ExtensionWebViewAuthority.kt",
         [

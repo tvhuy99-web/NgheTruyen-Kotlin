@@ -91,16 +91,16 @@ fun main(args:Array<String>) {
   val musicMixed=File(dir,"music-mixed.wav"); val sfxMixed=File(dir,"sfx-mixed.wav")
   wav(voice,1000,400); wav(music,2000,200); wav(sfx,500,20)
 
-  // Sample away from the layer boundary. Newer mixers deliberately fade/crossfade looping
-  // MUSIC/AMBIENCE at boundaries, while the stable middle of a constant source must still mix
-  // 1000 narration + (2000 * 0.25) = 1500. The 400-frame layer also proves looping beyond the
-  // 200-frame source without depending on a hard-loop seam implementation.
+  // Sample at the exact midpoint. Newer mixers deliberately fade/crossfade looping
+  // MUSIC/AMBIENCE at boundaries, while the midpoint has full gain and must still mix
+  // 1000 narration + (2000 * 0.25) = 1500. Frame 200 is also the first frame beyond
+  // the 200-frame source, so it proves looping without depending on a hard-loop seam.
   Pcm16SceneMixer.mix(
     voice,
     listOf(SceneMixLayer(music,0,400,0.25f,0,looping=true)),
     musicMixed,
   )
-  check(sampleAt(musicMixed,250) in 1499..1501) { sampleAt(musicMixed,250) }
+  check(sampleAt(musicMixed,200) in 1499..1501) { sampleAt(musicMixed,200) }
 
   // SFX is a one-shot: it contributes exactly while its 20 source frames exist and does not loop.
   Pcm16SceneMixer.mix(

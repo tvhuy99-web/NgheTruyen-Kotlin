@@ -44,7 +44,7 @@ object XpkUnifiedNarrationPrompt {
             MAX_SFX_CUES_THIS_CHAPTER: $maxSfx
 
             QUY TẮC AMBIENCE / SFX:
-            1. Chỉ dùng ID UNIT/DIALOGUE của timeline chương hiện tại. Tuyệt đối không dùng giây, mili-giây hoặc timestamp.
+            1. Không dùng thời gian theo giây/mili-giây hoặc timestamp. Chỉ dùng ID UNIT/DIALOGUE của timeline chương hiện tại.
             2. AMBIENCE là nền môi trường kéo dài. Có thể để khoảng im lặng; không bắt buộc phủ kín chương.
             3. SFX là one-shot tại ĐẦU UNIT được chọn. Tối đa một SFX cho mỗi UNIT và tổng số không vượt MAX_SFX_CUES_THIS_CHAPTER.
             4. Không mô phỏng mọi hành động. Chỉ dùng SFX khi âm thanh có giá trị kể chuyện, làm rõ sự kiện, tạo không gian hoặc nhấn cao trào.

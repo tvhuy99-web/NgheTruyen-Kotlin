@@ -42,11 +42,14 @@ for token in [
         raise SystemExit("MUSIC_NORMALIZE_FLOW setting persistence missing: " + token)
 
 music_start = reader.find('    if (showMusicDialog) {')
-progress_start = reader.find('    if (showMusicNormalizationProgress) {', music_start)
 library_start = reader.find('    if (showMusicLibrary) {', music_start)
 if music_start < 0 or library_start < 0:
     raise SystemExit("MUSIC_NORMALIZE_FLOW Reader music UI region missing")
-if progress_start >= 0 and progress_start > library_start:
-    raise SystemExit("MUSIC_NORMALIZE_FLOW legacy progress dialog moved outside music UI region")
+
+# The old Reader progress dialog may remain as unreachable compatibility code, but the
+# active normalize-all flow must be owned by AudioDirectionLayerSwitches. Reintroducing
+# an activation path to the legacy dialog would restore the duplicate/verbose workflow.
+if "showMusicNormalizationProgress = true" in reader:
+    raise SystemExit("MUSIC_NORMALIZE_FLOW legacy Reader normalization flow is reachable again")
 
 print("MUSIC_NORMALIZATION_FLOW_PARITY=PASS")

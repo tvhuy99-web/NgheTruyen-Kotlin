@@ -79,9 +79,16 @@ fun wav(file:File, sample:Int, frames:Int=200) {
 }
 fun sample(file:File):Int { val s=WaveFileAssembler.inspect(file); RandomAccessFile(file,"r").use{ it.seek(s.dataOffset); val lo=it.read(); val hi=it.read(); return ((hi shl 8) or lo).toShort().toInt() } }
 fun main(args:Array<String>) {
-  val dir=File(args[0]); dir.mkdirs(); val voice=File(dir,"voice.wav"); val music=File(dir,"music.wav"); val mixed=File(dir,"mixed.wav")
-  wav(voice,1000); wav(music,2000)
-  Pcm16SceneMixer.mix(voice,listOf(SceneMixLayer(music,0,200,0.25f,0)),mixed)
+  val dir=File(args[0]); dir.mkdirs(); val voice=File(dir,"voice.wav"); val music=File(dir,"music.wav"); val sfx=File(dir,"sfx.wav"); val mixed=File(dir,"mixed.wav")
+  wav(voice,1000); wav(music,2000); wav(sfx,500,20)
+  Pcm16SceneMixer.mix(
+    voice,
+    listOf(
+      SceneMixLayer(music,0,200,0.25f,0,looping=true),
+      SceneMixLayer(sfx,50,200,0.20f,0,looping=false),
+    ),
+    mixed,
+  )
   check(sample(mixed) in 1499..1501) { sample(mixed) }
   val out=ByteArrayOutputStream(); Id3v23Writer.write(out,Id3v23Writer.Metadata("Truyện","Tác giả","Truyện",chapters=listOf(Id3v23Writer.Chapter("Chương 1",0,1000)))); val b=out.toByteArray()
   check(String(b.copyOfRange(0,3))=="ID3"); check(String(b).contains("TIT2")); check(String(b).contains("TPE1")); check(String(b).contains("CHAP")); check(String(b).contains("CTOC"))
@@ -101,7 +108,6 @@ fun main(args:Array<String>) {
         ]
         subprocess.run([kotlinc, *map(str, sources), "-d", str(jar)], check=True, cwd=ROOT)
         subprocess.run([kotlin, "-cp", str(jar), "SmokeKt", str(td / "run")], check=True, cwd=ROOT)
-
 
 
 def java_api_static() -> None:
@@ -128,20 +134,33 @@ def java_api_static() -> None:
         ], check=True)
     print("MILESTONE5_MP3_JAVA_API_STATIC_OK")
 
+
 def main() -> None:
     require("app/build.gradle.kts", "versionCode = 28", 'versionName = "2.8.0-ai-narration-priority2-complete"', 'implementation("co.ntbl:lame:1.0.0")', "verifyReleaseSigning")
     require("app/src/main/java/vn/nghetruyen/app/core/model/Models.kt", 'MP3("mp3", "audio/mpeg")')
     require("app/src/main/java/vn/nghetruyen/app/audio/AudioExportEngine.kt", "AudioExportPackaging", "ONE_FILE_PER_CHAPTER", "chapterMarkers")
     require("app/src/main/java/vn/nghetruyen/app/audio/Mp3LameEncoder.kt", "Lame()", "encodeBuffer", "encodeFlush", "Id3v23Writer")
     require("app/src/main/java/vn/nghetruyen/app/audio/Id3v23Writer.kt", 'frame("CHAP"', 'frame("CTOC"', "MAX_CHAPTERS")
-    require("app/src/main/java/vn/nghetruyen/app/audio/AudioExportWorker.kt", "applicationContext.filesDir", "source.sha256", "sourceFingerprint", "ONE_FILE_PER_CHAPTER", "findOrCreateDocument", "mixIfRequested", "chapterMarkers")
+    require(
+        "app/src/main/java/vn/nghetruyen/app/audio/AudioExportWorker.kt",
+        "applicationContext.filesDir", "source.sha256", "sourceFingerprint", "ONE_FILE_PER_CHAPTER",
+        "findOrCreateDocument", "mixIfRequested", "chapterMarkers", "XpkPlaybackRuntime.buildSpeechTimeline",
+        "AudioAssetKind.AMBIENCE", "AudioAssetKind.SFX", "looping = false",
+    )
     require("app/src/main/java/vn/nghetruyen/app/audio/AndroidAudioTrackDecoder.kt", "MediaExtractor", "MediaCodec", "Pcm16Resampler", "MAX_DECODED_PCM_BYTES")
-    require("app/src/main/java/vn/nghetruyen/app/audio/Pcm16SceneMixer.kt", "SceneMixLayer", "Streaming narration/music mixer", "MAX_LAYER_BYTES")
+    require(
+        "app/src/main/java/vn/nghetruyen/app/audio/Pcm16SceneMixer.kt",
+        "SceneMixLayer",
+        "Streaming narration + MUSIC + AMBIENCE + SFX mixer",
+        "val looping: Boolean = true",
+        "if (!layer.looping && local >= totalFrames)",
+        "MAX_LAYER_BYTES",
+    )
     require("app/src/main/java/vn/nghetruyen/app/data/local/AppDatabase.kt", "version = 18", "MIGRATION_11_12", "MIGRATION_12_13", "packaging", "chapterMarkers")
     require("app/src/main/java/vn/nghetruyen/app/transfer/BackupTransferManager.kt", "FORMAT_VERSION = 15", "writeChapterTransforms", "writeVoiceAssignments", "writeSceneMusicTracks", "writeSceneMusicCues")
     require("app/src/main/java/vn/nghetruyen/app/diagnostics/PerformanceDiagnostics.kt", "Debug.getPss", "chapterSearchP95Millis", "10_000")
     require("app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt", "resumeAudioExport", "AudioExportRequest", "runPerformanceDiagnostics")
-    require("app/src/main/java/vn/nghetruyen/app/MainActivity.kt", "audioExportDirectoryLauncher", "OpenDocumentTree", "AudioExportRequest")
+    require("app/src/main/java/vn/nghetruyen/app/MainActivity.kt", "audioExportDirectoryLauncher", "OpenDocumentTree", "AudioExportRequest", "OpenMultipleDocuments")
     require(
         "app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt",
         "XUẤT SÁCH NÓI",

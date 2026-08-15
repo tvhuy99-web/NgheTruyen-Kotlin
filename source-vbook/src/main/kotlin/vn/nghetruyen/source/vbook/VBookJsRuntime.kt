@@ -617,6 +617,11 @@ class VBookJsRuntime(
                 )
                 diagnostics.emit(event(manifest, request, parsed.name, parsed.severity, attributes = parsed.attributes))
                 true
+            }.apply {
+                // NativeV2 uses Log.log.apply(...). Give the host logger the normal Function
+                // prototype so JavaScript apply/call helpers remain available in Rhino.
+                parentScope = scope
+                prototype = ScriptableObject.getFunctionPrototype(scope)
             }
             ScriptableObject.putProperty(obj, "d", logger(DiagnosticSeverity.DEBUG))
             ScriptableObject.putProperty(obj, "i", logger(DiagnosticSeverity.INFO))
@@ -857,7 +862,9 @@ class VBookJsRuntime(
         }
 
     private fun hostFunction(block: (Array<out Any>) -> Any?): BaseFunction = object : BaseFunction() {
-        override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<out Any>): Any? = block(args)
+        // Function.prototype.apply(null, args) is valid JavaScript and Rhino forwards a null
+        // thisObj. Kotlin must not insert a non-null check before the host callback can run.
+        override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable?, args: Array<out Any>): Any? = block(args)
     }
 
     private fun actionArguments(

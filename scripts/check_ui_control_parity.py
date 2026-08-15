@@ -28,10 +28,8 @@ required = {
     "ReaderScreen.kt": [
         'ReaderIntSlider("Cỡ chữ"',
         'ReaderIntSlider("Khoảng cách dòng"',
-        'ReaderFloatSlider("Mức chuẩn hóa"',
+        'Text("Bật nhạc nền", Modifier.weight(1f))',
         'ReaderFloatSlider("Giảm nhạc khi giọng đọc phát"',
-        'ReaderIntSlider("Attack"',
-        'ReaderIntSlider("Release"',
         'TtsSlider("Tốc độ đọc"',
         'TtsSlider("Cao độ"',
         'TtsSlider("Âm lượng"',
@@ -40,7 +38,8 @@ required = {
         "musicModeExpanded",
         "Android, tối đa 100%",
         "Sonic, tối đa 200%",
-        "Chế độ phát khi không dùng nhạc theo cảnh",
+        'Text("Chế độ phát"',
+        'ReaderMenuButton("QUẢN LÝ DANH SÁCH NHẠC")',
     ],
     "StoryDetailScreen.kt": [
         'title = { Text("AI RIÊNG CHO TRUYỆN") }',
@@ -103,9 +102,19 @@ for token in [
 if "ValueStepper(" in reader:
     raise SystemExit("ReaderScreen.kt: ValueStepper remains")
 
-# The XPK reader music dialog contains target LUFS/duck/attack/release. Kotlin-only
-# extensions such as crossfade/avoid-repeat may remain in Personal advanced settings,
-# but must not be required inside the reference Reader workflow.
+# Reader music keeps only the compact user-facing controls. Technical normalization,
+# attack and release values remain internal settings and are not part of this screen.
+for token in [
+    'ReaderFloatSlider("Mức chuẩn hóa"',
+    'ReaderIntSlider("Attack"',
+    'ReaderIntSlider("Release"',
+    'ReaderMenuButton("CHUẨN HÓA TOÀN BỘ KHO NHẠC")',
+    "CÂN BẰNG ÂM THANH",
+    "Chế độ phát khi không dùng nhạc theo cảnh",
+]:
+    if token in reader:
+        raise SystemExit(f"ReaderScreen.kt: obsolete music control remains: {token}")
+
 for token in [
     'TextButton({ ttsDraft = ttsDraft.copy(processingMethod',
     'TextButton({ ttsDraft = ttsDraft.copy(sonicAccurate',

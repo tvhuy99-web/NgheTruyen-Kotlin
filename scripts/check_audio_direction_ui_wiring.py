@@ -56,7 +56,7 @@ assert "AudioDirectionLayerSwitches(" in music_dialog
 assert music_dialog.find('Text("Bật nhạc nền"') < music_dialog.find("AudioDirectionLayerSwitches(")
 assert 'Text("Chế độ phát"' in music_dialog
 assert 'ReaderFloatSlider("Giảm nhạc khi giọng đọc phát"' in music_dialog
-assert 'ReaderMenuButton("QUẢN LÝ DANH SÁCH NHẠC")' in music_dialog
+assert music_dialog.count('ReaderMenuButton("QUẢN LÝ DANH SÁCH NHẠC")') == 1
 
 for removed in (
     "CÂN BẰNG ÂM THANH",
@@ -76,7 +76,6 @@ required_component_tokens = (
     'title = "Attack"',
     'title = "Release"',
     'label = "CHUẨN HÓA TOÀN BỘ KHO NHẠC"',
-    'label = "QUẢN LÝ NHẠC',
     'label = "QUẢN LÝ ÂM THANH MÔI TRƯỜNG',
     'label = "QUẢN LÝ HIỆU ỨNG ÂM THANH',
     'Text("THÊM TỆP")',
@@ -90,6 +89,8 @@ required_component_tokens = (
 )
 for token in required_component_tokens:
     assert token in component, f"missing compact audio UI token: {token}"
+
+assert 'label = "QUẢN LÝ NHẠC' not in component, "duplicate music manager must not return to embedded audio controls"
 
 for removed in (
     'text = "ÂM THANH AI"',

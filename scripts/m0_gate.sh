@@ -49,6 +49,7 @@ STATIC_GATES=(
   scripts/check_xpk_final_ui_parity.py
   scripts/check_downloaded_xpk_parity.py
   scripts/check_xpk_strict_parity.py
+  scripts/check_audio_direction_ui_wiring.py
 )
 for gate in "${STATIC_GATES[@]}"; do
   printf 'RUN_STATIC_GATE=%s\n' "$gate"

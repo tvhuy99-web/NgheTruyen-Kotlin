@@ -12,8 +12,30 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 /**
+ * Process-local bridge from the application-level AudioDirectionRuntime to the active reader music
+ * controller. There is only one ReaderPlaybackService at a time; attaching a new listener replaces
+ * a stale service listener and release detaches by identity.
+ */
+object SceneMusicSfxDuckBus {
+    @Volatile private var listener: ((Float, Long) -> Unit)? = null
+
+    fun attach(value: (Float, Long) -> Unit) {
+        listener = value
+    }
+
+    fun detach(value: (Float, Long) -> Unit) {
+        if (listener === value) listener = null
+    }
+
+    fun duck(factor: Float, holdMillis: Long) {
+        listener?.invoke(factor, holdMillis)
+    }
+}
+
+/**
  * Owns MediaPlayer instances for background music. Scene changes use a real overlapping crossfade;
  * the current track stays audible while the requested track fades in, then the old player is released.
+ * TTS ducking and brief SFX-priority ducking are independent multipliers so one cannot cancel the other.
  * All public calls are expected on the main thread.
  */
 class SceneMusicController(
@@ -33,11 +55,20 @@ class SceneMusicController(
     private var outgoing: Slot? = null
     private var transitionJob: Job? = null
     private var duckJob: Job? = null
+    private var sfxDuckJob: Job? = null
     private var speaking = false
     private var duckFactor = 0.63095734f
     private var duckMultiplier = 1f
+    private var sfxDuckMultiplier = 1f
     private var duckAttackMillis = 1850
     private var duckReleaseMillis = 2050
+    private val sfxDuckListener: (Float, Long) -> Unit = { factor, holdMillis ->
+        duckForImportantSfx(factor, holdMillis)
+    }
+
+    init {
+        SceneMusicSfxDuckBus.attach(sfxDuckListener)
+    }
 
     val activeTrackId: String?
         get() = active?.trackId
@@ -114,6 +145,9 @@ class SceneMusicController(
         transitionJob = null
         duckJob?.cancel()
         duckJob = null
+        sfxDuckJob?.cancel()
+        sfxDuckJob = null
+        sfxDuckMultiplier = 1f
         release(outgoing)
         outgoing = null
         if (clearTrack) {
@@ -125,7 +159,20 @@ class SceneMusicController(
         }
     }
 
-    fun release() = stop(clearTrack = true)
+    fun release() {
+        SceneMusicSfxDuckBus.detach(sfxDuckListener)
+        stop(clearTrack = true)
+    }
+
+    private fun duckForImportantSfx(factor: Float, holdMillis: Long) {
+        val target = factor.coerceIn(0.45f, 1f)
+        sfxDuckJob?.cancel()
+        sfxDuckJob = scope.launch(Dispatchers.Main.immediate) {
+            animateSfxDuck(target, SFX_DUCK_ATTACK_MS)
+            delay(holdMillis.coerceIn(120L, 3_000L))
+            animateSfxDuck(1f, SFX_DUCK_RELEASE_MS)
+        }
+    }
 
     private fun createPlayer(
         trackId: String,
@@ -230,10 +277,28 @@ class SceneMusicController(
         }
     }
 
+    private suspend fun animateSfxDuck(target: Float, durationMillis: Int) {
+        val start = sfxDuckMultiplier
+        if (durationMillis <= 0) {
+            sfxDuckMultiplier = target
+            active?.let(::applyLevel)
+            outgoing?.let(::applyLevel)
+            return
+        }
+        val steps = (durationMillis / 30f).roundToInt().coerceIn(3, 30)
+        repeat(steps + 1) { index ->
+            val fraction = index.toFloat() / steps.toFloat()
+            sfxDuckMultiplier = start + (target - start) * fraction
+            active?.let(::applyLevel)
+            outgoing?.let(::applyLevel)
+            if (index < steps) delay((durationMillis.toLong() / steps).coerceAtLeast(1L))
+        }
+    }
+
     private fun applyLevel(slot: Slot) = setSlotLevel(slot, desiredLevel(slot))
 
     private fun desiredLevel(slot: Slot): Float =
-        (slot.baseVolume * duckMultiplier * slot.fadeMultiplier).coerceIn(0f, 1f)
+        (slot.baseVolume * duckMultiplier * sfxDuckMultiplier * slot.fadeMultiplier).coerceIn(0f, 1f)
 
     private fun setSlotLevel(slot: Slot, level: Float) {
         runCatching { slot.player.setVolume(level, level) }
@@ -247,5 +312,7 @@ class SceneMusicController(
 
     companion object {
         private const val XPK_DEFAULT_CROSSFADE_MILLIS = 2_200
+        private const val SFX_DUCK_ATTACK_MS = 120
+        private const val SFX_DUCK_RELEASE_MS = 360
     }
 }

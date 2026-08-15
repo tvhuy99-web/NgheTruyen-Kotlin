@@ -18,6 +18,7 @@ class AudioDirectorMusicSettingsUiTest {
 
     @Test
     fun personalMusicSettingsKeepManualMusicAndDoNotDuplicateAiAudioControls() {
+        returnToRoot()
         composeRule.onNodeWithText("CÁ NHÂN", useUnmergedTree = true).performClick()
         composeRule.onNodeWithText("Cài đặt", useUnmergedTree = true).performClick()
         composeRule
@@ -35,6 +36,22 @@ class AudioDirectorMusicSettingsUiTest {
         assertTextDoesNotExist("Nhạc cảnh AI")
         assertTextDoesNotExist("Âm thanh môi trường AI")
         assertTextDoesNotExist("Hiệu ứng âm thanh AI")
+    }
+
+    private fun returnToRoot() {
+        repeat(6) {
+            if (composeRule.onAllNodesWithText("CÁ NHÂN", useUnmergedTree = true)
+                    .fetchSemanticsNodes().isNotEmpty()
+            ) return
+            composeRule.runOnUiThread {
+                composeRule.activity.onBackPressedDispatcher.onBackPressed()
+            }
+            composeRule.waitForIdle()
+        }
+        check(
+            composeRule.onAllNodesWithText("CÁ NHÂN", useUnmergedTree = true)
+                .fetchSemanticsNodes().isNotEmpty(),
+        ) { "Could not return to the root navigation before opening Personal settings." }
     }
 
     private fun assertTextDoesNotExist(text: String) {

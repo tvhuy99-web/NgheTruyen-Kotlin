@@ -20,7 +20,7 @@ import java.util.concurrent.ConcurrentHashMap
  * Chromium/vBook-only network compatibility decorator.
  *
  * vBook scripts commonly obtain a CSRF token or anti-bot session in Browser/WebView and then call a
- * JSON endpoint through fetch().  The request must therefore keep the same browser identity.  The
+ * JSON endpoint through fetch(). The request must therefore keep the same browser identity. The
  * generic SourceNetworkBroker intentionally stays neutral; this decorator projects the WebView
  * session into vBook HTTP without changing semantics for native SourcePacks.
  */
@@ -84,7 +84,7 @@ internal class VBookBrowserSessionNetworkBroker(
                 "browserUserAgentSha256" to VBookHttpSessionCompatibility.sha256(browserUa),
                 "referer" to projection.headers.headerValue("Referer").orEmpty().take(700),
                 "requestOrigin" to VBookHttpSessionCompatibility.originOf(request.url),
-                "projectedHeaderNames" to projection.headers.keys.sorted(String.CASE_INSENSITIVE_ORDER).joinToString(","),
+                "projectedHeaderNames" to projection.headers.keys.sortedWith(String.CASE_INSENSITIVE_ORDER).joinToString(","),
             ),
         ))
 
@@ -131,7 +131,7 @@ internal class VBookBrowserSessionNetworkBroker(
                 "wireUserAgent" to wireUserAgent.take(700),
                 "wireUserAgentSha256" to VBookHttpSessionCompatibility.sha256(wireUserAgent),
                 "wireReferer" to wireReferer.take(700),
-                "wireHeaderNames" to response.requestHeaders.keys.sorted(String.CASE_INSENSITIVE_ORDER).joinToString(","),
+                "wireHeaderNames" to response.requestHeaders.keys.sortedWith(String.CASE_INSENSITIVE_ORDER).joinToString(","),
                 "userAgentMatchesBrowser" to (browserUa.isNotBlank() && wireUserAgent == browserUa).toString(),
                 "requestOrigin" to VBookHttpSessionCompatibility.originOf(response.requestUrl ?: request.url),
             ),
@@ -208,14 +208,14 @@ internal object VBookHttpSessionCompatibility {
         val acceptSource = if (out.hasHeader("Accept")) {
             "extension"
         } else {
-            out["Accept"] = "*/*"
-            "browser-fetch-default"
+            out["Accept"] = "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8"
+            "lua-vbook-default"
         }
         val acceptLanguageSource = if (out.hasHeader("Accept-Language")) {
             "extension"
         } else {
-            out["Accept-Language"] = "vi-VN,vi;q=0.9,en;q=0.6"
-            "browser-compatible-default"
+            out["Accept-Language"] = "vi-VN,vi;q=0.9,en-US;q=0.7,en;q=0.6"
+            "lua-vbook-default"
         }
         val refererSource = if (out.hasHeader("Referer")) {
             "extension"

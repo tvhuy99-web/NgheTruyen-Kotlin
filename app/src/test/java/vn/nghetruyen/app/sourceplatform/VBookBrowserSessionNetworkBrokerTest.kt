@@ -2,7 +2,6 @@ package vn.nghetruyen.app.sourceplatform
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import vn.nghetruyen.source.api.SemanticVersion
@@ -73,10 +72,10 @@ class VBookBrowserSessionNetworkBrokerTest {
         val result = broker.execute(manifest(), request)
 
         assertTrue(result is SourcePlatformResult.Success)
-        val sent = assertNotNull(capturedRequest).let { capturedRequest!! }
+        val sent = requireNotNull(capturedRequest)
         assertEquals("Mozilla/5.0 (Linux; Android 16; wv) Chrome/138.0 Mobile Safari/537.36", sent.headers.value("User-Agent"))
-        assertEquals("*/*", sent.headers.value("Accept"))
-        assertEquals("vi-VN,vi;q=0.9,en;q=0.6", sent.headers.value("Accept-Language"))
+        assertEquals("text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8", sent.headers.value("Accept"))
+        assertEquals("vi-VN,vi;q=0.9,en-US;q=0.7,en;q=0.6", sent.headers.value("Accept-Language"))
         assertEquals("https://m.qidian.com/", sent.headers.value("Referer"))
         assertTrue(partition.readCookieHeader(manifest().id, request.url).orEmpty().contains("_csrfToken=csrf-from-webview"))
         assertEquals(request.url, mirroredUrl)
@@ -88,6 +87,8 @@ class VBookBrowserSessionNetworkBrokerTest {
         assertTrue(session.attributes["networkCookieBytes"].orEmpty().toInt() > 0)
         assertEquals("webview", session.attributes["effectiveUserAgentSource"])
         assertEquals("source-origin", session.attributes["effectiveRefererSource"])
+        assertEquals("lua-vbook-default", session.attributes["effectiveAcceptSource"])
+        assertEquals("lua-vbook-default", session.attributes["effectiveAcceptLanguageSource"])
 
         val wire = events.first { it.name == "VBOOK_HTTP_WIRE_IDENTITY" }
         assertEquals("true", wire.attributes["userAgentMatchesBrowser"])
@@ -99,6 +100,8 @@ class VBookBrowserSessionNetworkBrokerTest {
         assertTrue(shape.attributes["observedJsonKeys"].orEmpty().contains("pageNum"))
         assertTrue(successPayload.contains("\"pageNum\":1"))
         assertEquals(20, Regex("\\\"bookId\\\"").findAll(successPayload).count())
+        assertEquals(2, qidianReferenceNextPage(successPayload))
+        assertTrue(qidianLuaReferenceNextRoute().contains("%22page%22%3A%222%22"))
     }
 
     @Test
@@ -220,6 +223,16 @@ class VBookBrowserSessionNetworkBrokerTest {
         }
         return "{\"code\":0,\"msg\":\"success\",\"data\":{\"pageNum\":1,\"pageSize\":20,\"hasNext\":true,\"list\":[$items]}}"
     }
+
+    private fun qidianReferenceNextPage(payload: String): Int? {
+        val current = Regex("\\\"pageNum\\\"\\s*:\\s*(\\d+)").find(payload)?.groupValues?.get(1)?.toIntOrNull()
+        val hasNext = Regex("\\\"hasNext\\\"\\s*:\\s*true").containsMatchIn(payload)
+        return if (current != null && hasNext) current + 1 else null
+    }
+
+    /** Oracle copied from the successful Lua session6 executor output: page="2". */
+    private fun qidianLuaReferenceNextRoute(): String =
+        "http://14.225.254.182#__vbook_route=%7B%22kind%22%3A%22list%22%2C%22script%22%3A%22gen0.js%22%2C%22input%22%3A%22%2Fmajax%2Frank%2Fyuepiaolist%3Fgender%3Dmale%26pageNum%3D%7Bpage%7D%26%7B_csrfToken%7D%22%2C%22page%22%3A%222%22%7D"
 
     private class MemoryCookiePartition : SourceCookiePartition {
         private var header: String? = null

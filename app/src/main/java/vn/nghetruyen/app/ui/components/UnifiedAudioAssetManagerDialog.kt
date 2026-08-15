@@ -67,6 +67,7 @@ fun UnifiedAudioAssetManagerDialog(
             .mapIndexed { index, row -> row.copy(orderIndex = index) }
     }
     var draft by remember(kind) { mutableStateOf(initialRows) }
+    var transientAddedIds by remember(kind) { mutableStateOf<Set<String>>(emptySet()) }
     val baselineIds = remember(kind) { initialRows.mapTo(linkedSetOf()) { it.id } }
     var search by remember(kind) { mutableStateOf("") }
     var selectedTrackId by remember(kind) { mutableStateOf<String?>(null) }
@@ -93,13 +94,13 @@ fun UnifiedAudioAssetManagerDialog(
 
     fun cancelLibrary() {
         stopPreview()
-        val app = application
-        val initialIds = baselineIds.toSet()
-        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-            val dao = app.container.database.sceneMusicTrackDao()
-            dao.listAll()
-                .filter { AudioAssetClassifier.classify(it) == kind && it.id !in initialIds }
-                .forEach { dao.delete(it.id) }
+        val idsToDelete = transientAddedIds.toSet()
+        if (idsToDelete.isNotEmpty()) {
+            val app = application
+            CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                val dao = app.container.database.sceneMusicTrackDao()
+                idsToDelete.forEach { dao.delete(it) }
+            }
         }
         onDismiss()
     }
@@ -133,6 +134,7 @@ fun UnifiedAudioAssetManagerDialog(
                     uri = uri.toString(),
                     tagsCsv = typeMarker(kind),
                 ).onSuccess { trackId ->
+                    transientAddedIds = transientAddedIds + trackId
                     SceneMusicAnalysisWorker.enqueue(context, trackId, normalizationTarget(kind))
                 }
             }
@@ -213,6 +215,7 @@ fun UnifiedAudioAssetManagerDialog(
                                     val keepIds = normalized.mapTo(hashSetOf()) { it.id }
                                     existingKind.filter { it.id !in keepIds }.forEach { dao.delete(it.id) }
                                     dao.upsertAll(normalized)
+                                    transientAddedIds = emptySet()
                                     notify("Đã lưu ${kindDisplayName(kind).lowercase()}.")
                                     onDismiss()
                                 }

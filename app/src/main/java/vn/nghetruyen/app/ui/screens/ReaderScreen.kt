@@ -746,14 +746,16 @@ fun ReaderScreen(
             onDismissRequest = { showMusicDialog = false },
             title = { Text("NHẠC NỀN") },
             text = { Column(Modifier.heightIn(max = 620.dp).verticalScroll(rememberScrollState())) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Bật nhạc nền", Modifier.weight(1f))
+                    Switch(musicEnabled, { musicEnabled = it })
+                }
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 vn.nghetruyen.app.ui.components.AudioDirectionLayerSwitches(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Bật nhạc nền khi đọc bằng TTS", Modifier.weight(1f)); Switch(musicEnabled, { musicEnabled = it })
-                }
-                Text("Chế độ phát khi không dùng nhạc theo cảnh", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                Text("Chế độ phát", fontWeight = FontWeight.SemiBold)
                 Button(onClick = { musicModeExpanded = true }, modifier = Modifier.fillMaxWidth()) {
                     Text(if (musicMode == SceneMusicPlaybackMode.SHUFFLE) "Phát ngẫu nhiên" else "Phát lần lượt")
                 }
@@ -761,51 +763,13 @@ fun ReaderScreen(
                     DropdownMenuItem(text = { Text("Phát lần lượt") }, onClick = { musicMode = SceneMusicPlaybackMode.SEQUENTIAL; musicModeExpanded = false })
                     DropdownMenuItem(text = { Text("Phát ngẫu nhiên") }, onClick = { musicMode = SceneMusicPlaybackMode.SHUFFLE; musicModeExpanded = false })
                 }
-                Text("CÂN BẰNG ÂM THANH", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp))
-                Text("Mỗi bài nhạc được đo một lần và dùng một mức gain chuẩn hóa cố định. Attack là thời gian hạ nhạc khi giọng đọc bắt đầu; Release là thời gian đưa nhạc trở lại sau khi giọng đọc dừng.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 4.dp))
-                ReaderFloatSlider("Mức chuẩn hóa", musicTargetLufs, -36f, -18f, steps = 17, shown = { "%.0f LUFS".format(it) }) { musicTargetLufs = it }
                 ReaderFloatSlider("Giảm nhạc khi giọng đọc phát", musicDuckDb, 0f, 24f, steps = 23, shown = { "%.0f dB".format(it) }) { musicDuckDb = it }
-                ReaderIntSlider("Attack", musicAttackMs, 0, 2_000, step = 10, suffix = " ms") { musicAttackMs = it }
-                ReaderIntSlider("Release", musicReleaseMs, 0, 5_000, step = 10, suffix = " ms") { musicReleaseMs = it }
-                ReaderMenuButton("CHUẨN HÓA TOÀN BỘ KHO NHẠC") {
-                    val tracks = state.sceneMusicTracks
-                    if (tracks.isEmpty()) {
-                        onMessage("Kho nhạc đang trống.")
-                    } else {
-                        musicNormalizationTarget = musicTargetLufs
-                        musicNormalizationDone = 0
-                        musicNormalizationFailed = 0
-                        musicNormalizationCancelled = 0
-                        musicNormalizationRunToken += 1
-                        val runToken = musicNormalizationRunToken
-                        val workIds = tracks.map { track ->
-                            SceneMusicAnalysisWorker.enqueue(context, track.id, musicTargetLufs)
-                        }
-                        musicNormalizationWorkIds = workIds
-                        showMusicNormalizationProgress = true
-                        scope.launch {
-                            val workManager = WorkManager.getInstance(context.applicationContext)
-                            while (showMusicNormalizationProgress && runToken == musicNormalizationRunToken) {
-                                val infos = withContext(Dispatchers.IO) {
-                                    workIds.mapNotNull { id -> runCatching { workManager.getWorkInfoById(id).get() }.getOrNull() }
-                                }
-                                musicNormalizationDone = infos.count { it.state == WorkInfo.State.SUCCEEDED }
-                                musicNormalizationFailed = infos.count { it.state == WorkInfo.State.FAILED }
-                                musicNormalizationCancelled = infos.count { it.state == WorkInfo.State.CANCELLED }
-                                if (infos.size == workIds.size && infos.all { it.state.isFinished }) break
-                                delay(300)
-                            }
-                        }
-                    }
-                }
-                Text("${state.sceneMusicTracks.size} bài • ${state.sceneMusicTracks.count { it.enabled }} đang bật", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
                 ReaderMenuButton("QUẢN LÝ DANH SÁCH NHẠC") {
                     val rows = state.sceneMusicTracks.sortedWith(compareBy<SceneMusicTrackEntity> { it.orderIndex }.thenBy { it.title.lowercase() })
                     musicLibraryDraft = rows.mapIndexed { index, row -> row.copy(orderIndex = index) }
                     musicLibraryBaselineIds = rows.mapTo(linkedSetOf()) { it.id }
                     musicSearch = ""; showMusicLibrary = true
                 }
-                Text("Tên và mô tả của các bài đang bật được gửi cho AI làm dữ liệu tham chiếu. Khi được trao quyền, AI tự quyết định giữ bài hiện tại hoặc đổi sang bài phù hợp với cảnh.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
             } },
             confirmButton = { TextButton(onClick = {
                 val activeCount = state.sceneMusicTracks.count { it.enabled }

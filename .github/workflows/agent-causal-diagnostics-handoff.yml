@@ -1,0 +1,52 @@
+name: Agent causal diagnostics handoff
+
+on:
+  push:
+    branches:
+      - fix/diagnostics-screen-runtime-parity
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/diagnostics-screen-runtime-parity
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Apply exact causal diagnostics patch
+        run: python3 scripts/agent_causal_diagnostics_handoff.py
+
+      - name: Verify patch shape
+        run: |
+          git diff --check
+          grep -R "selective-causal-handoff" -n app/src/main source-diagnostics/src/main
+          grep -R "story-open:" -n app/src/main app/src/test
+          grep -R "screenRotationEventsDiscarded" -n source-diagnostics/src/main app/src/main
+
+      - name: Run focused diagnostics and source tests
+        run: ./gradlew :source-diagnostics:test :source-lua:test :source-vbook:test :app:testDebugUnitTest --no-daemon
+
+      - name: Compile app
+        run: ./gradlew :app:compileDebugKotlin --no-daemon
+
+      - name: Commit functional patch and remove staging files
+        run: |
+          rm -f scripts/agent_causal_diagnostics_handoff.py .github/workflows/agent-causal-diagnostics-handoff.yml
+          git add -A
+          git diff --cached --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix(diagnostics): hand off causal story trace across screens"
+          git push origin HEAD:fix/diagnostics-screen-runtime-parity

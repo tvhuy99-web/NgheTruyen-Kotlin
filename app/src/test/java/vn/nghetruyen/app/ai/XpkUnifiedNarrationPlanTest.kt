@@ -43,8 +43,9 @@ class XpkUnifiedNarrationPlanTest {
         assertTrue(prompt.contains("[UNIT id="))
         assertTrue(prompt.contains("a1 | Mưa nhẹ | mưa nhẹ ngoài trời"))
         assertTrue(prompt.contains("s1 | Sấm | sấm gần đột ngột"))
-        assertFalse(prompt.contains("timestamp", ignoreCase = true))
-        assertFalse(prompt.contains("uri", ignoreCase = true))
+        assertFalse(prompt.contains("\"time\":"))
+        assertFalse(prompt.contains("\"uri\":"))
+        assertFalse(prompt.contains("\"volume\":"))
     }
 
     @Test

@@ -1,0 +1,58 @@
+name: Agent Generalize Navigation Diagnostics
+
+on:
+  push:
+    branches:
+      - fix/generalize-navigation-diagnostics-handoff
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: fix/generalize-navigation-diagnostics-handoff
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Apply generic navigation diagnostics patch
+        run: python3 scripts/agent_generalize_navigation_diagnostics.py
+
+      - name: Verify wiring shape
+        run: |
+          grep -q 'traceKind = "story-open"' app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt
+          grep -q 'traceKind = "chapter-open"' app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt
+          grep -q 'readyEventName = "READER_SCREEN_READY"' app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt
+          test "$(grep -c 'navigateWithCausalHandoff(' app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt)" -ge 2
+          ! grep -q 'storyDiagnosticTraceId' app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt
+
+      - name: Run exact navigation regression
+        run: ./gradlew --no-daemon :app:testDebugUnitTest --tests 'vn.nghetruyen.app.sourceplatform.CausalNavigationDiagnosticsTest'
+
+      - name: Run source and app regression suite
+        run: ./gradlew --no-daemon :source-diagnostics:test :source-lua:test :source-vbook:test :app:testDebugUnitTest :app:compileDebugKotlin
+
+      - name: Commit functional patch and remove staging files
+        shell: bash
+        run: |
+          rm -f scripts/agent_generalize_navigation_diagnostics.py
+          rm -f .github/workflows/agent-generalize-navigation-diagnostics.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git status --short
+          git commit -m 'fix(diagnostics): generalize causal navigation handoff'
+          git push origin HEAD:fix/generalize-navigation-diagnostics-handoff

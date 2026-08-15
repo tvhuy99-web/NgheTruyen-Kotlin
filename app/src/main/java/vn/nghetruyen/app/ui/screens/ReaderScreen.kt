@@ -538,11 +538,6 @@ fun ReaderScreen(
                 if (textMode) ReaderMenuButton("HIỂN THỊ VĂN BẢN") { showReaderOptions = false; showDisplayDialog = true }
                 ReaderMenuButton("HẸN GIỜ NGỦ - ${state.sleepTimerStatus}") { showReaderOptions = false; showSleepDialog = true }
                 ReaderMenuButton("NHẠC NỀN") { showReaderOptions = false; showMusicDialog = true }
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                vn.nghetruyen.app.ui.components.AudioDirectionLayerSwitches(
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 ReaderMenuButton(if (textMode) "XUẤT ÂM THANH (CẦN CHẾ ĐỘ TTS)" else "XUẤT ÂM THANH") {
                     showReaderOptions = false
                     if (textMode) onMessage("Hãy chuyển sang chế độ TTS trước khi xuất âm thanh.") else showExportDialog = true
@@ -751,6 +746,10 @@ fun ReaderScreen(
             onDismissRequest = { showMusicDialog = false },
             title = { Text("NHẠC NỀN") },
             text = { Column(Modifier.heightIn(max = 620.dp).verticalScroll(rememberScrollState())) {
+                vn.nghetruyen.app.ui.components.AudioDirectionLayerSwitches(
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text("Bật nhạc nền khi đọc bằng TTS", Modifier.weight(1f)); Switch(musicEnabled, { musicEnabled = it })
                 }

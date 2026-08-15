@@ -97,7 +97,11 @@ class VBookNativeLogApplyIntegrationTest {
             ),
         )
 
-        assertTrue(result is SourcePlatformResult.Success)
+        val failure = result as? SourcePlatformResult.Failure
+        assertTrue(
+            "runtime result=$result failure=${failure?.error?.code}:${failure?.error?.message} events=${events.map(DiagnosticEvent::name)}",
+            result is SourcePlatformResult.Success,
+        )
         val nativeEvents = events.filter { it.name.startsWith("NATIVE_V2_TRANSFORM_") }
         assertEquals(
             listOf("NATIVE_V2_TRANSFORM_START", "NATIVE_V2_TRANSFORM_OP", "NATIVE_V2_TRANSFORM_DONE"),

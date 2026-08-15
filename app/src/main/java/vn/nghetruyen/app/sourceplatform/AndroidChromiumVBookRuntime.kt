@@ -995,8 +995,8 @@ internal object ChromiumVBookNetworkCompatibility {
         val schemeEnd = raw.indexOf("://")
         if (schemeEnd <= 0 || raw.substring(0, schemeEnd).lowercase(Locale.ROOT) !in setOf("http", "https")) return raw
         val authorityStart = schemeEnd + 3
-        val pathStart = raw.indexOf('/', authorityStart)
-        if (pathStart < 0) return raw
+        val pathStart = raw.indexOfAny(charArrayOf('/', '?', '#'), authorityStart)
+        if (pathStart < 0 || raw[pathStart] != '/') return raw
         var duplicateEnd = pathStart
         while (duplicateEnd + 1 < raw.length && raw[duplicateEnd + 1] == '/') duplicateEnd += 1
         return if (duplicateEnd == pathStart) raw else raw.removeRange(pathStart + 1, duplicateEnd + 1)

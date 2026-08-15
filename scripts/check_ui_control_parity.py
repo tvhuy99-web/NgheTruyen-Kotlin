@@ -6,6 +6,7 @@ personal = (ROOT / "screens/PersonalScreen.kt").read_text(encoding="utf-8")
 reader = (ROOT / "screens/ReaderScreen.kt").read_text(encoding="utf-8")
 story = (ROOT / "screens/StoryDetailScreen.kt").read_text(encoding="utf-8")
 role = (ROOT / "components/GlobalVoiceRoleEditorDialog.kt").read_text(encoding="utf-8")
+component = (ROOT / "components/AudioDirectionLayerSwitches.kt").read_text(encoding="utf-8")
 
 required = {
     "PersonalScreen.kt": [
@@ -39,7 +40,13 @@ required = {
         "Android, tối đa 100%",
         "Sonic, tối đa 200%",
         'Text("Chế độ phát"',
-        'ReaderMenuButton("QUẢN LÝ DANH SÁCH NHẠC")',
+        "musicTrackCount = musicTracks.size",
+        "onManageMusic = {",
+        'Text("MÔ TẢ HÀNG LOẠT")',
+        'ReaderMenuButton("CHUẨN HÓA")',
+        'ReaderMenuButton("SỬA TÊN / MÔ TẢ")',
+        'title = { Text("CHỈNH SỬA BÀI NHẠC") }',
+        'label = { Text("Mô tả") }',
     ],
     "StoryDetailScreen.kt": [
         'title = { Text("AI RIÊNG CHO TRUYỆN") }',
@@ -79,12 +86,23 @@ required = {
         "enabled = draft.roleName.isNotBlank() && draft.description.isNotBlank()",
         'Text("XÓA HỒ SƠ")',
     ],
+    "AudioDirectionLayerSwitches.kt": [
+        'label = "QUẢN LÝ NHẠC ($musicTrackCount)"',
+        'label = "QUẢN LÝ ÂM THANH MÔI TRƯỜNG',
+        'label = "QUẢN LÝ HIỆU ỨNG ÂM THANH',
+        'label = { Text("Tên") }',
+        'label = { Text("Mô tả") }',
+        'Text("CHUẨN HÓA")',
+        'Text("LƯU")',
+        'Text("XÓA")',
+    ],
 }
 texts = {
     "PersonalScreen.kt": personal,
     "ReaderScreen.kt": reader,
     "StoryDetailScreen.kt": story,
     "GlobalVoiceRoleEditorDialog.kt": role,
+    "AudioDirectionLayerSwitches.kt": component,
 }
 for name, tokens in required.items():
     for token in tokens:
@@ -102,8 +120,8 @@ for token in [
 if "ValueStepper(" in reader:
     raise SystemExit("ReaderScreen.kt: ValueStepper remains")
 
-# Reader music keeps only the compact user-facing controls. Technical normalization,
-# attack and release values remain internal settings and are not part of this screen.
+# Technical normalization controls are implemented in the embedded audio component rather than
+# duplicated as ReaderScreen-specific sliders/buttons.
 for token in [
     'ReaderFloatSlider("Mức chuẩn hóa"',
     'ReaderIntSlider("Attack"',
@@ -111,9 +129,21 @@ for token in [
     'ReaderMenuButton("CHUẨN HÓA TOÀN BỘ KHO NHẠC")',
     "CÂN BẰNG ÂM THANH",
     "Chế độ phát khi không dùng nhạc theo cảnh",
+    'ReaderMenuButton("QUẢN LÝ DANH SÁCH NHẠC")',
 ]:
     if token in reader:
-        raise SystemExit(f"ReaderScreen.kt: obsolete music control remains: {token}")
+        raise SystemExit(f"ReaderScreen.kt: obsolete/duplicate music control remains: {token}")
+
+for prose in [
+    "Mỗi bài nhạc được đo một lần",
+    "Tên và mô tả của các bài đang bật được gửi cho AI",
+    "AI giữ hoặc đổi nhạc theo cảnh/UNIT",
+    "Ambience là nền môi trường kéo dài",
+    "SFX là âm one-shot",
+    "Mỗi trình quản lý cho phép chọn nhiều tệp",
+]:
+    if prose in reader or prose in component:
+        raise SystemExit(f"obsolete explanatory audio prose remains: {prose}")
 
 for token in [
     'TextButton({ ttsDraft = ttsDraft.copy(processingMethod',

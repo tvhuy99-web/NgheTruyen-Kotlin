@@ -162,7 +162,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
      * recorder only so callbacks from the old generation can be recognized, mirrored to lifecycle
      * tracking, and suppressed from the new screen. Dialogs do not call this method.
      */
-    fun onScreenChanged(screenKey: String): Boolean {
+    fun onScreenChanged(screenKey: String, handoffTraceIds: Set<String> = emptySet()): Boolean {
         val next = screenKey.trim().take(500).ifBlank { "unknown" }
         if (next == activeScreenKey) return false
         val previous = activeScreenKey
@@ -170,10 +170,23 @@ class SourceDiagnosticRuntime(private val context: Context) {
         activeScreenSessionId = UUID.randomUUID().toString()
         return when (mode) {
             MODE_SCREEN -> {
-                // Historical API name retained in source-diagnostics; strict screen mode now returns
-                // an empty carry set and advances the immutable screen generation.
-                recorder.retainActiveOperationTraces()
-                evidence.retainTraces(emptySet())
+                val selectedHandoff = handoffTraceIds.asSequence()
+                    .map(String::trim)
+                    .filter(String::isNotBlank)
+                    .take(64)
+                    .toSet()
+                val handoffAttributes = mapOf(
+                    "screen" to next,
+                    "screenSessionId" to activeScreenSessionId,
+                )
+                recorder.rotateScreen(selectedHandoff, handoffAttributes)
+                evidence.retainTraces(
+                    traceIds = selectedHandoff,
+                    targetGeneration = recorder.currentScreenGeneration(),
+                    handoffAttributes = handoffAttributes,
+                )
+                val recorderStats = recorder.stats()
+                val evidenceStats = evidence.stats()
                 mark(
                     name = "DIAGNOSTIC_SCREEN_STARTED",
                     category = DiagnosticCategory.RUNTIME,
@@ -182,7 +195,12 @@ class SourceDiagnosticRuntime(private val context: Context) {
                         "screen" to next,
                         "previousScreen" to previous,
                         "screenGeneration" to recorder.currentScreenGeneration().toString(),
-                        "screenIsolation" to "strict-origin",
+                        "screenIsolation" to if (selectedHandoff.isEmpty()) "strict-origin" else "selective-causal-handoff",
+                        "handoffTraceCount" to selectedHandoff.size.toString(),
+                        "handoffEventCount" to recorderStats.screenHandoffEventsRetained.toString(),
+                        "handoffEvidenceCount" to evidenceStats.screenHandoffItemsRetained.toString(),
+                        "rotationDiscardedEventCount" to recorderStats.screenRotationEventsDiscarded.toString(),
+                        "rotationDiscardedEvidenceCount" to evidenceStats.screenRotationItemsDiscarded.toString(),
                         "carriedActiveTraceCount" to "0",
                     ),
                 )
@@ -294,9 +312,17 @@ class SourceDiagnosticRuntime(private val context: Context) {
                 put("persistentRejectedEvidence", continuousStore.rejectedEvidenceCount)
                 put("staleScreenEventsDropped", recorderStats.staleScreenEventsDropped)
                 put("staleScreenEvidenceDropped", evidenceStats.staleScreenItemsDropped)
+                put("screenRotationEventsDiscarded", recorderStats.screenRotationEventsDiscarded)
+                put("screenHandoffEventsRetained", recorderStats.screenHandoffEventsRetained)
+                put("screenRotationEvidenceDiscarded", evidenceStats.screenRotationItemsDiscarded)
+                put("screenHandoffEvidenceRetained", evidenceStats.screenHandoffItemsRetained)
                 put("screenIsolationDropsIntentional", true)
-                if (recorderStats.staleScreenEventsDropped > 0 || evidenceStats.staleScreenItemsDropped > 0) {
+                if (
+                    recorderStats.staleScreenEventsDropped > 0 || evidenceStats.staleScreenItemsDropped > 0 ||
+                    recorderStats.screenRotationEventsDiscarded > 0 || evidenceStats.screenRotationItemsDiscarded > 0
+                ) {
                     put("lossVisible", true)
+                    put("lossReason", "screen-isolation-discard")
                 }
             }.toString(2))
             zip.addText("report/persistent_install_failures.json", DiagnosticJsonExporter.export(criticalStore.snapshot()).toString(Charsets.UTF_8))
@@ -493,7 +519,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
         appendLine()
         appendLine("Modes:")
         appendLine("- off: records no session timeline/evidence; only the last 100 install/import failures are retained so package errors are never lost.")
-        appendLine("- screen-scoped: strict provenance. A screen change starts a new immutable generation; no previous-screen event or evidence is copied into it. Late callbacks remain visible to lifecycle tracking but are dropped from the new screen timeline/evidence and counted explicitly.")
+        appendLine("- screen-scoped: strict provenance with selective causal handoff. A screen change starts a new immutable generation; only the trace that directly produced the destination screen may be handed off. Unrelated previous-screen data is discarded, late unrelated callbacks are dropped, and both are counted explicitly.")
         appendLine("- continuous: verbose events persist across screens and process restarts in a bounded two-segment history until explicitly cleared.")
         appendLine()
         appendLine("Contents:")

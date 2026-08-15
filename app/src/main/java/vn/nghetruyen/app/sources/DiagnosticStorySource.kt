@@ -1,6 +1,7 @@
 package vn.nghetruyen.app.sources
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withContext
 import vn.nghetruyen.app.core.common.AppResult
 import vn.nghetruyen.app.core.model.ChapterContent
 import vn.nghetruyen.app.core.model.ChapterPage
@@ -119,9 +120,10 @@ internal class DiagnosticStorySource(
         if (diagnostics.mode == SourceDiagnosticRuntime.MODE_OFF) return block()
 
         prepareExploreScreenContext(action, screenCategory)
-        val operationId = "source-action:${descriptor.id.take(120)}:${action.lowercase()}:${UUID.randomUUID()}"
+        val operationId = currentDiagnosticCausalTraceId()
+            ?: "source-action:${descriptor.id.take(120)}:${action.lowercase()}:${UUID.randomUUID()}"
         val startedAt = System.currentTimeMillis()
-        val base = baseAttributes(action) + attributes
+        val base = baseAttributes(action) + attributes + mapOf("diagnosticRootTraceId" to operationId)
         diagnostics.mark(
             name = "SOURCE_ACTION_STARTED",
             category = DiagnosticCategory.RUNTIME,
@@ -132,7 +134,7 @@ internal class DiagnosticStorySource(
         )
 
         return try {
-            when (val result = block()) {
+            when (val result = withContext(DiagnosticCausalTrace(operationId)) { block() }) {
                 is AppResult.Success -> {
                     val duration = elapsedSince(startedAt)
                     diagnostics.mark(

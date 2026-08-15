@@ -95,6 +95,57 @@ class ScreenDiagnosticRotationTest {
     }
 
     @Test
+    fun selectiveNavigationHandoffRetainsOnlyCausalTraceAndRestampsGeneration() {
+        val recorder = BoundedDiagnosticRecorder(50, DiagnosticLevel.VERBOSE)
+        recorder.emit(operationEvent(1, "story-open", "SOURCE_ACTION_STARTED", DiagnosticOperationState.STARTED))
+        recorder.emit(stageEvent(2, "story-open", "VBOOK_ACTION_STARTED"))
+        recorder.emit(stageEvent(3, "unrelated", "BACKGROUND_REFRESH"))
+
+        recorder.rotateScreen(
+            retainTraceIds = setOf("story-open"),
+            handoffAttributes = mapOf("screen" to "story:42", "screenSessionId" to "session-2"),
+        )
+
+        val retained = recorder.snapshot()
+        assertEquals(2, retained.size)
+        assertTrue(retained.all { it.traceId == "story-open" })
+        assertTrue(retained.all { it.attributes["diagnosticScreenDisposition"] == "handoff" })
+        assertTrue(retained.all { it.attributes["diagnosticScreenGeneration"] == "1" })
+        assertTrue(retained.all { it.attributes["diagnosticOriginScreenGeneration"] == "0" })
+        assertTrue(retained.all { it.attributes["screen"] == "story:42" })
+        assertEquals(1L, recorder.stats().screenRotationEventsDiscarded)
+        assertEquals(2L, recorder.stats().screenHandoffEventsRetained)
+
+        recorder.emit(stageEvent(4, "story-open", "LATE_NAVIGATION_CALLBACK"))
+        assertEquals("current", recorder.snapshot().last().attributes["diagnosticScreenDisposition"])
+    }
+
+    @Test
+    fun evidenceSelectiveHandoffKeepsOnlyCausalTraceAndCountsDiscard() {
+        val evidence = BoundedDiagnosticEvidenceRecorder(
+            maxBytes = 4096,
+            maxItems = 10,
+            maxItemBytes = 2048,
+        ).apply { enabled = true }
+        evidence.capture(evidence(1, "story-open", "executor-input.json", "input"))
+        evidence.capture(evidence(2, "other", "other.json", "other"))
+
+        evidence.retainTraces(
+            traceIds = setOf("story-open"),
+            targetGeneration = 7,
+            handoffAttributes = mapOf("screen" to "story:42"),
+        )
+
+        val retained = evidence.snapshot().single()
+        assertEquals("story-open", retained.traceId)
+        assertEquals("handoff", retained.attributes["diagnosticScreenDisposition"])
+        assertEquals("7", retained.attributes["diagnosticScreenGeneration"])
+        assertEquals("story:42", retained.attributes["screen"])
+        assertEquals(1L, evidence.stats().screenRotationItemsDiscarded)
+        assertEquals(1L, evidence.stats().screenHandoffItemsRetained)
+    }
+
+    @Test
     fun evidenceFromOldTraceIsDroppedAfterScreenRotation() {
         val recorder = BoundedDiagnosticRecorder(50, DiagnosticLevel.VERBOSE)
         val evidence = BoundedDiagnosticEvidenceRecorder(

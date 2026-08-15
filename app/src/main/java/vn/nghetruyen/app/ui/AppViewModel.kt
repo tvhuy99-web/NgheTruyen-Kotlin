@@ -99,6 +99,7 @@ import vn.nghetruyen.app.playback.ReaderChapterNavigation
 import vn.nghetruyen.app.sources.SourceCheckReport
 import vn.nghetruyen.app.sources.SourceDescriptor
 import vn.nghetruyen.app.sources.SourceDiagnosticBrowserActivity
+import vn.nghetruyen.app.sources.DiagnosticCausalTrace
 import vn.nghetruyen.app.sources.SourceLoginActivity
 import vn.nghetruyen.app.sources.StorySearch
 import vn.nghetruyen.app.sources.SourceUiSurface
@@ -2105,15 +2106,23 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             val storyLoadStartedAt = System.currentTimeMillis()
             val storyOriginGeneration = container.sourceDiagnostics.recorder.currentScreenGeneration()
-            when (val result = source.story(story.url.ifBlank { story.id })) {
+            val storyDiagnosticTraceId = "story-open:${UUID.randomUUID()}"
+            val result = withContext(DiagnosticCausalTrace(storyDiagnosticTraceId)) {
+                source.story(story.url.ifBlank { story.id })
+            }
+            when (result) {
                 is AppResult.Success -> {
                     val destinationStoryKey = "story:${result.value.story.id}"
-                    container.sourceDiagnostics.onScreenChanged(destinationStoryKey)
+                    container.sourceDiagnostics.onScreenChanged(
+                        destinationStoryKey,
+                        handoffTraceIds = setOf(storyDiagnosticTraceId),
+                    )
                     container.sourceDiagnostics.mark(
                         name = "STORY_SCREEN_READY",
                         category = vn.nghetruyen.source.diagnostics.DiagnosticCategory.RUNTIME,
                         severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.INFO,
                         sourceId = result.value.story.sourceId,
+                        traceId = storyDiagnosticTraceId,
                         durationMs = (System.currentTimeMillis() - storyLoadStartedAt).coerceAtLeast(0L),
                         attributes = mapOf(
                             "action" to "STORY",
@@ -2121,7 +2130,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             "chapterCount" to result.value.chapters.size.toString(),
                             "hasNextChapterPage" to (!result.value.nextChapterPageUrl.isNullOrBlank()).toString(),
                             "originScreenGeneration" to storyOriginGeneration.toString(),
-                            "handoff" to "source-action-to-story-screen",
+                            "diagnosticRootTraceId" to storyDiagnosticTraceId,
+                            "handoff" to "selective-causal-source-action-to-story-screen",
                         ),
                     )
                     resetChapterPagination(result.value.story.id)

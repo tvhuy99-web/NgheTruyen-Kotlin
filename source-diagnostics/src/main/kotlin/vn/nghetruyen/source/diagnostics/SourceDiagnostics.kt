@@ -94,6 +94,8 @@ data class DiagnosticRecorderStats(
     val itemCount: Int,
     val evictedEvents: Long,
     val staleScreenEventsDropped: Long = 0,
+    val screenRotationEventsDiscarded: Long = 0,
+    val screenHandoffEventsRetained: Long = 0,
 )
 
 /**
@@ -117,6 +119,8 @@ class BoundedDiagnosticRecorder(
     private var evictedEvents: Long = 0
     private var screenGeneration: Long = 0
     private var staleScreenEventsDropped: Long = 0
+    private var screenRotationEventsDiscarded: Long = 0
+    private var screenHandoffEventsRetained: Long = 0
 
     init {
         require(maxEvents in 1..100_000) { "DIAGNOSTIC_CAPACITY_INVALID" }
@@ -186,7 +190,13 @@ class BoundedDiagnosticRecorder(
     }
 
     fun stats(): DiagnosticRecorderStats = lock.withLock {
-        DiagnosticRecorderStats(events.size, evictedEvents, staleScreenEventsDropped)
+        DiagnosticRecorderStats(
+            itemCount = events.size,
+            evictedEvents = evictedEvents,
+            staleScreenEventsDropped = staleScreenEventsDropped,
+            screenRotationEventsDiscarded = screenRotationEventsDiscarded,
+            screenHandoffEventsRetained = screenHandoffEventsRetained,
+        )
     }
 
     fun snapshot(sourceId: String? = null, traceId: String? = null): List<DiagnosticEvent> = lock.withLock {
@@ -202,20 +212,65 @@ class BoundedDiagnosticRecorder(
     }
 
     /**
-     * Screen-mode rotation now has strict Lua-style provenance: nothing from the previous screen is
-     * copied into the new screen. Origin bindings remain so late callbacks can be identified and
-     * suppressed from the new timeline while still reaching lifecycle mirrors.
-     *
-     * The historical method name is retained for source compatibility. It intentionally returns an
-     * empty set so legacy callers also clear, rather than carry, browser/network evidence.
+     * Starts a new screen generation while retaining only explicitly selected causal traces.
+     * Retained events are re-stamped as handoff evidence for the destination screen; unrelated
+     * previous-screen events are discarded and counted. Trace origin is moved to the new generation
+     * so a late callback from the handed-off navigation can still complete on the destination screen.
      */
-    fun retainActiveOperationTraces(): Set<String> = lock.withLock {
-        screenGeneration = if (screenGeneration == Long.MAX_VALUE) 1L else screenGeneration + 1L
+    fun rotateScreen(
+        retainTraceIds: Set<String> = emptySet(),
+        handoffAttributes: Map<String, String> = emptyMap(),
+    ): Set<String> = lock.withLock {
+        val selected = retainTraceIds.asSequence()
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .take(MAX_ORIGIN_BINDINGS)
+            .toCollection(linkedSetOf())
+        val previousGeneration = screenGeneration
+        val nextGeneration = if (screenGeneration == Long.MAX_VALUE) 1L else screenGeneration + 1L
+        val retained = events.asSequence()
+            .filter { it.traceId in selected }
+            .map { event ->
+                val origin = event.attributes["diagnosticOriginScreenGeneration"]
+                    ?: event.attributes["diagnosticScreenGeneration"]
+                    ?: previousGeneration.toString()
+                event.copy(
+                    attributes = event.attributes + handoffAttributes + mapOf(
+                        "diagnosticOriginScreenGeneration" to origin,
+                        "diagnosticScreenGeneration" to nextGeneration.toString(),
+                        "diagnosticScreenDisposition" to "handoff",
+                        "diagnosticHandoffReason" to "navigation-result",
+                    ),
+                )
+            }
+            .toList()
+
+        val activeOperationIds = linkedSetOf<String>()
+        retained.forEach { event ->
+            val operationId = DiagnosticOperationContract.id(event) ?: return@forEach
+            val state = DiagnosticOperationContract.state(event)
+            val upper = event.name.uppercase(Locale.ROOT)
+            if (state in TERMINAL_STATES || state == null && isLegacyTerminal(upper)) {
+                activeOperationIds.remove(operationId)
+            } else {
+                activeOperationIds.add(operationId)
+            }
+        }
+
+        screenRotationEventsDiscarded = (events.size - retained.size).coerceAtLeast(0).toLong()
+        screenHandoffEventsRetained = retained.size.toLong()
+        screenGeneration = nextGeneration
         events.clear()
-        evictedEvents = 0
-        staleScreenEventsDropped = 0
-        emptySet()
+        retained.forEach(events::addLast)
+        selected.forEach { traceId -> rememberOrigin(traceOrigins, traceId, nextGeneration, overwrite = true) }
+        activeOperationIds.forEach { operationId ->
+            rememberOrigin(operationOrigins, operationId, nextGeneration, overwrite = true)
+        }
+        selected
     }
+
+    /** Legacy strict rotation: carry nothing. */
+    fun retainActiveOperationTraces(): Set<String> = rotateScreen(emptySet())
 
     fun clear(sourceId: String? = null) = lock.withLock {
         if (sourceId == null) {
@@ -224,6 +279,8 @@ class BoundedDiagnosticRecorder(
             traceOrigins.clear()
             evictedEvents = 0
             staleScreenEventsDropped = 0
+            screenRotationEventsDiscarded = 0
+            screenHandoffEventsRetained = 0
             screenGeneration = 0
         } else {
             val retained = events.filterNot { it.sourceId == sourceId }
@@ -339,6 +396,8 @@ data class DiagnosticEvidenceStats(
     val evictedItems: Long,
     val truncatedItems: Long,
     val staleScreenItemsDropped: Long = 0,
+    val screenRotationItemsDiscarded: Long = 0,
+    val screenHandoffItemsRetained: Long = 0,
 )
 
 class BoundedDiagnosticEvidenceRecorder(
@@ -353,6 +412,8 @@ class BoundedDiagnosticEvidenceRecorder(
     private var evictedItems: Long = 0
     private var truncatedItems: Long = 0
     private var staleScreenItemsDropped: Long = 0
+    private var screenRotationItemsDiscarded: Long = 0
+    private var screenHandoffItemsRetained: Long = 0
     @Volatile override var enabled: Boolean = false
 
     init {
@@ -393,15 +454,39 @@ class BoundedDiagnosticEvidenceRecorder(
 
     fun snapshot(): List<DiagnosticEvidence> = lock.withLock { items.toList() }
 
-    /** Legacy screen-rotation API. Passing an empty set clears all previous-screen evidence. */
-    fun retainTraces(traceIds: Set<String>) = lock.withLock {
-        val retained = items.filter { it.traceId in traceIds }
+    /**
+     * Screen rotation retains only evidence belonging to the causal traces explicitly handed off.
+     * Unlike eviction counters, rotation discard counters describe the latest screen boundary and are
+     * never silently reset by the boundary itself.
+     */
+    fun retainTraces(
+        traceIds: Set<String>,
+        targetGeneration: Long? = null,
+        handoffAttributes: Map<String, String> = emptyMap(),
+    ) = lock.withLock {
+        val selected = traceIds.asSequence().map(String::trim).filter(String::isNotBlank).toSet()
+        val retained = items.asSequence()
+            .filter { it.traceId in selected }
+            .map { item ->
+                if (targetGeneration == null) item else {
+                    val origin = item.attributes["diagnosticOriginScreenGeneration"]
+                        ?: item.attributes["diagnosticScreenGeneration"]
+                    val provenance = buildMap {
+                        if (origin != null) put("diagnosticOriginScreenGeneration", origin)
+                        put("diagnosticScreenGeneration", targetGeneration.toString())
+                        put("diagnosticScreenDisposition", "handoff")
+                        put("diagnosticHandoffReason", "navigation-result")
+                        putAll(handoffAttributes)
+                    }
+                    item.copy(attributes = item.attributes + provenance)
+                }
+            }
+            .toList()
+        screenRotationItemsDiscarded = (items.size - retained.size).coerceAtLeast(0).toLong()
+        screenHandoffItemsRetained = retained.size.toLong()
         items.clear()
         retained.forEach(items::addLast)
         retainedBytes = retained.sumOf { it.data.size.toLong() }
-        evictedItems = 0
-        truncatedItems = retained.count { it.attributes["truncated"].equals("true", ignoreCase = true) }.toLong()
-        staleScreenItemsDropped = 0
     }
 
     fun clear() = lock.withLock {
@@ -410,10 +495,20 @@ class BoundedDiagnosticEvidenceRecorder(
         evictedItems = 0
         truncatedItems = 0
         staleScreenItemsDropped = 0
+        screenRotationItemsDiscarded = 0
+        screenHandoffItemsRetained = 0
     }
 
     fun stats(): DiagnosticEvidenceStats = lock.withLock {
-        DiagnosticEvidenceStats(items.size, retainedBytes, evictedItems, truncatedItems, staleScreenItemsDropped)
+        DiagnosticEvidenceStats(
+            itemCount = items.size,
+            retainedBytes = retainedBytes,
+            evictedItems = evictedItems,
+            truncatedItems = truncatedItems,
+            staleScreenItemsDropped = staleScreenItemsDropped,
+            screenRotationItemsDiscarded = screenRotationItemsDiscarded,
+            screenHandoffItemsRetained = screenHandoffItemsRetained,
+        )
     }
 }
 

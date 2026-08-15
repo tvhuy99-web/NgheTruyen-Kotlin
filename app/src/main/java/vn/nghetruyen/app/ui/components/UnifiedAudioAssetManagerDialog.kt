@@ -48,7 +48,9 @@ import vn.nghetruyen.app.playback.ReaderPlaybackService
 
 /**
  * Canonical asset-library dialog for MUSIC, AMBIENCE and SFX.
- * The old Reader music library is the UX reference, so all three kinds expose the same controls.
+ * The old Reader music library is the UX reference, so all three kinds expose the same controls:
+ * search, add files, bulk description, clear/save/cancel, preview, normalize, edit, copy name,
+ * copy description, enable/disable, reorder and delete.
  */
 @Composable
 fun UnifiedAudioAssetManagerDialog(

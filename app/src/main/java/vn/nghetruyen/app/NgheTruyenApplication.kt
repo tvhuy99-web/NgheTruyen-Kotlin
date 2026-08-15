@@ -42,7 +42,9 @@ class NgheTruyenApplication : Application() {
                 }
             } else synchronized(chromiumRuntimeLock) {
                 chromiumRuntimes[brokers.storage] ?: run {
-                    val parityDiagnostics = VBookHttpParityDiagnosticSink(diagnostics)
+                    val parityDiagnostics = VBookHttpParityDiagnosticSink(
+                        replayAwareChromiumDiagnostics(diagnostics),
+                    )
                     val webViewCookieReader = brokers.browser as? SourceWebViewCookieReader
                     val browserSessionBridge = AndroidVBookBrowserSessionBridge(this, webViewCookieReader)
                     val browserSessionNetwork = VBookBrowserSessionNetworkBroker(
@@ -67,7 +69,7 @@ class NgheTruyenApplication : Application() {
                             browser = replay.browserBroker,
                             network = replay.networkBroker,
                         ),
-                        diagnostics = replayAwareChromiumDiagnostics(parityDiagnostics),
+                        diagnostics = parityDiagnostics,
                         webViewCookieReader = webViewCookieReader,
                     )
                     ChromiumVBookDispatcherParityRuntime(

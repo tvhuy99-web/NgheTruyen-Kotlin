@@ -10,34 +10,25 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import org.json.JSONArray
-import org.json.JSONObject
-import vn.nghetruyen.app.ai.AudioDirectionAiServices
 import vn.nghetruyen.app.ai.ChapterAiWorkflow
-import vn.nghetruyen.app.ai.XpkAmbienceSfxDirector
-import vn.nghetruyen.app.ai.XpkSceneMusicParity
+import vn.nghetruyen.app.ai.NarrationPlanCoordinator
 import vn.nghetruyen.app.audio.AmbienceSfxPlan
 import vn.nghetruyen.app.audio.AudioAssetClassifier
 import vn.nghetruyen.app.audio.AudioAssetKind
 import vn.nghetruyen.app.audio.AudioDirectionAsset
 import vn.nghetruyen.app.audio.AudioDirectionPreferences
-import vn.nghetruyen.app.core.common.AppResult
-import vn.nghetruyen.app.data.local.ChapterTransformEntity
 import vn.nghetruyen.app.data.repository.LibraryRepository
-import java.util.UUID
 
 /**
- * Sidecar audio runtime that follows the canonical PlaybackQueueStore UNIT timeline.
- *
- * It intentionally leaves existing SceneMusicController ownership untouched. The current scene-music
- * plan is supplied to AI as read-only context while this runtime owns only AMBIENCE and SFX. This
- * avoids regressions in the mature music crossfade/continuity path while adding the two new layers.
+ * Playback consumer for the unified XPK chapter plan. This class never calls an AI provider itself:
+ * when a plan is absent/stale it asks [NarrationPlanCoordinator] to prepare the whole active chapter
+ * once, then consumes the persisted AMBIENCE/SFX portion on the canonical UNIT timeline.
  */
 class AudioDirectionRuntime(
     context: Context,
     private val libraryRepository: LibraryRepository,
     private val preferences: AudioDirectionPreferences,
-    private val aiServices: AudioDirectionAiServices,
+    private val narrationPlanCoordinator: NarrationPlanCoordinator,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutex = Mutex()
@@ -46,8 +37,8 @@ class AudioDirectionRuntime(
 
     private var collectorJob: Job? = null
     private var preparedChapterId = ""
-    private var preparedSourceHash = ""
-    private var failedSourceHash = ""
+    private var preparedSignature = ""
+    private var failedSignature = ""
     private var failedAtMillis = 0L
     private var assetsById: Map<String, AudioDirectionAsset> = emptyMap()
     private var ambienceByUnitId: Map<String, String> = emptyMap()
@@ -117,140 +108,69 @@ class AudioDirectionRuntime(
         force: Boolean,
     ): Boolean {
         val rawTracks = libraryRepository.listEnabledSceneMusicTracks()
-        val allAssets = rawTracks.map(AudioAssetClassifier::toAsset).filter { it.id.isNotBlank() && it.uri.isNotBlank() }
-        val ambienceAssets = allAssets.filter { it.kind == AudioAssetKind.AMBIENCE }
-        val sfxAssets = allAssets.filter { it.kind == AudioAssetKind.SFX }
+        val allAssets = rawTracks.map(AudioAssetClassifier::toAsset)
+            .filter { it.id.isNotBlank() && it.uri.isNotBlank() }
+        val activeAudioAssets = allAssets.filter { asset ->
+            (settings.ambienceEnabled && asset.kind == AudioAssetKind.AMBIENCE) ||
+                (settings.soundEffectsEnabled && asset.kind == AudioAssetKind.SFX)
+        }
         assetsById = allAssets.associateBy(AudioDirectionAsset::id)
 
         val validUnits = snapshot.speechChunks.map { it.unitId }.filter(String::isNotBlank)
-        val sourceHash = ChapterAiWorkflow.sha256(
+        val signature = ChapterAiWorkflow.sha256(
             snapshot.paragraphs +
-                allAssets.flatMap { listOf(it.id, it.title, it.description, it.kind.name) } +
+                activeAudioAssets.flatMap { asset ->
+                    val row = rawTracks.firstOrNull { it.id == asset.id }
+                    listOf(asset.id, asset.title, asset.description, asset.kind.name, row?.updatedAt?.toString().orEmpty())
+                } +
                 listOf(
+                    "chapter=${snapshot.chapterId}",
                     "ambience=${settings.ambienceEnabled}",
                     "sfx=${settings.soundEffectsEnabled}",
                     "timeline=${validUnits.joinToString(",")}",
                 ),
         )
-        if (!force && preparedChapterId == snapshot.chapterId && preparedSourceHash == sourceHash) return true
-        if (!force && failedSourceHash == sourceHash &&
+        if (!force && preparedChapterId == snapshot.chapterId && preparedSignature == signature) return true
+        if (!force && failedSignature == signature &&
             System.currentTimeMillis() - failedAtMillis < FAILURE_RETRY_COOLDOWN_MS
-        ) {
-            return false
-        }
+        ) return false
 
-        val validAmbienceIds = ambienceAssets.map(AudioDirectionAsset::id).toSet()
-        val validSfxIds = sfxAssets.map(AudioDirectionAsset::id).toSet()
-        val cache = libraryRepository.getChapterTransform(snapshot.chapterId, KIND_AUDIO_DIRECTION)
-        if (!force && cache?.sourceSha256 == sourceHash) {
-            val cachedPlan = runCatching {
-                XpkAmbienceSfxDirector.decodePersisted(
-                    cache.transformedText,
-                    validUnits,
-                    validAmbienceIds,
-                    validSfxIds,
-                    settings.ambienceEnabled,
-                    settings.soundEffectsEnabled,
-                )
-            }.getOrNull()
-            if (cachedPlan != null) {
-                clearFailure()
-                installPlan(snapshot.chapterId, sourceHash, validUnits, cachedPlan)
-                return true
-            }
-        }
-
-        val needsAmbienceAi = settings.ambienceEnabled && ambienceAssets.isNotEmpty()
-        val needsSfxAi = settings.soundEffectsEnabled && sfxAssets.isNotEmpty()
-        if (!needsAmbienceAi && !needsSfxAi) {
-            val empty = AmbienceSfxPlan()
-            persistPlan(snapshot, sourceHash, empty, "local", "no-assets")
+        if (activeAudioAssets.isEmpty()) {
             clearFailure()
-            installPlan(snapshot.chapterId, sourceHash, validUnits, empty)
+            installPlan(snapshot.chapterId, signature, validUnits, AmbienceSfxPlan())
             return true
         }
 
-        val previous = libraryRepository.loadPreviousCachedChapter(snapshot.storyId, snapshot.chapterIndex)
-        val previousTail = previous?.let {
-            XpkSceneMusicParity.continuityTailForPrompt(
-                title = it.chapter.title,
-                body = it.paragraphs.joinToString("\n"),
-                maxUnits = 5,
-            )
-        }.orEmpty()
-        val musicContext = currentMusicScenesContext(snapshot.chapterId)
-        val prompt = XpkAmbienceSfxDirector.buildPrompt(
-            snapshot = snapshot,
-            ambienceAssets = ambienceAssets,
-            soundEffectAssets = sfxAssets,
-            ambienceEnabled = needsAmbienceAi,
-            soundEffectsEnabled = needsSfxAi,
-            previousChapterTail = previousTail,
-            musicScenesContext = musicContext,
-            incomingAmbienceId = ambienceController.activeId(),
-        )
-        return when (val response = aiServices.direct(snapshot.storyId, prompt)) {
-            is AppResult.Failure -> {
-                markFailure(sourceHash)
-                false
-            }
-            is AppResult.Success -> {
-                val parsed = runCatching {
-                    XpkAmbienceSfxDirector.parseAndValidate(
-                        response.value.content,
-                        validUnits,
-                        validAmbienceIds,
-                        validSfxIds,
-                        needsAmbienceAi,
-                        needsSfxAi,
-                    )
-                }.getOrNull()
-                if (parsed == null) {
-                    markFailure(sourceHash)
-                    false
-                } else {
-                    persistPlan(snapshot, sourceHash, parsed, response.value.provider, response.value.model)
-                    clearFailure()
-                    installPlan(snapshot.chapterId, sourceHash, validUnits, parsed)
-                    true
-                }
-            }
+        val content = libraryRepository.loadCachedChapter(snapshot.chapterId)
+        if (content == null) {
+            markFailure(signature)
+            return false
         }
-    }
 
-    private suspend fun currentMusicScenesContext(chapterId: String): String {
-        val transform = libraryRepository.getChapterTransform(chapterId, ChapterAiWorkflow.KIND_SCENE_MUSIC) ?: return "[]"
-        return runCatching {
-            val root = JSONObject(transform.transformedText)
-            (root.optJSONArray("music_scenes") ?: JSONArray()).toString()
-        }.getOrDefault("[]")
-    }
+        var plan = narrationPlanCoordinator.loadAudioDirectionPlan(content)
+        if (force || plan == null) {
+            val outcome = runCatching {
+                narrationPlanCoordinator.ensureActivePlans(content = content, force = force)
+            }.getOrNull()
+            if (outcome == null) {
+                markFailure(signature)
+                return false
+            }
+            plan = narrationPlanCoordinator.loadAudioDirectionPlan(content)
+        }
+        if (plan == null) {
+            markFailure(signature)
+            return false
+        }
 
-    private suspend fun persistPlan(
-        snapshot: PlaybackSnapshot,
-        sourceHash: String,
-        newPlan: AmbienceSfxPlan,
-        provider: String,
-        model: String,
-    ) {
-        libraryRepository.saveChapterTransform(
-            ChapterTransformEntity(
-                id = UUID.nameUUIDFromBytes("${snapshot.chapterId}\u0000$KIND_AUDIO_DIRECTION".toByteArray()).toString(),
-                storyId = snapshot.storyId,
-                chapterId = snapshot.chapterId,
-                kind = KIND_AUDIO_DIRECTION,
-                provider = provider,
-                model = model,
-                sourceSha256 = sourceHash,
-                transformedText = XpkAmbienceSfxDirector.encode(newPlan),
-                updatedAt = System.currentTimeMillis(),
-            ),
-        )
+        clearFailure()
+        installPlan(snapshot.chapterId, signature, validUnits, plan)
+        return true
     }
 
     private fun installPlan(
         chapterId: String,
-        sourceHash: String,
+        signature: String,
         validUnits: List<String>,
         newPlan: AmbienceSfxPlan,
     ) {
@@ -264,7 +184,7 @@ class AudioDirectionRuntime(
         ambienceByUnitId = ambienceMap
         sfxByUnitId = newPlan.soundEffectCues.associate { it.unitId to it.effectId }
         preparedChapterId = chapterId
-        preparedSourceHash = sourceHash
+        preparedSignature = signature
         lastTriggeredSfxKey = ""
     }
 
@@ -302,19 +222,19 @@ class AudioDirectionRuntime(
         sfxController.play(asset, settings.soundEffectsMasterVolume, settings.maxConcurrentSfx)
     }
 
-    private fun markFailure(sourceHash: String) {
-        failedSourceHash = sourceHash
+    private fun markFailure(signature: String) {
+        failedSignature = signature
         failedAtMillis = System.currentTimeMillis()
     }
 
     private fun clearFailure() {
-        failedSourceHash = ""
+        failedSignature = ""
         failedAtMillis = 0L
     }
 
     private fun clearPreparedPlan() {
         preparedChapterId = ""
-        preparedSourceHash = ""
+        preparedSignature = ""
         clearFailure()
         assetsById = emptyMap()
         ambienceByUnitId = emptyMap()
@@ -323,7 +243,7 @@ class AudioDirectionRuntime(
     }
 
     companion object {
-        const val KIND_AUDIO_DIRECTION = "AUDIO_DIRECTION"
+        const val KIND_AUDIO_DIRECTION = NarrationPlanCoordinator.KIND_AUDIO_DIRECTION
         private const val FAILURE_RETRY_COOLDOWN_MS = 60_000L
     }
 }

@@ -382,7 +382,7 @@ private fun AudioAssetManagerDialog(
         },
         confirmButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { launcher.launch(arrayOf("audio/*")) }) { Text("THÊM TỆP") }
+                TextButton(onClick = { launcher.launch(arrayOf("audio/*")) }) { Text("THÊM NHIỀU TỆP") }
                 TextButton(onClick = onDismiss) { Text("ĐÓNG") }
             }
         },

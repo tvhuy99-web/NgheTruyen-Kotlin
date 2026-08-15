@@ -2,6 +2,7 @@ package vn.nghetruyen.app.ui.components
 
 import android.content.Intent
 import android.content.SharedPreferences
+import android.media.MediaPlayer
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -42,7 +43,10 @@ import vn.nghetruyen.app.audio.SceneMusicAnalysisWorker
 import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
 
 @Composable
-fun AudioDirectionLayerSwitches(modifier: Modifier = Modifier) {
+fun AudioDirectionLayerSwitches(
+    modifier: Modifier = Modifier,
+    onManageMusic: (() -> Unit)? = null,
+) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val application = context.applicationContext as NgheTruyenApplication
     val repository = application.container.libraryRepository
@@ -87,10 +91,12 @@ fun AudioDirectionLayerSwitches(modifier: Modifier = Modifier) {
         )
 
         HorizontalDivider(Modifier.padding(vertical = 6.dp))
-        AudioManagerButton(
-            label = "QUẢN LÝ NHẠC (${tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }})",
-            onClick = { managerKind = AudioAssetKind.MUSIC },
-        )
+        if (onManageMusic != null) {
+            AudioManagerButton(
+                label = "QUẢN LÝ NHẠC (${tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }})",
+                onClick = onManageMusic,
+            )
+        }
         AudioManagerButton(
             label = "QUẢN LÝ ÂM THANH MÔI TRƯỜNG (${tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.AMBIENCE }})",
             onClick = { managerKind = AudioAssetKind.AMBIENCE },
@@ -128,6 +134,7 @@ private fun AudioAssetManagerDialog(
     val application = context.applicationContext as NgheTruyenApplication
     val repository = application.container.libraryRepository
     val scope = rememberCoroutineScope()
+    var selectedTrackId by remember(kind) { mutableStateOf<String?>(null) }
     val title = when (kind) {
         AudioAssetKind.MUSIC -> "QUẢN LÝ NHẠC"
         AudioAssetKind.AMBIENCE -> "QUẢN LÝ ÂM THANH MÔI TRƯỜNG"
@@ -159,89 +166,152 @@ private fun AudioAssetManagerDialog(
         title = { Text(title) },
         text = {
             Column(Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState())) {
-                Button(
-                    onClick = { launcher.launch(arrayOf("audio/*")) },
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("THÊM NHIỀU TỆP") }
                 if (tracks.isEmpty()) {
                     Text("Chưa có tệp nào.", modifier = Modifier.padding(vertical = 10.dp))
                 } else {
                     tracks.sortedWith(compareBy<SceneMusicTrackEntity> { it.orderIndex }.thenBy { it.title.lowercase() })
                         .forEach { track ->
-                            AudioAssetEditorRow(track = track, kind = kind)
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                TextButton(
+                                    onClick = { selectedTrackId = track.id },
+                                    modifier = Modifier.weight(1f),
+                                ) { Text(track.title) }
+                                Switch(
+                                    checked = track.enabled,
+                                    onCheckedChange = { enabled ->
+                                        scope.launch { repository.setSceneMusicTrackEnabled(track.id, enabled) }
+                                    },
+                                )
+                            }
                             HorizontalDivider()
                         }
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("ĐÓNG") } },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { launcher.launch(arrayOf("audio/*")) }) { Text("THÊM TỆP") }
+                TextButton(onClick = onDismiss) { Text("ĐÓNG") }
+            }
+        },
     )
+
+    selectedTrackId?.let { selectedId ->
+        tracks.firstOrNull { it.id == selectedId }?.let { track ->
+            AudioAssetEditorDialog(
+                track = track,
+                kind = kind,
+                onDismiss = { selectedTrackId = null },
+            )
+        }
+    }
 }
 
 @Composable
-private fun AudioAssetEditorRow(track: SceneMusicTrackEntity, kind: AudioAssetKind) {
+private fun AudioAssetEditorDialog(
+    track: SceneMusicTrackEntity,
+    kind: AudioAssetKind,
+    onDismiss: () -> Unit,
+) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val application = context.applicationContext as NgheTruyenApplication
     val repository = application.container.libraryRepository
     val scope = rememberCoroutineScope()
     var title by remember(track.id, track.updatedAt) { mutableStateOf(track.title) }
-    var description by remember(track.id, track.updatedAt) {
-        mutableStateOf(stripTypeMarker(track.tagsCsv))
+    var previewPlayer by remember(track.id) { mutableStateOf<MediaPlayer?>(null) }
+
+    fun stopPreview() {
+        runCatching { previewPlayer?.stop() }
+        runCatching { previewPlayer?.release() }
+        previewPlayer = null
     }
 
-    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = when (kind) {
-                    AudioAssetKind.MUSIC -> "MUSIC"
-                    AudioAssetKind.AMBIENCE -> "AMBIENCE"
-                    AudioAssetKind.SFX -> "SFX"
-                },
-                modifier = Modifier.weight(1f),
-            )
-            Switch(
-                checked = track.enabled,
-                onCheckedChange = { enabled ->
-                    scope.launch { repository.setSceneMusicTrackEnabled(track.id, enabled) }
-                },
-            )
-        }
-        OutlinedTextField(
-            value = title,
-            onValueChange = { title = it.take(120) },
-            label = { Text("Tên") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
-            value = description,
-            onValueChange = { description = it.take(260) },
-            label = { Text("Mô tả cho AI") },
-            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            TextButton(
-                onClick = {
-                    scope.launch {
-                        repository.updateSceneMusicTrackMetadata(
-                            track.id,
-                            title,
-                            typedDescription(kind, description),
-                        )
-                    }
-                },
-            ) { Text("LƯU") }
-            TextButton(
-                onClick = { SceneMusicAnalysisWorker.enqueue(context, track.id, normalizationTarget(kind)) },
-            ) { Text("CHUẨN HÓA") }
-            TextButton(
-                onClick = { scope.launch { repository.deleteSceneMusicTrack(track.id) } },
-            ) { Text("XÓA") }
-        }
+    DisposableEffect(track.id) {
+        onDispose { stopPreview() }
     }
+
+    AlertDialog(
+        onDismissRequest = {
+            stopPreview()
+            onDismiss()
+        },
+        title = { Text(track.title) },
+        text = {
+            OutlinedTextField(
+                value = title,
+                onValueChange = { title = it.take(120) },
+                label = { Text("Tên") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = {
+            Column(Modifier.fillMaxWidth()) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(
+                        onClick = {
+                            stopPreview()
+                            previewPlayer = runCatching { MediaPlayer.create(context, Uri.parse(track.uri)) }
+                                .getOrNull()
+                                ?.also { player ->
+                                    val volume = track.volume.coerceIn(0f, 1f)
+                                    player.setVolume(volume, volume)
+                                    player.setOnCompletionListener { completed ->
+                                        runCatching { completed.release() }
+                                        if (previewPlayer === completed) previewPlayer = null
+                                    }
+                                    player.start()
+                                }
+                        },
+                        modifier = Modifier.weight(1f),
+                    ) { Text(if (previewPlayer == null) "NGHE THỬ" else "NGHE LẠI") }
+                    TextButton(
+                        onClick = { stopPreview() },
+                        enabled = previewPlayer != null,
+                        modifier = Modifier.weight(1f),
+                    ) { Text("DỪNG") }
+                    TextButton(
+                        onClick = { SceneMusicAnalysisWorker.enqueue(context, track.id, normalizationTarget(kind)) },
+                        modifier = Modifier.weight(1f),
+                    ) { Text("CHUẨN HÓA") }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                repository.updateSceneMusicTrackMetadata(
+                                    track.id,
+                                    title.trim().ifBlank { track.title },
+                                    track.tagsCsv,
+                                )
+                            }
+                            stopPreview()
+                            onDismiss()
+                        },
+                        modifier = Modifier.weight(1f),
+                    ) { Text("LƯU") }
+                    TextButton(
+                        onClick = {
+                            stopPreview()
+                            scope.launch { repository.deleteSceneMusicTrack(track.id) }
+                            onDismiss()
+                        },
+                        modifier = Modifier.weight(1f),
+                    ) { Text("XÓA") }
+                    TextButton(
+                        onClick = {
+                            stopPreview()
+                            onDismiss()
+                        },
+                        modifier = Modifier.weight(1f),
+                    ) { Text("ĐÓNG") }
+                }
+            }
+        },
+    )
 }
 
 @Composable
@@ -283,22 +353,6 @@ private fun typeMarker(kind: AudioAssetKind): String = when (kind) {
     AudioAssetKind.AMBIENCE -> "type:ambience"
     AudioAssetKind.SFX -> "type:sfx"
 }
-
-private fun typedDescription(kind: AudioAssetKind, description: String): String {
-    val clean = stripTypeMarker(description).trim()
-    val marker = typeMarker(kind)
-    return listOf(marker, clean).filter(String::isNotBlank).joinToString("\n").take(300)
-}
-
-private fun stripTypeMarker(value: String): String = value
-    .lineSequence()
-    .filterNot { line ->
-        val lower = line.trim().lowercase()
-        lower.startsWith("type:") || lower.startsWith("type=") ||
-            lower in setOf("[music]", "[ambience]", "[environment]", "[sfx]")
-    }
-    .joinToString("\n")
-    .trim()
 
 private fun normalizationTarget(kind: AudioAssetKind): Float = when (kind) {
     AudioAssetKind.MUSIC -> -24f

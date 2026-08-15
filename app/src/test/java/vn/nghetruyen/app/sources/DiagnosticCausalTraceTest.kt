@@ -9,6 +9,7 @@ import org.junit.Test
 class DiagnosticCausalTraceTest {
     @Test
     fun causalTraceSurvivesDispatcherChange() = runBlocking {
+        // Story-source execution crosses Dispatchers.IO; the causal trace must survive that hop.
         val observed = withContext(DiagnosticCausalTrace("story-open:test")) {
             withContext(Dispatchers.IO) { currentDiagnosticCausalTraceId() }
         }

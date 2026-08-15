@@ -26,7 +26,9 @@ jobs:
           java-version: '17'
 
       - name: Apply exact causal diagnostics patch
-        run: python3 scripts/agent_causal_diagnostics_handoff.py
+        run: |
+          python3 scripts/agent_causal_diagnostics_handoff.py
+          python3 scripts/agent_causal_fix_active_origins.py
 
       - name: Verify patch shape
         run: |
@@ -34,6 +36,7 @@ jobs:
           grep -R "selective-causal-handoff" -n app/src/main source-diagnostics/src/main
           grep -R "story-open:" -n app/src/main app/src/test
           grep -R "screenRotationEventsDiscarded" -n source-diagnostics/src/main app/src/main
+          grep -R "activeOperationIds" -n source-diagnostics/src/main
 
       - name: Run focused diagnostics and source tests
         run: ./gradlew :source-diagnostics:test :source-lua:test :source-vbook:test :app:testDebugUnitTest --no-daemon
@@ -43,7 +46,7 @@ jobs:
 
       - name: Commit functional patch and remove staging files
         run: |
-          rm -f scripts/agent_causal_diagnostics_handoff.py .github/workflows/agent-causal-diagnostics-handoff.yml
+          rm -f scripts/agent_causal_diagnostics_handoff.py scripts/agent_causal_fix_active_origins.py scripts/agent_causal_trigger.txt .github/workflows/agent-causal-diagnostics-handoff.yml
           git add -A
           git diff --cached --check
           git config user.name "github-actions[bot]"

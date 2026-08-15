@@ -33,6 +33,9 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import vn.nghetruyen.app.NgheTruyenApplication
@@ -44,12 +47,8 @@ import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
 import vn.nghetruyen.app.playback.ReaderPlaybackService
 
 /**
- * One canonical asset-library dialog used by MUSIC, AMBIENCE and SFX.
- *
- * The MUSIC library in ReaderScreen is the UX reference: search, add many files, bulk description,
- * clear all, draft save/cancel, preview, normalize, edit metadata, enable/disable, reorder and delete.
- * All three asset kinds intentionally expose exactly the same controls. The only differences are the
- * dialog title, type marker and normalization target.
+ * Canonical asset-library dialog for MUSIC, AMBIENCE and SFX.
+ * The old Reader music library is the UX reference, so all three kinds expose the same controls.
  */
 @Composable
 fun UnifiedAudioAssetManagerDialog(
@@ -94,10 +93,13 @@ fun UnifiedAudioAssetManagerDialog(
 
     fun cancelLibrary() {
         stopPreview()
-        val currentIds = tracks.mapTo(linkedSetOf()) { it.id }
-        val transientIds = currentIds - baselineIds
-        scope.launch {
-            transientIds.forEach { application.container.database.sceneMusicTrackDao().delete(it) }
+        val app = application
+        val initialIds = baselineIds.toSet()
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            val dao = app.container.database.sceneMusicTrackDao()
+            dao.listAll()
+                .filter { AudioAssetClassifier.classify(it) == kind && it.id !in initialIds }
+                .forEach { dao.delete(it.id) }
         }
         onDismiss()
     }
@@ -291,7 +293,7 @@ fun UnifiedAudioAssetManagerDialog(
                         }
                         UnifiedAssetActionButton("SỬA TÊN / MÔ TẢ") {
                             editingTrack = track
-                            selectedMusicTrackId = null
+                            selectedTrackId = null
                         }
                         UnifiedAssetActionButton("SAO CHÉP TÊN") {
                             clipboard.setText(AnnotatedString(track.title))
@@ -305,7 +307,7 @@ fun UnifiedAudioAssetManagerDialog(
                             draft = draft.map {
                                 if (it.id == track.id) it.copy(enabled = !track.enabled) else it
                             }
-                            selectedMusicTrackId = null
+                            selectedTrackId = null
                         }
                         if (index > 0) {
                             UnifiedAssetActionButton("DI CHUYỂN LÊN") {
@@ -314,7 +316,7 @@ fun UnifiedAudioAssetManagerDialog(
                                 rows[index - 1] = rows[index]
                                 rows[index] = previous
                                 draft = rows.mapIndexed { position, row -> row.copy(orderIndex = position) }
-                                selectedMusicTrackId = null
+                                selectedTrackId = null
                             }
                         }
                         if (index in 0 until draft.lastIndex) {
@@ -324,15 +326,15 @@ fun UnifiedAudioAssetManagerDialog(
                                 rows[index + 1] = rows[index]
                                 rows[index] = next
                                 draft = rows.mapIndexed { position, row -> row.copy(orderIndex = position) }
-                                selectedMusicTrackId = null
+                                selectedTrackId = null
                             }
                         }
                         UnifiedAssetActionButton("XÓA KHỎI DANH SÁCH") {
                             deleteTrack = track
-                            selectedMusicTrackId = null
+                            selectedTrackId = null
                         }
                         TextButton(
-                            onClick = { selectedMusicTrackId = null },
+                            onClick = { selectedTrackId = null },
                             modifier = Modifier.align(Alignment.End),
                         ) { Text("ĐÓNG") }
                     }

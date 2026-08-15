@@ -21,21 +21,24 @@ import kotlin.random.Random
  *
  * Each logical layer owns its own loop clock. Short ambience clips are never hard-looped: a second
  * MediaPlayer is started before the current clip ends and the two overlap/crossfade. Independent
- * overlap jitter plus deterministic initial phase offsets prevent two ambience layers from exposing
- * the same repeating seam. Scene changes are reconciled by asset id, so a still-valid layer keeps
- * playing while only the changed layer fades out/in.
+ * overlap jitter plus phase offsets prevent two ambience layers from exposing the same repeating
+ * seam. Explicitly numbered variants (forest_01/forest_02/...) are shuffled at loop boundaries and
+ * the current variant is excluded whenever another candidate exists. Scene changes are reconciled
+ * by logical asset id, so a still-valid layer keeps playing while only the changed layer fades.
  */
 class SceneAmbienceController(context: Context) {
     private val appContext = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private data class Slot(
+        val asset: AudioDirectionAsset,
         val player: MediaPlayer,
         var fade: Float,
     )
 
     private data class Layer(
-        var asset: AudioDirectionAsset,
+        var anchorAsset: AudioDirectionAsset,
+        var variants: List<AudioDirectionAsset>,
         var masterVolume: Float,
         var mixScale: Float,
         var current: Slot,
@@ -45,9 +48,12 @@ class SceneAmbienceController(context: Context) {
     private val layers = linkedMapOf<String, Layer>()
     @Volatile private var activeIdsSnapshot: List<String> = emptyList()
     @Volatile private var pausedSnapshot: Boolean = false
+    @Volatile private var sfxDuckMultiplier: Float = 1f
+    private var sfxDuckJob: Job? = null
 
     fun play(
         assets: List<AudioDirectionAsset>,
+        variantsByAssetId: Map<String, List<AudioDirectionAsset>> = emptyMap(),
         masterVolume: Float,
         crossfadeMillis: Int,
         overlapMinMillis: Int,
@@ -66,11 +72,23 @@ class SceneAmbienceController(context: Context) {
         scope.launch {
             reconcile(
                 requested = requested,
+                variantsByAssetId = variantsByAssetId,
                 masterVolume = masterVolume.coerceIn(0f, 1f),
                 crossfadeMillis = safeCrossfade,
                 overlapMinMillis = safeOverlapMin,
                 overlapMaxMillis = safeOverlapMax,
             )
+        }
+    }
+
+    /** Brief priority duck for an AI-selected one-shot SFX. */
+    fun duckForImportantSfx(factor: Float = SFX_DUCK_FACTOR, holdMillis: Long = SFX_DUCK_HOLD_MS) {
+        val target = factor.coerceIn(0.45f, 1f)
+        sfxDuckJob?.cancel()
+        sfxDuckJob = scope.launch {
+            animateBusDuck(target, SFX_DUCK_ATTACK_MS)
+            delay(holdMillis.coerceIn(120L, 3_000L))
+            animateBusDuck(1f, SFX_DUCK_RELEASE_MS)
         }
     }
 
@@ -101,6 +119,9 @@ class SceneAmbienceController(context: Context) {
     fun stop() {
         pausedSnapshot = false
         activeIdsSnapshot = emptyList()
+        sfxDuckJob?.cancel()
+        sfxDuckJob = null
+        sfxDuckMultiplier = 1f
         scope.launch {
             val current = layers.values.toList()
             layers.clear()
@@ -114,6 +135,7 @@ class SceneAmbienceController(context: Context) {
 
     private suspend fun reconcile(
         requested: List<AudioDirectionAsset>,
+        variantsByAssetId: Map<String, List<AudioDirectionAsset>>,
         masterVolume: Float,
         crossfadeMillis: Int,
         overlapMinMillis: Int,
@@ -127,16 +149,18 @@ class SceneAmbienceController(context: Context) {
         layers.keys.toList().forEach { id ->
             val current = layers[id] ?: return@forEach
             val replacement = requestedById[id]
-            if (replacement == null || replacement.uri != current.asset.uri) {
+            if (replacement == null || replacement.uri != current.anchorAsset.uri) {
                 layers.remove(id)
                 fadeOutAndRelease(current, crossfadeMillis)
             }
         }
 
         requested.forEachIndexed { index, asset ->
+            val candidates = normalizedVariants(asset, variantsByAssetId[asset.id].orEmpty())
             val existing = layers[asset.id]
             if (existing != null) {
-                existing.asset = asset
+                existing.anchorAsset = asset
+                existing.variants = candidates
                 existing.masterVolume = masterVolume
                 existing.mixScale = mixScale
                 applyLevel(existing, existing.current)
@@ -147,14 +171,17 @@ class SceneAmbienceController(context: Context) {
                 }
                 return@forEachIndexed
             }
-            val player = createPlayer(asset) ?: return@forEachIndexed
+
+            val firstAsset = chooseInitialVariant(asset, candidates)
+            val player = createPlayer(firstAsset) ?: return@forEachIndexed
             val phase = initialPhaseMillis(player.duration, asset.id, index)
             if (phase > 0) runCatching { player.seekTo(phase) }
             val layer = Layer(
-                asset = asset,
+                anchorAsset = asset,
+                variants = candidates,
                 masterVolume = masterVolume,
                 mixScale = mixScale,
-                current = Slot(player, fade = 0f),
+                current = Slot(firstAsset, player, fade = 0f),
             )
             layers[asset.id] = layer
             applyLevel(layer, layer.current)
@@ -171,7 +198,7 @@ class SceneAmbienceController(context: Context) {
 
     private fun scheduleLoop(layer: Layer, overlapMinMillis: Int, overlapMaxMillis: Int) {
         layer.loopJob?.cancel()
-        if (pausedSnapshot || layers[layer.asset.id] !== layer) return
+        if (pausedSnapshot || layers[layer.anchorAsset.id] !== layer) return
         val current = layer.current
         val duration = runCatching { current.player.duration }.getOrDefault(0)
         val position = runCatching { current.player.currentPosition }.getOrDefault(0)
@@ -185,14 +212,15 @@ class SceneAmbienceController(context: Context) {
 
         layer.loopJob = scope.launch {
             delay(waitMillis.toLong())
-            if (pausedSnapshot || layers[layer.asset.id] !== layer || layer.current !== current) return@launch
-            val nextPlayer = createPlayer(layer.asset) ?: run {
+            if (pausedSnapshot || layers[layer.anchorAsset.id] !== layer || layer.current !== current) return@launch
+            val nextAsset = chooseNextVariant(layer.variants, current.asset.id)
+            val nextPlayer = createPlayer(nextAsset) ?: run {
                 scheduleLoop(layer, overlapMinMillis, overlapMaxMillis)
                 return@launch
             }
             val jitter = loopStartJitterMillis(nextPlayer.duration)
             if (jitter > 0) runCatching { nextPlayer.seekTo(jitter) }
-            val next = Slot(nextPlayer, fade = 0f)
+            val next = Slot(nextAsset, nextPlayer, fade = 0f)
             applyLevel(layer, next)
             val started = runCatching { nextPlayer.start() }.isSuccess
             if (!started) {
@@ -202,7 +230,7 @@ class SceneAmbienceController(context: Context) {
             }
             try {
                 crossfadeSlots(layer, current, next, overlap)
-                if (layers[layer.asset.id] !== layer) {
+                if (layers[layer.anchorAsset.id] !== layer) {
                     releasePlayer(nextPlayer)
                     return@launch
                 }
@@ -220,7 +248,7 @@ class SceneAmbienceController(context: Context) {
     private suspend fun crossfadeSlots(layer: Layer, old: Slot, next: Slot, durationMillis: Int) {
         val steps = (durationMillis / 40).coerceIn(5, 75)
         repeat(steps + 1) { index ->
-            if (layers[layer.asset.id] !== layer || pausedSnapshot) return
+            if (layers[layer.anchorAsset.id] !== layer || pausedSnapshot) return
             val fraction = index.toFloat() / steps.toFloat()
             old.fade = 1f - fraction
             next.fade = fraction
@@ -239,7 +267,7 @@ class SceneAmbienceController(context: Context) {
     ) {
         val steps = (durationMillis / 40).coerceIn(5, 75)
         repeat(steps + 1) { index ->
-            if (layers[layer.asset.id] !== layer && to > from) return
+            if (layers[layer.anchorAsset.id] !== layer && to > from) return
             val fraction = index.toFloat() / steps.toFloat()
             slot.fade = from + (to - from) * fraction
             applyLevel(layer, slot)
@@ -263,6 +291,26 @@ class SceneAmbienceController(context: Context) {
         }
     }
 
+    private suspend fun animateBusDuck(target: Float, durationMillis: Int) {
+        val start = sfxDuckMultiplier
+        if (durationMillis <= 0) {
+            sfxDuckMultiplier = target
+            applyAllLevels()
+            return
+        }
+        val steps = (durationMillis / 30).coerceIn(3, 30)
+        repeat(steps + 1) { index ->
+            val fraction = index.toFloat() / steps.toFloat()
+            sfxDuckMultiplier = start + (target - start) * fraction
+            applyAllLevels()
+            if (index < steps) delay((durationMillis / steps).coerceAtLeast(1).toLong())
+        }
+    }
+
+    private fun applyAllLevels() {
+        layers.values.forEach { layer -> applyLevel(layer, layer.current) }
+    }
+
     private fun createPlayer(asset: AudioDirectionAsset): MediaPlayer? = runCatching {
         MediaPlayer().apply {
             setAudioAttributes(
@@ -278,8 +326,30 @@ class SceneAmbienceController(context: Context) {
     }.getOrNull()
 
     private fun applyLevel(layer: Layer, slot: Slot) {
-        val level = effectiveVolume(layer.asset, layer.masterVolume) * layer.mixScale * slot.fade.coerceIn(0f, 1f)
-        runCatching { slot.player.setVolume(level, level) }
+        val level = effectiveVolume(slot.asset, layer.masterVolume) *
+            layer.mixScale *
+            sfxDuckMultiplier *
+            slot.fade.coerceIn(0f, 1f)
+        runCatching { slot.player.setVolume(level.coerceIn(0f, 1f), level.coerceIn(0f, 1f)) }
+    }
+
+    private fun normalizedVariants(
+        anchor: AudioDirectionAsset,
+        candidates: List<AudioDirectionAsset>,
+    ): List<AudioDirectionAsset> = (listOf(anchor) + candidates)
+        .filter { it.kind == anchor.kind && it.uri.isNotBlank() }
+        .distinctBy(AudioDirectionAsset::id)
+        .take(MAX_VARIANTS_PER_FAMILY)
+
+    private fun chooseInitialVariant(anchor: AudioDirectionAsset, variants: List<AudioDirectionAsset>): AudioDirectionAsset {
+        if (variants.size <= 1) return anchor
+        return variants.random()
+    }
+
+    private fun chooseNextVariant(variants: List<AudioDirectionAsset>, currentId: String): AudioDirectionAsset {
+        if (variants.isEmpty()) error("Ambience variant list cannot be empty")
+        val alternatives = variants.filterNot { it.id == currentId }
+        return if (alternatives.isEmpty()) variants.first() else alternatives.random()
     }
 
     private fun releaseLayer(layer: Layer) {
@@ -316,7 +386,12 @@ class SceneAmbienceController(context: Context) {
         private const val VOICE_PRIORITY_DUCK = 0.58f
         private const val MAX_AMBIENCE_VOLUME = 0.34f
         private const val DUAL_LAYER_SCALE = 0.78f
+        private const val MAX_VARIANTS_PER_FAMILY = 12
         private const val DEFAULT_LOOP_OVERLAP_MIN_MS = 900
         private const val DEFAULT_LOOP_OVERLAP_MAX_MS = 2_200
+        private const val SFX_DUCK_FACTOR = 0.72f
+        private const val SFX_DUCK_HOLD_MS = 650L
+        private const val SFX_DUCK_ATTACK_MS = 120
+        private const val SFX_DUCK_RELEASE_MS = 360
     }
 }

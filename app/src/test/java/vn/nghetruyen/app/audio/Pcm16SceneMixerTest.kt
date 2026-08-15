@@ -27,18 +27,56 @@ class Pcm16SceneMixerTest {
             val segment = WaveFileAssembler.inspect(output)
             RandomAccessFile(output, "r").use { input ->
                 input.seek(segment.dataOffset)
-                val first = ((input.read() and 0xff) or ((input.read() and 0xff) shl 8)).toShort().toInt()
+                val first = readSample(input)
                 assertEquals(1_000, first)
 
                 val middleFrame = 4_096L
                 input.seek(segment.dataOffset + middleFrame * segment.blockAlign)
-                val middle = ((input.read() and 0xff) or ((input.read() and 0xff) shl 8)).toShort().toInt()
+                val middle = readSample(input)
                 assertEquals(1_500, middle)
             }
         } finally {
             root.deleteRecursively()
         }
     }
+
+    @Test
+    fun oneShotSfxDucksOnlyLoopingBackgroundNotNarration() {
+        val root = createTempDirectory("scene-sfx-duck-test-").toFile()
+        try {
+            val voice = File(root, "voice.wav")
+            val ambience = File(root, "ambience.wav")
+            val sfx = File(root, "sfx.wav")
+            val output = File(root, "mixed.wav")
+            writeConstantWave(voice, 1_000, 8_192)
+            writeConstantWave(ambience, 2_000, 256)
+            writeConstantWave(sfx, 0, 256)
+
+            Pcm16SceneMixer.mix(
+                voice,
+                listOf(
+                    SceneMixLayer(ambience, 0, 8_192, volume = 0.25f, looping = true),
+                    SceneMixLayer(sfx, 4_096, 8_192, volume = 1f, fadeFrames = 0, looping = false),
+                ),
+                output,
+            )
+
+            val segment = WaveFileAssembler.inspect(output)
+            RandomAccessFile(output, "r").use { input ->
+                input.seek(segment.dataOffset + 3_000L * segment.blockAlign)
+                assertEquals(1_500, readSample(input))
+
+                input.seek(segment.dataOffset + 4_096L * segment.blockAlign)
+                // Voice stays at 1000; only the 500-point ambience contribution is ducked to 72%.
+                assertEquals(1_360, readSample(input))
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    private fun readSample(input: RandomAccessFile): Int =
+        ((input.read() and 0xff) or ((input.read() and 0xff) shl 8)).toShort().toInt()
 
     private fun writeConstantWave(file: File, sample: Int, frames: Int) {
         FileOutputStream(file).use { output ->

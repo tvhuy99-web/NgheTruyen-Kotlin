@@ -997,7 +997,7 @@ private fun extensionSubsequenceScore(needle: String, haystack: String): Int? {
     var firstMatch = -1
     var lastMatch = -1
     haystack.forEachIndexed { index, char ->
-        if (needleIndex < needle.length && char == haystack[index]) {
+        if (needleIndex < needle.length && char == needle[needleIndex]) {
             if (firstMatch < 0) firstMatch = index
             lastMatch = index
             needleIndex += 1
@@ -1075,6 +1075,8 @@ private fun InstalledSourcesSection(
     var logPackId by remember { mutableStateOf<String?>(null) }
     var installedQuery by remember { mutableStateOf("") }
 
+    // Kept in the signature because the runtime still supports them, but the primary action
+    // surface intentionally follows the Lua menu and therefore does not expose these here.
     @Suppress("UNUSED_VARIABLE")
     val retainedRuntimeActions = listOf(onRollback, onLogin)
 
@@ -1121,6 +1123,7 @@ private fun InstalledSourcesSection(
             )
         }
     }
+
 
     selectedPackId?.let { selectedId ->
         state.sourcePacks.firstOrNull { it.id == selectedId }?.let { pack ->
@@ -1529,6 +1532,7 @@ private fun SourceRepositorySection(
             }
         }
     }
+
 
     if (selectedRepository != null && selectedPackageId != null) {
         val item = state.sourceRepositoryPackages.firstOrNull {

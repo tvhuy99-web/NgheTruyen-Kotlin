@@ -32,6 +32,7 @@ data class SceneMixLayer(
 object Pcm16SceneMixer {
     private const val BLOCK_FRAMES = 2_048
     private const val MAX_LAYER_BYTES = 64L * 1024 * 1024
+    private const val MIN_LOOPING_FADE_MILLIS = 1_200L
 
     fun mix(narrationWav: File, layers: List<SceneMixLayer>, destination: File) {
         if (layers.isEmpty()) {
@@ -48,7 +49,7 @@ object Pcm16SceneMixer {
                 throw IOException("Lớp âm thanh phải cùng sample rate và số kênh với lời đọc.")
             }
             if (segment.dataLength > MAX_LAYER_BYTES) throw IOException("Một lớp âm thanh vượt giới hạn 64 MiB PCM.")
-            PreparedLayer(layer, readPcm(segment), narration.blockAlign)
+            PreparedLayer(layer, readPcm(segment), narration.blockAlign, narration.sampleRate.toInt())
         }
         val tempData = File(destination.parentFile ?: narrationWav.parentFile, "${destination.name}.pcm.tmp")
         try {
@@ -89,10 +90,18 @@ object Pcm16SceneMixer {
         }
     }
 
-    private data class PreparedLayer(val layer: SceneMixLayer, val pcm: ByteArray, val blockAlign: Int) {
+    private data class PreparedLayer(
+        val layer: SceneMixLayer,
+        val pcm: ByteArray,
+        val blockAlign: Int,
+        val sampleRate: Int,
+    ) {
         private val totalFrames = pcm.size / blockAlign
+        private val boundaryFadeFrames = if (layer.looping) {
+            maxOf(layer.fadeFrames, (sampleRate * MIN_LOOPING_FADE_MILLIS / 1_000L).toInt())
+        } else layer.fadeFrames
         private val loopBlendFrames = if (layer.looping && totalFrames > 8) {
-            layer.fadeFrames
+            boundaryFadeFrames
                 .coerceAtLeast(1)
                 .coerceAtMost((totalFrames / 4).coerceAtLeast(1))
         } else 0
@@ -112,7 +121,7 @@ object Pcm16SceneMixer {
             } else {
                 min(layer.endFrameExclusive - frame, totalFrames.toLong() - local)
             }
-            val gain = layer.volume.coerceIn(0f, 1f) * fadeGain(local, audibleRemaining, layer.fadeFrames)
+            val gain = layer.volume.coerceIn(0f, 1f) * fadeGain(local, audibleRemaining, boundaryFadeFrames)
             if (gain <= 0f) return 0
 
             val rawSample = if (!layer.looping) {

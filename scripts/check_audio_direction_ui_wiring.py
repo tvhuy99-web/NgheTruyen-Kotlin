@@ -20,72 +20,76 @@ def section(text: str, start: str, end: str) -> str:
     return text[start_index:end_index]
 
 
-# Personal > Music remains the legacy/manual surface and must not duplicate Reader AI controls.
 music_page = section(
     personal,
     '"settings_music" -> PersonalSubPage("NHẠC NỀN & NHẠC CẢNH")',
     '"settings_following" -> PersonalSubPage',
 )
-assert "BackgroundMusicCard(" in music_page, "music settings must keep local background music controls"
-assert "SceneMusicLibraryCard(" in music_page, "music settings must keep the existing scene-music library"
-assert "AudioDirectionLayerSwitches(" not in music_page, "AI sound controls must not duplicate on settings_music"
+assert "BackgroundMusicCard(" in music_page
+assert "SceneMusicLibraryCard(" in music_page
+assert "AudioDirectionLayerSwitches(" not in music_page
 
 playback_card = section(
     personal,
     "private fun PlaybackAutomationCard(",
     "private fun ReferenceFloatSettingsSlider(",
 )
-assert "AudioDirectionLayerSwitches(" not in playback_card, "AI sound asset managers must not live in playback automation"
-assert 'SettingSwitch("Tự lập nhạc cảnh"' not in playback_card, "Music AI switch must not be duplicated in playback automation"
+assert "AudioDirectionLayerSwitches(" not in playback_card
+assert 'SettingSwitch("Tự lập nhạc cảnh"' not in playback_card
 
-# Reader options expose one Background Music entry. The compact controls live inside that dialog.
 reader_options = section(
     reader,
     "    if (showReaderOptions) {",
     "    if (showReaderModeDialog) {",
 )
-assert 'title = { Text("TÙY CHỌN ĐỌC") }' in reader_options, "reader options dialog must keep its existing title"
-assert 'ReaderMenuButton("NHẠC NỀN")' in reader_options, "background-music entry must remain in reader options"
-assert "AudioDirectionLayerSwitches(" not in reader_options, "AI sound controls must not spill into reader options"
+assert 'title = { Text("TÙY CHỌN ĐỌC") }' in reader_options
+assert 'ReaderMenuButton("NHẠC NỀN")' in reader_options
+assert "AudioDirectionLayerSwitches(" not in reader_options
 
 music_dialog = section(
     reader,
     "    if (showMusicDialog) {",
     "    if (showMusicNormalizationProgress) {",
 )
-assert 'Text("Bật nhạc nền", Modifier.weight(1f))' in music_dialog, "background-music master switch must exist"
-assert "AudioDirectionLayerSwitches(" in music_dialog, "AI sound controls must render inside Background Music"
-assert music_dialog.find('Text("Bật nhạc nền"') < music_dialog.find("AudioDirectionLayerSwitches("), "master background-music switch must be first"
-assert 'Text("Chế độ phát"' in music_dialog, "compact playback mode selector must remain"
-assert 'ReaderFloatSlider("Giảm nhạc khi giọng đọc phát"' in music_dialog, "voice ducking control must remain"
-assert 'ReaderMenuButton("QUẢN LÝ DANH SÁCH NHẠC")' in music_dialog, "music list manager must remain"
+assert 'Text("Bật nhạc nền", Modifier.weight(1f))' in music_dialog
+assert "AudioDirectionLayerSwitches(" in music_dialog
+assert music_dialog.find('Text("Bật nhạc nền"') < music_dialog.find("AudioDirectionLayerSwitches(")
+assert 'Text("Chế độ phát"' in music_dialog
+assert 'ReaderFloatSlider("Giảm nhạc khi giọng đọc phát"' in music_dialog
+assert 'ReaderMenuButton("QUẢN LÝ DANH SÁCH NHẠC")' in music_dialog
 
 for removed in (
     "CÂN BẰNG ÂM THANH",
     "Mỗi bài nhạc được đo một lần",
-    'ReaderFloatSlider("Mức chuẩn hóa"',
-    'ReaderIntSlider("Attack"',
-    'ReaderIntSlider("Release"',
-    'ReaderMenuButton("CHUẨN HÓA TOÀN BỘ KHO NHẠC")',
     "Tên và mô tả của các bài đang bật được gửi cho AI",
 ):
-    assert removed not in music_dialog, f"obsolete background-music item still visible: {removed}"
+    assert removed not in music_dialog, f"obsolete background-music explanation still visible: {removed}"
 
-# Music AI remains independent from the manual backgroundMusicEnabled switch.
-assert "music = appSettings.autoSceneMusicEnabled," in coordinator, "Music AI must follow its own switch"
-assert "backgroundMusicEnabled && appSettings.autoSceneMusicEnabled" not in coordinator, "Music AI must not depend on manual background music"
+assert "music = appSettings.autoSceneMusicEnabled," in coordinator
+assert "backgroundMusicEnabled && appSettings.autoSceneMusicEnabled" not in coordinator
 
 required_component_tokens = (
     'title = "Nhạc cảnh AI"',
     'title = "Âm thanh môi trường AI"',
     'title = "Hiệu ứng âm thanh AI"',
+    'title = "Mức chuẩn hóa"',
+    'title = "Attack"',
+    'title = "Release"',
+    'label = "CHUẨN HÓA TOÀN BỘ KHO NHẠC"',
     'label = "QUẢN LÝ NHẠC',
     'label = "QUẢN LÝ ÂM THANH MÔI TRƯỜNG',
     'label = "QUẢN LÝ HIỆU ỨNG ÂM THANH',
+    'Text("THÊM TỆP")',
+    'Text("NGHE THỬ")',
+    'Text("DỪNG")',
+    'Text("CHUẨN HÓA")',
+    'Text("LƯU")',
+    'Text("XÓA")',
+    'Text("ĐÓNG")',
     "ActivityResultContracts.OpenMultipleDocuments()",
 )
 for token in required_component_tokens:
-    assert token in component, f"missing compact AI audio UI token: {token}"
+    assert token in component, f"missing compact audio UI token: {token}"
 
 for removed in (
     'text = "ÂM THANH AI"',
@@ -95,16 +99,28 @@ for removed in (
     "Ambience là nền môi trường kéo dài",
     "SFX là âm one-shot",
     "Mỗi trình quản lý cho phép chọn nhiều tệp",
+    "Mô tả cho AI",
     "description: String",
 ):
-    assert removed not in component, f"obsolete AI audio description still visible: {removed}"
+    assert removed not in component, f"obsolete audio description still visible: {removed}"
 
-assert "bringIntoViewRequester" not in component, "embedded component must not auto-scroll another settings page"
-assert "BuildConfig.DIAGNOSTIC_BUILD_ID" not in component, "embedded component must not expose debug build markers"
-assert '<string name="app_name">Nghe Truyện</string>' in debug_strings, "debug APK must keep the product name Nghe Truyện"
-assert "AI Sound Director" not in debug_strings, "feature labels must not be appended to the app name"
+music_library = section(reader, "    if (showMusicLibrary) {", "    selectedMusicTrackId?.let")
+for removed in (
+    "Ước tính khi gửi danh mục AI",
+    "Đã có mô tả",
+    'Text("DÁN MÔ TẢ")',
+    'Text("SAO CHÉP MÔ TẢ")',
+):
+    assert removed not in music_library, f"obsolete music-list description/control remains: {removed}"
+assert 'Text("THÊM BÀI")' in music_library
+assert 'Text("LƯU DANH SÁCH")' in music_library
+assert 'Text("HỦY")' in music_library
 
-# Instrumentation keeps guarding Personal > Music so the Reader AI block cannot be duplicated there.
+assert "bringIntoViewRequester" not in component
+assert "BuildConfig.DIAGNOSTIC_BUILD_ID" not in component
+assert '<string name="app_name">Nghe Truyện</string>' in debug_strings
+assert "AI Sound Director" not in debug_strings
+
 for token in (
     'onNodeWithText("CÁ NHÂN"',
     'onNodeWithText("Cài đặt"',

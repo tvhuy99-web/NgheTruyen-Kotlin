@@ -48,25 +48,27 @@ class Pcm16SceneMixerTest {
             val ambience = File(root, "ambience.wav")
             val sfx = File(root, "sfx.wav")
             val output = File(root, "mixed.wav")
-            writeConstantWave(voice, 1_000, 8_192)
-            writeConstantWave(ambience, 2_000, 256)
-            writeConstantWave(sfx, 0, 256)
+            val narrationFrames = 88_200
+            val sfxStart = 60_000L
+            writeConstantWave(voice, 1_000, narrationFrames)
+            writeConstantWave(ambience, 2_000, 512)
+            writeConstantWave(sfx, 0, 512)
 
             Pcm16SceneMixer.mix(
                 voice,
                 listOf(
-                    SceneMixLayer(ambience, 0, 8_192, volume = 0.25f, looping = true),
-                    SceneMixLayer(sfx, 4_096, 8_192, volume = 1f, fadeFrames = 0, looping = false),
+                    SceneMixLayer(ambience, 0, narrationFrames.toLong(), volume = 0.25f, looping = true),
+                    SceneMixLayer(sfx, sfxStart, narrationFrames.toLong(), volume = 1f, fadeFrames = 0, looping = false),
                 ),
                 output,
             )
 
             val segment = WaveFileAssembler.inspect(output)
             RandomAccessFile(output, "r").use { input ->
-                input.seek(segment.dataOffset + 3_000L * segment.blockAlign)
+                input.seek(segment.dataOffset + 40_000L * segment.blockAlign)
                 assertEquals(1_500, readSample(input))
 
-                input.seek(segment.dataOffset + 4_096L * segment.blockAlign)
+                input.seek(segment.dataOffset + sfxStart * segment.blockAlign)
                 // Voice stays at 1000; only the 500-point ambience contribution is ducked to 72%.
                 assertEquals(1_360, readSample(input))
             }

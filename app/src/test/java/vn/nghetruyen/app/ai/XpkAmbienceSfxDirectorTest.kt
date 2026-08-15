@@ -42,6 +42,29 @@ class XpkAmbienceSfxDirectorTest {
     }
 
     @Test
+    fun acceptsTwoCompatibleLogicalAmbienceLayersOnSameUnits() {
+        val plan = XpkAmbienceSfxDirector.parseAndValidate(
+            raw = """
+                {
+                  "ambience_scenes": [
+                    {"start_id":"P0001-U01","end_id":"P0004-U01","ambience_id":"rain"},
+                    {"start_id":"P0001-U01","end_id":"P0004-U01","ambience_id":"forest"}
+                  ],
+                  "sfx_cues": []
+                }
+            """.trimIndent(),
+            validUnitIds = units,
+            validAmbienceIds = setOf("rain", "forest"),
+            validSfxIds = emptySet(),
+            ambienceEnabled = true,
+            soundEffectsEnabled = false,
+        )
+
+        assertEquals(2, plan.ambienceScenes.size)
+        assertEquals(setOf("rain", "forest"), plan.ambienceScenes.map { it.ambienceId }.toSet())
+    }
+
+    @Test
     fun mergesAdjacentSameAmbience() {
         val plan = XpkAmbienceSfxDirector.parseAndValidate(
             raw = """
@@ -69,7 +92,7 @@ class XpkAmbienceSfxDirectorTest {
     fun rejectsCuesForDisabledLayers() {
         assertFails {
             XpkAmbienceSfxDirector.parseAndValidate(
-                raw = """{"ambience_scenes":[{"start_id":"P0001-U01","end_id":"P0001-U01","ambience_id":"rain"}],"sfx_cues":[]}""",
+                raw = """{"ambience_scenes":[{"start_id":"P0001-U01","end_id":"P0002-U01","ambience_id":"rain"}],"sfx_cues":[]}""",
                 validUnitIds = units,
                 validAmbienceIds = setOf("rain"),
                 validSfxIds = emptySet(),
@@ -90,7 +113,7 @@ class XpkAmbienceSfxDirectorTest {
     }
 
     @Test
-    fun rejectsUnknownIdsOverlapAndDuplicateSfxUnit() {
+    fun rejectsUnknownIdsThirdAmbienceLayerAndDuplicateSfxUnit() {
         assertFails {
             XpkAmbienceSfxDirector.parseAndValidate(
                 raw = """{"ambience_scenes":[],"sfx_cues":[{"unit_id":"P0002-U01","effect_id":"missing"}]}""",
@@ -105,12 +128,13 @@ class XpkAmbienceSfxDirectorTest {
             XpkAmbienceSfxDirector.parseAndValidate(
                 raw = """
                     {"ambience_scenes":[
-                      {"start_id":"P0001-U01","end_id":"P0003-U01","ambience_id":"rain"},
-                      {"start_id":"P0003-U01","end_id":"P0004-U01","ambience_id":"forest"}
+                      {"start_id":"P0001-U01","end_id":"P0004-U01","ambience_id":"rain"},
+                      {"start_id":"P0001-U01","end_id":"P0004-U01","ambience_id":"forest"},
+                      {"start_id":"P0001-U01","end_id":"P0004-U01","ambience_id":"wind"}
                     ],"sfx_cues":[]}
                 """.trimIndent(),
                 validUnitIds = units,
-                validAmbienceIds = setOf("rain", "forest"),
+                validAmbienceIds = setOf("rain", "forest", "wind"),
                 validSfxIds = emptySet(),
                 ambienceEnabled = true,
                 soundEffectsEnabled = false,
@@ -129,6 +153,20 @@ class XpkAmbienceSfxDirectorTest {
                 validSfxIds = setOf("door", "thunder"),
                 ambienceEnabled = false,
                 soundEffectsEnabled = true,
+            )
+        }
+    }
+
+    @Test
+    fun rejectsOneUnitAmbienceFlicker() {
+        assertFails {
+            XpkAmbienceSfxDirector.parseAndValidate(
+                raw = """{"ambience_scenes":[{"start_id":"P0002-U01","end_id":"P0002-U01","ambience_id":"rain"}],"sfx_cues":[]}""",
+                validUnitIds = units,
+                validAmbienceIds = setOf("rain"),
+                validSfxIds = emptySet(),
+                ambienceEnabled = true,
+                soundEffectsEnabled = false,
             )
         }
     }

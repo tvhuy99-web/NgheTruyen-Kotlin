@@ -19,7 +19,11 @@ class AudioDirectionPreferences(context: Context) {
         val soundEffectsEnabled: Boolean = false,
         val ambienceMasterVolume: Float = DEFAULT_AMBIENCE_VOLUME,
         val soundEffectsMasterVolume: Float = DEFAULT_SFX_VOLUME,
+        val ambienceCrossfadeMillis: Int = DEFAULT_AMBIENCE_CROSSFADE_MS,
+        val ambienceLoopOverlapMinMillis: Int = DEFAULT_AMBIENCE_LOOP_OVERLAP_MIN_MS,
+        val ambienceLoopOverlapMaxMillis: Int = DEFAULT_AMBIENCE_LOOP_OVERLAP_MAX_MS,
         val minimumSfxGapMillis: Long = DEFAULT_MIN_SFX_GAP_MS,
+        val sameEffectCooldownMillis: Long = DEFAULT_SAME_EFFECT_COOLDOWN_MS,
         val maxConcurrentSfx: Int = DEFAULT_MAX_CONCURRENT_SFX,
     )
 
@@ -33,6 +37,10 @@ class AudioDirectionPreferences(context: Context) {
     }
 
     fun snapshot(): Snapshot {
+        val overlapMin = preferences.getInt(KEY_AMBIENCE_LOOP_OVERLAP_MIN_MS, DEFAULT_AMBIENCE_LOOP_OVERLAP_MIN_MS)
+            .coerceIn(350, 3_000)
+        val overlapMax = preferences.getInt(KEY_AMBIENCE_LOOP_OVERLAP_MAX_MS, DEFAULT_AMBIENCE_LOOP_OVERLAP_MAX_MS)
+            .coerceIn(overlapMin, 4_000)
         val value = Snapshot(
             ambienceEnabled = preferences.getBoolean(KEY_AMBIENCE_ENABLED, false),
             soundEffectsEnabled = preferences.getBoolean(KEY_SFX_ENABLED, false),
@@ -40,8 +48,14 @@ class AudioDirectionPreferences(context: Context) {
                 .coerceIn(0f, 1f),
             soundEffectsMasterVolume = preferences.getFloat(KEY_SFX_VOLUME, DEFAULT_SFX_VOLUME)
                 .coerceIn(0f, 1f),
+            ambienceCrossfadeMillis = preferences.getInt(KEY_AMBIENCE_CROSSFADE_MS, DEFAULT_AMBIENCE_CROSSFADE_MS)
+                .coerceIn(500, 3_000),
+            ambienceLoopOverlapMinMillis = overlapMin,
+            ambienceLoopOverlapMaxMillis = overlapMax,
             minimumSfxGapMillis = preferences.getLong(KEY_MIN_SFX_GAP_MS, DEFAULT_MIN_SFX_GAP_MS)
                 .coerceIn(500L, 15_000L),
+            sameEffectCooldownMillis = preferences.getLong(KEY_SAME_EFFECT_COOLDOWN_MS, DEFAULT_SAME_EFFECT_COOLDOWN_MS)
+                .coerceIn(1_000L, 30_000L),
             maxConcurrentSfx = preferences.getInt(KEY_MAX_CONCURRENT_SFX, DEFAULT_MAX_CONCURRENT_SFX)
                 .coerceIn(1, 4),
         )
@@ -69,6 +83,36 @@ class AudioDirectionPreferences(context: Context) {
         snapshot()
     }
 
+    fun setAmbienceCrossfadeMillis(value: Int) {
+        preferences.edit().putInt(KEY_AMBIENCE_CROSSFADE_MS, value.coerceIn(500, 3_000)).apply()
+        snapshot()
+    }
+
+    fun setAmbienceLoopOverlapRange(minMillis: Int, maxMillis: Int) {
+        val safeMin = minMillis.coerceIn(350, 3_000)
+        val safeMax = maxMillis.coerceIn(safeMin, 4_000)
+        preferences.edit()
+            .putInt(KEY_AMBIENCE_LOOP_OVERLAP_MIN_MS, safeMin)
+            .putInt(KEY_AMBIENCE_LOOP_OVERLAP_MAX_MS, safeMax)
+            .apply()
+        snapshot()
+    }
+
+    fun setMinimumSfxGapMillis(value: Long) {
+        preferences.edit().putLong(KEY_MIN_SFX_GAP_MS, value.coerceIn(500L, 15_000L)).apply()
+        snapshot()
+    }
+
+    fun setSameEffectCooldownMillis(value: Long) {
+        preferences.edit().putLong(KEY_SAME_EFFECT_COOLDOWN_MS, value.coerceIn(1_000L, 30_000L)).apply()
+        snapshot()
+    }
+
+    fun setMaxConcurrentSfx(value: Int) {
+        preferences.edit().putInt(KEY_MAX_CONCURRENT_SFX, value.coerceIn(1, 4)).apply()
+        snapshot()
+    }
+
     fun addChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener) {
         preferences.registerOnSharedPreferenceChangeListener(listener)
     }
@@ -83,7 +127,11 @@ class AudioDirectionPreferences(context: Context) {
         private const val KEY_SFX_ENABLED = "sound_effects_enabled"
         private const val KEY_AMBIENCE_VOLUME = "ambience_master_volume"
         private const val KEY_SFX_VOLUME = "sound_effects_master_volume"
+        private const val KEY_AMBIENCE_CROSSFADE_MS = "ambience_crossfade_ms"
+        private const val KEY_AMBIENCE_LOOP_OVERLAP_MIN_MS = "ambience_loop_overlap_min_ms"
+        private const val KEY_AMBIENCE_LOOP_OVERLAP_MAX_MS = "ambience_loop_overlap_max_ms"
         private const val KEY_MIN_SFX_GAP_MS = "minimum_sfx_gap_ms"
+        private const val KEY_SAME_EFFECT_COOLDOWN_MS = "same_effect_cooldown_ms"
         private const val KEY_MAX_CONCURRENT_SFX = "max_concurrent_sfx"
 
         @Volatile
@@ -93,7 +141,11 @@ class AudioDirectionPreferences(context: Context) {
 
         const val DEFAULT_AMBIENCE_VOLUME = 0.24f
         const val DEFAULT_SFX_VOLUME = 0.42f
+        const val DEFAULT_AMBIENCE_CROSSFADE_MS = 1_600
+        const val DEFAULT_AMBIENCE_LOOP_OVERLAP_MIN_MS = 900
+        const val DEFAULT_AMBIENCE_LOOP_OVERLAP_MAX_MS = 2_200
         const val DEFAULT_MIN_SFX_GAP_MS = 2_200L
+        const val DEFAULT_SAME_EFFECT_COOLDOWN_MS = 6_000L
         const val DEFAULT_MAX_CONCURRENT_SFX = 2
     }
 }

@@ -18,6 +18,11 @@ data class AudioDirectionAsset(
     val kind: AudioAssetKind,
 )
 
+/**
+ * One logical ambience interval. Two rows may overlap on the same UNIT range to represent the
+ * PRIMARY + SECONDARY ambience layers. Keeping one id per row preserves the persisted/export format
+ * while allowing the runtime and mixer to compose at most two compatible environmental layers.
+ */
 data class AmbienceScene(
     val startUnitId: String,
     val endUnitId: String,
@@ -34,6 +39,28 @@ data class AmbienceSfxPlan(
     val soundEffectCues: List<SoundEffectCue> = emptyList(),
 )
 
+object AudioDirectionLimits {
+    const val MAX_CONCURRENT_AMBIENCE = 2
+    const val MIN_AMBIENCE_SCENE_UNITS = 2
+}
+
+/**
+ * Groups explicitly numbered ambience variants such as forest_01/forest_02 or rain-v1/rain-v2.
+ * Descriptive titles without a trailing variant number remain distinct, so unrelated assets are
+ * never shuffled together merely because they share words such as "rain" or "forest".
+ */
+object AudioAssetVariantFamily {
+    private val extension = Regex("(?i)\\.(mp3|m4a|aac|wav|ogg|flac|opus|wma|webm|aiff|aif)$")
+    private val numericVariant = Regex("(?i)(?:[\\s._-]+(?:v|var|variant)?\\s*\\d{1,3}|\\s*\\(\\d{1,3}\\))$")
+
+    fun key(title: String): String {
+        val clean = title.trim().replace(extension, "").trim().lowercase()
+        if (clean.isBlank()) return ""
+        val family = clean.replace(numericVariant, "").trim(' ', '_', '-', '.')
+        return family.ifBlank { clean }
+    }
+}
+
 /**
  * Existing scene-music rows are intentionally reused as the physical asset library. This preserves
  * URI permissions, per-file volume and loudness-normalization metadata without a Room migration.
@@ -41,6 +68,7 @@ data class AmbienceSfxPlan(
  * Classification is metadata-only:
  * - MUSIC: default, or type:music / [music]
  * - AMBIENCE: type:ambience / type:environment / [ambience]
+ * - CONTINUOUS SFX: type:sfx_continuous / type:continuous / [continuous] is promoted to AMBIENCE
  * - SFX: type:sfx / type:sound_effect / [sfx]
  *
  * The explicit markers keep ordinary words such as "rain" or "battle" as descriptive tags rather
@@ -50,6 +78,18 @@ object AudioAssetClassifier {
     fun classify(track: SceneMusicTrackEntity): AudioAssetKind {
         val metadata = "${track.title}\n${track.tagsCsv}".lowercase()
         return when {
+            hasAny(
+                metadata,
+                "type:sfx_continuous",
+                "type=sfx_continuous",
+                "type:sfx-continuous",
+                "type=sfx-continuous",
+                "type:continuous",
+                "type=continuous",
+                "[continuous]",
+                "[sfx_continuous]",
+                "[sfx-continuous]",
+            ) -> AudioAssetKind.AMBIENCE
             hasAny(metadata, "type:sfx", "type=sfx", "type:sound_effect", "type=sound-effect", "[sfx]") -> AudioAssetKind.SFX
             hasAny(metadata, "type:ambience", "type=ambience", "type:environment", "type=environment", "[ambience]", "[environment]") -> AudioAssetKind.AMBIENCE
             else -> AudioAssetKind.MUSIC

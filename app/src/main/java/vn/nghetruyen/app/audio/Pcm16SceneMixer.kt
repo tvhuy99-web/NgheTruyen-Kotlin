@@ -22,7 +22,13 @@ data class SceneMixLayer(
     val looping: Boolean = true,
 )
 
-/** Streaming narration + MUSIC + AMBIENCE + SFX mixer. */
+/**
+ * Streaming narration + MUSIC + AMBIENCE + SFX mixer.
+ *
+ * Looping layers use an internal overlap/crossfade at the source seam instead of modulo hard-looping.
+ * A deterministic phase derived from source + timeline start prevents simultaneous ambience layers
+ * with similar durations from exposing synchronized repetition in exported audiobooks.
+ */
 object Pcm16SceneMixer {
     private const val BLOCK_FRAMES = 2_048
     private const val MAX_LAYER_BYTES = 64L * 1024 * 1024
@@ -85,20 +91,62 @@ object Pcm16SceneMixer {
 
     private data class PreparedLayer(val layer: SceneMixLayer, val pcm: ByteArray, val blockAlign: Int) {
         private val totalFrames = pcm.size / blockAlign
+        private val loopBlendFrames = if (layer.looping && totalFrames > 8) {
+            layer.fadeFrames
+                .coerceAtLeast(1)
+                .coerceAtMost((totalFrames / 4).coerceAtLeast(1))
+        } else 0
+        private val loopCycleFrames = if (loopBlendFrames > 0) {
+            (totalFrames - loopBlendFrames).coerceAtLeast(1)
+        } else totalFrames.coerceAtLeast(1)
+        private val phaseFrames = if (layer.looping && loopCycleFrames > 1) {
+            positiveHash(layer.sourceWav.name, layer.startFrame) % loopCycleFrames
+        } else 0
 
         fun sample(frame: Long, channel: Int, channels: Int): Int {
             if (frame !in layer.startFrame until layer.endFrameExclusive || totalFrames <= 0) return 0
             val local = frame - layer.startFrame
             if (!layer.looping && local >= totalFrames) return 0
-            val sourceFrame = if (layer.looping) (local % totalFrames).toInt() else local.toInt()
             val audibleRemaining = if (layer.looping) {
                 layer.endFrameExclusive - frame
             } else {
                 min(layer.endFrameExclusive - frame, totalFrames.toLong() - local)
             }
             val gain = layer.volume.coerceIn(0f, 1f) * fadeGain(local, audibleRemaining, layer.fadeFrames)
-            val offset = sourceFrame * blockAlign + channel.coerceAtMost(channels - 1) * 2
-            return (sample16(pcm, offset) * gain).toInt()
+            if (gain <= 0f) return 0
+
+            val rawSample = if (!layer.looping) {
+                sourceSample(local.toInt(), channel, channels)
+            } else if (loopBlendFrames <= 0 || totalFrames <= loopBlendFrames * 2) {
+                val sourceFrame = ((local + phaseFrames) % totalFrames.toLong()).toInt()
+                sourceSample(sourceFrame, channel, channels)
+            } else {
+                seamlessLoopSample(local, channel, channels)
+            }
+            return (rawSample * gain).toInt()
+        }
+
+        private fun seamlessLoopSample(local: Long, channel: Int, channels: Int): Int {
+            val cyclePosition = ((local + phaseFrames) % loopCycleFrames.toLong()).toInt()
+            val normalFrames = (loopCycleFrames - loopBlendFrames).coerceAtLeast(0)
+            if (cyclePosition < normalFrames) {
+                val sourceFrame = loopBlendFrames + cyclePosition
+                return sourceSample(sourceFrame.coerceAtMost(totalFrames - 1), channel, channels)
+            }
+
+            val blendPosition = (cyclePosition - normalFrames).coerceIn(0, loopBlendFrames - 1)
+            val tailFrame = (totalFrames - loopBlendFrames + blendPosition).coerceIn(0, totalFrames - 1)
+            val headFrame = blendPosition.coerceIn(0, totalFrames - 1)
+            val fraction = blendPosition.toFloat() / loopBlendFrames.coerceAtLeast(1).toFloat()
+            val tail = sourceSample(tailFrame, channel, channels)
+            val head = sourceSample(headFrame, channel, channels)
+            return (tail * (1f - fraction) + head * fraction).toInt()
+        }
+
+        private fun sourceSample(sourceFrame: Int, channel: Int, channels: Int): Int {
+            val safeFrame = sourceFrame.coerceIn(0, totalFrames - 1)
+            val offset = safeFrame * blockAlign + channel.coerceAtMost(channels - 1) * 2
+            return sample16(pcm, offset).toInt()
         }
     }
 
@@ -107,6 +155,11 @@ object Pcm16SceneMixer {
         val fadeIn = (elapsed.toFloat() / fadeFrames).coerceIn(0f, 1f)
         val fadeOut = (remaining.toFloat() / fadeFrames).coerceIn(0f, 1f)
         return min(fadeIn, fadeOut)
+    }
+
+    private fun positiveHash(name: String, startFrame: Long): Int {
+        val hash = 31L * name.hashCode().toLong() + startFrame
+        return hash.and(0x7fffffffL).toInt()
     }
 
     private fun requirePcm16(segment: WaveSegment) {

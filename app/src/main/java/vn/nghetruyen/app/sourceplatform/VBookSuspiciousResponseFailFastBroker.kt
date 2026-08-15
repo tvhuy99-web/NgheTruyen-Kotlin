@@ -13,23 +13,32 @@ import vn.nghetruyen.source.api.SourcePlatformResult
 /**
  * Promotes only high-confidence tiny 2xx application-error envelopes to an explicit network error.
  *
- * This deliberately leaves larger/business responses untouched so extensions may inspect them.  It
+ * This deliberately leaves larger/business responses untouched so extensions may inspect them. It
  * targets the anti-bot/session failure pattern seen after a Browser-derived CSRF token: HTTP 200,
- * a tiny JSON error object, and no usable payload.  Failing here preserves the real cause instead of
- * allowing a later script dereference such as data.pageNum to hide it.
+ * a tiny JSON error object, and no usable payload. The session prerequisite is captured before the
+ * request executes so a Set-Cookie carried by the error response itself cannot create a false
+ * positive. Failing here preserves the real cause instead of allowing a later script dereference
+ * such as data.pageNum to hide it.
  */
 internal class VBookSuspiciousResponseFailFastBroker(
     private val delegate: SourceNetworkBroker,
     private val cookies: SourceCookiePartition,
+    private val browserCookieReader: (sourceId: String, requestUrl: String) -> String? = { _, _ -> null },
 ) : SourceNetworkBroker {
     override fun execute(
         manifest: SourceManifest,
         request: SourceNetworkRequest,
     ): SourcePlatformResult<SourceNetworkResponse> {
+        val hadBrowserSession = if (manifest.capabilities.cookies == SourceCookieMode.BROWSER_SHARED) {
+            val browserCookies = runCatching { browserCookieReader(manifest.id, request.url) }.getOrNull().orEmpty()
+            val partitionCookies = runCatching { cookies.readCookieHeader(manifest.id, request.url) }.getOrNull().orEmpty()
+            browserCookies.isNotBlank() || partitionCookies.isNotBlank()
+        } else {
+            false
+        }
+
         val result = delegate.execute(manifest, request)
-        if (result !is SourcePlatformResult.Success) return result
-        if (manifest.capabilities.cookies != SourceCookieMode.BROWSER_SHARED) return result
-        if (cookies.readCookieHeader(manifest.id, request.url).isNullOrBlank()) return result
+        if (result !is SourcePlatformResult.Success || !hadBrowserSession) return result
 
         val response = result.value
         val shape = VBookHttpSessionCompatibility.classify(response)

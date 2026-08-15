@@ -7,6 +7,11 @@ reader = (ROOT / "screens/ReaderScreen.kt").read_text(encoding="utf-8")
 story = (ROOT / "screens/StoryDetailScreen.kt").read_text(encoding="utf-8")
 role = (ROOT / "components/GlobalVoiceRoleEditorDialog.kt").read_text(encoding="utf-8")
 component = (ROOT / "components/AudioDirectionLayerSwitches.kt").read_text(encoding="utf-8")
+unified_audio_manager = ROOT / "components/UnifiedAudioAssetManagerDialog.kt"
+if unified_audio_manager.exists():
+    # The canonical MUSIC/AMBIENCE/SFX editor moved out of AudioDirectionLayerSwitches. Keep the
+    # parity gate tied to the controls themselves rather than to their historical source file.
+    component += "\n" + unified_audio_manager.read_text(encoding="utf-8")
 
 required = {
     "PersonalScreen.kt": [

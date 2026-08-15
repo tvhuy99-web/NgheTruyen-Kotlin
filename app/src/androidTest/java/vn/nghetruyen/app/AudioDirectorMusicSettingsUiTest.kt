@@ -1,7 +1,7 @@
 package vn.nghetruyen.app
 
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -18,6 +18,9 @@ class AudioDirectorMusicSettingsUiTest {
 
     @Test
     fun personalMusicSettingsKeepManualMusicAndDoNotDuplicateAiAudioControls() {
+        // The v2 rule launches MainActivity only after the Compose test environment is ready.
+        // Explicit synchronization is required because v2 uses StandardTestDispatcher.
+        composeRule.waitForIdle()
         returnToRoot()
         composeRule.onNodeWithText("CÁ NHÂN", useUnmergedTree = true).performClick()
         composeRule.onNodeWithText("Cài đặt", useUnmergedTree = true).performClick()

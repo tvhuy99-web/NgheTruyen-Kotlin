@@ -29,18 +29,40 @@ class SafeRhinoSandboxTest {
     }
 
     @Test
-    fun instructionBudgetStopsInfiniteLoop() {
+    fun crossingSoftInstructionBudgetDoesNotRejectCompatibleScript() {
+        val sandbox = SafeRhinoSandbox(
+            JsSandboxPolicy(
+                maxInstructions = 1_000,
+                wallClockTimeoutMs = 2_000,
+                instructionObserverThreshold = 100,
+                hardInstructionMultiplier = 1_000,
+            ),
+        )
+
+        val result = sandbox.execute(
+            JsSandboxRequest("var sum = 0; for (var i = 0; i < 10000; i++) { sum += i; } sum;"),
+        )
+
+        assertTrue(result.observedInstructions > 1_000)
+        assertTrue(result.softInstructionLimitExceeded)
+    }
+
+    @Test
+    fun hardInstructionBudgetStopsInfiniteLoop() {
         val sandbox = SafeRhinoSandbox(
             JsSandboxPolicy(
                 maxInstructions = 5_000,
                 wallClockTimeoutMs = 1_000,
                 instructionObserverThreshold = 100,
+                hardInstructionMultiplier = 2,
             ),
         )
 
         val failure = runCatching { sandbox.execute(JsSandboxRequest("while (true) {}")) }.exceptionOrNull()
         assertTrue(failure is JsSandboxException)
         assertEquals(JsSandboxFailure.INSTRUCTION_LIMIT, (failure as JsSandboxException).failure)
+        assertTrue(failure.message.orEmpty().contains("hard runaway limit"))
+        assertTrue(failure.message.orEmpty().contains("soft compatibility budget"))
     }
 
     @Test

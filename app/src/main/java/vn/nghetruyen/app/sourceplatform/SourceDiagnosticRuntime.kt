@@ -42,13 +42,14 @@ data class DiagnosticActiveOperation(
     val lastEventAtEpochMs: Long,
     val startEvent: String,
     val lastEvent: String,
+    val screenGeneration: Long?,
 )
 
 /**
  * Three-mode diagnostic runtime:
  *  - off: no session event/evidence recording; the last 100 install/import failures remain durable;
- *  - basic: full-fidelity diagnostics for the current screen/context; completed old-screen work is
- *    rotated out while in-flight operation traces survive the boundary atomically;
+ *  - basic: full-fidelity diagnostics for exactly the current screen/context. Screen rotation is a
+ *    hard provenance boundary: previous-screen events/evidence are never copied into the new one;
  *  - advanced: continuous full-fidelity diagnostics persisted until the user explicitly clears it.
  *
  * The string values basic/advanced are intentionally retained to migrate existing preferences and
@@ -156,12 +157,12 @@ class SourceDiagnosticRuntime(private val context: Context) {
     }
 
     /**
-     * Called by app navigation. Screen mode rotates the old logical context without destroying an
-     * operation that is still running. The recorder reconstructs active operations and performs the
-     * retain/drop mutation under its own emit lock, closing the START-vs-screen-reset race. Matching
-     * browser/network evidence follows the same active trace ids. Dialogs do not call this method.
+     * Called by app navigation. In screen mode this creates a strict generation boundary. The
+     * visible event/evidence buffers are cleared; trace/operation origin bindings remain inside the
+     * recorder only so callbacks from the old generation can be recognized, mirrored to lifecycle
+     * tracking, and suppressed from the new screen. Dialogs do not call this method.
      */
-    fun onScreenChanged(screenKey: String): Boolean {
+    fun onScreenChanged(screenKey: String, handoffTraceIds: Set<String> = emptySet()): Boolean {
         val next = screenKey.trim().take(500).ifBlank { "unknown" }
         if (next == activeScreenKey) return false
         val previous = activeScreenKey
@@ -169,8 +170,23 @@ class SourceDiagnosticRuntime(private val context: Context) {
         activeScreenSessionId = UUID.randomUUID().toString()
         return when (mode) {
             MODE_SCREEN -> {
-                val carriedTraceIds = recorder.retainActiveOperationTraces()
-                evidence.retainTraces(carriedTraceIds)
+                val selectedHandoff = handoffTraceIds.asSequence()
+                    .map(String::trim)
+                    .filter(String::isNotBlank)
+                    .take(64)
+                    .toSet()
+                val handoffAttributes = mapOf(
+                    "screen" to next,
+                    "screenSessionId" to activeScreenSessionId,
+                )
+                recorder.rotateScreen(selectedHandoff, handoffAttributes)
+                evidence.retainTraces(
+                    traceIds = selectedHandoff,
+                    targetGeneration = recorder.currentScreenGeneration(),
+                    handoffAttributes = handoffAttributes,
+                )
+                val recorderStats = recorder.stats()
+                val evidenceStats = evidence.stats()
                 mark(
                     name = "DIAGNOSTIC_SCREEN_STARTED",
                     category = DiagnosticCategory.RUNTIME,
@@ -178,7 +194,14 @@ class SourceDiagnosticRuntime(private val context: Context) {
                     attributes = mapOf(
                         "screen" to next,
                         "previousScreen" to previous,
-                        "carriedActiveTraceCount" to carriedTraceIds.size.toString(),
+                        "screenGeneration" to recorder.currentScreenGeneration().toString(),
+                        "screenIsolation" to if (selectedHandoff.isEmpty()) "strict-origin" else "selective-causal-handoff",
+                        "handoffTraceCount" to selectedHandoff.size.toString(),
+                        "handoffEventCount" to recorderStats.screenHandoffEventsRetained.toString(),
+                        "handoffEvidenceCount" to evidenceStats.screenHandoffItemsRetained.toString(),
+                        "rotationDiscardedEventCount" to recorderStats.screenRotationEventsDiscarded.toString(),
+                        "rotationDiscardedEvidenceCount" to evidenceStats.screenRotationItemsDiscarded.toString(),
+                        "carriedActiveTraceCount" to "0",
                     ),
                 )
                 true
@@ -224,7 +247,9 @@ class SourceDiagnosticRuntime(private val context: Context) {
         )
     }
 
-    fun activitySnapshot(): List<DiagnosticActiveOperation> = activityTracker.snapshot()
+    fun activitySnapshot(): List<DiagnosticActiveOperation> =
+        if (mode == MODE_SCREEN) activityTracker.snapshot(recorder.currentScreenGeneration())
+        else activityTracker.snapshot()
 
     fun activityLines(nowMs: Long = System.currentTimeMillis()): List<String> = activitySnapshot().map { operation ->
         val elapsed = (nowMs - operation.startedAtEpochMs).coerceAtLeast(0L)
@@ -260,11 +285,13 @@ class SourceDiagnosticRuntime(private val context: Context) {
         backupLogTail: String = "",
     ): ByteArray {
         val safeEvents = events.sortedBy(DiagnosticEvent::timestampEpochMs)
+        val recorderStats = recorder.stats()
+        val evidenceStats = evidence.stats()
         val deepReport = DiagnosticDeepBlackBox.analyze(
             events = safeEvents,
             nowMs = System.currentTimeMillis(),
-            recorderStats = recorder.stats(),
-            evidenceStats = evidence.stats(),
+            recorderStats = recorderStats,
+            evidenceStats = evidenceStats,
         )
         val output = ByteArrayOutputStream()
         ZipOutputStream(output).use { zip ->
@@ -283,6 +310,20 @@ class SourceDiagnosticRuntime(private val context: Context) {
             zip.addText("report/data_loss.json", JSONObject(deepReport.dataLossJson).apply {
                 put("persistentDroppedEventSegments", continuousStore.droppedEventSegments)
                 put("persistentRejectedEvidence", continuousStore.rejectedEvidenceCount)
+                put("staleScreenEventsDropped", recorderStats.staleScreenEventsDropped)
+                put("staleScreenEvidenceDropped", evidenceStats.staleScreenItemsDropped)
+                put("screenRotationEventsDiscarded", recorderStats.screenRotationEventsDiscarded)
+                put("screenHandoffEventsRetained", recorderStats.screenHandoffEventsRetained)
+                put("screenRotationEvidenceDiscarded", evidenceStats.screenRotationItemsDiscarded)
+                put("screenHandoffEvidenceRetained", evidenceStats.screenHandoffItemsRetained)
+                put("screenIsolationDropsIntentional", true)
+                if (
+                    recorderStats.staleScreenEventsDropped > 0 || evidenceStats.staleScreenItemsDropped > 0 ||
+                    recorderStats.screenRotationEventsDiscarded > 0 || evidenceStats.screenRotationItemsDiscarded > 0
+                ) {
+                    put("lossVisible", true)
+                    put("lossReason", "screen-isolation-discard")
+                }
             }.toString(2))
             zip.addText("report/persistent_install_failures.json", DiagnosticJsonExporter.export(criticalStore.snapshot()).toString(Charsets.UTF_8))
             deepReport.flowLogs.forEach { (flow, log) ->
@@ -290,6 +331,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
             }
             if (activeScreenKey.isNotBlank()) zip.addText("report/current_screen.txt", activeScreenKey)
             if (activeScreenSessionId.isNotBlank()) zip.addText("report/current_screen_session.txt", activeScreenSessionId)
+            if (mode == MODE_SCREEN) zip.addText("report/current_screen_generation.txt", recorder.currentScreenGeneration().toString())
             if (backupLogTail.isNotBlank()) {
                 zip.addText("report/backup_tail.log", DiagnosticRedactor.redactLongText(backupLogTail, 64_000))
             }
@@ -353,6 +395,8 @@ class SourceDiagnosticRuntime(private val context: Context) {
         put("generatedAt", Instant.now().toString())
         put("diagnosticMode", mode)
         put("screenScoped", mode == MODE_SCREEN)
+        put("screenIsolation", if (mode == MODE_SCREEN) "strict-origin" else "continuous-or-off")
+        put("screenGeneration", recorder.currentScreenGeneration())
         put("continuous", mode == MODE_CONTINUOUS)
         put("activeScreen", activeScreenKey)
         put("activeScreenSessionId", activeScreenSessionId)
@@ -368,15 +412,17 @@ class SourceDiagnosticRuntime(private val context: Context) {
         put("device", Build.DEVICE)
         put("product", Build.PRODUCT)
         put("eventCount", events.size)
-        put("activeOperationCount", activityTracker.snapshot().size)
+        put("activeOperationCount", activitySnapshot().size)
         val eventStats = recorder.stats()
         val stats = evidence.stats()
         put("ramEventItems", eventStats.itemCount)
         put("ramEventEvicted", eventStats.evictedEvents)
+        put("staleScreenEventsDropped", eventStats.staleScreenEventsDropped)
         put("ramEvidenceItems", stats.itemCount)
         put("ramEvidenceBytes", stats.retainedBytes)
         put("ramEvidenceEvictedItems", stats.evictedItems)
         put("ramEvidenceTruncatedItems", stats.truncatedItems)
+        put("staleScreenEvidenceDropped", stats.staleScreenItemsDropped)
         put("continuousEventCount", continuousStore.eventCount)
         put("continuousEvidenceBytes", continuousStore.evidenceBytes)
         put("continuousEvidenceRejected", continuousStore.rejectedEvidenceCount)
@@ -384,7 +430,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
     }
 
     private fun activeOperationsJson(): JSONArray = JSONArray().apply {
-        activityTracker.snapshot().forEach { operation ->
+        activitySnapshot().forEach { operation ->
             put(JSONObject().apply {
                 put("traceId", operation.traceId)
                 put("operationId", operation.operationId)
@@ -399,6 +445,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
                 put("lastEventAtEpochMs", operation.lastEventAtEpochMs)
                 put("startEvent", operation.startEvent)
                 put("lastEvent", operation.lastEvent)
+                put("screenGeneration", operation.screenGeneration ?: JSONObject.NULL)
             })
         }
     }
@@ -472,19 +519,19 @@ class SourceDiagnosticRuntime(private val context: Context) {
         appendLine()
         appendLine("Modes:")
         appendLine("- off: records no session timeline/evidence; only the last 100 install/import failures are retained so package errors are never lost.")
-        appendLine("- screen-scoped: completed old-screen events are rotated out, but any operation still running keeps its complete trace and matching evidence across the boundary.")
+        appendLine("- screen-scoped: strict provenance with selective causal handoff. A screen change starts a new immutable generation; only the trace that directly produced the destination screen may be handed off. Unrelated previous-screen data is discarded, late unrelated callbacks are dropped, and both are counted explicitly.")
         appendLine("- continuous: verbose events persist across screens and process restarts in a bounded two-segment history until explicitly cleared.")
         appendLine()
         appendLine("Contents:")
         appendLine("- report/log.txt: Lua-style readable timeline with cause and suggestion for failures.")
-        appendLine("- report/events.json + report/traces.txt: structured events and trace summaries.")
+        appendLine("- report/events.json + report/traces.txt: structured events and trace summaries. Every retained event includes diagnosticScreenGeneration and diagnosticScreenDisposition.")
         appendLine("- report/operations.json: explicit operations, deadlines, stages, polling and current/terminal state; legacy events use compatibility reconstruction.")
         appendLine("- report/flows.json + flows/*.log: latest state and raw timeline split by Lua-style diagnostic flow.")
         appendLine("- report/browser_sessions.json: browser counters, safe capability probes, late callbacks and last error state.")
-        appendLine("- report/data_loss.json: explicit RAM eviction/truncation accounting so missing evidence is never silent.")
+        appendLine("- report/data_loss.json: RAM eviction/truncation plus intentional stale-screen event/evidence drop counters so missing evidence is never silent.")
         appendLine("- report/persistent_install_failures.json: the last 100 install/import failures, retained even when diagnostics were off.")
-        appendLine("- report/current_screen_session.txt: opaque id for the current screen-scoped diagnostic session.")
-        appendLine("- evidence/current/: current or carried in-flight browser/runtime/network/parser evidence captured in RAM.")
+        appendLine("- report/current_screen_session.txt + report/current_screen_generation.txt: opaque identifiers for the current screen-scoped diagnostic generation.")
+        appendLine("- evidence/current/: evidence that belongs only to the current screen generation.")
         appendLine("- evidence/sanitized/: sanitized HTML snapshots for inspection.")
         appendLine("- continuous/: bounded persisted event history and evidence when continuous mode has been used.")
         appendLine("- environment/runtime/source/repository snapshots for reproduction context.")
@@ -553,6 +600,7 @@ internal class DiagnosticActivityTracker : DiagnosticSink {
                     lastEventAtEpochMs = event.timestampEpochMs,
                     startEvent = event.name,
                     lastEvent = event.name,
+                    screenGeneration = event.attributes["diagnosticScreenGeneration"]?.toLongOrNull(),
                 )
                 while (active.size > 100) active.remove(active.entries.first().key)
             }
@@ -571,8 +619,12 @@ internal class DiagnosticActivityTracker : DiagnosticSink {
         }
     }
 
-    fun snapshot(): List<DiagnosticActiveOperation> = synchronized(lock) {
-        active.values.sortedByDescending(DiagnosticActiveOperation::lastEventAtEpochMs)
+    fun snapshot(screenGeneration: Long? = null): List<DiagnosticActiveOperation> = synchronized(lock) {
+        active.values
+            .asSequence()
+            .filter { screenGeneration == null || it.screenGeneration == screenGeneration }
+            .sortedByDescending(DiagnosticActiveOperation::lastEventAtEpochMs)
+            .toList()
     }
 
     fun clear() = synchronized(lock) { active.clear() }
@@ -581,12 +633,17 @@ internal class DiagnosticActivityTracker : DiagnosticSink {
     private fun isDiagnosticBoundary(name: String): Boolean =
         name.startsWith("DIAGNOSTIC_SCREEN_") || name.startsWith("DIAGNOSTICS_MODE_")
     private fun isTerminal(name: String): Boolean = TERMINAL_SUFFIXES.any(name::endsWith)
-    private fun operationStem(name: String): String =
-        (START_SUFFIXES + TERMINAL_SUFFIXES).firstOrNull(name::endsWith)?.let(name::removeSuffix) ?: name
+    private fun operationStem(name: String): String {
+        if (name.endsWith("_VERIFIED")) return name.removeSuffix("_VERIFIED") + "_VERIFY"
+        return (START_SUFFIXES + TERMINAL_SUFFIXES).firstOrNull(name::endsWith)?.let(name::removeSuffix) ?: name
+    }
 
     companion object {
         private val START_SUFFIXES = listOf("_STARTED", "_START")
-        private val TERMINAL_SUFFIXES = listOf("_COMPLETED", "_FAILED", "_ERROR", "_DONE", "_CANCELLED", "_STOPPED")
+        private val TERMINAL_SUFFIXES = listOf(
+            "_COMPLETED", "_FAILED", "_ERROR", "_DONE", "_CANCELLED", "_STOPPED", "_TIMEOUT",
+            "_VERIFIED", "_SUCCEEDED", "_SUCCESS", "_FINISHED", "_OK",
+        )
         private val TERMINAL_STATES = setOf(
             DiagnosticOperationState.COMPLETED,
             DiagnosticOperationState.FAILED,

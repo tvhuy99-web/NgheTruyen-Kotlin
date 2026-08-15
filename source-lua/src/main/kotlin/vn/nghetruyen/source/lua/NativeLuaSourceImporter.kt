@@ -77,6 +77,7 @@ object NativeLuaSourceImporter {
         }
         val metadata = packageTable.get("metadata").checktable()
         val source = sourceTable
+        val compatibilityMigrations = applyHostCompatibilityMigrations(source)
         val adapterSandbox = LuaSandbox(
             modules = mapOf(NATIVE_API_MODULE to nativeApi),
             instructionBudget = 500_000,
@@ -118,7 +119,7 @@ object NativeLuaSourceImporter {
             mode = SourceRuntimeMode.NATIVE_LUA_COMPAT,
             entry = "native/source.lua",
             instructionBudget = 500_000,
-            memoryBudgetBytes = 32 * 1024 * 1024,
+            memoryBudgetBytes = 64 * 1024 * 1024,
             actionTimeoutMs = 50_000,
         )
         val manifest = SourceFullAuthorityPolicy.apply(
@@ -191,6 +192,9 @@ object NativeLuaSourceImporter {
         entries["source.json"] = SourceManifestWriter.write(manifest)
         val warnings = buildList {
             addAll(vBook.warnings)
+            if (compatibilityMigrations.isNotEmpty()) {
+                add("Host compatibility migrations: ${compatibilityMigrations.joinToString()}")
+            }
             add("Native Source API 2 chạy với FULL_IN_APP: toàn bộ Browser, network capture, Storage, Crypto, WebSocket và public Internet đều khả dụng bên trong sandbox.")
             add("Biên an toàn vẫn nằm dưới Source API: luajava, io, os, debug, package, bytecode, raw Android/Java và file/content escape không được mở cho extension.")
             if (archiveFiles.size > 1) add("Đã giữ ${archiveFiles.size} tệp trong package và ánh xạ ${moduleBundle.entryPaths.size} alias require() an toàn.")
@@ -206,6 +210,41 @@ object NativeLuaSourceImporter {
         permissions.set("storage", LuaValue.TRUE)
         permissions.set("network_capture", LuaValue.TRUE)
         source.set("permissions", permissions)
+    }
+
+    /**
+     * Applies narrowly-scoped host compatibility migrations to the sanitized source table after
+     * package validation. Original Lua/package bytes remain untouched and export provenance stays exact.
+     */
+    private fun applyHostCompatibilityMigrations(source: LuaTable): List<String> {
+        val hooks = source.get("hooks")
+        if (!hooks.istable() || !hooks.get("stv_page_window").isfunction()) return emptyList()
+        val actions = source.get("actions")
+        if (!actions.istable()) return emptyList()
+        val chapters = actions.get("chapters")
+        if (!chapters.istable()) return emptyList()
+        val steps = chapters.get("steps")
+        if (!steps.istable()) return emptyList()
+
+        val stepTable = steps.checktable()
+        for (stepIndex in 1..stepTable.length()) {
+            val transform = stepTable.get(stepIndex).get("transform")
+            if (!transform.istable()) continue
+            val operations = transform.get("operations")
+            if (!operations.istable()) continue
+            val operationTable = operations.checktable()
+            for (operationIndex in 1..operationTable.length()) {
+                val operation = operationTable.get(operationIndex)
+                if (!operation.istable()) continue
+                val spec = operation.checktable()
+                if (spec.get("op").optjstring("") != "split") continue
+                if (spec.get("separator").optjstring("") != "-//-") continue
+                if (!spec.get("limit").isnil()) return emptyList()
+                spec.set("limit", LuaValue.valueOf("\$vars.window.probe_end"))
+                return listOf("stv-chapter-split-probe-window-v1")
+            }
+        }
+        return emptyList()
     }
 
     private data class ModuleBundle(

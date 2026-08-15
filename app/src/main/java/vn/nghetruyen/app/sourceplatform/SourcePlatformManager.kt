@@ -19,6 +19,7 @@ import vn.nghetruyen.source.runtime.FileSourceStorageBroker
 import vn.nghetruyen.source.runtime.JcaSourceCryptoBroker
 import vn.nghetruyen.source.lua.LuaNativeHookBroker
 import vn.nghetruyen.source.lua.NativeLuaArchiveImporter
+import vn.nghetruyen.source.lua.NativeLuaRuntimeOverlay
 import vn.nghetruyen.source.vbook.VBookHostManifestFactory
 import vn.nghetruyen.source.vbook.VBookJsRuntime
 import vn.nghetruyen.source.vbook.VBookManifestParser
@@ -90,6 +91,7 @@ class SourcePlatformManager(
     private val cryptoBroker = JcaSourceCryptoBroker(AndroidSourceSecretKeyProvider())
     private val webSocketBroker = OkHttpSourceWebSocketBroker(cookieJar, diagnostics)
     private val nativeHookBroker = LuaNativeHookBroker()
+    private val nativeRuntimeOverlayCache = java.util.concurrent.ConcurrentHashMap<String, Map<String, ByteArray>>()
     private val graphicsBroker = AndroidSourceGraphicsBroker()
     private val translationBroker = AndroidSourceTranslationBroker(translationEngine)
     private val genericCommentLoader = GenericStoryCommentLoader(networkBroker, browserBroker)
@@ -211,7 +213,35 @@ class SourcePlatformManager(
     fun activeStorySources(): List<StorySource> = store.list()
         .filter { it.enabled && it.active != null }
         .mapNotNull { installed -> store.readActivePack(installed.sourceId) }
+        .map(::runtimePack)
         .map { pack -> SourcePackStorySource(pack, executor, genericCommentLoader) }
+
+    private fun runtimePack(pack: VerifiedSourcePack): VerifiedSourcePack {
+        if (pack.manifest.runtime.mode != SourceRuntimeMode.NATIVE_LUA_COMPAT) return pack
+        val runtimeEntries = nativeRuntimeOverlayCache[pack.packageSha256] ?: try {
+            NativeLuaRuntimeOverlay.refresh(pack).entries.also { entries ->
+                nativeRuntimeOverlayCache[pack.packageSha256] = entries
+            }
+        } catch (error: Exception) {
+            diagnostics.emit(
+                DiagnosticEvent(
+                    timestampEpochMs = System.currentTimeMillis(),
+                    traceId = "native-runtime-overlay:${UUID.randomUUID()}",
+                    sourceId = pack.manifest.id,
+                    sourceVersion = pack.manifest.version.toString(),
+                    category = DiagnosticCategory.RUNTIME,
+                    name = "NATIVE_LUA_RUNTIME_OVERLAY_FAILED",
+                    severity = DiagnosticSeverity.WARN,
+                    attributes = mapOf(
+                        "errorType" to error.javaClass.name.take(240),
+                        "error" to error.message.orEmpty().take(1_000),
+                    ),
+                ),
+            )
+            return pack
+        }
+        return if (runtimeEntries === pack.entries) pack else pack.copy(entries = runtimeEntries)
+    }
 
     fun installedPacks(): List<SourcePackUiInfo> = store.list().map { installed ->
         val active = installed.active

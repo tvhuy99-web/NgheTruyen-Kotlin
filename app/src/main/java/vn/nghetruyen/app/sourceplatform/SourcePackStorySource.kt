@@ -18,6 +18,7 @@ import vn.nghetruyen.app.sources.SourceImplementationKind
 import vn.nghetruyen.app.sources.SourceUiActionDescriptor
 import vn.nghetruyen.app.sources.SourceUiActionResult
 import vn.nghetruyen.app.sources.SourceUiSurface
+import vn.nghetruyen.app.sources.currentDiagnosticCausalTraceId
 import vn.nghetruyen.app.sources.StorySource
 import vn.nghetruyen.source.api.JsonValue
 import vn.nghetruyen.source.api.SourceActionName
@@ -358,9 +359,15 @@ class SourcePackStorySource(
     }
     }
 
-    private fun execute(action: SourceActionName, input: JsonValue.Obj): JsonValue? {
+    private suspend fun execute(action: SourceActionName, input: JsonValue.Obj): JsonValue? {
         if (action !in pack.manifest.actions) return null
-        return when (val result = executor.execute(pack, resources, SourceActionRequest(pack.manifest.id, action, input))) {
+        val causalTraceId = currentDiagnosticCausalTraceId()
+        val request = if (causalTraceId == null) {
+            SourceActionRequest(pack.manifest.id, action, input)
+        } else {
+            SourceActionRequest(pack.manifest.id, action, input, traceId = causalTraceId)
+        }
+        return when (val result = executor.execute(pack, resources, request)) {
             is SourcePlatformResult.Success -> result.value.value
             is SourcePlatformResult.Failure -> throw SourcePackRuntimeFailure(result.error.code.name, result.error.message)
         }

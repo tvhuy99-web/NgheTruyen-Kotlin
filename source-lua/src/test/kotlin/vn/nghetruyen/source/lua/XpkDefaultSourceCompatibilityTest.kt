@@ -58,6 +58,8 @@ class XpkDefaultSourceCompatibilityTest {
         assertTrue(genre.contains("function execute(input, page)"))
         assertTrue(genre.contains("NativeV2.response(\"stories\""))
         assertTrue(toc.contains("page: url || \"\""))
+        val core = requireNotNull(pack.entries["src/native_v2_core.js"]).toString(Charsets.UTF_8)
+        assertTrue("STV chapter split should be bounded by the page probe window", core.contains("\"limit\":\"\$vars.window.probe_end\""))
     }
 
     @Test

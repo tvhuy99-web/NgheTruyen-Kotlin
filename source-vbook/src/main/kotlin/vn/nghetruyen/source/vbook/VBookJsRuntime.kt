@@ -92,6 +92,8 @@ class VBookJsRuntime(
                     "timeoutMs" to timeoutMs.toString(),
                     "instructionBudget" to manifest.runtime.instructionBudget.toString(),
                     "memoryBudgetBytes" to manifest.runtime.memoryBudgetBytes.toString(),
+                    "effectiveMemoryBudgetBytes" to (if (manifest.runtime.mode == SourceRuntimeMode.NATIVE_LUA_COMPAT) maxOf(manifest.runtime.memoryBudgetBytes, 64 * 1024 * 1024) else manifest.runtime.memoryBudgetBytes).toString(),
+                    "hardInstructionLimit" to (manifest.runtime.instructionBudget.toLong() * if (manifest.runtime.mode == SourceRuntimeMode.NATIVE_LUA_COMPAT) 64L else 16L).toString(),
                 )))
                 VBookSafeRhinoBoundary.installCurrentContext()
                 installHostApi(cx, scope, manifest, resources, request, budget)
@@ -202,11 +204,12 @@ class VBookJsRuntime(
             maxInstructions = manifest.runtime.instructionBudget.toLong(),
             wallClockTimeoutMs = timeoutMs,
             instructionObserverThreshold = 1_000,
-            maxHeapGrowthBytes = manifest.runtime.memoryBudgetBytes.toLong(),
-            maxResultUnits = manifest.runtime.memoryBudgetBytes.coerceAtLeast(1),
+            maxHeapGrowthBytes = (if (manifest.runtime.mode == SourceRuntimeMode.NATIVE_LUA_COMPAT) maxOf(manifest.runtime.memoryBudgetBytes, 64 * 1024 * 1024) else manifest.runtime.memoryBudgetBytes).toLong(),
+            maxResultUnits = (if (manifest.runtime.mode == SourceRuntimeMode.NATIVE_LUA_COMPAT) maxOf(manifest.runtime.memoryBudgetBytes, 64 * 1024 * 1024) else manifest.runtime.memoryBudgetBytes).coerceAtLeast(1),
             maxCollectionItems = 20_000,
             maxValueDepth = 96,
             languageVersion = Context.VERSION_ES6,
+            hardInstructionMultiplier = if (manifest.runtime.mode == SourceRuntimeMode.NATIVE_LUA_COMPAT) 64 else 16,
         ),
         clockMs = clockMs,
     )
@@ -350,21 +353,36 @@ class VBookJsRuntime(
                 val hookName = inputObject.propertyString("name") ?: error("NATIVE_LUA_HOOK_NAME_REQUIRED")
                 val sourceCode = resources.read("native/source.lua", 1024 * 1024)
                     ?: error("NATIVE_LUA_SOURCE_MISSING")
-                ScriptableObject.putProperty(scope, "__ngheNativeInput", inputObject)
-                val inputJson = Context.toString(cx.evaluateString(
-                    scope,
-                    "JSON.stringify({value:__ngheNativeInput.value,args:__ngheNativeInput.args||{},context:__ngheNativeInput.context||{}})",
-                    "native-hook-input",
-                    1,
-                    null,
-                ))
+                val bridgeInput = VBookNativeHookBridgeInputCodec.resolve(inputObject.propertyString("input")) {
+                    ScriptableObject.putProperty(scope, "__ngheNativeInput", inputObject)
+                    try {
+                        Context.toString(cx.evaluateString(
+                            scope,
+                            "JSON.stringify({value:__ngheNativeInput.value,args:__ngheNativeInput.args||{},context:__ngheNativeInput.context||{}})",
+                            "native-hook-input-legacy",
+                            1,
+                            null,
+                        ))
+                    } finally {
+                        ScriptableObject.deleteProperty(scope, "__ngheNativeInput")
+                    }
+                }
+                val inputJson = bridgeInput.json
                 diagnostics.emit(event(manifest, request, "VBOOK_BRIDGE_NATIVE_HOOK_STARTED", DiagnosticSeverity.DEBUG, attributes = mapOf(
                     "hook" to hookName.take(160),
+                    "bridgeInputMode" to bridgeInput.mode,
                     "inputBytes" to inputJson.toByteArray(Charsets.UTF_8).size.toString(),
                     "sourceBytes" to sourceCode.size.toString(),
                     "remainingMs" to (budget.deadlineMs - clockMs()).coerceAtLeast(0L).toString(),
                 )))
-                captureEvidence(manifest, request, "bridge-$hookName-input.json", "application/json", inputJson, mapOf("hook" to hookName))
+                captureEvidence(
+                    manifest,
+                    request,
+                    "bridge-$hookName-input.json",
+                    "application/json",
+                    inputJson,
+                    mapOf("hook" to hookName, "bridgeInputMode" to bridgeInput.mode),
+                )
                 val result = brokers.nativeHooks.execute(manifest, SourceNativeHookRequest(
                     sourceId = manifest.id,
                     sourceCode = sourceCode,
@@ -599,6 +617,11 @@ class VBookJsRuntime(
                 )
                 diagnostics.emit(event(manifest, request, parsed.name, parsed.severity, attributes = parsed.attributes))
                 true
+            }.apply {
+                // NativeV2 uses Log.log.apply(...). Give the host logger the normal Function
+                // prototype so JavaScript apply/call helpers remain available in Rhino.
+                parentScope = scope
+                prototype = ScriptableObject.getFunctionPrototype(scope)
             }
             ScriptableObject.putProperty(obj, "d", logger(DiagnosticSeverity.DEBUG))
             ScriptableObject.putProperty(obj, "i", logger(DiagnosticSeverity.INFO))
@@ -839,7 +862,9 @@ class VBookJsRuntime(
         }
 
     private fun hostFunction(block: (Array<out Any>) -> Any?): BaseFunction = object : BaseFunction() {
-        override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<out Any>): Any? = block(args)
+        // Function.prototype.apply(null, args) is valid JavaScript and Rhino forwards a null
+        // thisObj. Kotlin must not insert a non-null check before the host callback can run.
+        override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable?, args: Array<out Any>): Any? = block(args)
     }
 
     private fun actionArguments(

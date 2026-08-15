@@ -69,6 +69,7 @@ var PIPELINES=__NATIVE_V2_PIPELINES__;
 var BASE=__NATIVE_V2_BASE__;
 var PERMISSIONS=__NATIVE_V2_PERMISSIONS__;
 var RUNTIME_VERSION=__NATIVE_V2_RUNTIME_VERSION__;
+// NGHETRUYEN_NATIVE_V2_HOST_RUNTIME:2026-08-15.1
 var MAX_HOOK_INPUT_BYTES=__NATIVE_V2_MAX_HOOK_INPUT_BYTES__;
 function own(o,k){return Object.prototype.hasOwnProperty.call(o||{},k)}
 function isObj(v){return !!v&&typeof v==="object"&&!Array.isArray(v)}
@@ -77,6 +78,18 @@ function isEmpty(v){return v===null||v===undefined||v===""||(Array.isArray(v)&&v
 function asArray(v){if(v===null||v===undefined)return [];return Array.isArray(v)?v:[v]}
 function log(){var a=["NATIVE_V2"].concat(Array.prototype.slice.call(arguments));try{Log.log.apply(null,a)}catch(e){}}
 var WARNED=Object.create(null),WARNING_COUNT=0,MAX_WARNINGS=64;
+var REGEX_CACHE=Object.create(null),REGEX_CACHE_ORDER=[],MAX_REGEX_CACHE=128;
+function cachedRegExp(pattern,flags){
+ pattern=String(pattern==null?"":pattern);flags=String(flags||"");
+ var key=flags+"\u0000"+pattern,re=REGEX_CACHE[key];
+ if(re){re.lastIndex=0;return re}
+ re=new RegExp(pattern,flags);
+ if(REGEX_CACHE_ORDER.length>=MAX_REGEX_CACHE){var old=REGEX_CACHE_ORDER.shift();delete REGEX_CACHE[old]}
+ REGEX_CACHE_ORDER.push(key);REGEX_CACHE[key]=re;return re;
+}
+function regexMatchText(value,pattern,flags){var re=cachedRegExp(pattern,flags);re.lastIndex=0;var result=String(value==null?"":value).match(re);re.lastIndex=0;return result}
+function regexTestText(value,pattern,flags){var re=cachedRegExp(pattern,flags);re.lastIndex=0;var result=re.test(String(value==null?"":value));re.lastIndex=0;return result}
+function regexReplaceText(value,pattern,flags,replacement){var re=cachedRegExp(pattern,flags);re.lastIndex=0;var result=String(value==null?"":value).replace(re,replacement);re.lastIndex=0;return result}
 function warn(stage,message,detail){
  var d=String(detail==null?"":detail),key=String(stage||"parse")+"|"+String(message||"")+"|"+d;
  if(WARNED[key]||WARNING_COUNT>=MAX_WARNINGS)return;WARNED[key]=true;WARNING_COUNT++;
@@ -172,7 +185,7 @@ function nodeValue(node,desc){
 }
 function applyReplace(value,rules){
  var list=Array.isArray(rules)?rules:(rules?[rules]:[]),out=String(value==null?"":value);
- list.forEach(function(rule){if(!rule)return;var pattern=String(rule.pattern==null?"":rule.pattern),replacement=String(rule.replacement==null?"":rule.replacement);if(!pattern)return;try{if(rule.plain)out=out.split(pattern).join(replacement);else out=out.replace(new RegExp(pattern,String(rule.flags||"g")),replacement)}catch(e){warn("parse.replace","Regex thay thế không hợp lệ: "+pattern,e&&e.message?e.message:e)}});
+ list.forEach(function(rule){if(!rule)return;var pattern=String(rule.pattern==null?"":rule.pattern),replacement=String(rule.replacement==null?"":rule.replacement);if(!pattern)return;try{if(rule.plain)out=out.split(pattern).join(replacement);else out=regexReplaceText(out,pattern,String(rule.flags||"g"),replacement)}catch(e){warn("parse.replace","Regex thay thế không hợp lệ: "+pattern,e&&e.message?e.message:e)}});
  return out;
 }
 function postProcess(value,desc,ctx){
@@ -187,12 +200,12 @@ function postProcess(value,desc,ctx){
  if(typeof out==="string"){
   if(desc.trim!==false)out=out.trim();
   if(desc.replace)out=applyReplace(out,desc.replace);
-  if(desc.regex){try{var m=String(out).match(new RegExp(String(desc.regex),String(desc.flags||"")));out=m?(m[Number(desc.group==null?1:desc.group)]!==undefined?m[Number(desc.group==null?1:desc.group)]:m[0]):""}catch(e){warn("parse.regex","Regex trích xuất không hợp lệ: "+String(desc.regex),e&&e.message?e.message:e);out=""}}
+  if(desc.regex){try{var m=regexMatchText(out,String(desc.regex),String(desc.flags||""));out=m?(m[Number(desc.group==null?1:desc.group)]!==undefined?m[Number(desc.group==null?1:desc.group)]:m[0]):""}catch(e){warn("parse.regex","Regex trích xuất không hợp lệ: "+String(desc.regex),e&&e.message?e.message:e);out=""}}
   if(desc.prefix!==undefined){var prefixValue=resolveDynamic(ctx,desc.prefix,out);out=String(prefixValue==null?"":prefixValue)+out}
   if(desc.suffix!==undefined){var suffixValue=resolveDynamic(ctx,desc.suffix,out);out=out+String(suffixValue==null?"":suffixValue)}
   if(desc.absolute)out=normalizeUrl(out,ctx.current_url||BASE);
  }
- if(desc.matches!==undefined){try{out=new RegExp(String(desc.matches),String(desc.flags||"i")).test(String(out==null?"":out))}catch(e){warn("parse.matches","Regex matches không hợp lệ: "+String(desc.matches),e&&e.message?e.message:e);out=false}}
+ if(desc.matches!==undefined){try{out=regexTestText(out,String(desc.matches),String(desc.flags||"i"))}catch(e){warn("parse.matches","Regex matches không hợp lệ: "+String(desc.matches),e&&e.message?e.message:e);out=false}}
  else if(desc.contains!==undefined)out=String(out==null?"":out).toLowerCase().indexOf(String(resolveDynamic(ctx,desc.contains,out)).toLowerCase())>=0;
  if(desc.map&&isObj(desc.map)){var mk=String(out==null?"":out);if(own(desc.map,mk))out=resolveDynamic(ctx,desc.map[mk],out);else if(desc.map_default!==undefined)out=resolveDynamic(ctx,desc.map_default,out)}
  if(isEmpty(out)&&desc.default!==undefined)out=resolveDynamic(ctx,desc.default,out);
@@ -376,7 +389,7 @@ function evalCondition(condition,ctx,source){
  if(op==="not_equals"||op==="not_equal"||op==="neq"||op==="!=")return comparable(left)!==comparable(right);
  var ls=String(left==null?"":left),rs=String(right==null?"":right);if(condition.ignore_case===true){ls=ls.toLowerCase();rs=rs.toLowerCase()}
  if(op==="contains")return ls.indexOf(rs)>=0;if(op==="not_contains")return ls.indexOf(rs)<0;if(op==="starts_with")return ls.indexOf(rs)===0;if(op==="ends_with")return rs===""||ls.slice(-rs.length)===rs;
- if(op==="matches"||op==="regex")try{return new RegExp(rs,String(condition.flags||"")).test(ls)}catch(e){warn("parse.condition_regex","Regex điều kiện không hợp lệ: "+rs,e&&e.message?e.message:e);return false}
+ if(op==="matches"||op==="regex")try{return regexTestText(ls,rs,String(condition.flags||""))}catch(e){warn("parse.condition_regex","Regex điều kiện không hợp lệ: "+rs,e&&e.message?e.message:e);return false}
  if(op==="in"){var arr=Array.isArray(right)?right:[right];for(var ii=0;ii<arr.length;ii++)if(comparable(left)===comparable(arr[ii]))return true;return false}
  var ln=Number(left),rn=Number(right);if(op==="greater"||op==="gt")return ln>rn;if(op==="greater_equal"||op==="gte")return ln>=rn;if(op==="less"||op==="lt")return ln<rn;if(op==="less_equal"||op==="lte")return ln<=rn;
  return truthy(left);
@@ -386,12 +399,20 @@ function htmlDecode(value){try{var d=(new DOMParser()).parseFromString("<textare
 function b64EncodeText(value){try{return btoa(unescape(encodeURIComponent(String(value==null?"":value))))}catch(e){return btoa(String(value==null?"":value))}}
 function b64DecodeText(value){try{return decodeURIComponent(escape(atob(String(value||""))))}catch(e){try{return atob(String(value||""))}catch(ignore){return ""}}}
 function utf8ByteLength(value){value=String(value==null?"":value);try{return unescape(encodeURIComponent(value)).length}catch(e){return value.length}}
+function transformValueMeta(value){if(Array.isArray(value))return "arrayLength="+value.length;if(typeof value==="string")return "stringBytes="+utf8ByteLength(value);if(value&&typeof value==="object")return "objectKeys="+Object.keys(value).length;return "type="+typeof value}
 function applyTransformOperation(value,rawOp,ctx,stage){
  var opSpec=typeof rawOp==="string"?{op:rawOp}:(rawOp||{}),op=String(opSpec.op||opSpec.operation||"").toLowerCase().replace(/[- ]/g,"_");
  if(op==="trim")return String(value==null?"":value).trim();if(op==="lower"||op==="lowercase")return String(value==null?"":value).toLowerCase();if(op==="upper"||op==="uppercase")return String(value==null?"":value).toUpperCase();
- if(op==="replace"){var pattern=String(resolveDynamic(ctx,opSpec.pattern,value)||""),rep=String(resolveDynamic(ctx,opSpec.replacement,value)||"");return opSpec.plain===true?String(value==null?"":value).split(pattern).join(rep):String(value==null?"":value).replace(new RegExp(pattern,String(opSpec.flags||"g")),rep)}
- if(op==="regex_replace"){try{return String(value==null?"":value).replace(new RegExp(String(opSpec.pattern||""),String(opSpec.flags||"g")),String(resolveDynamic(ctx,opSpec.replacement,value)||""))}catch(e){fail(stage,"regex_replace không hợp lệ",e.message||e)}}
- if(op==="split")return String(value==null?"":value).split(String(opSpec.separator!==undefined?opSpec.separator:(opSpec.delimiter||",")));
+ if(op==="replace"){var pattern=String(resolveDynamic(ctx,opSpec.pattern,value)||""),rep=String(resolveDynamic(ctx,opSpec.replacement,value)||"");return opSpec.plain===true?String(value==null?"":value).split(pattern).join(rep):regexReplaceText(value,pattern,String(opSpec.flags||"g"),rep)}
+ if(op==="regex_replace"){try{return regexReplaceText(value,String(opSpec.pattern||""),String(opSpec.flags||"g"),String(resolveDynamic(ctx,opSpec.replacement,value)||""))}catch(e){fail(stage,"regex_replace không hợp lệ",e.message||e)}}
+ if(op==="split"){
+  var splitText=String(value==null?"":value),splitSep=String(opSpec.separator!==undefined?opSpec.separator:(opSpec.delimiter||","));
+  if(opSpec.limit===undefined)return splitText.split(splitSep);
+  var resolvedLimit=Number(resolveDynamic(ctx,opSpec.limit,value));
+  if(!isFinite(resolvedLimit))fail(stage,"split limit không hợp lệ",String(opSpec.limit));
+  resolvedLimit=Math.max(0,Math.min(20000,Math.floor(resolvedLimit)));
+  return splitText.split(splitSep,resolvedLimit);
+ }
  if(op==="join")return asArray(value).join(String(opSpec.separator!==undefined?opSpec.separator:(opSpec.delimiter||"")));
  if(op==="substring"||op==="slice_text"){var st=Number(opSpec.start||0)||0,en=opSpec.stop!==undefined?Number(opSpec.stop):(opSpec.end!==undefined?Number(opSpec.end):undefined);if(opSpec.length!==undefined)en=st+(Number(opSpec.length)||0);return String(value==null?"":value).slice(st,en)}
  if(op==="url_encode")return encodeURIComponent(String(value==null?"":value));if(op==="url_decode")try{return decodeURIComponent(String(value==null?"":value))}catch(e){warn(stage+".url_decode","URL decode thất bại",e&&e.message?e.message:e);return String(value==null?"":value)}
@@ -421,7 +442,9 @@ function applyTransformOperation(value,rawOp,ctx,stage){
 }
 function doTransform(rawSpec,ctx,stage){
  var spec=rawSpec||{},source=spec.from!==undefined?resolveRef(ctx,spec.from):ctx.last,value=spec.input!==undefined?resolveDynamic(ctx,spec.input,source):source,ops=spec.operations!==undefined?spec.operations:(spec.ops!==undefined?spec.ops:(spec.op||spec.operation?[spec]:[]));
- ops=Array.isArray(ops)?ops:[ops];for(var i=0;i<ops.length;i++)value=applyTransformOperation(value,ops[i],ctx,stage+".op"+(i+1));
+ ops=Array.isArray(ops)?ops:[ops];log("TRANSFORM_START",stage,"ops="+ops.length,transformValueMeta(value));
+ for(var i=0;i<ops.length;i++){var rawOp=ops[i],opName=String((typeof rawOp==="string"?rawOp:(rawOp&& (rawOp.op||rawOp.operation)))||"");log("TRANSFORM_OP",stage,"index="+(i+1),"op="+opName,transformValueMeta(value));value=applyTransformOperation(value,rawOp,ctx,stage+".op"+(i+1))}
+ log("TRANSFORM_DONE",stage,transformValueMeta(value));
  if(spec.into)ctx.vars[String(spec.into)]=value;ctx.last=value;return value;
 }
 function toSerializable(value,depth){

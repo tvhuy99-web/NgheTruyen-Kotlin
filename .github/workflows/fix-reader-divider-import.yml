@@ -1,0 +1,44 @@
+name: Fix Reader divider import
+
+on:
+  push:
+    branches:
+      - feat/ai-sound-director
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/ai-sound-director
+      - name: Add missing HorizontalDivider import
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          path = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt')
+          text = path.read_text()
+          target = 'import androidx.compose.material3.DropdownMenuItem\n'
+          added = 'import androidx.compose.material3.HorizontalDivider\n'
+          if added in text:
+              raise SystemExit('HorizontalDivider import already present')
+          if text.count(target) != 1:
+              raise SystemExit(f'expected one DropdownMenuItem import, got {text.count(target)}')
+          text = text.replace(target, target + added, 1)
+          path.write_text(text)
+          PY
+          git diff --check
+      - name: Commit fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt
+          git diff --cached --quiet && exit 0
+          git commit -m "fix(ui): import HorizontalDivider in reader"
+          git push origin HEAD:feat/ai-sound-director

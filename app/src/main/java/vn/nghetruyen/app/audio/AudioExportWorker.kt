@@ -284,6 +284,8 @@ class AudioExportWorker(
     private suspend fun loadVoiceAssignments(
         content: vn.nghetruyen.app.core.model.ChapterContent,
     ): Map<String, ExportVoiceAssignment> {
+        // Legacy paragraph API `listVoiceAssignments` is intentionally not used here. Export reads
+        // the canonical UNIT transform so realtime playback and audiobook export share one timeline.
         val transform = container.libraryRepository.getChapterTransform(content.chapter.id, ChapterAiWorkflow.KIND_VOICE_CAST)
             ?: return emptyMap()
         if (transform.sourceSha256 != ChapterAiWorkflow.sha256(content.paragraphs)) return emptyMap()

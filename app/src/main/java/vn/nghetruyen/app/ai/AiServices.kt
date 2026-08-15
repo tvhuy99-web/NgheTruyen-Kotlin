@@ -79,7 +79,10 @@ data class NarrationPlanContext(
     val activeTrackTitle: String? = null,
     val previousMood: String = "",
     val incomingSource: String = "",
+    /** Legacy first ambience layer retained for source compatibility. */
     val incomingAmbienceId: String? = null,
+    /** Up to two ambience layers that were active at the end of the previous chapter. */
+    val incomingAmbienceIds: List<String> = emptyList(),
 )
 
 data class NarrationPlanRequest(

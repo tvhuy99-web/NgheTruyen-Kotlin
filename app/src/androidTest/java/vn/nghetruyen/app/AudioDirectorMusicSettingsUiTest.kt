@@ -1,5 +1,6 @@
 package vn.nghetruyen.app
 
+import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -19,7 +20,7 @@ class AudioDirectorMusicSettingsUiTest {
     val composeRule = createAndroidComposeRule<MainActivity>()
 
     @Test
-    fun musicSettingsExposeMusicAmbienceAndSfxThroughUserNavigation() {
+    fun personalMusicSettingsKeepManualMusicAndDoNotDuplicateAiAudioControls() {
         composeRule.onNodeWithText("CÁ NHÂN", useUnmergedTree = true).performClick()
         composeRule.onNodeWithText("Cài đặt", useUnmergedTree = true).performClick()
         composeRule
@@ -28,14 +29,14 @@ class AudioDirectorMusicSettingsUiTest {
             .performClick()
 
         composeRule.waitUntil(timeoutMillis = 5_000) {
-            composeRule.onAllNodesWithText("AI SOUND DIRECTOR", useUnmergedTree = true)
+            composeRule.onAllNodesWithText("Nhạc nền cục bộ", useUnmergedTree = true)
                 .fetchSemanticsNodes().isNotEmpty()
         }
 
-        composeRule.onNodeWithText("AI SOUND DIRECTOR", useUnmergedTree = true).assertIsDisplayed()
-        composeRule.onNodeWithText("Nhạc cảnh AI", useUnmergedTree = true).performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("Âm thanh môi trường AI", useUnmergedTree = true).performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("Hiệu ứng âm thanh AI", useUnmergedTree = true).performScrollTo().assertIsDisplayed()
-        composeRule.onNode(hasText("QUẢN LÝ NHẠC", substring = true), useUnmergedTree = true).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Nhạc nền cục bộ", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithText("ÂM THANH AI", useUnmergedTree = true).assertDoesNotExist()
+        composeRule.onNodeWithText("Nhạc cảnh AI", useUnmergedTree = true).assertDoesNotExist()
+        composeRule.onNodeWithText("Âm thanh môi trường AI", useUnmergedTree = true).assertDoesNotExist()
+        composeRule.onNodeWithText("Hiệu ứng âm thanh AI", useUnmergedTree = true).assertDoesNotExist()
     }
 }

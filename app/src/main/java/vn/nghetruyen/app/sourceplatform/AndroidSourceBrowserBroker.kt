@@ -75,7 +75,7 @@ class AndroidSourceBrowserBroker(
     private val clockMs: () -> Long = System::currentTimeMillis,
     resolver: (String) -> List<InetAddress> = { host -> InetAddress.getAllByName(host).toList() },
     private val evidence: DiagnosticEvidenceSink = DiagnosticEvidenceSink.NONE,
-) : SourceBrowserBroker {
+) : SourceBrowserBroker, SourceWebViewCookieReader {
     private val appContext = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
     private val operationLock = Any()
@@ -105,6 +105,16 @@ class AndroidSourceBrowserBroker(
                     }
                 }
             })
+        }
+    }
+
+    override fun readWebViewCookieHeader(sourceId: String, requestUrl: String): String? {
+        if (!requestUrl.startsWith("https://", ignoreCase = true)) return null
+        return synchronized(operationLock) {
+            if (active?.manifest?.id != sourceId) return@synchronized null
+            runCatching {
+                runOnMain(5_000L) { CookieManager.getInstance().getCookie(requestUrl) }
+            }.getOrNull()
         }
     }
 
@@ -1659,7 +1669,7 @@ class AndroidSourceBrowserBroker(
                 method = request.method.take(16),
                 mainFrame = request.isForMainFrame,
                 resourceType = resourceType,
-                headerNames = request.requestHeaders.keys.take(64).toSet(),
+                headerNames = request.requestHeaders.orEmpty().keys.take(64).toSet(),
                 timestampEpochMs = System.currentTimeMillis(),
             ))
         }

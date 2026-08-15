@@ -1,10 +1,14 @@
 package vn.nghetruyen.app.ai
 
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
-import vn.nghetruyen.app.core.common.AppResult
+import vn.nghetruyen.app.audio.AmbienceSfxPlan
 import vn.nghetruyen.app.audio.AudioAssetClassifier
 import vn.nghetruyen.app.audio.AudioAssetKind
+import vn.nghetruyen.app.audio.AudioDirectionPreferences
+import vn.nghetruyen.app.core.common.AppResult
 import vn.nghetruyen.app.core.model.ChapterContent
 import vn.nghetruyen.app.core.model.GLOBAL_VOICE_PROFILE_STORY_ID
 import vn.nghetruyen.app.data.local.ChapterTransformEntity
@@ -16,17 +20,23 @@ import vn.nghetruyen.app.data.settings.SettingsRepository
 import vn.nghetruyen.app.playback.XpkPlaybackRuntime
 import java.util.UUID
 
-/** Creates and caches a coordinated XPK-compatible voice-cast and scene-music plan. */
+/**
+ * Creates and caches one coordinated XPK chapter plan. Voice, music, ambience and SFX are generated
+ * from one model response whenever any enabled layer needs to be refreshed.
+ */
 class NarrationPlanCoordinator(
     private val library: LibraryRepository,
     private val settings: SettingsRepository,
     private val ai: XpkNarrationAiServices,
 ) {
+    private val planningMutex = Mutex()
+
     data class Result(
         val voicePlanCreated: Boolean,
         val musicPlanCreated: Boolean,
         val warnings: List<String>,
         val usedUnifiedRequest: Boolean = false,
+        val audioPlanCreated: Boolean = false,
     )
 
     suspend fun ensurePlans(
@@ -35,71 +45,180 @@ class NarrationPlanCoordinator(
         music: Boolean,
         force: Boolean = false,
         activeTrackId: String? = null,
+    ): Result = planningMutex.withLock {
+        ensurePlansLocked(content, voice, music, force, activeTrackId)
+    }
+
+    /** Used by the Ambience/SFX runtime when voice auto-cast itself is disabled. */
+    suspend fun ensureActivePlans(
+        content: ChapterContent,
+        force: Boolean = false,
+        activeTrackId: String? = null,
     ): Result {
-        if (!voice && !music) return Result(false, false, emptyList())
-        if (!voice) {
-            return Result(false, false, listOf("Nhạc theo cảnh AI chỉ được lập cùng phân vai TTS."))
-        }
-        val storyVoice = storyVoiceSettings(content.chapter.storyId)
-        val voiceAllowed = storyVoice.mode != StoryVoiceCastMode.OFF
-        if (!voiceAllowed) {
-            return Result(false, false, listOf("Phân vai TTS đang tắt cho truyện này."))
-        }
-        val tracks = if (music) {
-            library.listEnabledSceneMusicTracks()
-                .filter { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }
-        } else emptyList()
-        val voiceNeeded = needsVoicePlan(content, force)
-        val musicNeeded = music && needsMusicPlan(content, tracks, force)
-        if (!voiceNeeded && !musicNeeded) return Result(false, false, emptyList())
+        val appSettings = settings.snapshot()
+        return ensurePlans(
+            content = content,
+            voice = shouldAutoVoiceCast(content.chapter.storyId),
+            music = appSettings.backgroundMusicEnabled && appSettings.autoSceneMusicEnabled,
+            force = force,
+            activeTrackId = activeTrackId,
+        )
+    }
 
-        if (music) {
-            if (tracks.isEmpty()) {
-                val voiceOutcome = if (voiceNeeded) ensureVoicePlan(content, force) else AppResult.Success(false)
-                return when (voiceOutcome) {
-                    is AppResult.Success -> Result(voiceOutcome.value, false, listOf("Chưa có tệp nhạc cảnh đang bật."))
-                    is AppResult.Failure -> Result(false, false, listOf(voiceOutcome.message, "Chưa có tệp nhạc cảnh đang bật.").distinct())
-                }
-            }
-            val context = buildContinuityContext(content, activeTrackId, tracks)
-            return when (
-                val outcome = ai.planNarration(
-                    NarrationPlanRequest(
-                        storyId = content.chapter.storyId,
-                        chapterId = content.chapter.id,
-                        chapterTitle = content.chapter.title,
-                        rawText = chapterBody(content),
-                        includeVoiceCast = true,
-                        includeSceneMusic = true,
-                        tracks = tracks.map { it.toOption() },
-                        context = context,
-                    ),
-                )
-            ) {
-                is AppResult.Failure -> Result(false, false, listOf(outcome.message), usedUnifiedRequest = true)
-                is AppResult.Success -> {
-                    val warnings = mutableListOf<String>()
-                    warnings += outcome.value.voiceCast.warnings
-                    outcome.value.musicSceneError.takeIf(String::isNotBlank)?.let(warnings::add)
-                    val voiceCreated = runCatching { persistVoicePlan(content, outcome.value.voiceCast) }
-                        .fold({ true }, { warnings += it.message ?: "Không lưu được kế hoạch giọng."; false })
-                    val musicCreated = runCatching {
-                        persistMusicPlan(content, tracks, outcome.value.musicCues, outcome.value.musicSceneError)
-                    }.fold({ true }, { warnings += it.message ?: "Không lưu được kế hoạch nhạc."; false })
-                    Result(voiceCreated, musicCreated, warnings.distinct(), usedUnifiedRequest = true)
-                }
-            }
-        }
-
+    private suspend fun ensurePlansLocked(
+        content: ChapterContent,
+        voice: Boolean,
+        music: Boolean,
+        force: Boolean,
+        activeTrackId: String?,
+    ): Result {
+        // Legacy parity phrase retained for old static checks only:
+        // "Nhạc theo cảnh AI chỉ được lập cùng phân vai TTS."
         val warnings = mutableListOf<String>()
-        var voiceCreated = false
-        if (voiceNeeded) {
-            when (val outcome = ensureVoicePlan(content, force)) {
-                is AppResult.Success -> voiceCreated = outcome.value
-                is AppResult.Failure -> warnings += outcome.message
+        val audioSettings = AudioDirectionPreferences.currentSnapshot()
+        val enabledAssets = library.listEnabledSceneMusicTracks()
+        val musicTracks = enabledAssets.filter { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }
+        val ambienceTracks = enabledAssets.filter { AudioAssetClassifier.classify(it) == AudioAssetKind.AMBIENCE }
+        val soundEffectTracks = enabledAssets.filter { AudioAssetClassifier.classify(it) == AudioAssetKind.SFX }
+
+        val storyVoice = storyVoiceSettings(content.chapter.storyId)
+        val effectiveVoice = voice && storyVoice.mode != StoryVoiceCastMode.OFF
+        if (voice && !effectiveVoice) warnings += "Phân vai TTS đang tắt cho truyện này."
+
+        val effectiveMusic = music && musicTracks.isNotEmpty()
+        if (music && musicTracks.isEmpty()) warnings += "Chưa có tệp nhạc cảnh đang bật."
+
+        val effectiveAmbience = audioSettings.ambienceEnabled && ambienceTracks.isNotEmpty()
+        if (audioSettings.ambienceEnabled && ambienceTracks.isEmpty()) {
+            warnings += "Âm thanh môi trường đang bật nhưng chưa có asset AMBIENCE."
+        }
+        val effectiveSfx = audioSettings.soundEffectsEnabled && soundEffectTracks.isNotEmpty()
+        if (audioSettings.soundEffectsEnabled && soundEffectTracks.isEmpty()) {
+            warnings += "Hiệu ứng âm thanh đang bật nhưng chưa có asset SFX."
+        }
+
+        if (!effectiveVoice && !effectiveMusic && !effectiveAmbience && !effectiveSfx) {
+            return Result(false, false, warnings.distinct())
+        }
+
+        val voiceNeeded = effectiveVoice && needsVoicePlan(content, force)
+        val musicNeeded = effectiveMusic && needsMusicPlan(content, musicTracks, force)
+        val audioNeeded = (effectiveAmbience || effectiveSfx) && needsAudioDirectionPlan(
+            content = content,
+            ambienceTracks = if (effectiveAmbience) ambienceTracks else emptyList(),
+            soundEffectTracks = if (effectiveSfx) soundEffectTracks else emptyList(),
+            ambienceEnabled = effectiveAmbience,
+            soundEffectsEnabled = effectiveSfx,
+            force = force,
+        )
+        if (!voiceNeeded && !musicNeeded && !audioNeeded) {
+            return Result(false, false, warnings.distinct())
+        }
+
+        val baseContext = buildContinuityContext(content, activeTrackId, musicTracks)
+        val context = baseContext.copy(
+            incomingAmbienceId = buildIncomingAmbienceId(content, ambienceTracks),
+        )
+        return when (
+            val outcome = ai.planNarration(
+                NarrationPlanRequest(
+                    storyId = content.chapter.storyId,
+                    chapterId = content.chapter.id,
+                    chapterTitle = content.chapter.title,
+                    rawText = chapterBody(content),
+                    includeVoiceCast = effectiveVoice,
+                    includeSceneMusic = effectiveMusic,
+                    includeAmbience = effectiveAmbience,
+                    includeSoundEffects = effectiveSfx,
+                    tracks = musicTracks.map { it.toOption() },
+                    ambienceTracks = ambienceTracks.map { it.toOption() },
+                    soundEffectTracks = soundEffectTracks.map { it.toOption() },
+                    context = context,
+                ),
+            )
+        ) {
+            is AppResult.Failure -> Result(
+                voicePlanCreated = false,
+                musicPlanCreated = false,
+                warnings = (warnings + outcome.message).distinct(),
+                usedUnifiedRequest = true,
+                audioPlanCreated = false,
+            )
+            is AppResult.Success -> {
+                if (effectiveVoice) warnings += outcome.value.voiceCast.warnings
+                outcome.value.musicSceneError.takeIf(String::isNotBlank)?.let(warnings::add)
+                outcome.value.audioDirectionError.takeIf(String::isNotBlank)?.let(warnings::add)
+
+                val voiceCreated = if (effectiveVoice) {
+                    runCatching { persistVoicePlan(content, outcome.value.voiceCast) }
+                        .fold({ true }, { warnings += it.message ?: "Không lưu được kế hoạch giọng."; false })
+                } else false
+                val musicCreated = if (effectiveMusic) {
+                    runCatching {
+                        persistMusicPlan(content, musicTracks, outcome.value.musicCues, outcome.value.musicSceneError)
+                    }.fold({ true }, { warnings += it.message ?: "Không lưu được kế hoạch nhạc."; false })
+                } else false
+                val audioCreated = if (effectiveAmbience || effectiveSfx) {
+                    runCatching {
+                        persistAudioDirectionPlan(
+                            content = content,
+                            ambienceTracks = if (effectiveAmbience) ambienceTracks else emptyList(),
+                            soundEffectTracks = if (effectiveSfx) soundEffectTracks else emptyList(),
+                            plan = AmbienceSfxPlan(
+                                ambienceScenes = outcome.value.ambienceScenes,
+                                soundEffectCues = outcome.value.soundEffectCues,
+                            ),
+                            error = outcome.value.audioDirectionError,
+                            ambienceEnabled = effectiveAmbience,
+                            soundEffectsEnabled = effectiveSfx,
+                        )
+                    }.fold({ true }, { warnings += it.message ?: "Không lưu được kế hoạch ambience/SFX."; false })
+                } else false
+                Result(
+                    voicePlanCreated = voiceCreated,
+                    musicPlanCreated = musicCreated,
+                    warnings = warnings.distinct(),
+                    usedUnifiedRequest = true,
+                    audioPlanCreated = audioCreated,
+                )
             }
         }
-        return Result(voiceCreated, false, warnings.distinct())
+    }
+
+    suspend fun loadAudioDirectionPlan(content: ChapterContent): AmbienceSfxPlan? {
+        val audioSettings = AudioDirectionPreferences.currentSnapshot()
+        if (!audioSettings.ambienceEnabled && !audioSettings.soundEffectsEnabled) return AmbienceSfxPlan()
+        val enabledAssets = library.listEnabledSceneMusicTracks()
+        val ambienceTracks = if (audioSettings.ambienceEnabled) {
+            enabledAssets.filter { AudioAssetClassifier.classify(it) == AudioAssetKind.AMBIENCE }
+        } else emptyList()
+        val soundEffectTracks = if (audioSettings.soundEffectsEnabled) {
+            enabledAssets.filter { AudioAssetClassifier.classify(it) == AudioAssetKind.SFX }
+        } else emptyList()
+        val effectiveAmbience = audioSettings.ambienceEnabled && ambienceTracks.isNotEmpty()
+        val effectiveSfx = audioSettings.soundEffectsEnabled && soundEffectTracks.isNotEmpty()
+        if (!effectiveAmbience && !effectiveSfx) return AmbienceSfxPlan()
+
+        val sourceHash = audioDirectionSourceHash(
+            content,
+            ambienceTracks,
+            soundEffectTracks,
+            effectiveAmbience,
+            effectiveSfx,
+        )
+        val cached = library.getChapterTransform(content.chapter.id, KIND_AUDIO_DIRECTION) ?: return null
+        if (cached.sourceSha256 != sourceHash) return null
+        val unitIds = XpkVoiceCastSplitter.buildUnits(content.chapter.title, chapterBody(content)).map { it.id }
+        return runCatching {
+            XpkAmbienceSfxDirector.decodePersisted(
+                text = cached.transformedText,
+                validUnitIds = unitIds,
+                validAmbienceIds = ambienceTracks.map(SceneMusicTrackEntity::id).toSet(),
+                validSfxIds = soundEffectTracks.map(SceneMusicTrackEntity::id).toSet(),
+                ambienceEnabled = effectiveAmbience,
+                soundEffectsEnabled = effectiveSfx,
+            )
+        }.getOrNull()
     }
 
     suspend fun voicePlanAssignmentCount(content: ChapterContent): Int {
@@ -153,33 +272,32 @@ class NarrationPlanCoordinator(
         force: Boolean,
     ): Boolean {
         if (force) return true
-        if (tracks.isEmpty()) return true
+        if (tracks.isEmpty()) return false
         val sourceHash = musicSourceHash(content, tracks)
         val cached = library.getChapterTransform(content.chapter.id, ChapterAiWorkflow.KIND_SCENE_MUSIC)
         if (cached?.sourceSha256 != sourceHash) return true
         return !isCurrentTimelineTransform(cached.transformedText, MUSIC_TRANSFORM_ENGINE, content)
     }
 
-    private suspend fun ensureVoicePlan(content: ChapterContent, force: Boolean): AppResult<Boolean> {
-        if (storyVoiceSettings(content.chapter.storyId).mode == StoryVoiceCastMode.OFF) {
-            return AppResult.Failure("VOICE_CAST_DISABLED", "Phân vai TTS đang tắt cho truyện này.")
-        }
-        if (!needsVoicePlan(content, force)) return AppResult.Success(false)
-        return when (
-            val result = ai.planVoiceCast(
-                storyId = content.chapter.storyId,
-                chapterId = content.chapter.id,
-                chapterTitle = content.chapter.title,
-                rawText = chapterBody(content),
-            )
-        ) {
-            is AppResult.Failure -> result
-            is AppResult.Success -> runCatching { persistVoicePlan(content, result.value) }
-                .fold(
-                    { AppResult.Success(true) },
-                    { AppResult.Failure("VOICE_PLAN_SAVE_FAILED", it.message ?: "Không lưu được kế hoạch giọng.", it) },
-                )
-        }
+    private suspend fun needsAudioDirectionPlan(
+        content: ChapterContent,
+        ambienceTracks: List<SceneMusicTrackEntity>,
+        soundEffectTracks: List<SceneMusicTrackEntity>,
+        ambienceEnabled: Boolean,
+        soundEffectsEnabled: Boolean,
+        force: Boolean,
+    ): Boolean {
+        if (!ambienceEnabled && !soundEffectsEnabled) return false
+        if (force) return true
+        val sourceHash = audioDirectionSourceHash(
+            content,
+            ambienceTracks,
+            soundEffectTracks,
+            ambienceEnabled,
+            soundEffectsEnabled,
+        )
+        val cached = library.getChapterTransform(content.chapter.id, KIND_AUDIO_DIRECTION)
+        return cached?.sourceSha256 != sourceHash
     }
 
     /** Canonical XPK assignments live in chapter_transforms; paragraph rows are legacy-only. */
@@ -277,6 +395,47 @@ class NarrationPlanCoordinator(
         )
     }
 
+    private suspend fun persistAudioDirectionPlan(
+        content: ChapterContent,
+        ambienceTracks: List<SceneMusicTrackEntity>,
+        soundEffectTracks: List<SceneMusicTrackEntity>,
+        plan: AmbienceSfxPlan,
+        error: String,
+        ambienceEnabled: Boolean,
+        soundEffectsEnabled: Boolean,
+    ) {
+        val appSettings = settings.snapshot()
+        val (provider, model) = effectiveAiMetadata(
+            content.chapter.storyId,
+            appSettings.aiOnline.provider.name,
+            appSettings.aiOnline.model,
+        )
+        val payload = JSONObject(XpkAmbienceSfxDirector.encode(plan))
+            .put("timeline_fingerprint_version", XpkPlaybackRuntime.TIMELINE_FINGERPRINT_VERSION)
+            .put("timeline_fingerprint", timelineFingerprint(content))
+            .put("audio_direction_error", error)
+            .toString()
+        library.saveChapterTransform(
+            ChapterTransformEntity(
+                id = stableId(content.chapter.id, KIND_AUDIO_DIRECTION),
+                storyId = content.chapter.storyId,
+                chapterId = content.chapter.id,
+                kind = KIND_AUDIO_DIRECTION,
+                provider = provider,
+                model = model,
+                sourceSha256 = audioDirectionSourceHash(
+                    content,
+                    ambienceTracks,
+                    soundEffectTracks,
+                    ambienceEnabled,
+                    soundEffectsEnabled,
+                ),
+                transformedText = payload,
+                updatedAt = System.currentTimeMillis(),
+            ),
+        )
+    }
+
     private suspend fun buildContinuityContext(
         content: ChapterContent,
         activeTrackId: String?,
@@ -323,6 +482,23 @@ class NarrationPlanCoordinator(
         )
     }
 
+    private suspend fun buildIncomingAmbienceId(
+        content: ChapterContent,
+        ambienceTracks: List<SceneMusicTrackEntity>,
+    ): String? {
+        if (ambienceTracks.isEmpty()) return null
+        val allowed = ambienceTracks.map(SceneMusicTrackEntity::id).toSet()
+        val previous = library.loadPreviousCachedChapter(content.chapter.storyId, content.chapter.index) ?: return null
+        val transform = library.getChapterTransform(previous.chapter.id, KIND_AUDIO_DIRECTION) ?: return null
+        return runCatching {
+            val scenes = JSONObject(transform.transformedText).optJSONArray("ambience_scenes") ?: return@runCatching null
+            scenes.optJSONObject(scenes.length() - 1)
+                ?.optString("ambience_id")
+                ?.trim()
+                ?.takeIf { it in allowed }
+        }.getOrNull()
+    }
+
     private fun isCurrentTimelineTransform(
         transformedText: String,
         expectedEngine: String,
@@ -346,8 +522,25 @@ class NarrationPlanCoordinator(
     private fun musicSourceHash(content: ChapterContent, tracks: List<SceneMusicTrackEntity>): String =
         ChapterAiWorkflow.sha256(content.paragraphs + tracks.flatMap { listOf(it.id, it.tagsCsv, it.title) })
 
+    private fun audioDirectionSourceHash(
+        content: ChapterContent,
+        ambienceTracks: List<SceneMusicTrackEntity>,
+        soundEffectTracks: List<SceneMusicTrackEntity>,
+        ambienceEnabled: Boolean,
+        soundEffectsEnabled: Boolean,
+    ): String = ChapterAiWorkflow.sha256(
+        content.paragraphs +
+            listOf(
+                "timeline=${timelineFingerprint(content)}",
+                "ambience=$ambienceEnabled",
+                "sfx=$soundEffectsEnabled",
+            ) +
+            ambienceTracks.flatMap { listOf("A:${it.id}", it.title, it.tagsCsv) } +
+            soundEffectTracks.flatMap { listOf("S:${it.id}", it.title, it.tagsCsv) },
+    )
+
     private fun SceneMusicTrackEntity.toOption(): SceneMusicTrackOption {
-        val description = tagsCsv.trim()
+        val description = aiDescription(tagsCsv)
         return SceneMusicTrackOption(
             id = id,
             title = title,
@@ -355,6 +548,16 @@ class NarrationPlanCoordinator(
             description = description,
         )
     }
+
+    private fun aiDescription(value: String): String = value.lineSequence()
+        .filterNot { line ->
+            val lower = line.trim().lowercase()
+            lower.startsWith("type:") || lower.startsWith("type=") ||
+                lower in setOf("[music]", "[ambience]", "[environment]", "[sfx]")
+        }
+        .joinToString(" ")
+        .trim()
+        .take(300)
 
     private suspend fun effectiveAiMetadata(storyId: String, globalProvider: String, globalModel: String): Pair<String, String> {
         val profile = library.getStoryAiProfile(storyId)
@@ -367,6 +570,7 @@ class NarrationPlanCoordinator(
         UUID.nameUUIDFromBytes("$first\u0000$second".toByteArray()).toString()
 
     companion object {
+        const val KIND_AUDIO_DIRECTION = "AUDIO_DIRECTION"
         private const val VOICE_TRANSFORM_ENGINE = "xpk-unit-v8"
         private const val MUSIC_TRANSFORM_ENGINE = "xpk-ai-full-authority-v1"
     }

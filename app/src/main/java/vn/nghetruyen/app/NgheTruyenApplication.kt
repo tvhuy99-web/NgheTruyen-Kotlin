@@ -59,6 +59,7 @@ class NgheTruyenApplication : Application() {
                     val failFastNetwork = VBookSuspiciousResponseFailFastBroker(
                         delegate = browserSessionNetwork,
                         cookies = brokers.cookies,
+                        browserCookieReader = browserSessionBridge::readCookies,
                     )
                     val replay = ChromiumVBookReplayCoordinator(
                         browserDelegate = brokers.browser,

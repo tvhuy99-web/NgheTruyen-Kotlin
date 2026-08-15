@@ -14,6 +14,7 @@ import vn.nghetruyen.app.data.settings.AiProvider
 import vn.nghetruyen.app.data.settings.SettingsRepository
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import kotlin.math.min
 
 /** Lightweight AI transport dedicated to the ambience/SFX direction pass. */
 class AudioDirectionAiServices(
@@ -43,6 +44,12 @@ class AudioDirectionAiServices(
         val temperature: Float,
         val enabled: Boolean,
         val timeoutMillis: Int,
+    )
+
+    private data class AiRequest(
+        val url: String,
+        val headers: Map<String, String>,
+        val body: String,
     )
 
     suspend fun direct(storyId: String, prompt: String): AppResult<Response> {
@@ -85,93 +92,144 @@ class AudioDirectionAiServices(
         if (config.provider == AiProvider.GEMINI && apiKey.isBlank()) {
             return AppResult.Failure("AI_KEY_MISSING", "Chưa lưu API key cho Gemini.")
         }
-        val request = when (config.provider) {
-            AiProvider.GEMINI -> geminiRequest(config, apiKey, prompt)
-            AiProvider.OPENAI_COMPATIBLE -> openAiRequest(config, apiKey, prompt)
+        val requests = runCatching { buildRequests(config, apiKey, prompt) }.getOrElse {
+            return AppResult.Failure("AI_CONFIGURATION_INVALID", it.message ?: "Cấu hình AI không hợp lệ.", it)
         }
+        if (requests.isEmpty()) return AppResult.Failure("AI_ENDPOINT_INVALID", "Không tạo được endpoint AI hợp lệ.")
+
         val timeout = config.timeoutMillis.coerceAtLeast(10_000)
         val callClient = client.newBuilder()
             .connectTimeout(minOf(timeout, 30_000).toLong(), TimeUnit.MILLISECONDS)
             .readTimeout(timeout.toLong(), TimeUnit.MILLISECONDS)
             .writeTimeout(timeout.toLong(), TimeUnit.MILLISECONDS)
             .build()
-        callClient.newCall(request).execute().use { response ->
-            if (response.isRedirect) {
-                return AppResult.Failure("AI_REDIRECT_BLOCKED", "Endpoint AI trả redirect; hãy dùng URL API trực tiếp.")
+        var lastFailure: AppResult.Failure? = null
+
+        requests.forEachIndexed { index, requestData ->
+            try {
+                val request = Request.Builder()
+                    .url(requestData.url)
+                    .header("Accept", "application/json")
+                    .apply { requestData.headers.forEach { (name, value) -> header(name, value) } }
+                    .post(requestData.body.toRequestBody(JSON_MEDIA_TYPE))
+                    .build()
+                callClient.newCall(request).execute().use { response ->
+                    if (response.isRedirect) {
+                        lastFailure = AppResult.Failure("AI_REDIRECT_BLOCKED", "Endpoint AI trả redirect; hãy dùng URL API trực tiếp.")
+                        return@forEachIndexed
+                    }
+                    val raw = response.body?.charStream()?.use { reader ->
+                        buildString {
+                            val buffer = CharArray(8_192)
+                            while (length <= MAX_RESPONSE_CHARS) {
+                                val count = reader.read(buffer, 0, min(buffer.size, MAX_RESPONSE_CHARS + 1 - length))
+                                if (count < 0) break
+                                append(buffer, 0, count)
+                            }
+                        }
+                    }.orEmpty()
+                    if (raw.length > MAX_RESPONSE_CHARS) {
+                        return AppResult.Failure("AI_RESPONSE_TOO_LARGE", "Phản hồi AI vượt giới hạn an toàn.")
+                    }
+                    if (!response.isSuccessful) {
+                        lastFailure = AppResult.Failure(
+                            "AI_HTTP_${response.code}",
+                            extractError(raw).ifBlank { "Nhà cung cấp AI trả lỗi HTTP ${response.code}." }.take(500),
+                        )
+                        val canFallback = config.provider == AiProvider.OPENAI_COMPATIBLE &&
+                            response.code in OPENAI_ENDPOINT_FALLBACK_HTTP_CODES && index < requests.lastIndex
+                        if (canFallback) return@forEachIndexed
+                        return lastFailure!!
+                    }
+                    val content = runCatching { extractContent(config.provider, raw) }.getOrElse { error ->
+                        lastFailure = AppResult.Failure("AI_BAD_RESPONSE", error.message ?: "Không đọc được phản hồi AI.", error)
+                        ""
+                    }
+                    if (content.isNotBlank()) {
+                        return AppResult.Success(Response(content.trim(), config.provider.name, config.model))
+                    }
+                    lastFailure = AppResult.Failure("AI_EMPTY_RESPONSE", "AI trả về nội dung trống.")
+                }
+            } catch (error: IOException) {
+                lastFailure = AppResult.Failure("AI_NETWORK_ERROR", error.message ?: "Không kết nối được nhà cung cấp AI.", error)
+            } catch (error: Exception) {
+                lastFailure = AppResult.Failure("AI_NETWORK_ERROR", error.message ?: "Không kết nối được nhà cung cấp AI.", error)
             }
-            val raw = response.body?.string().orEmpty()
-            if (raw.length > MAX_RESPONSE_CHARS) {
-                return AppResult.Failure("AI_RESPONSE_TOO_LARGE", "Phản hồi AI vượt giới hạn an toàn.")
-            }
-            if (!response.isSuccessful) {
-                return AppResult.Failure(
-                    "AI_HTTP_${response.code}",
-                    extractError(raw).ifBlank { "Nhà cung cấp AI trả lỗi HTTP ${response.code}." }.take(500),
-                )
-            }
-            val content = extractContent(config.provider, raw).trim()
-            if (content.isBlank()) return AppResult.Failure("AI_BAD_RESPONSE", "AI không trả nội dung đạo diễn âm thanh.")
-            return AppResult.Success(Response(content, config.provider.name, config.model))
         }
+        return lastFailure ?: AppResult.Failure("AI_EMPTY_RESPONSE", "AI trả về nội dung trống.")
     }
 
-    private fun geminiRequest(config: Config, apiKey: String, prompt: String): Request {
-        val body = JSONObject()
-            .put(
-                "contents",
-                JSONArray().put(
-                    JSONObject()
-                        .put("role", "user")
-                        .put("parts", JSONArray().put(JSONObject().put("text", prompt))),
-                ),
-            )
-            .put(
-                "generationConfig",
-                JSONObject()
-                    .put("temperature", config.temperature.toDouble())
-                    .put("responseMimeType", "application/json"),
-            )
-            .toString()
-        val model = config.model.removePrefix("models/")
-        return Request.Builder()
-            .url("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
-            .header("Accept", "application/json")
-            .header("x-goog-api-key", apiKey)
-            .post(body.toRequestBody(JSON_MEDIA_TYPE))
-            .build()
-    }
-
-    private fun openAiRequest(config: Config, apiKey: String, prompt: String): Request {
-        val endpoint = config.endpoint.trim()
-        val isResponses = endpoint.trimEnd('/').endsWith("/responses", ignoreCase = true)
-        val body = if (isResponses) {
-            JSONObject()
-                .put("model", config.model)
-                .put("temperature", config.temperature.toDouble())
+    private fun buildRequests(config: Config, apiKey: String, prompt: String): List<AiRequest> = when (config.provider) {
+        AiProvider.GEMINI -> {
+            val model = config.model.removePrefix("models/").trim()
+            require(GEMINI_MODEL_PATTERN.matches(model)) { "Tên model Gemini chứa ký tự không hợp lệ." }
+            val body = JSONObject()
                 .put(
-                    "input",
+                    "contents",
                     JSONArray().put(
-                        JSONObject()
-                            .put("role", "user")
-                            .put(
-                                "content",
-                                JSONArray().put(JSONObject().put("type", "input_text").put("text", prompt)),
-                            ),
+                        JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", prompt))),
                     ),
                 )
-        } else {
-            JSONObject()
-                .put("model", config.model)
-                .put("temperature", config.temperature.toDouble())
-                .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", prompt)))
-                .put("response_format", JSONObject().put("type", "json_object"))
+                .put(
+                    "generationConfig",
+                    JSONObject()
+                        .put("temperature", config.temperature.toDouble())
+                        .put("responseMimeType", "application/json"),
+                )
+                .toString()
+            listOf(
+                AiRequest(
+                    url = "$GEMINI_API_BASE/models/$model:generateContent",
+                    headers = mapOf("x-goog-api-key" to apiKey),
+                    body = body,
+                ),
+            )
         }
-        return Request.Builder()
-            .url(endpoint)
-            .header("Accept", "application/json")
-            .apply { if (apiKey.isNotBlank()) header("Authorization", "Bearer $apiKey") }
-            .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
-            .build()
+        AiProvider.OPENAI_COMPATIBLE -> {
+            val headers = buildMap { if (apiKey.isNotBlank()) put("Authorization", "Bearer $apiKey") }
+            openAiCandidateUrls(config.endpoint).map { url ->
+                val path = url.substringBefore('?').substringBefore('#').trimEnd('/').lowercase()
+                val body = if (path.endsWith("/responses")) {
+                    JSONObject().put("model", config.model).put("input", prompt).toString()
+                } else {
+                    JSONObject()
+                        .put("model", config.model)
+                        .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", prompt)))
+                        .put("temperature", config.temperature.toDouble())
+                        .toString()
+                }
+                AiRequest(url, headers, body)
+            }
+        }
+    }
+
+    private fun openAiCandidateUrls(value: String): List<String> {
+        val original = value.trim()
+        if (original.isBlank()) return emptyList()
+        val tailIndex = original.indexOfFirst { it == '?' || it == '#' }
+        val path = if (tailIndex >= 0) original.substring(0, tailIndex) else original
+        val tail = if (tailIndex >= 0) original.substring(tailIndex) else ""
+        val base = path.trimEnd('/')
+        val out = mutableListOf<String>()
+        val seen = linkedSetOf<String>()
+        fun append(candidate: String) {
+            val clean = candidate.trimEnd('/')
+            if (clean.isNotBlank() && seen.add(clean + tail)) out += clean + tail
+        }
+        append(base)
+        when {
+            base.endsWith("/responses", ignoreCase = true) -> append(base.dropLast("/responses".length) + "/chat/completions")
+            base.endsWith("/chat/completions", ignoreCase = true) -> append(base.dropLast("/chat/completions".length) + "/responses")
+            else -> {
+                append("$base/chat/completions")
+                append("$base/responses")
+                if (!base.endsWith("/v1", ignoreCase = true)) {
+                    append("$base/v1/chat/completions")
+                    append("$base/v1/responses")
+                }
+            }
+        }
+        return out
     }
 
     private suspend fun resolveConfig(storyId: String): Config {
@@ -190,41 +248,58 @@ class AudioDirectionAiServices(
         )
     }
 
-    private fun extractContent(provider: AiProvider, raw: String): String {
-        val root = JSONObject(raw)
-        return when (provider) {
-            AiProvider.GEMINI -> {
-                val candidates = root.optJSONArray("candidates") ?: return ""
-                val parts = candidates.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts") ?: return ""
-                buildString {
-                    for (index in 0 until parts.length()) {
-                        parts.optJSONObject(index)?.optString("text")?.takeIf(String::isNotBlank)?.let(::append)
+    private fun extractContent(provider: AiProvider, raw: String): String = when (provider) {
+        AiProvider.GEMINI -> {
+            val root = JSONObject(raw)
+            root.optJSONObject("error")?.optString("message")?.takeIf(String::isNotBlank)?.let { error(it) }
+            val candidate = root.optJSONArray("candidates")?.optJSONObject(0)
+                ?: error(root.optJSONObject("promptFeedback")?.optString("blockReason").orEmpty().ifBlank { "Gemini không trả candidate." })
+            val parts = candidate.optJSONObject("content")?.optJSONArray("parts") ?: error("Gemini không trả nội dung.")
+            buildString {
+                for (index in 0 until parts.length()) {
+                    parts.optJSONObject(index)?.optString("text")?.takeIf(String::isNotBlank)?.let {
+                        if (isNotEmpty()) append('\n')
+                        append(it)
                     }
                 }
             }
-            AiProvider.OPENAI_COMPATIBLE -> {
-                root.optJSONArray("choices")
-                    ?.optJSONObject(0)
-                    ?.optJSONObject("message")
-                    ?.optString("content")
-                    ?.takeIf(String::isNotBlank)
-                    ?: extractResponsesText(root)
-            }
         }
+        AiProvider.OPENAI_COMPATIBLE -> extractOpenAiContent(raw)
     }
 
-    private fun extractResponsesText(root: JSONObject): String {
-        root.optString("output_text").takeIf(String::isNotBlank)?.let { return it }
-        val output = root.optJSONArray("output") ?: return ""
-        val out = StringBuilder()
-        for (i in 0 until output.length()) {
-            val content = output.optJSONObject(i)?.optJSONArray("content") ?: continue
-            for (j in 0 until content.length()) {
-                val item = content.optJSONObject(j) ?: continue
-                item.optString("text").takeIf(String::isNotBlank)?.let(out::append)
+    private fun extractOpenAiContent(raw: String): String {
+        val root = JSONObject(raw)
+        root.optJSONObject("error")?.optString("message")?.takeIf(String::isNotBlank)?.let { error(it) }
+        root.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.opt("content")?.let { content ->
+            when (content) {
+                is String -> if (content.isNotBlank()) return content
+                is JSONArray -> {
+                    val text = buildString {
+                        for (index in 0 until content.length()) {
+                            content.optJSONObject(index)?.optString("text")?.takeIf(String::isNotBlank)?.let {
+                                if (isNotEmpty()) append('\n')
+                                append(it)
+                            }
+                        }
+                    }
+                    if (text.isNotBlank()) return text
+                }
             }
         }
-        return out.toString()
+        root.optString("output_text").takeIf(String::isNotBlank)?.let { return it }
+        val output = root.optJSONArray("output") ?: JSONArray()
+        val text = buildString {
+            for (outputIndex in 0 until output.length()) {
+                val parts = output.optJSONObject(outputIndex)?.optJSONArray("content") ?: continue
+                for (partIndex in 0 until parts.length()) {
+                    parts.optJSONObject(partIndex)?.optString("text")?.takeIf(String::isNotBlank)?.let {
+                        if (isNotEmpty()) append('\n')
+                        append(it)
+                    }
+                }
+            }
+        }
+        return text.takeIf(String::isNotBlank) ?: error("OpenAI-compatible API không trả nội dung")
     }
 
     private fun extractError(raw: String): String = runCatching {
@@ -239,7 +314,10 @@ class AudioDirectionAiServices(
 
     companion object {
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
-        private const val MAX_PROMPT_CHARS = 180_000
-        private const val MAX_RESPONSE_CHARS = 1_000_000
+        private const val GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
+        private val GEMINI_MODEL_PATTERN = Regex("^[A-Za-z0-9._-]+$")
+        private val OPENAI_ENDPOINT_FALLBACK_HTTP_CODES = setOf(404, 405)
+        private const val MAX_PROMPT_CHARS = 160_000
+        private const val MAX_RESPONSE_CHARS = 2_000_000
     }
 }

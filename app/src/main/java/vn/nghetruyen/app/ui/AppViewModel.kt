@@ -106,6 +106,7 @@ import vn.nghetruyen.app.sources.SourceUiSurface
 import vn.nghetruyen.app.sourceplatform.SourceInstallPreview
 import vn.nghetruyen.app.sourceplatform.SourceImportFileMetadata
 import vn.nghetruyen.app.sourceplatform.SourceDiagnosticUi
+import vn.nghetruyen.app.sourceplatform.navigateWithCausalHandoff
 import vn.nghetruyen.app.sourceplatform.StoryCommentCache
 import vn.nghetruyen.app.sourceplatform.SourcePackUiInfo
 import vn.nghetruyen.app.sourceplatform.SourceRepositoryPackageUiInfo
@@ -2104,36 +2105,23 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 mutableState.update { it.copy(loading = false, message = "Nguồn truyện không tồn tại.") }
                 return@launch
             }
-            val storyLoadStartedAt = System.currentTimeMillis()
-            val storyOriginGeneration = container.sourceDiagnostics.recorder.currentScreenGeneration()
-            val storyDiagnosticTraceId = "story-open:${UUID.randomUUID()}"
-            val result = withContext(DiagnosticCausalTrace(storyDiagnosticTraceId)) {
+            val result = container.sourceDiagnostics.navigateWithCausalHandoff(
+                traceKind = "story-open",
+                action = "STORY",
+                readyEventName = "STORY_SCREEN_READY",
+                destinationScreenKey = { detail -> "story:${detail.story.id}" },
+                sourceId = { detail -> detail.story.sourceId },
+                readyAttributes = { detail ->
+                    mapOf(
+                        "chapterCount" to detail.chapters.size.toString(),
+                        "hasNextChapterPage" to (!detail.nextChapterPageUrl.isNullOrBlank()).toString(),
+                    )
+                },
+            ) {
                 source.story(story.url.ifBlank { story.id })
             }
             when (result) {
                 is AppResult.Success -> {
-                    val destinationStoryKey = "story:${result.value.story.id}"
-                    container.sourceDiagnostics.onScreenChanged(
-                        destinationStoryKey,
-                        handoffTraceIds = setOf(storyDiagnosticTraceId),
-                    )
-                    container.sourceDiagnostics.mark(
-                        name = "STORY_SCREEN_READY",
-                        category = vn.nghetruyen.source.diagnostics.DiagnosticCategory.RUNTIME,
-                        severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.INFO,
-                        sourceId = result.value.story.sourceId,
-                        traceId = storyDiagnosticTraceId,
-                        durationMs = (System.currentTimeMillis() - storyLoadStartedAt).coerceAtLeast(0L),
-                        attributes = mapOf(
-                            "action" to "STORY",
-                            "status" to "success",
-                            "chapterCount" to result.value.chapters.size.toString(),
-                            "hasNextChapterPage" to (!result.value.nextChapterPageUrl.isNullOrBlank()).toString(),
-                            "originScreenGeneration" to storyOriginGeneration.toString(),
-                            "diagnosticRootTraceId" to storyDiagnosticTraceId,
-                            "handoff" to "selective-causal-source-action-to-story-screen",
-                        ),
-                    )
                     resetChapterPagination(result.value.story.id)
                     container.libraryRepository.rememberStory(result.value.story)
                     if (container.libraryRepository.getFollowing(result.value.story.id) != null) {
@@ -2382,27 +2370,48 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val sourceId = detail?.story?.sourceId.orEmpty()
             val cached = container.libraryRepository.loadCachedChapter(chapter.id)
                 ?: container.libraryRepository.loadCachedChapterByUrl(chapter.storyId, chapter.url)
-            val content: AppResult<ChapterContent> = when {
-                cached != null -> AppResult.Success(cached)
-                sourceId == "offline" -> AppResult.Failure(
-                    "NOT_FOUND",
-                    "Không tìm thấy nội dung chương ngoại tuyến.",
-                )
-                else -> {
-                    val source = container.sourceRegistry.get(sourceId)
-                    source?.chapter(chapter.url.ifBlank { chapter.id })
-                        ?: AppResult.Failure("NO_SOURCE", "Không tìm thấy nguồn chương.")
+            val content = container.sourceDiagnostics.navigateWithCausalHandoff(
+                traceKind = "chapter-open",
+                action = "CONTENT",
+                readyEventName = "READER_SCREEN_READY",
+                destinationScreenKey = { value -> "reader:${value.chapter.id}" },
+                sourceId = { _ -> sourceId.ifBlank { "offline" } },
+                readyAttributes = { value ->
+                    mapOf(
+                        "chapterId" to value.chapter.id,
+                        "storyId" to value.chapter.storyId,
+                        "paragraphCount" to value.paragraphs.size.toString(),
+                        "fromCache" to (cached != null).toString(),
+                    )
+                },
+            ) {
+                val rawContent: AppResult<ChapterContent> = when {
+                    cached != null -> AppResult.Success(cached)
+                    sourceId == "offline" -> AppResult.Failure(
+                        "NOT_FOUND",
+                        "Không tìm thấy nội dung chương ngoại tuyến.",
+                    )
+                    else -> {
+                        val source = container.sourceRegistry.get(sourceId)
+                        source?.chapter(chapter.url.ifBlank { chapter.id })
+                            ?: AppResult.Failure("NO_SOURCE", "Không tìm thấy nguồn chương.")
+                    }
+                }
+                when (rawContent) {
+                    is AppResult.Success -> {
+                        val normalized = enrichNavigation(ReaderDocumentNormalizer.normalize(rawContent.value))
+                        if (normalized.paragraphs.isEmpty()) {
+                            AppResult.Failure("EMPTY_CHAPTER_CONTENT", "Chương không có nội dung có thể đọc.")
+                        } else {
+                            AppResult.Success(normalized)
+                        }
+                    }
+                    is AppResult.Failure -> rawContent
                 }
             }
             when (content) {
                 is AppResult.Success -> {
-                    val enriched = enrichNavigation(ReaderDocumentNormalizer.normalize(content.value))
-                    if (enriched.paragraphs.isEmpty()) {
-                        mutableState.update {
-                            it.copy(loading = false, message = "Chương không có nội dung có thể đọc.")
-                        }
-                        return@launch
-                    }
+                    val enriched = content.value
                     container.libraryRepository.cacheChapter(enriched)
                     trimReaderCache(
                         state.value.readerCacheLimitMiB,

@@ -17,7 +17,7 @@ required_reader = [
     "THIẾT LẬP AI CHO TRUYỆN NÀY",
     "PHÂN VAI TTS CHO TRUYỆN NÀY",
     "StoryReferenceAdvancedDialogs(",
-    "Trao toàn quyền giữ và đổi nhạc cho AI",
+    "AudioDirectionLayerSwitches(",
     "CHUẨN HÓA TOÀN BỘ KHO NHẠC",
     "QUẢN LÝ DANH SÁCH NHẠC",
     "displayFontSizeDraft",
@@ -32,6 +32,8 @@ reader_options_end = reader.find('    if (showReaderModeDialog) {', reader_optio
 if reader_options_start < 0 or reader_options_end < 0:
     raise SystemExit("REFERENCE_WORKFLOW standard Reader options block missing")
 reader_options = reader[reader_options_start:reader_options_end]
+if "AudioDirectionLayerSwitches(" not in reader_options:
+    raise SystemExit("REFERENCE_WORKFLOW AI audio controls must live directly in standard Reader options")
 for extra in [
     'Text("MỞ RỘNG"',
     'ĐÁNH DẤU ĐOẠN',
@@ -50,9 +52,10 @@ for obsolete in [
     'title = { Text("AI & CHUYỂN NGỮ") }',
     'title = { Text("KHÁC") }',
     "musicAdvanced",
+    "Trao toàn quyền giữ và đổi nhạc cho AI",
 ]:
     if obsolete in reader:
-        raise SystemExit("REFERENCE_WORKFLOW obsolete Reader navigation: " + obsolete)
+        raise SystemExit("REFERENCE_WORKFLOW obsolete Reader navigation/control: " + obsolete)
 
 start = vm.find("private fun openStoryAdvancedOptions")
 if start < 0:

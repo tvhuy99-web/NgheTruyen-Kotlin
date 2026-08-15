@@ -23,14 +23,19 @@ class SceneAmbienceController(context: Context) {
             return
         }
         stop()
-        val created = runCatching { MediaPlayer.create(appContext, Uri.parse(asset.uri)) }.getOrNull() ?: return
-        created.setAudioAttributes(
-            AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_MEDIA)
-                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                .build(),
-        )
-        created.isLooping = true
+        val created = runCatching {
+            MediaPlayer().apply {
+                setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build(),
+                )
+                setDataSource(appContext, Uri.parse(asset.uri))
+                isLooping = true
+                prepare()
+            }
+        }.getOrElse { return }
         created.setVolume(targetVolume, targetVolume)
         created.setOnErrorListener { mediaPlayer, _, _ ->
             runCatching { mediaPlayer.release() }

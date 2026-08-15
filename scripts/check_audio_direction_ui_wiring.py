@@ -3,7 +3,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 personal = (ROOT / "app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt").read_text(encoding="utf-8")
+reader = (ROOT / "app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt").read_text(encoding="utf-8")
 component = (ROOT / "app/src/main/java/vn/nghetruyen/app/ui/components/AudioDirectionLayerSwitches.kt").read_text(encoding="utf-8")
+coordinator = (ROOT / "app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt").read_text(encoding="utf-8")
 debug_strings = (ROOT / "app/src/debug/res/values/strings.xml").read_text(encoding="utf-8")
 ui_test = (ROOT / "app/src/androidTest/java/vn/nghetruyen/app/AudioDirectorMusicSettingsUiTest.kt").read_text(encoding="utf-8")
 
@@ -18,14 +20,15 @@ def section(text: str, start: str, end: str) -> str:
     return text[start_index:end_index]
 
 
+# Personal > Music must remain the legacy/manual music surface. The AI controls belong to Reader options.
 music_page = section(
     personal,
     '"settings_music" -> PersonalSubPage("NHẠC NỀN & NHẠC CẢNH")',
     '"settings_following" -> PersonalSubPage',
 )
 assert "BackgroundMusicCard(" in music_page, "music settings must keep local background music controls"
-assert "AudioDirectionLayerSwitches(" in music_page, "AI sound controls must render on settings_music"
-assert "SceneMusicLibraryCard(" not in music_page, "legacy scene-music manager must not duplicate the unified audio managers"
+assert "SceneMusicLibraryCard(" in music_page, "music settings must keep the existing scene-music library"
+assert "AudioDirectionLayerSwitches(" not in music_page, "AI sound controls must not render on settings_music"
 
 playback_card = section(
     personal,
@@ -33,32 +36,58 @@ playback_card = section(
     "private fun ReferenceFloatSettingsSlider(",
 )
 assert "AudioDirectionLayerSwitches(" not in playback_card, "AI sound asset managers must not live in playback automation"
+assert 'SettingSwitch("Tự lập nhạc cảnh"' not in playback_card, "Music AI switch must not be duplicated in playback automation"
+
+# Reader > TÙY CHỌN > TÙY CHỌN ĐỌC is the single control surface requested by the product flow.
+reader_options = section(
+    reader,
+    "    if (showReaderOptions) {",
+    "    if (showReaderModeDialog) {",
+)
+assert 'title = { Text("TÙY CHỌN ĐỌC") }' in reader_options, "reader options dialog must keep its existing title"
+assert 'ReaderMenuButton("NHẠC NỀN")' in reader_options, "manual background-music entry must remain in reader options"
+assert "AudioDirectionLayerSwitches(" in reader_options, "AI sound controls must render directly inside reader options"
+
+music_dialog = section(
+    reader,
+    "    if (showMusicDialog) {",
+    "    if (showMusicNormalizationProgress) {",
+)
+assert "Trao toàn quyền giữ và đổi nhạc cho AI" not in music_dialog, "Music AI switch must not be duplicated in the manual music dialog"
+assert "setAutoSceneMusicEnabled" not in music_dialog, "manual music dialog must not mutate the Music AI switch"
+
+# Music AI must be independent from the manual backgroundMusicEnabled switch.
+assert "music = appSettings.autoSceneMusicEnabled," in coordinator, "Music AI must follow its own switch"
+assert "backgroundMusicEnabled && appSettings.autoSceneMusicEnabled" not in coordinator, "Music AI must not depend on manual background music"
 
 required_component_tokens = (
-    'text = "AI SOUND DIRECTOR"',
+    'text = "ÂM THANH AI"',
+    'text = "Tình trạng: Nhạc cảnh',
     'title = "Nhạc cảnh AI"',
     'title = "Âm thanh môi trường AI"',
     'title = "Hiệu ứng âm thanh AI"',
+    'Text("NGUYÊN TẮC"',
     'label = "QUẢN LÝ NHẠC',
     'label = "QUẢN LÝ ÂM THANH MÔI TRƯỜNG',
     'label = "QUẢN LÝ HIỆU ỨNG ÂM THANH',
     "ActivityResultContracts.OpenMultipleDocuments()",
-    "bringIntoViewRequester.bringIntoView()",
-    "BuildConfig.DIAGNOSTIC_BUILD_ID",
 )
 for token in required_component_tokens:
-    assert token in component, f"missing unified audio UI token: {token}"
+    assert token in component, f"missing embedded AI audio UI token: {token}"
 
+assert "bringIntoViewRequester" not in component, "reader-embedded component must not auto-scroll another settings page"
+assert "BuildConfig.DIAGNOSTIC_BUILD_ID" not in component, "reader-embedded component must not expose debug build markers"
 assert "Nghe Truyện • AI Sound Director" in debug_strings, "debug APK must be visibly distinguishable from the normal app"
+
+# Instrumentation keeps guarding the old Music page so the AI block cannot regress back there.
 for token in (
     'onNodeWithText("CÁ NHÂN"',
     'onNodeWithText("Cài đặt"',
     'hasText("NHẠC NỀN & NHẠC CẢNH")',
-    'onNodeWithText("AI SOUND DIRECTOR"',
-    'onNodeWithText("Nhạc cảnh AI"',
-    'onNodeWithText("Âm thanh môi trường AI"',
-    'onNodeWithText("Hiệu ứng âm thanh AI"',
+    'onNodeWithText("Nhạc nền cục bộ"',
+    'onNodeWithText("ÂM THANH AI"',
+    'assertDoesNotExist()',
 ):
-    assert token in ui_test, f"real navigation UI test missing token: {token}"
+    assert token in ui_test, f"music-page regression UI test missing token: {token}"
 
 print("AUDIO_DIRECTION_UI_WIRING=PASS")

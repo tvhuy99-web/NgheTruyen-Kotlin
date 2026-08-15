@@ -54,7 +54,11 @@ import vn.nghetruyen.app.audio.SceneMusicAnalysisWorker
 import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
 
 @Composable
-fun AudioDirectionLayerSwitches(modifier: Modifier = Modifier) {
+fun AudioDirectionLayerSwitches(
+    musicTrackCount: Int = 0,
+    onManageMusic: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val application = context.applicationContext as NgheTruyenApplication
     val repository = application.container.libraryRepository
@@ -202,6 +206,11 @@ fun AudioDirectionLayerSwitches(modifier: Modifier = Modifier) {
         )
 
         HorizontalDivider(Modifier.padding(vertical = 6.dp))
+        AudioManagerButton(
+            label = "QUẢN LÝ NHẠC ($musicTrackCount)",
+            enabled = onManageMusic != null,
+            onClick = { onManageMusic?.invoke() },
+        )
         AudioManagerButton(
             label = "QUẢN LÝ ÂM THANH MÔI TRƯỜNG (${tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.AMBIENCE }})",
             onClick = { managerKind = AudioAssetKind.AMBIENCE },
@@ -401,6 +410,7 @@ private fun AudioAssetEditorDialog(
     val repository = application.container.libraryRepository
     val scope = rememberCoroutineScope()
     var title by remember(track.id, track.updatedAt) { mutableStateOf(track.title) }
+    var description by remember(track.id, track.updatedAt) { mutableStateOf(assetDescription(kind, track.tagsCsv)) }
     var previewPlayer by remember(track.id) { mutableStateOf<MediaPlayer?>(null) }
 
     fun stopPreview() {
@@ -420,13 +430,23 @@ private fun AudioAssetEditorDialog(
         },
         title = { Text(track.title) },
         text = {
-            OutlinedTextField(
-                value = title,
-                onValueChange = { title = it.take(120) },
-                label = { Text("Tên") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it.take(120) },
+                    label = { Text("Tên") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it.take(300) },
+                    label = { Text("Mô tả") },
+                    minLines = 3,
+                    maxLines = 5,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         },
         confirmButton = {
             Column(Modifier.fillMaxWidth()) {
@@ -465,7 +485,7 @@ private fun AudioAssetEditorDialog(
                                 repository.updateSceneMusicTrackMetadata(
                                     track.id,
                                     title.trim().ifBlank { track.title },
-                                    track.tagsCsv,
+                                    tagsWithDescription(kind, description),
                                 )
                             }
                             stopPreview()
@@ -529,9 +549,23 @@ private fun defaultAssetName(kind: AudioAssetKind): String = when (kind) {
 }
 
 private fun typeMarker(kind: AudioAssetKind): String = when (kind) {
-    AudioAssetKind.MUSIC -> ""
+    AudioAssetKind.MUSIC -> "type:music"
     AudioAssetKind.AMBIENCE -> "type:ambience"
     AudioAssetKind.SFX -> "type:sfx"
+}
+
+private fun assetDescription(kind: AudioAssetKind, tagsCsv: String): String {
+    val marker = typeMarker(kind)
+    return tagsCsv.replace(marker, "", ignoreCase = true)
+        .trim()
+        .trimStart(',', ';')
+        .trim()
+}
+
+private fun tagsWithDescription(kind: AudioAssetKind, description: String): String {
+    val marker = typeMarker(kind)
+    val cleanDescription = description.trim().take(300)
+    return if (cleanDescription.isBlank()) marker else "$marker, $cleanDescription"
 }
 
 private fun normalizationTarget(kind: AudioAssetKind): Float = when (kind) {

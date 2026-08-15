@@ -13,7 +13,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import vn.nghetruyen.app.audio.AudioDirectionAsset
 import vn.nghetruyen.app.audio.AudioDirectionLimits
-import kotlin.math.abs
 import kotlin.math.pow
 import kotlin.random.Random
 
@@ -63,6 +62,7 @@ class SceneAmbienceController(context: Context) {
         val safeCrossfade = crossfadeMillis.coerceIn(500, 3_000)
         val safeOverlapMin = overlapMinMillis.coerceIn(350, 3_000)
         val safeOverlapMax = overlapMaxMillis.coerceIn(safeOverlapMin, 4_000)
+        pausedSnapshot = false
         scope.launch {
             reconcile(
                 requested = requested,
@@ -140,6 +140,11 @@ class SceneAmbienceController(context: Context) {
                 existing.masterVolume = masterVolume
                 existing.mixScale = mixScale
                 applyLevel(existing, existing.current)
+                val playing = runCatching { existing.current.player.isPlaying }.getOrDefault(false)
+                if (!playing) runCatching { existing.current.player.start() }
+                if (existing.loopJob?.isActive != true) {
+                    scheduleLoop(existing, overlapMinMillis, overlapMaxMillis)
+                }
                 return@forEachIndexed
             }
             val player = createPlayer(asset) ?: return@forEachIndexed
@@ -153,16 +158,14 @@ class SceneAmbienceController(context: Context) {
             )
             layers[asset.id] = layer
             applyLevel(layer, layer.current)
-            if (!pausedSnapshot) {
-                val started = runCatching { player.start() }.isSuccess
-                if (!started) {
-                    layers.remove(asset.id)
-                    releasePlayer(player)
-                    return@forEachIndexed
-                }
-                animateFade(layer, layer.current, from = 0f, to = 1f, durationMillis = crossfadeMillis)
-                scheduleLoop(layer, overlapMinMillis, overlapMaxMillis)
+            val started = runCatching { player.start() }.isSuccess
+            if (!started) {
+                layers.remove(asset.id)
+                releasePlayer(player)
+                return@forEachIndexed
             }
+            animateFade(layer, layer.current, from = 0f, to = 1f, durationMillis = crossfadeMillis)
+            scheduleLoop(layer, overlapMinMillis, overlapMaxMillis)
         }
     }
 
@@ -293,8 +296,8 @@ class SceneAmbienceController(context: Context) {
     private fun initialPhaseMillis(duration: Int, assetId: String, layerIndex: Int): Int {
         if (duration < 2_500) return 0
         val ceiling = minOf(duration / 3, 4_000).coerceAtLeast(1)
-        val seed = abs(31 * assetId.hashCode() + layerIndex * 997)
-        return seed % ceiling
+        val seed = (31L * assetId.hashCode().toLong() + layerIndex * 997L).and(0x7fffffffL)
+        return (seed % ceiling.toLong()).toInt()
     }
 
     private fun loopStartJitterMillis(duration: Int): Int {

@@ -4,14 +4,24 @@ import org.json.JSONArray
 import org.json.JSONObject
 import vn.nghetruyen.app.audio.AmbienceScene
 import vn.nghetruyen.app.audio.AmbienceSfxPlan
+import vn.nghetruyen.app.audio.AudioDirectionLimits
 import vn.nghetruyen.app.audio.SoundEffectCue
 
 /**
  * Validator/persistence codec for the Ambience and SFX portions of the unified XPK chapter plan.
  * Prompt composition lives only in [XpkUnifiedNarrationPrompt] so there is no second AI contract.
+ *
+ * Ambience keeps the v1 persisted schema (one ambience_id per row), but two rows may overlap to
+ * express two compatible logical ambience layers. This keeps existing exports/backups readable.
  */
 object XpkAmbienceSfxDirector {
     const val ENGINE = "xpk-audio-direction-v1"
+
+    private data class IndexedAmbience(
+        val start: Int,
+        val end: Int,
+        val ambienceId: String,
+    )
 
     fun parseAndValidate(
         raw: String,
@@ -30,8 +40,8 @@ object XpkAmbienceSfxDirector {
         val order = validUnitIds.withIndex().associate { it.value to it.index }
 
         val ambienceArray = root.optJSONArray("ambience_scenes") ?: JSONArray()
-        val ambienceScenes = mutableListOf<AmbienceScene>()
-        var previousEnd = -1
+        val indexedAmbience = mutableListOf<IndexedAmbience>()
+        var previousStart = -1
         for (index in 0 until ambienceArray.length()) {
             val row = ambienceArray.getJSONObject(index)
             require(row.keys().asSequence().toSet() == setOf("start_id", "end_id", "ambience_id")) {
@@ -45,15 +55,27 @@ object XpkAmbienceSfxDirector {
             require(ambienceEnabled) { "AI trả ambience trong khi lớp ambience đang tắt." }
             require(ambienceId in validAmbienceIds) { "ambience_scenes[$index] dùng ambience_id không tồn tại." }
             require(end >= start) { "ambience_scenes[$index] có ranh giới đảo ngược." }
-            require(start > previousEnd) { "ambience_scenes bị chồng lấn hoặc sai thứ tự." }
-            val previous = ambienceScenes.lastOrNull()
-            if (previous != null && previous.ambienceId == ambienceId && order[previous.endUnitId]?.plus(1) == start) {
-                ambienceScenes[ambienceScenes.lastIndex] = previous.copy(endUnitId = endId)
-            } else {
-                ambienceScenes += AmbienceScene(startId, endId, ambienceId)
+            require(start >= previousStart) { "ambience_scenes sai thứ tự timeline." }
+            val minimumSpan = AudioDirectionLimits.MIN_AMBIENCE_SCENE_UNITS.coerceAtMost(validUnitIds.size)
+            require(end - start + 1 >= minimumSpan) {
+                "ambience_scenes[$index] quá ngắn; ambience phải đủ bền để tránh bật/tắt theo một câu thoáng qua."
             }
-            previousEnd = end
+            indexedAmbience += IndexedAmbience(start, end, ambienceId)
+            previousStart = start
         }
+
+        validateAmbienceConcurrency(indexedAmbience, validUnitIds.size)
+        val ambienceScenes = mergeAdjacentAmbience(indexedAmbience, validUnitIds)
+        validateAmbienceConcurrency(
+            ambienceScenes.map { scene ->
+                IndexedAmbience(
+                    start = order.getValue(scene.startUnitId),
+                    end = order.getValue(scene.endUnitId),
+                    ambienceId = scene.ambienceId,
+                )
+            },
+            validUnitIds.size,
+        )
 
         val sfxArray = root.optJSONArray("sfx_cues") ?: JSONArray()
         val maxSfx = maxSfxForUnits(validUnitIds.size)
@@ -129,6 +151,47 @@ object XpkAmbienceSfxDirector {
             ambienceEnabled,
             soundEffectsEnabled,
         )
+    }
+
+    private fun validateAmbienceConcurrency(rows: List<IndexedAmbience>, unitCount: Int) {
+        if (rows.isEmpty()) return
+        val activeIds = Array(unitCount) { linkedSetOf<String>() }
+        rows.forEachIndexed { rowIndex, row ->
+            for (unit in row.start..row.end) {
+                require(activeIds[unit].add(row.ambienceId)) {
+                    "ambience_scenes[$rowIndex] lặp cùng ambience_id trên cùng một UNIT."
+                }
+                require(activeIds[unit].size <= AudioDirectionLimits.MAX_CONCURRENT_AMBIENCE) {
+                    "Mỗi UNIT chỉ được có tối đa ${AudioDirectionLimits.MAX_CONCURRENT_AMBIENCE} ambience đồng thời."
+                }
+            }
+        }
+    }
+
+    private fun mergeAdjacentAmbience(
+        rows: List<IndexedAmbience>,
+        validUnitIds: List<String>,
+    ): List<AmbienceScene> {
+        if (rows.isEmpty()) return emptyList()
+        val merged = mutableListOf<IndexedAmbience>()
+        rows.groupBy(IndexedAmbience::ambienceId).forEach { (ambienceId, sameAssetRows) ->
+            var current: IndexedAmbience? = null
+            sameAssetRows.sortedWith(compareBy<IndexedAmbience> { it.start }.thenBy { it.end }).forEach { row ->
+                val previous = current
+                current = if (previous == null) {
+                    row
+                } else if (row.start <= previous.end + 1) {
+                    previous.copy(end = maxOf(previous.end, row.end))
+                } else {
+                    merged += previous
+                    row
+                }
+            }
+            current?.let(merged::add)
+        }
+        return merged
+            .sortedWith(compareBy<IndexedAmbience> { it.start }.thenBy { it.end }.thenBy { it.ambienceId })
+            .map { row -> AmbienceScene(validUnitIds[row.start], validUnitIds[row.end], row.ambienceId) }
     }
 
     private fun maxSfxForUnits(unitCount: Int): Int = ((unitCount + 3) / 4).coerceIn(4, 48)

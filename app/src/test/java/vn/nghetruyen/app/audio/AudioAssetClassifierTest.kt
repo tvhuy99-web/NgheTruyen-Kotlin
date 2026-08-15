@@ -30,6 +30,18 @@ class AudioAssetClassifierTest {
     }
 
     @Test
+    fun continuousSfxMarkerIsPromotedToAmbienceBus() {
+        assertEquals(
+            AudioAssetKind.AMBIENCE,
+            AudioAssetClassifier.classify(track(tags = "type:sfx_continuous, vó ngựa kéo dài")),
+        )
+        assertEquals(
+            AudioAssetKind.AMBIENCE,
+            AudioAssetClassifier.classify(track(tags = "[continuous], máy chạy đều")),
+        )
+    }
+
+    @Test
     fun descriptiveWordsDoNotAccidentallyChangeKind() {
         assertEquals(
             AudioAssetKind.MUSIC,

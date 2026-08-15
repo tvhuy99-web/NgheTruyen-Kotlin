@@ -57,8 +57,12 @@ object AiLineProtocol {
         var audioDirectionError = ""
         val audioPlan = if (options.includeAmbience || options.includeSoundEffects) {
             runCatching {
-                require(root.has("ambience_scenes")) { "AI không trả ambience_scenes trong kế hoạch hợp nhất." }
-                require(root.has("sfx_cues")) { "AI không trả sfx_cues trong kế hoạch hợp nhất." }
+                if (options.includeAmbience) {
+                    require(root.has("ambience_scenes")) { "AI không trả ambience_scenes dù lớp ambience đang bật." }
+                }
+                if (options.includeSoundEffects) {
+                    require(root.has("sfx_cues")) { "AI không trả sfx_cues dù lớp SFX đang bật." }
+                }
                 XpkAmbienceSfxDirector.parseAndValidate(
                     JSONObject()
                         .put("ambience_scenes", root.optJSONArray("ambience_scenes") ?: JSONArray())

@@ -2370,7 +2370,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val sourceId = detail?.story?.sourceId.orEmpty()
             val cached = container.libraryRepository.loadCachedChapter(chapter.id)
                 ?: container.libraryRepository.loadCachedChapterByUrl(chapter.storyId, chapter.url)
-            val content = container.sourceDiagnostics.navigateWithCausalHandoff(
+            val navigationContent = container.sourceDiagnostics.navigateWithCausalHandoff(
                 traceKind = "chapter-open",
                 action = "CONTENT",
                 readyEventName = "READER_SCREEN_READY",
@@ -2385,7 +2385,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 },
             ) {
-                val rawContent: AppResult<ChapterContent> = when {
+                val content: AppResult<ChapterContent> = when {
                     cached != null -> AppResult.Success(cached)
                     sourceId == "offline" -> AppResult.Failure(
                         "NOT_FOUND",
@@ -2397,21 +2397,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             ?: AppResult.Failure("NO_SOURCE", "Không tìm thấy nguồn chương.")
                     }
                 }
-                when (rawContent) {
+                when (content) {
                     is AppResult.Success -> {
-                        val normalized = enrichNavigation(ReaderDocumentNormalizer.normalize(rawContent.value))
+                        val normalized = enrichNavigation(ReaderDocumentNormalizer.normalize(content.value))
                         if (normalized.paragraphs.isEmpty()) {
                             AppResult.Failure("EMPTY_CHAPTER_CONTENT", "Chương không có nội dung có thể đọc.")
                         } else {
                             AppResult.Success(normalized)
                         }
                     }
-                    is AppResult.Failure -> rawContent
+                    is AppResult.Failure -> content
                 }
             }
-            when (content) {
+            when (navigationContent) {
                 is AppResult.Success -> {
-                    val enriched = content.value
+                    val enriched = navigationContent.value
                     container.libraryRepository.cacheChapter(enriched)
                     trimReaderCache(
                         state.value.readerCacheLimitMiB,
@@ -2505,7 +2505,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         aiProfile?.autoRunOnOpen == true && aiProfile.mode == "IMPROVE" -> improveVietPhraseForCurrentChapter()
                     }
                 }
-                is AppResult.Failure -> mutableState.update { it.copy(loading = false, message = content.message) }
+                is AppResult.Failure -> mutableState.update { it.copy(loading = false, message = navigationContent.message) }
             }
         }
     }

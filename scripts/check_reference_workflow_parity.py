@@ -4,6 +4,7 @@
 from pathlib import Path
 
 reader = Path("app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt").read_text()
+component = Path("app/src/main/java/vn/nghetruyen/app/ui/components/AudioDirectionLayerSwitches.kt").read_text()
 vm = Path("app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt").read_text()
 library = Path("app/src/main/java/vn/nghetruyen/app/ui/screens/LibraryScreen.kt").read_text()
 settings = Path("app/src/main/java/vn/nghetruyen/app/data/settings/SettingsRepository.kt").read_text()
@@ -17,9 +18,9 @@ required_reader = [
     "THIẾT LẬP AI CHO TRUYỆN NÀY",
     "PHÂN VAI TTS CHO TRUYỆN NÀY",
     "StoryReferenceAdvancedDialogs(",
-    "Trao toàn quyền giữ và đổi nhạc cho AI",
-    "CHUẨN HÓA TOÀN BỘ KHO NHẠC",
-    "QUẢN LÝ DANH SÁCH NHẠC",
+    "AudioDirectionLayerSwitches(",
+    "onManageMusic = {",
+    "SỬA TÊN / MÔ TẢ",
     "displayFontSizeDraft",
     "displayLineHeightDraft",
 ]
@@ -27,11 +28,35 @@ missing = [item for item in required_reader if item not in reader]
 if missing:
     raise SystemExit("REFERENCE_WORKFLOW missing Reader markers: " + repr(missing))
 
+for marker in [
+    'label = "QUẢN LÝ NHẠC ($musicTrackCount)"',
+    'label = "QUẢN LÝ ÂM THANH MÔI TRƯỜNG',
+    'label = "QUẢN LÝ HIỆU ỨNG ÂM THANH',
+    'label = { Text("Mô tả") }',
+    'Text("CHUẨN HÓA")',
+    'Text("LƯU")',
+    'Text("XÓA")',
+]:
+    if marker not in component:
+        raise SystemExit("REFERENCE_WORKFLOW audio manager marker missing: " + marker)
+
+manager_positions = [
+    component.find('label = "QUẢN LÝ NHẠC ($musicTrackCount)"'),
+    component.find('label = "QUẢN LÝ ÂM THANH MÔI TRƯỜNG'),
+    component.find('label = "QUẢN LÝ HIỆU ỨNG ÂM THANH'),
+]
+if not (0 <= manager_positions[0] < manager_positions[1] < manager_positions[2]):
+    raise SystemExit("REFERENCE_WORKFLOW three audio managers must stay adjacent in Music/Ambience/SFX order")
+
 reader_options_start = reader.find('    if (showReaderOptions) {')
 reader_options_end = reader.find('    if (showReaderModeDialog) {', reader_options_start)
 if reader_options_start < 0 or reader_options_end < 0:
     raise SystemExit("REFERENCE_WORKFLOW standard Reader options block missing")
 reader_options = reader[reader_options_start:reader_options_end]
+if "AudioDirectionLayerSwitches(" in reader_options:
+    raise SystemExit("REFERENCE_WORKFLOW AI audio controls must not spill into standard Reader options")
+if 'ReaderMenuButton("NHẠC NỀN")' not in reader_options:
+    raise SystemExit("REFERENCE_WORKFLOW Reader options must keep the Background Music entry")
 for extra in [
     'Text("MỞ RỘNG"',
     'ĐÁNH DẤU ĐOẠN',
@@ -46,13 +71,53 @@ for extra in [
     if extra in reader_options:
         raise SystemExit("REFERENCE_WORKFLOW Kotlin-only action leaked into standard Reader options: " + extra)
 
+music_start = reader.find('    if (showMusicDialog) {')
+music_end = reader.find('    if (showMusicNormalizationProgress) {', music_start)
+if music_start < 0 or music_end < 0:
+    raise SystemExit("REFERENCE_WORKFLOW Background Music dialog missing")
+music_dialog = reader[music_start:music_end]
+for marker in [
+    'Text("Bật nhạc nền", Modifier.weight(1f))',
+    "AudioDirectionLayerSwitches(",
+    "musicTrackCount = musicTracks.size",
+    "onManageMusic = {",
+    'Text("Chế độ phát"',
+    'ReaderFloatSlider("Giảm nhạc khi giọng đọc phát"',
+]:
+    if marker not in music_dialog:
+        raise SystemExit("REFERENCE_WORKFLOW music control missing: " + marker)
+if 'ReaderMenuButton("QUẢN LÝ DANH SÁCH NHẠC")' in music_dialog:
+    raise SystemExit("REFERENCE_WORKFLOW duplicate standalone music manager remains")
+if music_dialog.find('Text("Bật nhạc nền"') > music_dialog.find("AudioDirectionLayerSwitches("):
+    raise SystemExit("REFERENCE_WORKFLOW master Background Music switch must be first")
 for obsolete in [
+    "CÂN BẰNG ÂM THANH",
     'title = { Text("AI & CHUYỂN NGỮ") }',
     'title = { Text("KHÁC") }',
     "musicAdvanced",
+    "Trao toàn quyền giữ và đổi nhạc cho AI",
 ]:
-    if obsolete in reader:
-        raise SystemExit("REFERENCE_WORKFLOW obsolete Reader navigation: " + obsolete)
+    if obsolete in music_dialog or obsolete in reader_options:
+        raise SystemExit("REFERENCE_WORKFLOW obsolete Reader navigation/control: " + obsolete)
+
+music_library_start = reader.find('    if (showMusicLibrary) {')
+music_library_end = reader.find('    selectedMusicTrackId?.let', music_library_start)
+music_library = reader[music_library_start:music_library_end]
+for marker in [
+    'Text("THÊM BÀI")',
+    'Text("MÔ TẢ HÀNG LOẠT")',
+    'Text("XÓA TẤT CẢ")',
+    'Text("LƯU DANH SÁCH")',
+    'Text("HỦY")',
+]:
+    if marker not in music_library:
+        raise SystemExit("REFERENCE_WORKFLOW music footer action missing: " + marker)
+body_end = music_library.find('confirmButton = { Column(Modifier.fillMaxWidth())')
+if body_end < 0:
+    raise SystemExit("REFERENCE_WORKFLOW fixed music footer missing")
+for marker in ['Text("THÊM BÀI")', 'Text("MÔ TẢ HÀNG LOẠT")', 'Text("XÓA TẤT CẢ")', 'Text("LƯU DANH SÁCH")']:
+    if marker in music_library[:body_end]:
+        raise SystemExit("REFERENCE_WORKFLOW music action leaked into scrollable body: " + marker)
 
 start = vm.find("private fun openStoryAdvancedOptions")
 if start < 0:

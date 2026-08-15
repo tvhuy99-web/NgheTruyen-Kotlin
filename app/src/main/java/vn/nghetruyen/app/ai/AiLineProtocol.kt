@@ -1,7 +1,9 @@
 package vn.nghetruyen.app.ai
 
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
+import vn.nghetruyen.app.audio.AmbienceSfxPlan
 
 object AiLineProtocol {
     data class XpkParseOptions(
@@ -9,8 +11,12 @@ object AiLineProtocol {
         val validUnitIds: List<String>,
         val validVoiceIds: List<String>,
         val validTrackIds: List<String> = emptyList(),
+        val validAmbienceIds: Set<String> = emptySet(),
+        val validSfxIds: Set<String> = emptySet(),
         val includeVoiceCast: Boolean = true,
         val includeSceneMusic: Boolean = false,
+        val includeAmbience: Boolean = false,
+        val includeSoundEffects: Boolean = false,
         val speedLimitPct: Float = 10f,
         val pitchLimitPct: Float = 10f,
         val volumeLimitPct: Float = 10f,
@@ -47,7 +53,41 @@ object AiLineProtocol {
                 }
             }
         } else emptyList()
-        return NarrationPlan(voiceCast = voicePlan, musicCues = scenes, musicSceneError = musicSceneError)
+
+        var audioDirectionError = ""
+        val audioPlan = if (options.includeAmbience || options.includeSoundEffects) {
+            runCatching {
+                if (options.includeAmbience) {
+                    require(root.has("ambience_scenes")) { "AI không trả ambience_scenes dù lớp ambience đang bật." }
+                }
+                if (options.includeSoundEffects) {
+                    require(root.has("sfx_cues")) { "AI không trả sfx_cues dù lớp SFX đang bật." }
+                }
+                XpkAmbienceSfxDirector.parseAndValidate(
+                    JSONObject()
+                        .put("ambience_scenes", root.optJSONArray("ambience_scenes") ?: JSONArray())
+                        .put("sfx_cues", root.optJSONArray("sfx_cues") ?: JSONArray())
+                        .toString(),
+                    validUnitIds = options.validUnitIds,
+                    validAmbienceIds = options.validAmbienceIds,
+                    validSfxIds = options.validSfxIds,
+                    ambienceEnabled = options.includeAmbience,
+                    soundEffectsEnabled = options.includeSoundEffects,
+                )
+            }.getOrElse { error ->
+                audioDirectionError = error.message ?: "Kết quả ambience/SFX không hợp lệ"
+                AmbienceSfxPlan()
+            }
+        } else AmbienceSfxPlan()
+
+        return NarrationPlan(
+            voiceCast = voicePlan,
+            musicCues = scenes,
+            musicSceneError = musicSceneError,
+            ambienceScenes = audioPlan.ambienceScenes,
+            soundEffectCues = audioPlan.soundEffectCues,
+            audioDirectionError = audioDirectionError,
+        )
     }
 
     private fun parseXpkVoiceCast(root: JSONObject, options: XpkParseOptions): VoiceCastPlan {
@@ -127,8 +167,6 @@ object AiLineProtocol {
         }
         if (validIds.isNotEmpty() && assignmentMap.isEmpty()) error("Không có ID hợp lệ nào trong phản hồi AI")
 
-        // Mirror VoiceCast:applyAssignments() exactly: groupVoice learns only from a valid explicit
-        // non-narrator AI assignment. A narrator/invalid row does not block a later valid group voice.
         val groupVoice = linkedMapOf<String, String>()
         validIds.forEach { id ->
             val group = options.dialogueGroupByUnitId[id]?.trim().orEmpty()
@@ -180,7 +218,6 @@ object AiLineProtocol {
         return XpkSceneMusicParity.validateScenes(rows, options.validUnitIds, options.validTrackIds)
     }
 
-    /** Legacy parser kept only for the deprecated OnlineAiServices narration interfaces. */
     @Deprecated("Use parseXpkNarration; paragraph ROLE/ASSIGN protocol is not used by XPK narration runtime")
     fun parseVoiceCast(raw: String): VoiceCastPlan {
         val roles = LinkedHashMap<String, VoiceRole>()

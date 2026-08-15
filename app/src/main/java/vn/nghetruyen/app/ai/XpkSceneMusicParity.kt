@@ -106,7 +106,7 @@ object XpkSceneMusicParity {
             $catalog
         """.trimIndent()
         val outputRules = """
-            - Đối tượng JSON phải có đúng hai mảng cấp cao: assignments và music_scenes.
+            - Khi nhiệm vụ nhạc được bật, JSON phải có mảng music_scenes.
             - music_scenes phải giữ đúng thứ tự từ đầu đến cuối chương và phủ kín toàn bộ UNIT.
             - Mỗi phần tử music_scenes có đúng ba trường: start_id, end_id, track_id.
             - track_id phải khớp chính xác một mã trong TRACK_CATALOG.

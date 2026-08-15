@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static gate for the XPK-parity product wiring added in Android 2.9.0."""
+"""Static gate for the retained XPK-parity product wiring."""
 
 from __future__ import annotations
 
@@ -334,15 +334,10 @@ def main() -> int:
         "app/src/main/java/vn/nghetruyen/app/sourceplatform/SourcePlatformManager.kt",
         "SemanticVersion.parse(BuildConfig.VERSION_NAME)",
     )
-    require(
-        "app/build.gradle.kts",
-        "versionCode = 33",
-        'versionName = "2.9.0-xpk-parity"',
-    )
 
     verify_screen_calls()
     verify_history_migration()
-    print("XPK parity 2.9.0 static gate: PASS")
+    print("XPK parity static gate: PASS")
     return 0
 
 

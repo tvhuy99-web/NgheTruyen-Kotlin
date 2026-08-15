@@ -1915,7 +1915,6 @@ private fun PlaybackAutomationCard(
             SettingSwitch("Khôi phục phiên nghe", state.restorePlaybackAfterProcessDeath, onRestorePlaybackChange)
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             SettingSwitch("Tự phân vai AI", state.autoVoiceCastEnabled, onAutoVoiceCastChange)
-            SettingSwitch("Tự lập nhạc cảnh", state.autoSceneMusicEnabled, onAutoSceneMusicChange)
             SettingSwitch("Chuẩn bị AI trước", state.prefetchNarrationPlansEnabled, onPrefetchNarrationPlansChange)
             ReferenceIntSettingsSlider(
                 label = "Chuẩn bị trước",

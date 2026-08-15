@@ -35,8 +35,9 @@ android {
         minSdk = 26
         targetSdk = 36
         // Legacy release-gate tokens: versionCode = 28, versionName = "2.8.0-ai-narration-priority2-complete"
-        versionCode = 33
-        versionName = "2.9.0-xpk-parity"
+        // Versioning policy: VERSIONING.md (MAJOR.MINOR.PATCH).
+        versionCode = 36
+        versionName = "3.0.2"
         buildConfigField("String", "DIAGNOSTIC_BUILD_ID", "\"$diagnosticBuildId\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

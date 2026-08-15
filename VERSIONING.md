@@ -45,5 +45,5 @@ Mỗi APK được phát hành hoặc gửi cho người dùng phải có `versi
 
 ## Phiên bản hiện tại
 
-- `versionName = 3.0.1`
-- `versionCode = 35`
+- `versionName = 3.0.2`
+- `versionCode = 36`

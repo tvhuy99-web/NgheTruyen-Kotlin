@@ -9,26 +9,31 @@ import kotlin.io.path.createTempDirectory
 
 class Pcm16SceneMixerTest {
     @Test
-    fun mixesLoopingLayerWithoutLoadingNarrationIntoMemory() {
+    fun mixesLoopingLayerWithSmoothBoundaryFade() {
         val root = createTempDirectory("scene-mix-test-").toFile()
         try {
             val voice = File(root, "voice.wav")
             val music = File(root, "music.wav")
             val output = File(root, "mixed.wav")
-            writeConstantWave(voice, 1_000, 4_096)
+            writeConstantWave(voice, 1_000, 8_192)
             writeConstantWave(music, 2_000, 128)
 
             Pcm16SceneMixer.mix(
                 voice,
-                listOf(SceneMixLayer(music, 0, 4_096, volume = 0.25f)),
+                listOf(SceneMixLayer(music, 0, 8_192, volume = 0.25f)),
                 output,
             )
 
             val segment = WaveFileAssembler.inspect(output)
             RandomAccessFile(output, "r").use { input ->
                 input.seek(segment.dataOffset)
-                val value = ((input.read() and 0xff) or ((input.read() and 0xff) shl 8)).toShort().toInt()
-                assertEquals(1_500, value)
+                val first = ((input.read() and 0xff) or ((input.read() and 0xff) shl 8)).toShort().toInt()
+                assertEquals(1_000, first)
+
+                val middleFrame = 4_096L
+                input.seek(segment.dataOffset + middleFrame * segment.blockAlign)
+                val middle = ((input.read() and 0xff) or ((input.read() and 0xff) shl 8)).toShort().toInt()
+                assertEquals(1_500, middle)
             }
         } finally {
             root.deleteRecursively()

@@ -45,6 +45,22 @@ class VBookSuspiciousResponseFailFastBrokerTest {
     }
 
     @Test
+    fun browserCookieReaderCanEstablishThePreRequestSession() {
+        val cookies = FixedCookies(null)
+        val delegate = tinyApplicationErrorDelegate()
+        val broker = VBookSuspiciousResponseFailFastBroker(
+            delegate = delegate,
+            cookies = cookies,
+            browserCookieReader = { _, _ -> "_csrfToken=webview-only; fu=1" },
+        )
+
+        val result = broker.execute(manifest(), request())
+
+        assertTrue(result is SourcePlatformResult.Failure)
+        assertTrue((result as SourcePlatformResult.Failure).error.message.startsWith("VBOOK_HTTP_SESSION_PAYLOAD_INVALID"))
+    }
+
+    @Test
     fun successfulQidianEnvelopeRemainsAvailableToTheScript() {
         val cookies = FixedCookies("_csrfToken=ready; fu=1")
         val body = "{\"code\":0,\"msg\":\"success\",\"data\":{\"pageNum\":1,\"pageSize\":20,\"list\":[]}}"
@@ -69,19 +85,45 @@ class VBookSuspiciousResponseFailFastBrokerTest {
     @Test
     fun noBrowserCookieLeavesApplicationEnvelopeUntouched() {
         val cookies = FixedCookies(null)
+        val broker = VBookSuspiciousResponseFailFastBroker(tinyApplicationErrorDelegate(), cookies)
+
+        assertTrue(broker.execute(manifest(), request()) is SourcePlatformResult.Success)
+    }
+
+    @Test
+    fun cookieCreatedByTheErrorResponseCannotTriggerFailFastRetroactively() {
+        val cookies = FixedCookies(null)
         val delegate = SourceNetworkBroker { _, request ->
+            cookies.mergeSetCookieHeaders(request.sourceId, request.url, listOf("server_session=created-by-response; Path=/; Secure"))
             SourcePlatformResult.Success(SourceNetworkResponse(
                 statusCode = 200,
                 finalUrl = request.url,
-                headers = mapOf("content-type" to listOf("application/json")),
-                body = "{\"code\":10001,\"msg\":\"expected business error\"}".toByteArray(),
+                headers = mapOf(
+                    "content-type" to listOf("application/json"),
+                    "set-cookie" to listOf("server_session=created-by-response; Path=/; Secure"),
+                ),
+                body = "{\"code\":10001,\"msg\":\"bootstrap session\"}".toByteArray(),
                 timing = SourceNetworkTiming(1L, 2L),
                 traceId = request.traceId,
             ))
         }
         val broker = VBookSuspiciousResponseFailFastBroker(delegate, cookies)
 
-        assertTrue(broker.execute(manifest(), request()) is SourcePlatformResult.Success)
+        val result = broker.execute(manifest(), request())
+
+        assertTrue(result is SourcePlatformResult.Success)
+        assertTrue(cookies.readCookieHeader(manifest().id, request().url).orEmpty().contains("server_session"))
+    }
+
+    private fun tinyApplicationErrorDelegate() = SourceNetworkBroker { _, request ->
+        SourcePlatformResult.Success(SourceNetworkResponse(
+            statusCode = 200,
+            finalUrl = request.url,
+            headers = mapOf("content-type" to listOf("application/json")),
+            body = "{\"code\":10001,\"msg\":\"expected business error\"}".toByteArray(),
+            timing = SourceNetworkTiming(1L, 2L),
+            traceId = request.traceId,
+        ))
     }
 
     private fun request() = SourceNetworkRequest(
@@ -108,6 +150,9 @@ class VBookSuspiciousResponseFailFastBrokerTest {
         override fun readCookieHeader(sourceId: String, requestUrl: String): String? = header
         override fun mergeSetCookieHeaders(sourceId: String, setCookieHeaders: List<String>) {
             header = setCookieHeaders.joinToString("; ") { it.substringBefore(';') }
+        }
+        override fun mergeSetCookieHeaders(sourceId: String, responseUrl: String, setCookieHeaders: List<String>) {
+            mergeSetCookieHeaders(sourceId, setCookieHeaders)
         }
         override fun clear(sourceId: String) {
             header = null

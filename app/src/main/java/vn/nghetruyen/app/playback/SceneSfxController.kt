@@ -59,7 +59,7 @@ class SceneSfxController(context: Context) {
     }
 
     private fun releaseOldest() {
-        val player = activePlayers.removeFirstOrNull() ?: return
+        val player = activePlayers.pollFirst() ?: return
         runCatching { player.stop() }
         runCatching { player.release() }
     }

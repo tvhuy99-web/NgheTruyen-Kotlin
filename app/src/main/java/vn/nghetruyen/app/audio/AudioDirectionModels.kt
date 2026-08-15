@@ -45,6 +45,23 @@ object AudioDirectionLimits {
 }
 
 /**
+ * Groups explicitly numbered ambience variants such as forest_01/forest_02 or rain-v1/rain-v2.
+ * Descriptive titles without a trailing variant number remain distinct, so unrelated assets are
+ * never shuffled together merely because they share words such as "rain" or "forest".
+ */
+object AudioAssetVariantFamily {
+    private val extension = Regex("(?i)\\.(mp3|m4a|aac|wav|ogg|flac|opus|wma|webm|aiff|aif)$")
+    private val numericVariant = Regex("(?i)(?:[\\s._-]+(?:v|var|variant)?\\s*\\d{1,3}|\\s*\\(\\d{1,3}\\))$")
+
+    fun key(title: String): String {
+        val clean = title.trim().replace(extension, "").trim().lowercase()
+        if (clean.isBlank()) return ""
+        val family = clean.replace(numericVariant, "").trim(' ', '_', '-', '.')
+        return family.ifBlank { clean }
+    }
+}
+
+/**
  * Existing scene-music rows are intentionally reused as the physical asset library. This preserves
  * URI permissions, per-file volume and loudness-normalization metadata without a Room migration.
  *

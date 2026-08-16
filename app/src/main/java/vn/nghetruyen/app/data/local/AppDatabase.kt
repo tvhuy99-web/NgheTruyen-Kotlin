@@ -540,9 +540,6 @@ interface ChapterDao {
     @Query("SELECT id FROM chapters WHERE storyId = :storyId AND downloadedAt IS NOT NULL AND content IS NOT NULL AND TRIM(content) != ''")
     suspend fun listDownloadedIds(storyId: String): List<String>
 
-    @Query("SELECT id FROM chapters WHERE downloadedAt IS NOT NULL AND content IS NOT NULL AND TRIM(content) != ''")
-    fun observeDownloadedIds(): Flow<List<String>>
-
     @Query("SELECT * FROM chapters ORDER BY storyId, chapterIndex")
     suspend fun listAll(): List<ChapterEntity>
 
@@ -554,27 +551,6 @@ interface ChapterDao {
 
     @Query("UPDATE chapters SET content = NULL, downloadedAt = NULL WHERE downloadedAt IS NULL")
     suspend fun clearTransientCache()
-
-    @Query("""
-        SELECT c.storyId AS storyId, COUNT(*) AS chapterCount,
-               COALESCE(SUM(LENGTH(CAST(c.content AS BLOB))), 0) AS bytes
-        FROM chapters c
-        INNER JOIN stories s ON s.id = c.storyId
-        WHERE c.downloadedAt IS NOT NULL AND c.content IS NOT NULL AND TRIM(c.content) != ''
-        GROUP BY c.storyId
-    """)
-    fun observeOfflineStorage(): Flow<List<OfflineStoryStorage>>
-
-    @Query("""
-        SELECT
-          COALESCE(SUM(CASE WHEN c.downloadedAt IS NOT NULL AND c.content IS NOT NULL AND TRIM(c.content) != '' THEN 1 ELSE 0 END), 0) AS downloadedChapters,
-          COALESCE(SUM(CASE WHEN c.downloadedAt IS NOT NULL THEN LENGTH(CAST(c.content AS BLOB)) ELSE 0 END), 0) AS downloadedBytes,
-          COALESCE(SUM(CASE WHEN c.downloadedAt IS NULL AND c.content IS NOT NULL AND TRIM(c.content) != '' THEN 1 ELSE 0 END), 0) AS cachedChapters,
-          COALESCE(SUM(CASE WHEN c.downloadedAt IS NULL THEN LENGTH(CAST(c.content AS BLOB)) ELSE 0 END), 0) AS cachedBytes
-        FROM chapters c
-        INNER JOIN stories s ON s.id = c.storyId
-    """)
-    fun observeStorageUsage(): Flow<StorageUsage>
 
     @Query("""
         SELECT c.id AS chapterId, c.storyId AS storyId, c.downloadedAt AS downloadedAt,
@@ -609,9 +585,6 @@ interface ProgressDao {
 
     @Query("SELECT * FROM reading_progress WHERE storyId = :storyId LIMIT 1")
     suspend fun get(storyId: String): ReadingProgressEntity?
-
-    @Query("SELECT * FROM reading_progress ORDER BY updatedAt DESC")
-    fun observeAll(): Flow<List<ReadingProgressEntity>>
 
     @Query("""
         SELECT p.storyId AS storyId, p.chapterId AS chapterId, p.paragraphIndex AS paragraphIndex,

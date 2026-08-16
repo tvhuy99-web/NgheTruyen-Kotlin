@@ -61,7 +61,6 @@ data class CacheTrimResult(
 
 class LibraryRepository(private val db: AppDatabase) {
     fun observeReading(): Flow<List<StoryEntity>> = db.storyDao().observeReading()
-    fun observeReadingProgress(): Flow<List<ReadingProgressEntity>> = db.progressDao().observeAll()
     fun observeReadingProgressWithChapterTitle(): Flow<List<ReadingProgressWithChapterTitle>> =
         db.progressDao().observeAllWithChapterTitle()
     fun observeReadingHistory(): Flow<List<ReadingHistoryEntity>> = db.readingHistoryDao().observeRecent()
@@ -71,9 +70,6 @@ class LibraryRepository(private val db: AppDatabase) {
     fun observeFollowing(): Flow<List<FollowedStoryEntity>> = db.followingDao().observeAll()
     fun observeDownloads(): Flow<List<DownloadJobEntity>> = db.downloadJobDao().observeAll()
     fun observeDownloadFailures(): Flow<List<ChapterDownloadFailureEntity>> = db.chapterDownloadFailureDao().observeAll()
-    fun observeOfflineStorage(): Flow<List<OfflineStoryStorage>> = db.chapterDao().observeOfflineStorage()
-    fun observeDownloadedChapterIds(): Flow<List<String>> = db.chapterDao().observeDownloadedIds()
-    fun observeStorageUsage(): Flow<StorageUsage> = db.chapterDao().observeStorageUsage()
     fun observeChapterStorageSnapshot(): Flow<List<ChapterStorageSnapshot>> = db.chapterDao().observeStorageSnapshot()
     fun observePronunciations(): Flow<List<PronunciationEntity>> = db.pronunciationDao().observeAll()
     fun observeVietPhraseRules(): Flow<List<VietPhraseEntity>> = db.vietPhraseDao().observeAll()

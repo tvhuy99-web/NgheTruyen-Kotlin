@@ -12,14 +12,14 @@ public class Sonic {
 
     private static final int SONIC_MIN_PITCH = 65;
     private static final int SONIC_MAX_PITCH = 400;
-    // This is used to down-sample some inputs to improve speed
+                                                               
     private static final int SONIC_AMDF_FREQ = 4000;
-    // The number of points to use in the sinc FIR filter for resampling.
+                                                                         
     private static final int SINC_FILTER_POINTS = 12;
     private static final int SINC_TABLE_SIZE = 601;
 
-    // Lookup table for windowed sinc function of SINC_FILTER_POINTS points.
-    // The code to generate this is in the header comment of sonic.c.
+                                                                            
+                                                                     
     private static final short sincTable[] = {
         0, 0, 0, 0, 0, 0, 0, -1, -1, -2, -2, -3, -4, -6, -7, -9, -10, -12, -14,
         -17, -19, -21, -24, -26, -29, -32, -34, -37, -40, -42, -44, -47, -48, -50,

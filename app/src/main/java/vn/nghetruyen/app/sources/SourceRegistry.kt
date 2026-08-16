@@ -103,12 +103,12 @@ class SourceRegistry(
         byId[id]?.let { return it }
         return withTimeoutOrNull(SOURCE_REFRESH_WAIT_MILLIS) {
             var generation = refreshGeneration.value
-            while (true) {
-                byId[id]?.let { return@withTimeoutOrNull it }
+            var resolved = byId[id]
+            while (resolved == null) {
                 generation = refreshGeneration.filter { it > generation }.first()
+                resolved = byId[id]
             }
-            @Suppress("UNREACHABLE_CODE")
-            null
+            resolved
         }
     }
 

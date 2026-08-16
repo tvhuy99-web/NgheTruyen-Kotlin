@@ -33,7 +33,7 @@ class ChapterCatalogSafetyTest {
         assertEquals(50, safe.chapters.size)
         assertEquals("Chương 50", safe.chapters.last().title)
         assertEquals(
-            "https://truyenfull.vision/linh-vu-thien-ha/trang-2/#list-chapter",
+            "https://truyenfull.vision/linh-vu-thien-ha/trang-2/",
             safe.nextPageUrl,
         )
         assertEquals(50, safe.chapters.map { it.id }.distinct().size)
@@ -42,7 +42,7 @@ class ChapterCatalogSafetyTest {
     @Test
     fun laterCatalogRecoversNextPageRelativeToCurrentPage() {
         val safe = sanitizeChapterCatalog(
-            currentPageUrl = "https://truyenfull.vision/linh-vu-thien-ha/trang-2/#list-chapter",
+            currentPageUrl = "https://truyenfull.vision/linh-vu-thien-ha/trang-2/",
             chapters = listOf(
                 chapter("chapter-51", 50, "Chương 51", "https://truyenfull.vision/linh-vu-thien-ha/chuong-51/"),
                 chapter("page-1", 51, "1", "https://truyenfull.vision/linh-vu-thien-ha/#list-chapter"),
@@ -54,9 +54,22 @@ class ChapterCatalogSafetyTest {
 
         assertEquals(listOf("Chương 51"), safe.chapters.map { it.title })
         assertEquals(
-            "https://truyenfull.vision/linh-vu-thien-ha/trang-3/#list-chapter",
+            "https://truyenfull.vision/linh-vu-thien-ha/trang-3/",
             safe.nextPageUrl,
         )
+    }
+
+    @Test
+    fun explicitNextPageUrlAlsoDropsBrowserFragment() {
+        val safe = sanitizeChapterCatalog(
+            currentPageUrl = "https://truyenfull.live/story/",
+            chapters = listOf(
+                chapter("chapter-1", 0, "Chương 1", "https://truyenfull.live/story/chuong-1/"),
+            ),
+            nextPageUrl = "https://truyenfull.live/story/trang-2/#list-chapter",
+        )
+
+        assertEquals("https://truyenfull.live/story/trang-2/", safe.nextPageUrl)
     }
 
     @Test

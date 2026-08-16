@@ -1,0 +1,82 @@
+name: Safe Cleanup Pass 2B Temp
+
+on:
+  push:
+    branches:
+      - agent/remove-unused-files
+    paths:
+      - .github/workflows/safe-cleanup-pass2b-temp.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v6
+        with:
+          ref: agent/remove-unused-files
+          fetch-depth: 1
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Apply guarded cleanup
+        run: |
+          python3 scripts/safe_cleanup_pass2_temp.py
+          git diff --check
+          git status --short
+
+      - name: Validate cleaned modules and app
+        run: |
+          ./gradlew --no-daemon --stacktrace \
+            :source-api:test \
+            :source-runtime:test \
+            :source-network:test \
+            :source-repository:test \
+            :source-vbook:test \
+            :source-store:test \
+            :source-diagnostics:test \
+            :app:testDebugUnitTest \
+            :app:compileDebugKotlin
+
+      - name: Commit validated cleanup
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git reset .github/workflows/safe-cleanup-pass2b-temp.yml scripts/safe_cleanup_pass2_temp.py
+          test -n "$(git diff --cached --name-only)"
+          git commit -m 'chore: remove dead helpers and redundant null handling'
+          git push origin HEAD:agent/remove-unused-files
+
+      - name: Remove temporary cleanup files
+        if: always()
+        run: |
+          git reset --hard HEAD
+          rm -f .github/workflows/safe-cleanup-pass2b-temp.yml scripts/safe_cleanup_pass2_temp.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m 'chore: remove temporary safe cleanup pass 2 files'
+            git push origin HEAD:agent/remove-unused-files
+          fi

@@ -76,10 +76,12 @@ internal fun sanitizeChapterCatalog(
         chapter.id.isNotBlank() && seenIds.add(chapter.id)
     }
 
-    val recoveredNext = nextPageUrl
-        ?.trim()
-        ?.takeIf(String::isNotEmpty)
-        ?: recoverNextPageUrl(currentPageUrl, pagerEntries)
+    val recoveredNext = (
+        nextPageUrl
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
+            ?: recoverNextPageUrl(currentPageUrl, pagerEntries)
+        )?.withoutFragment()
 
     return SanitizedChapterCatalog(uniqueChapters, recoveredNext)
 }
@@ -97,6 +99,8 @@ private fun recoverNextPageUrl(currentPageUrl: String, entries: List<PagerEntry>
         ?.trim()
         ?.takeIf(String::isNotEmpty)
 }
+
+private fun String.withoutFragment(): String = substringBefore('#').trim().ifEmpty { this }
 
 private fun truyenFullPagerPage(url: String): Int? {
     if (!url.contains("#list-chapter", ignoreCase = true)) return null

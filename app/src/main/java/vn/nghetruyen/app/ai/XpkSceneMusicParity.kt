@@ -9,7 +9,6 @@ object XpkSceneMusicParity {
     const val MAX_TRACKS = 500
     const val MAX_DESCRIPTION_CHARS = 300
     const val MODE = "ai_full_authority"
-    private const val MIN_MIDDLE_SCENE_UNITS = 2
 
     data class PromptTrack(
         val id: String,
@@ -84,37 +83,34 @@ object XpkSceneMusicParity {
             4. Nếu INCOMING_TRACK_ID là NONE, chọn bài phù hợp nhất cho phần mở đầu từ TRACK_CATALOG.
             5. Trong toàn chương, tại mỗi chuyển biến đáng kể, đánh giá lại bài đang dùng dựa trên ngữ cảnh trước sau, chức năng kể chuyện, hướng cảm xúc, nhịp kể, mức căng thẳng, không gian, thời gian, quy mô và tính chất của diễn biến.
             6. Giữ bài đang dùng trong khoảng mà nó còn phù hợp. Đổi tại đúng UNIT đầu tiên nơi một bài khác trở thành lựa chọn phù hợp hơn cho diễn biến đang bắt đầu.
-            7. Ổn định quan trọng hơn phản ứng theo từng câu: không đổi bài vì một câu thoại, một cảm xúc thoáng qua, một động tác ngắn hoặc một từ khóa. Một cảnh nhạc nằm giữa chương phải kéo dài ít nhất $MIN_MIDDLE_SCENE_UNITS UNIT; nếu một thay đổi không đủ bền để giữ bài mới qua mức tối thiểu đó thì giữ bài hiện tại.
-            8. Không đặt mục tiêu về số lần đổi nhạc hoặc số lượng music_scene. Không ưu tiên một bài cho cả chương, không ưu tiên nhiều bài, không ưu tiên đổi ít và cũng không ưu tiên đổi nhiều. Số cảnh phải hoàn toàn là kết quả của nhu cầu âm nhạc thực tế trong nội dung.
-            9. Một chuyển biến quan trọng chỉ tạo ranh giới khi nó thực sự mở ra một đơn vị kể chuyện mới có chức năng âm nhạc khác; không dùng BGM như SFX để nhấn một khoảnh khắc đơn lẻ.
-            10. Không dựa riêng vào từ khóa, nhãn cảm xúc hoặc độ dài bài đã phát. Luôn xét diễn biến đầy đủ trước và sau ranh giới.
-            11. Có thể giữ INCOMING_TRACK_ID qua một phần hoặc toàn bộ chương, đổi khỏi nó ngay đầu chương, hoặc dùng lại một bài sau khi đã chuyển qua bài khác, miễn mỗi quyết định phù hợp với nội dung.
-            12. Hai cảnh liền nhau không được cùng track_id; nếu cùng bài thì phải gộp thành một cảnh liên tục.
-            13. Mỗi music_scene là một khoảng liên tục dùng cùng một track_id. start_id và end_id đều được tính bao gồm.
-            14. Cảnh đầu bắt đầu tại ID $firstUnitId; cảnh cuối kết thúc tại ID $lastUnitId. Các cảnh phải đúng thứ tự TIMELINE, liên tục, không chồng lấn và không bỏ sót UNIT hoặc DIALOGUE.
-            15. Với hai cảnh liên tiếp, start_id của cảnh sau phải là phần tử ngay sau end_id của cảnh trước. Mọi ID phải có thật trong chương và mọi track_id phải có thật trong TRACK_CATALOG.
-            16. Phần mô tả sau tên bài, nếu có, chỉ là dữ liệu tham khảo về đặc tính của chính tệp nhạc. Hãy đối chiếu mô tả với toàn bộ ngữ cảnh và tự chọn bài phù hợp nhất; không coi một nhãn riêng lẻ là mệnh lệnh bắt buộc.
-            17. Không trả tên bài, URI, đường dẫn, thời gian theo giây, cảm xúc, thể loại, cường độ, lý do lựa chọn hoặc trường phụ.
+            7. Không đặt mục tiêu về số lần đổi nhạc hoặc số lượng music_scene. Không ưu tiên một bài cho cả chương, không ưu tiên nhiều bài, không ưu tiên đổi ít và cũng không ưu tiên đổi nhiều. Số cảnh phải hoàn toàn là kết quả của nhu cầu âm nhạc thực tế trong nội dung.
+            8. Một chi tiết ngắn, một câu thoại, một hành động hoặc một thay đổi thoáng qua chỉ tạo ranh giới khi bản thân nó thực sự mở ra một đơn vị kể chuyện cần chức năng âm nhạc khác. Ngược lại, một chuyển biến quan trọng phải được đổi bài đúng lúc dù đoạn đó dài hay ngắn.
+            9. Không dựa riêng vào từ khóa, nhãn cảm xúc hoặc độ dài bài đã phát. Luôn xét diễn biến đầy đủ trước và sau ranh giới.
+            10. Có thể giữ INCOMING_TRACK_ID qua một phần hoặc toàn bộ chương, đổi khỏi nó ngay đầu chương, hoặc dùng lại một bài sau khi đã chuyển qua bài khác, miễn mỗi quyết định phù hợp với nội dung.
+            11. Hai cảnh liền nhau không được cùng track_id; nếu cùng bài thì phải gộp thành một cảnh liên tục.
+            12. Mỗi music_scene là một khoảng liên tục dùng cùng một track_id. start_id và end_id đều được tính bao gồm.
+            13. Cảnh đầu bắt đầu tại ID $firstUnitId; cảnh cuối kết thúc tại ID $lastUnitId. Các cảnh phải đúng thứ tự TIMELINE, liên tục, không chồng lấn và không bỏ sót UNIT hoặc DIALOGUE.
+            14. Với hai cảnh liên tiếp, start_id của cảnh sau phải là phần tử ngay sau end_id của cảnh trước. Mọi ID phải có thật trong chương và mọi track_id phải có thật trong TRACK_CATALOG.
+            15. Phần mô tả sau tên bài, nếu có, chỉ là dữ liệu tham khảo về đặc tính của chính tệp nhạc. Hãy đối chiếu mô tả với toàn bộ ngữ cảnh và tự chọn bài phù hợp nhất; không coi một nhãn riêng lẻ là mệnh lệnh bắt buộc.
+            16. Không trả tên bài, URI, đường dẫn, thời gian theo giây, cảm xúc, thể loại, cường độ, lý do lựa chọn hoặc trường phụ.
 
             KIỂM TRA ÂM THẦM TRƯỚC KHI TRẢ:
 
-            18. Kiểm tra toàn chương được phủ kín, các ID và track_id hợp lệ, không có hai cảnh liền nhau cùng bài.
-            19. Kiểm tra không có cảnh nhạc giữa chương chỉ tồn tại một UNIT; nếu có, hãy bỏ ranh giới phản ứng quá nhanh và gộp nó vào ngữ cảnh ổn định phù hợp hơn.
-            20. Kiểm tra từng khoảng nhạc và từng ranh giới chỉ theo mức độ phù hợp với diễn biến, không theo mong muốn tăng hoặc giảm số lần đổi nhạc.
-            21. Kiểm tra riêng điểm đầu chương: INCOMING_TRACK_ID đã được giữ hoặc thay thế sau khi so sánh thực chất với phần mở đầu và TRACK_CATALOG, không phải do thói quen.
-            22. Không trình bày quá trình suy luận hoặc kết quả kiểm tra.
+            17. Kiểm tra toàn chương được phủ kín, các ID và track_id hợp lệ, không có hai cảnh liền nhau cùng bài.
+            18. Kiểm tra từng khoảng nhạc và từng ranh giới chỉ theo mức độ phù hợp với diễn biến, không theo mong muốn tăng hoặc giảm số lần đổi nhạc.
+            19. Kiểm tra riêng điểm đầu chương: INCOMING_TRACK_ID đã được giữ hoặc thay thế sau khi so sánh thực chất với phần mở đầu và TRACK_CATALOG, không phải do thói quen.
+            20. Không trình bày quá trình suy luận hoặc kết quả kiểm tra.
 
             TRACK_CATALOG, định dạng track_id | tên bài | mô tả tham khảo nếu có:
 
             $catalog
         """.trimIndent()
         val outputRules = """
-            - Khi nhiệm vụ nhạc được bật, JSON phải có mảng music_scenes.
+            - Đối tượng JSON phải có đúng hai mảng cấp cao: assignments và music_scenes.
             - music_scenes phải giữ đúng thứ tự từ đầu đến cuối chương và phủ kín toàn bộ UNIT.
             - Mỗi phần tử music_scenes có đúng ba trường: start_id, end_id, track_id.
             - track_id phải khớp chính xác một mã trong TRACK_CATALOG.
             - Không có hai phần tử music_scenes liền nhau dùng cùng track_id.
-            - Cảnh nhạc nằm giữa chương không được ngắn hơn $MIN_MIDDLE_SCENE_UNITS UNIT.
         """.trimIndent()
         return PromptBlock(instructions, outputRules, shuffled, incoming, source)
     }
@@ -178,15 +174,6 @@ object XpkSceneMusicParity {
             cursor = end + 1
         }
         require(cursor == validUnitIds.size) { "music_scenes chưa phủ kín toàn bộ UNIT" }
-        if (out.size > 2) {
-            out.subList(1, out.lastIndex).forEachIndexed { offset, scene ->
-                val start = order.getValue(scene.startUnitId)
-                val end = order.getValue(scene.endUnitId)
-                require(end - start + 1 >= MIN_MIDDLE_SCENE_UNITS) {
-                    "Cảnh nhạc giữa chương thứ ${offset + 2} quá ngắn; tránh đổi BGM theo từng câu."
-                }
-            }
-        }
         return out
     }
 

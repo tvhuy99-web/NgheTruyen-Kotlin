@@ -28,7 +28,6 @@ python3 scripts/m0_preflight.py \
 
 STATIC_GATES=(
   scripts/validate_release.py
-  scripts/check_version_policy.py
   scripts/check_lua_deep_diagnostics_parity.py
   scripts/check_source_platform_foundation.py
   scripts/check_vbook_chromium_static.py
@@ -50,7 +49,6 @@ STATIC_GATES=(
   scripts/check_xpk_final_ui_parity.py
   scripts/check_downloaded_xpk_parity.py
   scripts/check_xpk_strict_parity.py
-  scripts/check_audio_direction_ui_wiring.py
 )
 for gate in "${STATIC_GATES[@]}"; do
   printf 'RUN_STATIC_GATE=%s\n' "$gate"

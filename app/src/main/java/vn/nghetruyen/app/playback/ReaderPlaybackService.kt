@@ -59,8 +59,6 @@ import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
 import vn.nghetruyen.app.data.local.VoiceRoleEntity
 import vn.nghetruyen.app.ui.reference.ReferenceVoiceRoleExtras
 import vn.nghetruyen.app.audio.Pcm16WaveConverter
-import vn.nghetruyen.app.audio.AudioAssetClassifier
-import vn.nghetruyen.app.audio.AudioAssetKind
 import vn.nghetruyen.app.audio.SonicPcmProcessor
 import vn.nghetruyen.app.audio.PcmLoudnessEstimator
 import vn.nghetruyen.source.diagnostics.DiagnosticCategory
@@ -2176,7 +2174,6 @@ class ReaderPlaybackService : Service() {
 
         val enabledMusicTracks = if (useStoryProfile && chapterId.isNotBlank()) {
             container.libraryRepository.listEnabledSceneMusicTracks()
-                .filter { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }
         } else emptyList()
         val musicSourceHash = originalChapter?.let { chapter ->
             ChapterAiWorkflow.sha256(

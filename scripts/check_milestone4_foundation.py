@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Milestone 4 foundation gate: TTS recovery, media buttons, unified AI narration and sound direction."""
+"""Milestone 4 foundation gate: TTS recovery, media buttons, AI narration plans and scene music."""
 from __future__ import annotations
 
 import shutil
@@ -106,15 +106,8 @@ def main() -> None:
     )
     require(
         "app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt",
-        "planningMutex.withLock", "ensurePlansLocked", "persistVoicePlan", "persistMusicPlan",
-        "persistAudioDirectionPlan", "buildContinuityContext", "replaceVoiceAssignments",
-        "replaceSceneMusicCues", "SceneMusicTrackOption", "includeAmbience = effectiveAmbience",
-        "includeSoundEffects = effectiveSfx",
-    )
-    require(
-        "app/src/main/java/vn/nghetruyen/app/ai/XpkNarrationAiServices.kt",
-        "XpkUnifiedNarrationPrompt.compose", "validAmbienceIds", "validSfxIds",
-        "includeAmbience = request.includeAmbience", "includeSoundEffects = request.includeSoundEffects",
+        "ensureVoicePlan", "persistMusicPlan", "buildContinuityContext", "replaceVoiceAssignments",
+        "replaceSceneMusicCues", "SceneMusicTrackOption",
     )
     # Scene-catalog randomization moved out of the coordinator when canonical XPK scene planning was
     # introduced. Verify the behavior in its current owner rather than pinning the historical class.

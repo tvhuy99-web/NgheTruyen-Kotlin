@@ -7,37 +7,25 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.RandomAccessFile
 import kotlin.math.min
 
-/**
- * One PCM16 audio layer positioned on the narration timeline.
- * MUSIC/AMBIENCE use [looping]=true; SFX uses [looping]=false and naturally ends with its source.
- */
+/** One loopable PCM16 music layer positioned on the narration timeline. */
 data class SceneMixLayer(
     val sourceWav: File,
     val startFrame: Long,
     val endFrameExclusive: Long,
     val volume: Float = 0.18f,
     val fadeFrames: Int = 0,
-    val looping: Boolean = true,
 )
 
 /**
- * Streaming narration + MUSIC + AMBIENCE + SFX mixer.
- *
- * Looping layers use an internal overlap/crossfade at the source seam instead of modulo hard-looping.
- * A deterministic phase derived from source + timeline start prevents simultaneous ambience layers
- * with similar durations from exposing synchronized repetition in exported audiobooks. Non-looping
- * one-shot layers are treated as important SFX and apply a brief smooth duck only to looping
- * background layers; narration and the SFX itself are never ducked by that envelope.
+ * Streaming narration/music mixer. Music must already be decoded to PCM16 WAV
+ * with the same sample rate and channel count as narration.
  */
 object Pcm16SceneMixer {
     private const val BLOCK_FRAMES = 2_048
     private const val MAX_LAYER_BYTES = 64L * 1024 * 1024
-    private const val MIN_LOOPING_FADE_MILLIS = 1_200L
-    private const val SFX_BACKGROUND_DUCK = 0.72f
-    private const val SFX_DUCK_ATTACK_MILLIS = 120L
-    private const val SFX_DUCK_RELEASE_MILLIS = 360L
 
     fun mix(narrationWav: File, layers: List<SceneMixLayer>, destination: File) {
         if (layers.isEmpty()) {
@@ -47,16 +35,15 @@ object Pcm16SceneMixer {
         val narration = WaveFileAssembler.inspect(narrationWav)
         requirePcm16(narration)
         val prepared = layers.map { layer ->
-            require(layer.startFrame >= 0L && layer.endFrameExclusive > layer.startFrame) { "Khoảng lớp âm thanh không hợp lệ." }
+            require(layer.startFrame >= 0L && layer.endFrameExclusive > layer.startFrame) { "Khoảng nhạc cảnh không hợp lệ." }
             val segment = WaveFileAssembler.inspect(layer.sourceWav)
             requirePcm16(segment)
             if (segment.sampleRate != narration.sampleRate || segment.channelCount != narration.channelCount) {
-                throw IOException("Lớp âm thanh phải cùng sample rate và số kênh với lời đọc.")
+                throw IOException("Nhạc cảnh phải cùng sample rate và số kênh với lời đọc.")
             }
-            if (segment.dataLength > MAX_LAYER_BYTES) throw IOException("Một lớp âm thanh vượt giới hạn 64 MiB PCM.")
-            PreparedLayer(layer, readPcm(segment), narration.blockAlign, narration.sampleRate.toInt())
+            if (segment.dataLength > MAX_LAYER_BYTES) throw IOException("Một bản nhạc cảnh vượt giới hạn 64 MiB PCM.")
+            PreparedLayer(layer, readPcm(segment), narration.blockAlign)
         }
-        val oneShots = prepared.filterNot { it.layer.looping }
         val tempData = File(destination.parentFile ?: narrationWav.parentFile, "${destination.name}.pcm.tmp")
         try {
             BufferedInputStream(FileInputStream(narrationWav)).use { input ->
@@ -74,13 +61,11 @@ object Pcm16SceneMixer {
                         if (aligned <= 0) throw EOFException("Dữ liệu lời đọc kết thúc giữa một frame PCM.")
                         var offset = 0
                         while (offset < aligned) {
-                            val backgroundDuck = oneShots.minOfOrNull { it.backgroundDuckAt(framePosition) } ?: 1f
                             for (channel in 0 until narration.channelCount) {
                                 val sampleOffset = offset + channel * 2
                                 var mixed = sample16(buffer, sampleOffset).toInt()
                                 prepared.forEach { layer ->
-                                    val externalGain = if (layer.layer.looping) backgroundDuck else 1f
-                                    mixed += layer.sample(framePosition, channel, narration.channelCount, externalGain)
+                                    mixed += layer.sample(framePosition, channel, narration.channelCount)
                                 }
                                 writeSample16(buffer, sampleOffset, mixed.coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()))
                             }
@@ -98,101 +83,15 @@ object Pcm16SceneMixer {
         }
     }
 
-    private data class PreparedLayer(
-        val layer: SceneMixLayer,
-        val pcm: ByteArray,
-        val blockAlign: Int,
-        val sampleRate: Int,
-    ) {
+    private data class PreparedLayer(val layer: SceneMixLayer, val pcm: ByteArray, val blockAlign: Int) {
         private val totalFrames = pcm.size / blockAlign
-        private val layerFrames = (layer.endFrameExclusive - layer.startFrame)
-            .coerceAtMost(Int.MAX_VALUE.toLong())
-            .toInt()
-            .coerceAtLeast(1)
-        private val requestedBoundaryFadeFrames = if (layer.looping) {
-            maxOf(layer.fadeFrames, (sampleRate * MIN_LOOPING_FADE_MILLIS / 1_000L).toInt())
-        } else layer.fadeFrames
-        private val boundaryFadeFrames = requestedBoundaryFadeFrames
-            .coerceAtMost((layerFrames / 2).coerceAtLeast(1))
-        private val loopBlendFrames = if (layer.looping && totalFrames > 8) {
-            boundaryFadeFrames
-                .coerceAtLeast(1)
-                .coerceAtMost((totalFrames / 4).coerceAtLeast(1))
-        } else 0
-        private val loopCycleFrames = if (loopBlendFrames > 0) {
-            (totalFrames - loopBlendFrames).coerceAtLeast(1)
-        } else totalFrames.coerceAtLeast(1)
-        private val phaseFrames = if (layer.looping && loopCycleFrames > 1) {
-            positiveHash(layer.sourceWav.name, layer.startFrame) % loopCycleFrames
-        } else 0
-        private val oneShotEndFrame = if (layer.looping) {
-            layer.endFrameExclusive
-        } else {
-            min(layer.endFrameExclusive, layer.startFrame + totalFrames.toLong())
-        }
-        private val duckAttackFrames = (sampleRate * SFX_DUCK_ATTACK_MILLIS / 1_000L).coerceAtLeast(1L)
-        private val duckReleaseFrames = (sampleRate * SFX_DUCK_RELEASE_MILLIS / 1_000L).coerceAtLeast(1L)
-
-        fun sample(frame: Long, channel: Int, channels: Int, externalGain: Float = 1f): Int {
+        fun sample(frame: Long, channel: Int, channels: Int): Int {
             if (frame !in layer.startFrame until layer.endFrameExclusive || totalFrames <= 0) return 0
             val local = frame - layer.startFrame
-            if (!layer.looping && local >= totalFrames) return 0
-            val audibleRemaining = if (layer.looping) {
-                layer.endFrameExclusive - frame
-            } else {
-                min(layer.endFrameExclusive - frame, totalFrames.toLong() - local)
-            }
-            val gain = layer.volume.coerceIn(0f, 1f) *
-                fadeGain(local, audibleRemaining, boundaryFadeFrames) *
-                externalGain.coerceIn(0f, 1f)
-            if (gain <= 0f) return 0
-
-            val rawSample = if (!layer.looping) {
-                sourceSample(local.toInt(), channel, channels)
-            } else if (loopBlendFrames <= 0 || totalFrames <= loopBlendFrames * 2) {
-                val sourceFrame = ((local + phaseFrames) % totalFrames.toLong()).toInt()
-                sourceSample(sourceFrame, channel, channels)
-            } else {
-                seamlessLoopSample(local, channel, channels)
-            }
-            return (rawSample * gain).toInt()
-        }
-
-        fun backgroundDuckAt(frame: Long): Float {
-            if (layer.looping || totalFrames <= 0) return 1f
-            val attackStart = (layer.startFrame - duckAttackFrames).coerceAtLeast(0L)
-            val releaseEnd = oneShotEndFrame + duckReleaseFrames
-            if (frame < attackStart || frame >= releaseEnd) return 1f
-            if (frame < layer.startFrame) {
-                val fraction = (frame - attackStart).toFloat() / (layer.startFrame - attackStart).coerceAtLeast(1L).toFloat()
-                return 1f - (1f - SFX_BACKGROUND_DUCK) * fraction.coerceIn(0f, 1f)
-            }
-            if (frame < oneShotEndFrame) return SFX_BACKGROUND_DUCK
-            val fraction = (frame - oneShotEndFrame).toFloat() / duckReleaseFrames.toFloat()
-            return SFX_BACKGROUND_DUCK + (1f - SFX_BACKGROUND_DUCK) * fraction.coerceIn(0f, 1f)
-        }
-
-        private fun seamlessLoopSample(local: Long, channel: Int, channels: Int): Int {
-            val cyclePosition = ((local + phaseFrames) % loopCycleFrames.toLong()).toInt()
-            val normalFrames = (loopCycleFrames - loopBlendFrames).coerceAtLeast(0)
-            if (cyclePosition < normalFrames) {
-                val sourceFrame = loopBlendFrames + cyclePosition
-                return sourceSample(sourceFrame.coerceAtMost(totalFrames - 1), channel, channels)
-            }
-
-            val blendPosition = (cyclePosition - normalFrames).coerceIn(0, loopBlendFrames - 1)
-            val tailFrame = (totalFrames - loopBlendFrames + blendPosition).coerceIn(0, totalFrames - 1)
-            val headFrame = blendPosition.coerceIn(0, totalFrames - 1)
-            val fraction = blendPosition.toFloat() / loopBlendFrames.coerceAtLeast(1).toFloat()
-            val tail = sourceSample(tailFrame, channel, channels)
-            val head = sourceSample(headFrame, channel, channels)
-            return (tail * (1f - fraction) + head * fraction).toInt()
-        }
-
-        private fun sourceSample(sourceFrame: Int, channel: Int, channels: Int): Int {
-            val safeFrame = sourceFrame.coerceIn(0, totalFrames - 1)
-            val offset = safeFrame * blockAlign + channel.coerceAtMost(channels - 1) * 2
-            return sample16(pcm, offset).toInt()
+            val loopFrame = (local % totalFrames).toInt()
+            val gain = layer.volume.coerceIn(0f, 1f) * fadeGain(local, layer.endFrameExclusive - frame, layer.fadeFrames)
+            val offset = loopFrame * blockAlign + channel.coerceAtMost(channels - 1) * 2
+            return (sample16(pcm, offset) * gain).toInt()
         }
     }
 
@@ -201,11 +100,6 @@ object Pcm16SceneMixer {
         val fadeIn = (elapsed.toFloat() / fadeFrames).coerceIn(0f, 1f)
         val fadeOut = (remaining.toFloat() / fadeFrames).coerceIn(0f, 1f)
         return min(fadeIn, fadeOut)
-    }
-
-    private fun positiveHash(name: String, startFrame: Long): Int {
-        val hash = 31L * name.hashCode().toLong() + startFrame
-        return hash.and(0x7fffffffL).toInt()
     }
 
     private fun requirePcm16(segment: WaveSegment) {
@@ -221,7 +115,7 @@ object Pcm16SceneMixer {
             var offset = 0
             while (offset < data.size) {
                 val read = input.read(data, offset, data.size - offset)
-                if (read < 0) throw EOFException("Lớp âm thanh bị cắt ngắn.")
+                if (read < 0) throw EOFException("Nhạc cảnh bị cắt ngắn.")
                 offset += read
             }
         }

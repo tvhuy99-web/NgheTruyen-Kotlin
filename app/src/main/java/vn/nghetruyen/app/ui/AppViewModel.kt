@@ -336,11 +336,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var pendingReadingPersistenceKey: String = ""
     private var chapterSleepRemaining: Int? = null
     private var chapterSleepLastChapterId: String = ""
+    private val startedRoomObserverGroups = mutableSetOf<RoomObserverGroup>()
 
     init {
         observeSettings()
         observeDiagnostics()
-        observeLibrary()
         observePlayback()
         refreshTtsVoices()
         refreshSourceSessions()
@@ -452,144 +452,195 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun observeLibrary() {
-        viewModelScope.launch {
-            container.libraryRepository.observeReading().collect { items ->
-                mutableState.update { it.copy(readingStories = items) }
-            }
+    fun ensureRoomObserversForUi(
+        destination: Destination,
+        rootTab: RootTab,
+        librarySection: LibrarySection,
+    ) {
+        ensureRoomObserverGroups(roomObserverGroupsForUi(destination, rootTab, librarySection))
+    }
+
+    fun ensureRoomObserversForPersonalPage(page: String) {
+        ensureRoomObserverGroups(roomObserverGroupsForPersonalPage(page))
+    }
+
+    private fun ensureRoomObserverGroups(groups: Set<RoomObserverGroup>) {
+        groups.forEach(::ensureRoomObserverGroup)
+    }
+
+    private fun ensureRoomObserverGroup(group: RoomObserverGroup) {
+        val shouldStart = synchronized(startedRoomObserverGroups) {
+            startedRoomObserverGroups.add(group)
         }
-        viewModelScope.launch {
-            container.libraryRepository.observeReadingProgressWithChapterTitle().collect { items ->
-                val progressByStory = items.associate { item ->
-                    item.storyId to ReadingProgressEntity(
-                        storyId = item.storyId,
-                        chapterId = item.chapterId,
-                        paragraphIndex = item.paragraphIndex,
-                        totalParagraphs = item.totalParagraphs,
-                        updatedAt = item.updatedAt,
-                    )
+        if (!shouldStart) return
+
+        when (group) {
+            RoomObserverGroup.READING -> {
+                viewModelScope.launch {
+                    container.libraryRepository.observeReading()
+                        .distinctUntilChanged()
+                        .collect { items -> mutableState.update { it.copy(readingStories = items) } }
                 }
-                mutableState.update {
-                    it.copy(
-                        readingProgress = progressByStory,
-                        readingChapterTitles = items.associate { item -> item.storyId to item.chapterTitle },
-                    )
+                viewModelScope.launch {
+                    container.libraryRepository.observeReadingProgressWithChapterTitle()
+                        .distinctUntilChanged()
+                        .collect { items ->
+                            val progressByStory = items.associate { item ->
+                                item.storyId to ReadingProgressEntity(
+                                    storyId = item.storyId,
+                                    chapterId = item.chapterId,
+                                    paragraphIndex = item.paragraphIndex,
+                                    totalParagraphs = item.totalParagraphs,
+                                    updatedAt = item.updatedAt,
+                                )
+                            }
+                            mutableState.update {
+                                it.copy(
+                                    readingProgress = progressByStory,
+                                    readingChapterTitles = items.associate { item -> item.storyId to item.chapterTitle },
+                                )
+                            }
+                        }
                 }
             }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeReadingHistory().collect { items ->
-                mutableState.update { it.copy(readingHistory = items) }
+
+            RoomObserverGroup.HISTORY -> viewModelScope.launch {
+                container.libraryRepository.observeReadingHistory()
+                    .distinctUntilChanged()
+                    .collect { items -> mutableState.update { it.copy(readingHistory = items) } }
             }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeOffline().collect { items ->
-                mutableState.update { it.copy(downloadedStories = items) }
+
+            RoomObserverGroup.OFFLINE -> viewModelScope.launch {
+                container.libraryRepository.observeOffline()
+                    .distinctUntilChanged()
+                    .collect { items -> mutableState.update { it.copy(downloadedStories = items) } }
             }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeBookmarks().collect { items ->
-                mutableState.update { it.copy(bookmarks = items) }
+
+            RoomObserverGroup.BOOKMARKS -> viewModelScope.launch {
+                container.libraryRepository.observeBookmarks()
+                    .distinctUntilChanged()
+                    .collect { items -> mutableState.update { it.copy(bookmarks = items) } }
             }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeNotes().collect { items ->
-                mutableState.update { it.copy(notes = items) }
+
+            RoomObserverGroup.NOTES -> viewModelScope.launch {
+                container.libraryRepository.observeNotes()
+                    .distinctUntilChanged()
+                    .collect { items -> mutableState.update { it.copy(notes = items) } }
             }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeFollowing().collect { items ->
-                mutableState.update { it.copy(following = items) }
+
+            RoomObserverGroup.FOLLOWING -> viewModelScope.launch {
+                container.libraryRepository.observeFollowing()
+                    .distinctUntilChanged()
+                    .collect { items -> mutableState.update { it.copy(following = items) } }
             }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeDownloads().collect { items ->
-                mutableState.update { it.copy(downloads = items) }
+
+            RoomObserverGroup.DOWNLOADS -> {
+                viewModelScope.launch {
+                    container.libraryRepository.observeDownloads()
+                        .distinctUntilChanged()
+                        .collect { items -> mutableState.update { it.copy(downloads = items) } }
+                }
+                viewModelScope.launch {
+                    container.libraryRepository.observeDownloadFailures()
+                        .distinctUntilChanged()
+                        .collect { items -> mutableState.update { it.copy(downloadFailures = items) } }
+                }
             }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeDownloadFailures().collect { items ->
-                mutableState.update { it.copy(downloadFailures = items) }
-            }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeChapterStorageSnapshot().collect { rows ->
-                val downloaded = rows.filter { it.downloadedAt != null }
-                val cached = rows.filter { it.downloadedAt == null }
-                val offlineStorage = downloaded
-                    .groupBy { it.storyId }
-                    .mapValues { (storyId, chapters) ->
-                        OfflineStoryStorage(
-                            storyId = storyId,
-                            chapterCount = chapters.size,
-                            bytes = chapters.sumOf { it.bytes },
-                        )
+
+            RoomObserverGroup.STORAGE -> viewModelScope.launch {
+                container.libraryRepository.observeChapterStorageSnapshot()
+                    .distinctUntilChanged()
+                    .collect { rows ->
+                        val downloaded = rows.filter { it.downloadedAt != null }
+                        val cached = rows.filter { it.downloadedAt == null }
+                        val offlineStorage = downloaded
+                            .groupBy { it.storyId }
+                            .mapValues { (storyId, chapters) ->
+                                OfflineStoryStorage(
+                                    storyId = storyId,
+                                    chapterCount = chapters.size,
+                                    bytes = chapters.sumOf { it.bytes },
+                                )
+                            }
+                        mutableState.update {
+                            it.copy(
+                                offlineStorage = offlineStorage,
+                                downloadedChapterIds = downloaded.mapTo(linkedSetOf()) { row -> row.chapterId },
+                                storageUsage = StorageUsage(
+                                    downloadedChapters = downloaded.size,
+                                    downloadedBytes = downloaded.sumOf { it.bytes },
+                                    cachedChapters = cached.size,
+                                    cachedBytes = cached.sumOf { it.bytes },
+                                ),
+                            )
+                        }
                     }
-                mutableState.update {
-                    it.copy(
-                        offlineStorage = offlineStorage,
-                        downloadedChapterIds = downloaded.mapTo(linkedSetOf()) { row -> row.chapterId },
-                        storageUsage = StorageUsage(
-                            downloadedChapters = downloaded.size,
-                            downloadedBytes = downloaded.sumOf { it.bytes },
-                            cachedChapters = cached.size,
-                            cachedBytes = cached.sumOf { it.bytes },
-                        ),
-                    )
+            }
+
+            RoomObserverGroup.PRONUNCIATIONS -> viewModelScope.launch {
+                container.libraryRepository.observePronunciations()
+                    .distinctUntilChanged()
+                    .collect { rules -> mutableState.update { it.copy(pronunciations = rules) } }
+            }
+
+            RoomObserverGroup.VIETPHRASE -> {
+                viewModelScope.launch {
+                    container.libraryRepository.observeVietPhraseRules()
+                        .distinctUntilChanged()
+                        .collect { rules -> mutableState.update { it.copy(vietPhraseRules = rules) } }
+                }
+                viewModelScope.launch {
+                    container.libraryRepository.observeVietPhraseSnapshots()
+                        .distinctUntilChanged()
+                        .collect { snapshots -> mutableState.update { it.copy(vietPhraseSnapshots = snapshots) } }
+                }
+                viewModelScope.launch {
+                    container.libraryRepository.observeVietPhraseDictionaryStates()
+                        .distinctUntilChanged()
+                        .collect { dictionaries -> mutableState.update { it.copy(vietPhraseDictionaryStates = dictionaries) } }
+                }
+                viewModelScope.launch {
+                    container.libraryRepository.observeVietPhraseSuggestions()
+                        .distinctUntilChanged()
+                        .collect { suggestions -> mutableState.update { it.copy(vietPhraseSuggestions = suggestions) } }
                 }
             }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observePronunciations().collect { rules ->
-                mutableState.update { it.copy(pronunciations = rules) }
+
+            RoomObserverGroup.AI_PROFILES -> viewModelScope.launch {
+                container.libraryRepository.observeStoryAiProfiles()
+                    .distinctUntilChanged()
+                    .collect { profiles ->
+                        mutableState.update { it.copy(storyAiProfiles = profiles.associateBy(StoryAiProfileEntity::storyId)) }
+                    }
             }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeVietPhraseRules().collect { rules ->
-                mutableState.update { it.copy(vietPhraseRules = rules) }
+
+            RoomObserverGroup.SCENE_MUSIC -> viewModelScope.launch {
+                container.libraryRepository.observeSceneMusicTracks()
+                    .distinctUntilChanged()
+                    .collect { tracks -> mutableState.update { it.copy(sceneMusicTracks = tracks) } }
             }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeVietPhraseSnapshots().collect { snapshots ->
-                mutableState.update { it.copy(vietPhraseSnapshots = snapshots) }
+
+            RoomObserverGroup.TTS_PROFILES -> viewModelScope.launch {
+                container.libraryRepository.observeStoryTtsProfiles()
+                    .distinctUntilChanged()
+                    .collect { profiles ->
+                        val mapped = profiles.associateBy(StoryTtsProfileEntity::storyId)
+                        mutableState.update { it.copy(storyTtsProfiles = mapped) }
+                        val active = mapped[PlaybackQueueStore.state.value.storyId]
+                        if (active != null) PlaybackQueueStore.updateVoice(active.rate, active.pitch, active.volume)
+                    }
             }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeVietPhraseDictionaryStates().collect { dictionaries ->
-                mutableState.update { it.copy(vietPhraseDictionaryStates = dictionaries) }
+
+            RoomObserverGroup.VOICE_ROLES -> viewModelScope.launch {
+                container.libraryRepository.observeVoiceRoles()
+                    .distinctUntilChanged()
+                    .collect { roles -> mutableState.update { it.copy(voiceRoles = roles) } }
             }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeVietPhraseSuggestions().collect { suggestions ->
-                mutableState.update { it.copy(vietPhraseSuggestions = suggestions) }
-            }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeStoryAiProfiles().collect { profiles ->
-                mutableState.update { it.copy(storyAiProfiles = profiles.associateBy(StoryAiProfileEntity::storyId)) }
-            }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeSceneMusicTracks().collect { tracks ->
-                mutableState.update { it.copy(sceneMusicTracks = tracks) }
-            }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeStoryTtsProfiles().collect { profiles ->
-                val mapped = profiles.associateBy(StoryTtsProfileEntity::storyId)
-                mutableState.update { it.copy(storyTtsProfiles = mapped) }
-                val active = mapped[PlaybackQueueStore.state.value.storyId]
-                if (active != null) PlaybackQueueStore.updateVoice(active.rate, active.pitch, active.volume)
-            }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeVoiceRoles().collect { roles ->
-                mutableState.update { it.copy(voiceRoles = roles) }
-            }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeAudioExports().collect { jobs ->
-                mutableState.update { it.copy(audioExports = jobs) }
+
+            RoomObserverGroup.AUDIO_EXPORTS -> viewModelScope.launch {
+                container.libraryRepository.observeAudioExports()
+                    .distinctUntilChanged()
+                    .collect { jobs -> mutableState.update { it.copy(audioExports = jobs) } }
             }
         }
     }
@@ -597,6 +648,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun observePlayback() {
         viewModelScope.launch {
             PlaybackQueueStore.state.collect { playback ->
+                if (playback.storyId.isNotBlank()) ensureRoomObserverGroup(RoomObserverGroup.TTS_PROFILES)
                 val previousChapterId = chapterSleepLastChapterId
                 val currentChapterId = playback.chapterId
                 val remaining = chapterSleepRemaining

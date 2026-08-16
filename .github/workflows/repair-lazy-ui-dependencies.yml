@@ -1,0 +1,170 @@
+name: One-shot lazy UI dependency repair
+
+on:
+  push:
+    branches:
+      - agent/remove-unused-files
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Repair lazy dependency wiring
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected exactly one match in {path}, found {count}: {old[:100]!r}")
+              file.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          reference_app = "app/src/main/java/vn/nghetruyen/app/ui/ReferenceNgheTruyenApp.kt"
+          old = '''    LaunchedEffect(state.diagnosticsMode, diagnosticScreenKey) {
+              app.container.sourceDiagnostics.onScreenChanged(diagnosticScreenKey)
+          }
+          '''
+          new = '''    LaunchedEffect(state.diagnosticsMode, diagnosticScreenKey) {
+              app.container.sourceDiagnostics.onScreenChanged(diagnosticScreenKey)
+          }
+
+          // Keep Room observers demand-driven, but guarantee that every visible destination
+          // activates the data groups declared for it.
+          LaunchedEffect(state.destination, state.rootTab, state.librarySection) {
+              viewModel.ensureRoomObserversForUi(
+                  destination = state.destination,
+                  rootTab = state.rootTab,
+                  librarySection = state.librarySection,
+              )
+          }
+          '''
+          replace_once(reference_app, old, new)
+
+          view_model = "app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt"
+          old = '''    fun onPersonalPageChanged(page: String) {
+              activePersonalPage = page
+              val needsSourcePlatform = page.startsWith("extensions_") || page == "settings_diagnostics"
+              if (needsSourcePlatform) refreshSourcePlatformState()
+              refreshDiagnosticUi(loadDetails = shouldMaterializeDiagnosticDetails())
+          }
+          '''
+          new = '''    fun onPersonalPageChanged(page: String) {
+              activePersonalPage = page
+              mutablePersonalPage.value = page
+              ensureRoomObserversForPersonalPage(page)
+              val needsSourcePlatform = page.startsWith("extensions_") || page == "settings_diagnostics"
+              if (needsSourcePlatform) refreshSourcePlatformState()
+              refreshDiagnosticUi(loadDetails = shouldMaterializeDiagnosticDetails())
+          }
+          '''
+          replace_once(view_model, old, new)
+
+          old = '''            RoomObserverGroup.VOICE_ROLES -> viewModelScope.launch {
+                  container.libraryRepository.observeVoiceRoles()
+                      .distinctUntilChanged()
+                      .collect { roles -> mutableState.update { it.copy(voiceRoles = roles) } }
+              }
+          '''
+          new = '''            RoomObserverGroup.VOICE_ROLES -> viewModelScope.launch {
+                  // Seed the required role names only when a screen actually needs voice roles.
+                  // Voice/engine selection intentionally remains empty for the user to choose.
+                  withContext(Dispatchers.IO) { container.libraryRepository.ensureGlobalVoiceProfiles() }
+                  container.libraryRepository.observeVoiceRoles()
+                      .distinctUntilChanged()
+                      .collect { roles -> mutableState.update { it.copy(voiceRoles = roles) } }
+              }
+          '''
+          replace_once(view_model, old, new)
+
+          startup_seed = '''            withContext(Dispatchers.IO) { container.libraryRepository.ensureGlobalVoiceProfiles() }
+          '''
+          replace_once(view_model, startup_seed, "")
+
+          gate = "app/src/main/java/vn/nghetruyen/app/startup/StartupWorkGate.kt"
+          old = '''    fun awaitFirstFrame(timeoutMillis: Long = FIRST_FRAME_WAIT_TIMEOUT_MILLIS): Boolean {
+              if (isBeforeFirstFrame()) firstFrameLatch.await(timeoutMillis, TimeUnit.MILLISECONDS)
+              return !isBeforeFirstFrame()
+          }
+          '''
+          new = '''    fun awaitFirstFrame(timeoutMillis: Long = FIRST_FRAME_WAIT_TIMEOUT_MILLIS): Boolean {
+              if (!isBeforeFirstFrame()) return true
+              val reachedFirstFrame = firstFrameLatch.await(timeoutMillis, TimeUnit.MILLISECONDS)
+              if (!reachedFirstFrame) {
+                  // The first-frame gate is an optimization, never a reason to permanently skip
+                  // required initialization. Release the gate after the bounded wait.
+                  firstActivityStartupActive = false
+                  firstFrameLatch.countDown()
+              }
+              return true
+          }
+          '''
+          replace_once(gate, old, new)
+
+          demand_test = "app/src/test/java/vn/nghetruyen/app/ui/RoomObserverDemandTest.kt"
+          old = '''        assertEquals(
+              setOf(RoomObserverGroup.VIETPHRASE),
+              roomObserverGroupsForPersonalPage("settings_vietphrase"),
+          )
+          assertEquals(
+              setOf(RoomObserverGroup.OFFLINE, RoomObserverGroup.STORAGE),
+              roomObserverGroupsForPersonalPage("settings_storage"),
+          )
+          '''
+          new = '''        assertEquals(
+              setOf(RoomObserverGroup.VIETPHRASE),
+              roomObserverGroupsForPersonalPage("settings_vietphrase"),
+          )
+          assertEquals(
+              setOf(RoomObserverGroup.VOICE_ROLES),
+              roomObserverGroupsForPersonalPage("settings_automation"),
+          )
+          assertEquals(
+              setOf(RoomObserverGroup.SCENE_MUSIC),
+              roomObserverGroupsForPersonalPage("settings_music"),
+          )
+          assertEquals(
+              setOf(RoomObserverGroup.FOLLOWING),
+              roomObserverGroupsForPersonalPage("settings_following"),
+          )
+          assertEquals(
+              setOf(RoomObserverGroup.OFFLINE, RoomObserverGroup.STORAGE),
+              roomObserverGroupsForPersonalPage("settings_storage"),
+          )
+          '''
+          replace_once(demand_test, old, new)
+
+          # This workflow exists only to apply the patch without retaining repair machinery.
+          Path(".github/workflows/repair-lazy-ui-dependencies.yml").unlink()
+          PY
+
+      - name: Verify patch shape
+        shell: bash
+        run: |
+          git diff --check
+          grep -F 'viewModel.ensureRoomObserversForUi(' app/src/main/java/vn/nghetruyen/app/ui/ReferenceNgheTruyenApp.kt
+          grep -F 'mutablePersonalPage.value = page' app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt
+          grep -F 'ensureRoomObserversForPersonalPage(page)' app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt
+          grep -F 'ensureGlobalVoiceProfiles()' app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt
+          grep -F 'firstActivityStartupActive = false' app/src/main/java/vn/nghetruyen/app/startup/StartupWorkGate.kt
+
+      - name: Commit repair
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'fix: wire lazy UI dependencies'
+          git push origin HEAD:agent/remove-unused-files

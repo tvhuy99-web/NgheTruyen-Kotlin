@@ -29,7 +29,7 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Apply guarded round 3 patches
+      - name: Apply guarded follow-up patches
         shell: bash
         run: |
           python3 - <<'PY'
@@ -46,89 +46,30 @@ jobs:
           diagnostic = 'app/src/main/java/vn/nghetruyen/app/sourceplatform/SourceDiagnosticRuntime.kt'
           replace_once(
               diagnostic,
-              'import org.json.JSONObject\n',
-              'import org.json.JSONObject\nimport kotlinx.coroutines.flow.MutableStateFlow\nimport kotlinx.coroutines.flow.StateFlow\nimport kotlinx.coroutines.flow.asStateFlow\n',
+              'import kotlinx.coroutines.flow.asStateFlow\n',
+              'import kotlinx.coroutines.flow.asStateFlow\nimport kotlinx.coroutines.flow.update\n',
           )
           replace_once(
               diagnostic,
-              '''    private val prefs = context.getSharedPreferences("source_diagnostics", Context.MODE_PRIVATE)\n    private val activityTracker = DiagnosticActivityTracker()\n    private val criticalStore = CriticalDiagnosticStore(context)\n    private val continuousStore = ContinuousDiagnosticStore(context)\n    private val mirror = DiagnosticSink { event ->\n        activityTracker.emit(event)\n        continuousStore.emit(event)\n    }\n\n    val recorder = BoundedDiagnosticRecorder(\n        maxEvents = MAX_IN_MEMORY_EVENTS,\n        level = DiagnosticLevel.OFF,\n        mirror = mirror,\n        alwaysMirror = criticalStore,\n    )\n    val evidence = BoundedDiagnosticEvidenceRecorder(\n        maxBytes = 64L * 1024L * 1024L,\n        maxItems = 2_048,\n        maxItemBytes = 16 * 1024 * 1024,\n        mirror = continuousStore,\n    )\n\n    @Volatile var mode: String = MODE_OFF\n        private set\n''',
-              '''    private val prefs = context.getSharedPreferences("source_diagnostics", Context.MODE_PRIVATE)\n    private val activityTracker = DiagnosticActivityTracker()\n    private val criticalStore = CriticalDiagnosticStore(context)\n    private val continuousStoreDelegate = lazy { ContinuousDiagnosticStore(context) }\n    private val continuousStore by continuousStoreDelegate\n    private val changeVersion = MutableStateFlow(0L)\n    val changes: StateFlow<Long> = changeVersion.asStateFlow()\n\n    @Volatile var mode: String = MODE_OFF\n        private set\n\n    private fun signalChanged() {\n        changeVersion.value = if (changeVersion.value == Long.MAX_VALUE) 1L else changeVersion.value + 1L\n    }\n\n    private val criticalMirror = DiagnosticSink { event ->\n        criticalStore.emit(event)\n        if (PersistentCriticalDiagnosticPolicy.shouldPersist(event)) signalChanged()\n    }\n    private val mirror = DiagnosticSink { event ->\n        activityTracker.emit(event)\n        if (mode == MODE_CONTINUOUS) continuousStore.emit(event)\n        signalChanged()\n    }\n    private val evidenceMirror = object : DiagnosticEvidenceSink {\n        override val enabled: Boolean get() = mode == MODE_CONTINUOUS\n        override fun capture(evidence: DiagnosticEvidence) {\n            if (mode == MODE_CONTINUOUS) continuousStore.capture(evidence)\n            signalChanged()\n        }\n    }\n\n    val recorder = BoundedDiagnosticRecorder(\n        maxEvents = MAX_IN_MEMORY_EVENTS,\n        level = DiagnosticLevel.OFF,\n        mirror = mirror,\n        alwaysMirror = criticalMirror,\n    )\n    val evidence = BoundedDiagnosticEvidenceRecorder(\n        maxBytes = 64L * 1024L * 1024L,\n        maxItems = 2_048,\n        maxItemBytes = 16 * 1024 * 1024,\n        mirror = evidenceMirror,\n    )\n''',
-          )
-          replace_once(
-              diagnostic,
-              '''            else -> {\n                clearCurrentSession()\n                activeScreenKey = ""\n                activeScreenSessionId = ""\n                applyMode(MODE_OFF)\n            }\n''',
-              '''            else -> {\n                clearCurrentSession()\n                activeScreenKey = ""\n                activeScreenSessionId = ""\n                applyMode(MODE_OFF)\n                signalChanged()\n            }\n''',
-          )
-          replace_once(
-              diagnostic,
-              '''    fun clearBlackBox() {\n        clearCurrentSession()\n        continuousStore.clear()\n        criticalStore.clear()\n        if (mode == MODE_CONTINUOUS) continuousStore.enabled = true\n    }\n''',
-              '''    fun clearBlackBox() {\n        clearCurrentSession()\n        continuousStore.clear()\n        criticalStore.clear()\n        if (mode == MODE_CONTINUOUS) continuousStore.enabled = true\n        signalChanged()\n    }\n''',
-          )
-          replace_once(
-              diagnostic,
-              '''        evidence.enabled = value == MODE_SCREEN || value == MODE_CONTINUOUS\n        continuousStore.enabled = value == MODE_CONTINUOUS\n        if (value == MODE_OFF) activityTracker.clear()\n''',
-              '''        evidence.enabled = value == MODE_SCREEN || value == MODE_CONTINUOUS\n        if (value == MODE_CONTINUOUS) {\n            continuousStore.enabled = true\n        } else if (continuousStoreDelegate.isInitialized()) {\n            continuousStore.enabled = false\n        }\n        if (value == MODE_OFF) activityTracker.clear()\n''',
-          )
-
-          database = 'app/src/main/java/vn/nghetruyen/app/data/local/AppDatabase.kt'
-          replace_once(
-              database,
-              '''data class ReadingProgressEntity(\n    @PrimaryKey val storyId: String,\n    val chapterId: String,\n    val paragraphIndex: Int,\n    @ColumnInfo(defaultValue = "0") val totalParagraphs: Int = 0,\n    val updatedAt: Long,\n)\n\n@Entity(\n    tableName = "reading_history",\n''',
-              '''data class ReadingProgressEntity(\n    @PrimaryKey val storyId: String,\n    val chapterId: String,\n    val paragraphIndex: Int,\n    @ColumnInfo(defaultValue = "0") val totalParagraphs: Int = 0,\n    val updatedAt: Long,\n)\n\ndata class ReadingProgressWithChapterTitle(\n    val storyId: String,\n    val chapterId: String,\n    val paragraphIndex: Int,\n    val totalParagraphs: Int,\n    val updatedAt: Long,\n    val chapterTitle: String,\n)\n\ndata class ChapterStorageSnapshot(\n    val chapterId: String,\n    val storyId: String,\n    val downloadedAt: Long?,\n    val bytes: Long,\n)\n\n@Entity(\n    tableName = "reading_history",\n''',
-          )
-          replace_once(
-              database,
-              '''    @Query("""\n        SELECT\n          COALESCE(SUM(CASE WHEN c.downloadedAt IS NOT NULL AND c.content IS NOT NULL AND TRIM(c.content) != '' THEN 1 ELSE 0 END), 0) AS downloadedChapters,\n          COALESCE(SUM(CASE WHEN c.downloadedAt IS NOT NULL THEN LENGTH(CAST(c.content AS BLOB)) ELSE 0 END), 0) AS downloadedBytes,\n          COALESCE(SUM(CASE WHEN c.downloadedAt IS NULL AND c.content IS NOT NULL AND TRIM(c.content) != '' THEN 1 ELSE 0 END), 0) AS cachedChapters,\n          COALESCE(SUM(CASE WHEN c.downloadedAt IS NULL THEN LENGTH(CAST(c.content AS BLOB)) ELSE 0 END), 0) AS cachedBytes\n        FROM chapters c\n        INNER JOIN stories s ON s.id = c.storyId\n    """)\n    fun observeStorageUsage(): Flow<StorageUsage>\n\n    @Query("""\n        SELECT c.id AS chapterId,\n''',
-              '''    @Query("""\n        SELECT\n          COALESCE(SUM(CASE WHEN c.downloadedAt IS NOT NULL AND c.content IS NOT NULL AND TRIM(c.content) != '' THEN 1 ELSE 0 END), 0) AS downloadedChapters,\n          COALESCE(SUM(CASE WHEN c.downloadedAt IS NOT NULL THEN LENGTH(CAST(c.content AS BLOB)) ELSE 0 END), 0) AS downloadedBytes,\n          COALESCE(SUM(CASE WHEN c.downloadedAt IS NULL AND c.content IS NOT NULL AND TRIM(c.content) != '' THEN 1 ELSE 0 END), 0) AS cachedChapters,\n          COALESCE(SUM(CASE WHEN c.downloadedAt IS NULL THEN LENGTH(CAST(c.content AS BLOB)) ELSE 0 END), 0) AS cachedBytes\n        FROM chapters c\n        INNER JOIN stories s ON s.id = c.storyId\n    """)\n    fun observeStorageUsage(): Flow<StorageUsage>\n\n    @Query("""\n        SELECT c.id AS chapterId, c.storyId AS storyId, c.downloadedAt AS downloadedAt,\n               COALESCE(LENGTH(CAST(c.content AS BLOB)), 0) AS bytes\n        FROM chapters c\n        WHERE c.content IS NOT NULL AND TRIM(c.content) != ''\n    """)\n    fun observeStorageSnapshot(): Flow<List<ChapterStorageSnapshot>>\n\n    @Query("""\n        SELECT c.id AS chapterId,\n''',
-          )
-          replace_once(
-              database,
-              '''    @Query("SELECT * FROM reading_progress ORDER BY updatedAt DESC")\n    fun observeAll(): Flow<List<ReadingProgressEntity>>\n\n    @Query("SELECT * FROM reading_progress ORDER BY updatedAt DESC")\n    suspend fun listAll(): List<ReadingProgressEntity>\n''',
-              '''    @Query("SELECT * FROM reading_progress ORDER BY updatedAt DESC")\n    fun observeAll(): Flow<List<ReadingProgressEntity>>\n\n    @Query("""\n        SELECT p.storyId AS storyId, p.chapterId AS chapterId, p.paragraphIndex AS paragraphIndex,\n               p.totalParagraphs AS totalParagraphs, p.updatedAt AS updatedAt, COALESCE(c.title, '') AS chapterTitle\n        FROM reading_progress p\n        LEFT JOIN chapters c ON c.id = p.chapterId\n        ORDER BY p.updatedAt DESC\n    """)\n    fun observeAllWithChapterTitle(): Flow<List<ReadingProgressWithChapterTitle>>\n\n    @Query("SELECT * FROM reading_progress ORDER BY updatedAt DESC")\n    suspend fun listAll(): List<ReadingProgressEntity>\n''',
-          )
-
-          repository = 'app/src/main/java/vn/nghetruyen/app/data/repository/LibraryRepository.kt'
-          replace_once(
-              repository,
-              'import vn.nghetruyen.app.data.local.ChapterEntity\n',
-              'import vn.nghetruyen.app.data.local.ChapterEntity\nimport vn.nghetruyen.app.data.local.ChapterStorageSnapshot\n',
-          )
-          replace_once(
-              repository,
-              'import vn.nghetruyen.app.data.local.ReadingProgressEntity\n',
-              'import vn.nghetruyen.app.data.local.ReadingProgressEntity\nimport vn.nghetruyen.app.data.local.ReadingProgressWithChapterTitle\n',
-          )
-          replace_once(
-              repository,
-              '''    fun observeReading(): Flow<List<StoryEntity>> = db.storyDao().observeReading()\n    fun observeReadingProgress(): Flow<List<ReadingProgressEntity>> = db.progressDao().observeAll()\n    fun observeReadingHistory(): Flow<List<ReadingHistoryEntity>> = db.readingHistoryDao().observeRecent()\n''',
-              '''    fun observeReading(): Flow<List<StoryEntity>> = db.storyDao().observeReading()\n    fun observeReadingProgress(): Flow<List<ReadingProgressEntity>> = db.progressDao().observeAll()\n    fun observeReadingProgressWithChapterTitle(): Flow<List<ReadingProgressWithChapterTitle>> =\n        db.progressDao().observeAllWithChapterTitle()\n    fun observeReadingHistory(): Flow<List<ReadingHistoryEntity>> = db.readingHistoryDao().observeRecent()\n''',
-          )
-          replace_once(
-              repository,
-              '''    fun observeOfflineStorage(): Flow<List<OfflineStoryStorage>> = db.chapterDao().observeOfflineStorage()\n    fun observeDownloadedChapterIds(): Flow<List<String>> = db.chapterDao().observeDownloadedIds()\n    fun observeStorageUsage(): Flow<StorageUsage> = db.chapterDao().observeStorageUsage()\n''',
-              '''    fun observeOfflineStorage(): Flow<List<OfflineStoryStorage>> = db.chapterDao().observeOfflineStorage()\n    fun observeDownloadedChapterIds(): Flow<List<String>> = db.chapterDao().observeDownloadedIds()\n    fun observeStorageUsage(): Flow<StorageUsage> = db.chapterDao().observeStorageUsage()\n    fun observeChapterStorageSnapshot(): Flow<List<ChapterStorageSnapshot>> = db.chapterDao().observeStorageSnapshot()\n''',
+              '''    private fun signalChanged() {\n        changeVersion.value = if (changeVersion.value == Long.MAX_VALUE) 1L else changeVersion.value + 1L\n    }\n''',
+              '''    private fun signalChanged() {\n        changeVersion.update { version -> if (version == Long.MAX_VALUE) 1L else version + 1L }\n    }\n''',
           )
 
           viewmodel = 'app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt'
           replace_once(
               viewmodel,
-              '''                if (appliedCacheLimitMiB != settings.readerCacheLimitMiB) {\n                    appliedCacheLimitMiB = settings.readerCacheLimitMiB\n                    trimReaderCache(settings.readerCacheLimitMiB, announce = false)\n                }\n''',
-              '''                val previousCacheLimitMiB = appliedCacheLimitMiB\n                appliedCacheLimitMiB = settings.readerCacheLimitMiB\n                if (previousCacheLimitMiB != null && previousCacheLimitMiB != settings.readerCacheLimitMiB) {\n                    trimReaderCache(settings.readerCacheLimitMiB, announce = false)\n                }\n''',
+              'import vn.nghetruyen.app.sourceplatform.SourceTrustKeyUi\n',
+              'import vn.nghetruyen.app.sourceplatform.SourceTrustKeyUi\nimport vn.nghetruyen.app.startup.StartupWorkGate\n',
           )
           replace_once(
               viewmodel,
-              '''    private fun observeDiagnostics() {\n        viewModelScope.launch {\n            while (true) {\n                val events = visibleDiagnosticEvents()\n                mutableState.update { current ->\n                    current.copy(\n                        diagnosticsMode = container.sourceDiagnostics.mode,\n                        diagnosticActiveOperations = container.sourceDiagnostics.activityLines(),\n                        diagnosticPersistentCriticalCount = container.sourceDiagnostics.persistentCriticalCount(),\n                        sourceDiagnosticCount = events.size,\n                        sourceDiagnostics = diagnosticSummaries(events),\n                        sourceTraces = container.sourcePlatformManager.diagnosticTraces(100),\n                    )\n                }\n                delay(if (container.sourceDiagnostics.mode == "off") 2_000 else 750)\n            }\n        }\n    }\n''',
-              '''    private fun observeDiagnostics() {\n        viewModelScope.launch {\n            container.sourceDiagnostics.changes.collect {\n                val events = visibleDiagnosticEvents()\n                mutableState.update { current ->\n                    current.copy(\n                        diagnosticsMode = container.sourceDiagnostics.mode,\n                        diagnosticActiveOperations = container.sourceDiagnostics.activityLines(),\n                        diagnosticPersistentCriticalCount = container.sourceDiagnostics.persistentCriticalCount(),\n                        sourceDiagnosticCount = events.size,\n                        sourceDiagnostics = diagnosticSummaries(events),\n                        sourceTraces = container.sourcePlatformManager.diagnosticTraces(100),\n                    )\n                }\n            }\n        }\n    }\n''',
+              '''    private var searchJob: Job? = null\n    private var suggestionJob: Job? = null\n    private var storyLoadJob: Job? = null\n''',
+              '''    private var searchJob: Job? = null\n    private var suggestionJob: Job? = null\n    private var sourceSessionRefreshJob: Job? = null\n    private var storyLoadJob: Job? = null\n''',
           )
           replace_once(
               viewmodel,
-              '''        viewModelScope.launch {\n            container.libraryRepository.observeReadingProgress().collect { items ->\n                val chapterTitles = mutableMapOf<String, String>()\n                for (progress in items) {\n                    chapterTitles[progress.storyId] = container.libraryRepository\n                        .getChapter(progress.chapterId)\n                        ?.title\n                        .orEmpty()\n                }\n                mutableState.update {\n                    it.copy(\n                        readingProgress = items.associateBy(ReadingProgressEntity::storyId),\n                        readingChapterTitles = chapterTitles,\n                    )\n                }\n            }\n        }\n''',
-              '''        viewModelScope.launch {\n            container.libraryRepository.observeReadingProgressWithChapterTitle().collect { items ->\n                val progressByStory = items.associate { item ->\n                    item.storyId to ReadingProgressEntity(\n                        storyId = item.storyId,\n                        chapterId = item.chapterId,\n                        paragraphIndex = item.paragraphIndex,\n                        totalParagraphs = item.totalParagraphs,\n                        updatedAt = item.updatedAt,\n                    )\n                }\n                mutableState.update {\n                    it.copy(\n                        readingProgress = progressByStory,\n                        readingChapterTitles = items.associate { item -> item.storyId to item.chapterTitle },\n                    )\n                }\n            }\n        }\n''',
-          )
-          replace_once(
-              viewmodel,
-              '''        viewModelScope.launch {\n            container.libraryRepository.observeOfflineStorage().collect { items ->\n                mutableState.update { it.copy(offlineStorage = items.associateBy(OfflineStoryStorage::storyId)) }\n            }\n        }\n        viewModelScope.launch {\n            container.libraryRepository.observeDownloadedChapterIds().collect { ids ->\n                mutableState.update { it.copy(downloadedChapterIds = ids.toSet()) }\n            }\n        }\n        viewModelScope.launch {\n            container.libraryRepository.observeStorageUsage().collect { usage ->\n                mutableState.update { it.copy(storageUsage = usage) }\n            }\n        }\n''',
-              '''        viewModelScope.launch {\n            container.libraryRepository.observeChapterStorageSnapshot().collect { rows ->\n                val downloaded = rows.filter { it.downloadedAt != null }\n                val cached = rows.filter { it.downloadedAt == null }\n                val offlineStorage = downloaded\n                    .groupBy { it.storyId }\n                    .mapValues { (storyId, chapters) ->\n                        OfflineStoryStorage(\n                            storyId = storyId,\n                            chapterCount = chapters.size,\n                            bytes = chapters.sumOf { it.bytes },\n                        )\n                    }\n                mutableState.update {\n                    it.copy(\n                        offlineStorage = offlineStorage,\n                        downloadedChapterIds = downloaded.mapTo(linkedSetOf()) { row -> row.chapterId },\n                        storageUsage = StorageUsage(\n                            downloadedChapters = downloaded.size,\n                            downloadedBytes = downloaded.sumOf { it.bytes },\n                            cachedChapters = cached.size,\n                            cachedBytes = cached.sumOf { it.bytes },\n                        ),\n                    )\n                }\n            }\n        }\n''',
+              '''    fun refreshSourceSessions() {\n        val active = container.sourceRegistry.descriptors()\n            .filter { container.sourceSessionStore.hasSession(it.id) }\n            .mapTo(linkedSetOf()) { it.id }\n        mutableState.update { it.copy(sourceSessions = active) }\n    }\n''',
+              '''    fun refreshSourceSessions() {\n        sourceSessionRefreshJob?.cancel()\n        sourceSessionRefreshJob = viewModelScope.launch {\n            if (!StartupWorkGate.awaitFirstFrameAsync()) return@launch\n            val descriptors = container.sourceRegistry.descriptors()\n            val active = withContext(Dispatchers.IO) {\n                descriptors\n                    .filter { container.sourceSessionStore.hasSession(it.id) }\n                    .mapTo(linkedSetOf()) { it.id }\n            }\n            mutableState.update { it.copy(sourceSessions = active) }\n        }\n    }\n''',
           )
           PY
 
@@ -137,27 +78,22 @@ jobs:
           git diff --check
           git diff --stat
           git diff -- app/src/main/java/vn/nghetruyen/app/sourceplatform/SourceDiagnosticRuntime.kt \
-            app/src/main/java/vn/nghetruyen/app/data/local/AppDatabase.kt \
-            app/src/main/java/vn/nghetruyen/app/data/repository/LibraryRepository.kt \
             app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt
 
-      - name: Compile and test round 3
+      - name: Compile and test follow-up
         run: >-
           ./gradlew
           :source-diagnostics:test
-          :source-store:test
           :app:testDebugUnitTest
           :app:compileDebugKotlin
           --stacktrace
 
-      - name: Commit verified patch
+      - name: Commit verified follow-up
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add \
             app/src/main/java/vn/nghetruyen/app/sourceplatform/SourceDiagnosticRuntime.kt \
-            app/src/main/java/vn/nghetruyen/app/data/local/AppDatabase.kt \
-            app/src/main/java/vn/nghetruyen/app/data/repository/LibraryRepository.kt \
             app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt
-          git commit -m 'perf: remove diagnostic polling and reduce Room fan-out'
+          git commit -m 'perf: defer source session scan past first frame'
           git push origin HEAD:agent/remove-unused-files

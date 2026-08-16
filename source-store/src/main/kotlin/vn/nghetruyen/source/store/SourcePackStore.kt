@@ -197,6 +197,23 @@ class SourcePackStore(
         root.exists() && root.deleteRecursively()
     }
 
+    /**
+     * Cheap startup probe. This intentionally avoids parsing manifests or hashing stored payloads;
+     * callers use it only to decide whether an already-processed bundled source can skip bootstrap.
+     * Full integrity verification still happens whenever the source is actually loaded or executed.
+     */
+    fun hasStoredSource(sourceId: String): Boolean = synchronized(lock) {
+        val root = sourceRoot(sourceId)
+        if (!root.isDirectory) return@synchronized false
+        val activeVersion = File(root, ACTIVE_FILE).takeIf(File::isFile)?.readText()?.trim().orEmpty()
+        if (activeVersion.isBlank()) return@synchronized false
+        val activeDirectory = runCatching { child(File(root, "versions"), activeVersion) }.getOrNull()
+            ?: return@synchronized false
+        activeDirectory.isDirectory &&
+            File(activeDirectory, "source.json").isFile &&
+            File(activeDirectory, META_FILE).isFile
+    }
+
     fun load(sourceId: String): InstalledSource? = synchronized(lock) {
         val root = sourceRoot(sourceId)
         if (!root.isDirectory) return@synchronized null

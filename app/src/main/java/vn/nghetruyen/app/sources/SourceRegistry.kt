@@ -9,6 +9,7 @@ import vn.nghetruyen.app.core.model.SourceHealth
 import vn.nghetruyen.app.core.model.StoryDetail
 import vn.nghetruyen.app.core.model.StorySummary
 import vn.nghetruyen.app.sourceplatform.SourceDiagnosticRuntime
+import vn.nghetruyen.app.startup.StartupWorkGate
 
 class SourceRegistry(
     sources: List<StorySource>? = null,
@@ -79,7 +80,7 @@ class SourceRegistry(
             }
         }
         return selected.mapValues { (_, source) ->
-            source.withExecutionAndDiagnostics(diagnosticRuntime)
+            source.withExecutionAndDiagnostics(diagnosticRuntime).withStartupHomeGuard()
         }
     }
 
@@ -103,6 +104,18 @@ class SourceRegistry(
 private fun StorySource.withExecutionAndDiagnostics(diagnostics: SourceDiagnosticRuntime?): StorySource {
     if (this is DiagnosticStorySource) return this
     return withVBookExecutionBoundary().withDiagnostics(diagnostics)
+}
+
+private fun StorySource.withStartupHomeGuard(): StorySource =
+    if (this is StartupHomeGuardStorySource) this else StartupHomeGuardStorySource(this)
+
+private class StartupHomeGuardStorySource(
+    private val delegate: StorySource,
+) : StorySource by delegate {
+    override suspend fun home(page: Int): AppResult<List<StorySummary>> {
+        if (StartupWorkGate.isBeforeFirstFrame()) return AppResult.Success(emptyList())
+        return delegate.home(page)
+    }
 }
 
 /**

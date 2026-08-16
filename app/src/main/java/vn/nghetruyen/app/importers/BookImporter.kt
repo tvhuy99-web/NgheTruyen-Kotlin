@@ -47,7 +47,7 @@ class BookImporter(private val resolver: ContentResolver) {
         } ?: error("Không mở được tệp MOBI/AZW.")
         val mobi = MobiParser.parse(bytes, fallbackTitle)
         val document = Jsoup.parse(mobi.text)
-        val plainText = document.body()?.wholeText().orEmpty().ifBlank { document.wholeText() }
+        val plainText = document.body().wholeText().ifBlank { document.wholeText() }
         return ImportedBook(
             title = mobi.title.ifBlank { fallbackTitle },
             chapters = splitIntoChapters(plainText),
@@ -100,7 +100,7 @@ class BookImporter(private val resolver: ContentResolver) {
         val chapters = orderedPaths.distinct().mapNotNull { path ->
             val html = entries[path] ?: return@mapNotNull null
             val doc = Jsoup.parse(html, path)
-            val text = doc.body()?.wholeText().orEmpty().trim()
+            val text = doc.body().wholeText().trim()
             if (text.isBlank()) return@mapNotNull null
             ImportedChapter(
                 title = doc.title().ifBlank { path.substringAfterLast('/').substringBeforeLast('.') },

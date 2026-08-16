@@ -17,10 +17,14 @@ import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import vn.nghetruyen.app.NgheTruyenApplication
@@ -114,6 +118,7 @@ import vn.nghetruyen.app.sourceplatform.SourceRepositoryUiInfo
 import vn.nghetruyen.app.sourceplatform.SourceSelectorInspectionUi
 import vn.nghetruyen.app.sourceplatform.SourceTraceUi
 import vn.nghetruyen.app.sourceplatform.SourceTrustKeyUi
+import vn.nghetruyen.app.startup.StartupWorkGate
 import vn.nghetruyen.app.downloads.DownloadRequest
 import vn.nghetruyen.app.downloads.DownloadStorageGuard
 import vn.nghetruyen.app.downloads.StoryDownloadPlanner
@@ -297,28 +302,29 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val mutableState = MutableStateFlow(
         MainUiState(
             sources = container.sourceRegistry.descriptors(),
-            sourcePacks = container.sourcePlatformManager.installedPacks(),
-            sourceRepositories = container.sourcePlatformManager.repositories(),
-            sourceRepositoryPackages = container.sourcePlatformManager.repositoryPackages(),
-            sourceTrustKeys = container.sourcePlatformManager.trustKeys(),
-            sourceDiagnosticCount = visibleDiagnosticEvents().size,
-            sourceDiagnostics = visibleDiagnosticSummaries(),
-            sourceTraces = container.sourcePlatformManager.diagnosticTraces(100),
             diagnosticsMode = container.sourceDiagnostics.mode,
-            diagnosticActiveOperations = container.sourceDiagnostics.activityLines(),
-            diagnosticPersistentCriticalCount = container.sourceDiagnostics.persistentCriticalCount(),
-            backupHistory = container.backupHistoryStore.entries(),
-            backupLogPath = container.backupHistoryStore.logPath(),
-            backupLogText = container.backupHistoryStore.logText(),
             vietPhraseEnabled = referenceVietPhraseRuntime.enabled,
             vietPhraseFallbackHanViet = referenceVietPhraseRuntime.fallbackHanViet,
         ),
     )
     val state: StateFlow<MainUiState> = mutableState.asStateFlow()
+    private val mutablePersonalPage = MutableStateFlow("")
+    val compositionState: StateFlow<MainUiState> = combine(state, mutablePersonalPage) { current, personalPage ->
+        current.forActiveComposition(personalPage)
+    }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, mutableState.value.forActiveComposition(""))
+
+    private val mutableLibraryRevision = MutableStateFlow(0L)
+    val libraryRevision: StateFlow<Long> = mutableLibraryRevision.asStateFlow()
+    private val exploreHomeCache = ExploreHomeCache(application)
+    private var diagnosticOverlayVisible = false
+    private var activePersonalPage = ""
     private var scheduledFollowingUpdates: Boolean? = null
     private var appliedCacheLimitMiB: Int? = null
     private var searchJob: Job? = null
     private var suggestionJob: Job? = null
+    private var sourceSessionRefreshJob: Job? = null
     private var storyLoadJob: Job? = null
     private var chapterLoadJob: Job? = null
     private var chapterPageJob: Job? = null
@@ -334,19 +340,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var pendingReadingPersistenceKey: String = ""
     private var chapterSleepRemaining: Int? = null
     private var chapterSleepLastChapterId: String = ""
+    private val startedRoomObserverGroups = mutableSetOf<RoomObserverGroup>()
 
     init {
         observeSettings()
         observeDiagnostics()
-        observeLibrary()
         observePlayback()
-        refreshTtsVoices()
-        refreshSourceSessions()
-        refreshSourcePlatformState()
-        restorePersistedSourceRepositories()
-        refreshAiCredentialState()
-        viewModelScope.launch { container.libraryRepository.ensureGlobalVoiceProfiles() }
-        search("")
+        viewModelScope.launch {
+            if (!StartupWorkGate.awaitFirstFrameAsync()) return@launch
+            refreshTtsVoices()
+            refreshSourceSessions()
+            refreshSourcePlatformState()
+            restorePersistedSourceRepositories()
+            refreshAiCredentialState()
+            restoreCachedHomeAndRefresh()
+        }
     }
 
     private fun restorePersistedSourceRepositories() {
@@ -413,167 +421,316 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         chapterSortDescending = settings.chapterSortDescending,
                         readerDisplay = settings.readerDisplay,
                         aiOnline = settings.aiOnline,
-                        aiHasApiKey = container.aiCredentialStore.hasApiKey(settings.aiOnline.provider),
-                        aiHasGeminiApiKey = container.aiCredentialStore.hasApiKey(AiProvider.GEMINI),
-                        aiHasOpenAiApiKey = container.aiCredentialStore.hasApiKey(AiProvider.OPENAI_COMPATIBLE),
                     )
                 }
                 if (scheduledFollowingUpdates != settings.followingUpdatesEnabled) {
                     scheduledFollowingUpdates = settings.followingUpdatesEnabled
                     container.followingUpdateScheduler.setEnabled(settings.followingUpdatesEnabled)
                 }
-                if (appliedCacheLimitMiB != settings.readerCacheLimitMiB) {
-                    appliedCacheLimitMiB = settings.readerCacheLimitMiB
+                val previousCacheLimitMiB = appliedCacheLimitMiB
+                appliedCacheLimitMiB = settings.readerCacheLimitMiB
+                if (previousCacheLimitMiB != null && previousCacheLimitMiB != settings.readerCacheLimitMiB) {
                     trimReaderCache(settings.readerCacheLimitMiB, announce = false)
                 }
-                if (sourceChanged) search("")
+                if (sourceChanged && !StartupWorkGate.isBeforeFirstFrame()) {
+                    restoreCachedHomeAndRefresh()
+                }
             }
         }
     }
 
     private fun observeDiagnostics() {
         viewModelScope.launch {
-            while (true) {
-                val events = visibleDiagnosticEvents()
-                mutableState.update { current ->
-                    current.copy(
-                        diagnosticsMode = container.sourceDiagnostics.mode,
-                        diagnosticActiveOperations = container.sourceDiagnostics.activityLines(),
-                        diagnosticPersistentCriticalCount = container.sourceDiagnostics.persistentCriticalCount(),
-                        sourceDiagnosticCount = events.size,
-                        sourceDiagnostics = diagnosticSummaries(events),
-                        sourceTraces = container.sourcePlatformManager.diagnosticTraces(100),
-                    )
-                }
-                delay(if (container.sourceDiagnostics.mode == "off") 2_000 else 750)
+            container.sourceDiagnostics.changes.collectLatest {
+                delay(DIAGNOSTIC_UI_DEBOUNCE_MS)
+                refreshDiagnosticUi(loadDetails = shouldMaterializeDiagnosticDetails())
             }
         }
     }
 
-    private fun observeLibrary() {
+    fun setDiagnosticOverlayVisible(visible: Boolean) {
+        if (diagnosticOverlayVisible == visible) return
+        diagnosticOverlayVisible = visible
+        refreshDiagnosticUi(loadDetails = visible || shouldMaterializeDiagnosticDetails())
+    }
+
+    fun onPersonalPageChanged(page: String) {
+        activePersonalPage = page
+        mutablePersonalPage.value = page
+        ensureRoomObserversForPersonalPage(page)
+        if (page == "settings_automation") {
+            viewModelScope.launch { refreshVoiceRolesFromDatabase(seedGlobals = true) }
+        }
+        val needsSourcePlatform = page.startsWith("extensions_") || page == "settings_diagnostics"
+        if (needsSourcePlatform) refreshSourcePlatformState()
+        refreshDiagnosticUi(loadDetails = shouldMaterializeDiagnosticDetails())
+    }
+
+    private suspend fun refreshVoiceRolesFromDatabase(seedGlobals: Boolean = false) {
+        val (roles, error) = withContext(Dispatchers.IO) {
+            var failure: Throwable? = null
+            if (seedGlobals) {
+                runCatching { container.libraryRepository.ensureGlobalVoiceProfiles() }
+                    .onFailure { failure = it }
+            }
+            val loaded = runCatching { container.libraryRepository.listAllVoiceRoles() }
+                .onFailure { failure = it }
+                .getOrDefault(emptyList())
+            loaded to failure
+        }
+        mutableState.update { current ->
+            current.copy(
+                voiceRoles = roles,
+                message = error?.let { it.message ?: "Không nạp được hồ sơ giọng." } ?: current.message,
+            )
+        }
+    }
+
+    private fun shouldMaterializeDiagnosticDetails(): Boolean =
+        diagnosticOverlayVisible || activePersonalPage == "settings_diagnostics" || activePersonalPage == "extensions_diagnostics"
+
+    private fun refreshDiagnosticUi(loadDetails: Boolean) {
+        val runtime = container.sourceDiagnostics
         viewModelScope.launch {
-            container.libraryRepository.observeReading().collect { items ->
-                mutableState.update { it.copy(readingStories = items) }
+            val details = if (loadDetails) withContext(Dispatchers.Default) {
+                val events = visibleDiagnosticEvents()
+                DiagnosticUiDetails(
+                    count = events.size,
+                    summaries = diagnosticSummaries(events),
+                    traces = container.sourcePlatformManager.diagnosticTraces(100),
+                )
+            } else null
+            mutableState.update { current ->
+                current.copy(
+                    diagnosticsMode = runtime.mode,
+                    diagnosticActiveOperations = runtime.activityLines(),
+                    diagnosticPersistentCriticalCount = runtime.cachedPersistentCriticalCount(),
+                    sourceDiagnosticCount = details?.count ?: runtime.sessionEventCount() + runtime.cachedPersistentCriticalCount(),
+                    sourceDiagnostics = details?.summaries ?: emptyList(),
+                    sourceTraces = details?.traces ?: emptyList(),
+                )
             }
         }
-        viewModelScope.launch {
-            container.libraryRepository.observeReadingProgress().collect { items ->
-                val chapterTitles = mutableMapOf<String, String>()
-                for (progress in items) {
-                    chapterTitles[progress.storyId] = container.libraryRepository
-                        .getChapter(progress.chapterId)
-                        ?.title
-                        .orEmpty()
+    }
+
+    fun ensureRoomObserversForUi(
+        destination: Destination,
+        rootTab: RootTab,
+        librarySection: LibrarySection,
+    ) {
+        ensureRoomObserverGroups(roomObserverGroupsForUi(destination, rootTab, librarySection))
+    }
+
+    fun ensureRoomObserversForPersonalPage(page: String) {
+        ensureRoomObserverGroups(roomObserverGroupsForPersonalPage(page))
+    }
+
+    private fun ensureRoomObserverGroups(groups: Set<RoomObserverGroup>) {
+        groups.forEach(::ensureRoomObserverGroup)
+    }
+
+    private fun ensureRoomObserverGroup(group: RoomObserverGroup) {
+        val shouldStart = synchronized(startedRoomObserverGroups) {
+            startedRoomObserverGroups.add(group)
+        }
+        if (!shouldStart) return
+
+        when (group) {
+            RoomObserverGroup.READING -> {
+                viewModelScope.launch {
+                    container.libraryRepository.observeReading()
+                        .distinctUntilChanged()
+                        .collect { items ->
+                            mutableState.update { it.copy(readingStories = items) }
+                            bumpLibraryRevision()
+                        }
                 }
-                mutableState.update {
-                    it.copy(
-                        readingProgress = items.associateBy(ReadingProgressEntity::storyId),
-                        readingChapterTitles = chapterTitles,
-                    )
+                viewModelScope.launch {
+                    container.libraryRepository.observeReadingProgressWithChapterTitle()
+                        .distinctUntilChanged()
+                        .collect { items ->
+                            val progressByStory = items.associate { item ->
+                                item.storyId to ReadingProgressEntity(
+                                    storyId = item.storyId,
+                                    chapterId = item.chapterId,
+                                    paragraphIndex = item.paragraphIndex,
+                                    totalParagraphs = item.totalParagraphs,
+                                    updatedAt = item.updatedAt,
+                                )
+                            }
+                            mutableState.update {
+                                it.copy(
+                                    readingProgress = progressByStory,
+                                    readingChapterTitles = items.associate { item -> item.storyId to item.chapterTitle },
+                                )
+                            }
+                        }
                 }
             }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeReadingHistory().collect { items ->
-                mutableState.update { it.copy(readingHistory = items) }
+
+            RoomObserverGroup.HISTORY -> viewModelScope.launch {
+                container.libraryRepository.observeReadingHistory()
+                    .distinctUntilChanged()
+                    .collect { items -> mutableState.update { it.copy(readingHistory = items) } }
             }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeOffline().collect { items ->
-                mutableState.update { it.copy(downloadedStories = items) }
+
+            RoomObserverGroup.OFFLINE -> viewModelScope.launch {
+                container.libraryRepository.observeOffline()
+                    .distinctUntilChanged()
+                    .collect { items ->
+                        mutableState.update { it.copy(downloadedStories = items) }
+                        bumpLibraryRevision()
+                    }
             }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeBookmarks().collect { items ->
-                mutableState.update { it.copy(bookmarks = items) }
+
+            RoomObserverGroup.BOOKMARKS -> viewModelScope.launch {
+                container.libraryRepository.observeBookmarks()
+                    .distinctUntilChanged()
+                    .collect { items ->
+                        mutableState.update { it.copy(bookmarks = items) }
+                        bumpLibraryRevision()
+                    }
             }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeNotes().collect { items ->
-                mutableState.update { it.copy(notes = items) }
+
+            RoomObserverGroup.NOTES -> viewModelScope.launch {
+                container.libraryRepository.observeNotes()
+                    .distinctUntilChanged()
+                    .collect { items ->
+                        mutableState.update { it.copy(notes = items) }
+                        bumpLibraryRevision()
+                    }
             }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeFollowing().collect { items ->
-                mutableState.update { it.copy(following = items) }
+
+            RoomObserverGroup.FOLLOWING -> viewModelScope.launch {
+                container.libraryRepository.observeFollowing()
+                    .distinctUntilChanged()
+                    .collect { items ->
+                        mutableState.update { it.copy(following = items) }
+                        bumpLibraryRevision()
+                    }
             }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeDownloads().collect { items ->
-                mutableState.update { it.copy(downloads = items) }
+
+            RoomObserverGroup.DOWNLOADS -> {
+                viewModelScope.launch {
+                    container.libraryRepository.observeDownloads()
+                        .distinctUntilChanged()
+                        .collect { items -> mutableState.update { it.copy(downloads = items) } }
+                }
+                viewModelScope.launch {
+                    container.libraryRepository.observeDownloadFailures()
+                        .distinctUntilChanged()
+                        .collect { items -> mutableState.update { it.copy(downloadFailures = items) } }
+                }
             }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeDownloadFailures().collect { items ->
-                mutableState.update { it.copy(downloadFailures = items) }
+
+            RoomObserverGroup.STORAGE -> viewModelScope.launch {
+                container.libraryRepository.observeChapterStorageSnapshot()
+                    .distinctUntilChanged()
+                    .collect { rows ->
+                        val downloaded = rows.filter { it.downloadedAt != null }
+                        val cached = rows.filter { it.downloadedAt == null }
+                        val offlineStorage = downloaded
+                            .groupBy { it.storyId }
+                            .mapValues { (storyId, chapters) ->
+                                OfflineStoryStorage(
+                                    storyId = storyId,
+                                    chapterCount = chapters.size,
+                                    bytes = chapters.sumOf { it.bytes },
+                                )
+                            }
+                        mutableState.update {
+                            it.copy(
+                                offlineStorage = offlineStorage,
+                                downloadedChapterIds = downloaded.mapTo(linkedSetOf()) { row -> row.chapterId },
+                                storageUsage = StorageUsage(
+                                    downloadedChapters = downloaded.size,
+                                    downloadedBytes = downloaded.sumOf { it.bytes },
+                                    cachedChapters = cached.size,
+                                    cachedBytes = cached.sumOf { it.bytes },
+                                ),
+                            )
+                        }
+                    }
             }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeOfflineStorage().collect { items ->
-                mutableState.update { it.copy(offlineStorage = items.associateBy(OfflineStoryStorage::storyId)) }
+
+            RoomObserverGroup.PRONUNCIATIONS -> viewModelScope.launch {
+                container.libraryRepository.observePronunciations()
+                    .distinctUntilChanged()
+                    .collect { rules -> mutableState.update { it.copy(pronunciations = rules) } }
             }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeDownloadedChapterIds().collect { ids ->
-                mutableState.update { it.copy(downloadedChapterIds = ids.toSet()) }
+
+            RoomObserverGroup.VIETPHRASE -> {
+                viewModelScope.launch {
+                    container.libraryRepository.observeVietPhraseRules()
+                        .distinctUntilChanged()
+                        .collect { rules -> mutableState.update { it.copy(vietPhraseRules = rules) } }
+                }
+                viewModelScope.launch {
+                    container.libraryRepository.observeVietPhraseSnapshots()
+                        .distinctUntilChanged()
+                        .collect { snapshots -> mutableState.update { it.copy(vietPhraseSnapshots = snapshots) } }
+                }
+                viewModelScope.launch {
+                    container.libraryRepository.observeVietPhraseDictionaryStates()
+                        .distinctUntilChanged()
+                        .collect { dictionaries -> mutableState.update { it.copy(vietPhraseDictionaryStates = dictionaries) } }
+                }
+                viewModelScope.launch {
+                    container.libraryRepository.observeVietPhraseSuggestions()
+                        .distinctUntilChanged()
+                        .collect { suggestions -> mutableState.update { it.copy(vietPhraseSuggestions = suggestions) } }
+                }
             }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeStorageUsage().collect { usage ->
-                mutableState.update { it.copy(storageUsage = usage) }
+
+            RoomObserverGroup.AI_PROFILES -> viewModelScope.launch {
+                container.libraryRepository.observeStoryAiProfiles()
+                    .distinctUntilChanged()
+                    .collect { profiles ->
+                        mutableState.update { it.copy(storyAiProfiles = profiles.associateBy(StoryAiProfileEntity::storyId)) }
+                    }
             }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observePronunciations().collect { rules ->
-                mutableState.update { it.copy(pronunciations = rules) }
+
+            RoomObserverGroup.SCENE_MUSIC -> viewModelScope.launch {
+                container.libraryRepository.observeSceneMusicTracks()
+                    .distinctUntilChanged()
+                    .collect { tracks -> mutableState.update { it.copy(sceneMusicTracks = tracks) } }
             }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeVietPhraseRules().collect { rules ->
-                mutableState.update { it.copy(vietPhraseRules = rules) }
+
+            RoomObserverGroup.TTS_PROFILES -> viewModelScope.launch {
+                container.libraryRepository.observeStoryTtsProfiles()
+                    .distinctUntilChanged()
+                    .collect { profiles ->
+                        val mapped = profiles.associateBy(StoryTtsProfileEntity::storyId)
+                        mutableState.update { it.copy(storyTtsProfiles = mapped) }
+                        val active = mapped[PlaybackQueueStore.state.value.storyId]
+                        if (active != null) PlaybackQueueStore.updateVoice(active.rate, active.pitch, active.volume)
+                    }
             }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeVietPhraseSnapshots().collect { snapshots ->
-                mutableState.update { it.copy(vietPhraseSnapshots = snapshots) }
+
+            RoomObserverGroup.VOICE_ROLES -> viewModelScope.launch {
+                try {
+                    // Load a direct snapshot first so this screen never depends exclusively on a
+                    // Room invalidation callback to display persisted/default roles.
+                    refreshVoiceRolesFromDatabase(seedGlobals = true)
+                    container.libraryRepository.observeVoiceRoles()
+                        .distinctUntilChanged()
+                        .collect { roles -> mutableState.update { it.copy(voiceRoles = roles) } }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Throwable) {
+                    synchronized(startedRoomObserverGroups) {
+                        startedRoomObserverGroups.remove(RoomObserverGroup.VOICE_ROLES)
+                    }
+                    mutableState.update { current ->
+                        current.copy(message = error.message ?: "Luồng hồ sơ giọng đã dừng; sẽ thử lại khi mở màn hình.")
+                    }
+                }
             }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeVietPhraseDictionaryStates().collect { dictionaries ->
-                mutableState.update { it.copy(vietPhraseDictionaryStates = dictionaries) }
-            }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeVietPhraseSuggestions().collect { suggestions ->
-                mutableState.update { it.copy(vietPhraseSuggestions = suggestions) }
-            }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeStoryAiProfiles().collect { profiles ->
-                mutableState.update { it.copy(storyAiProfiles = profiles.associateBy(StoryAiProfileEntity::storyId)) }
-            }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeSceneMusicTracks().collect { tracks ->
-                mutableState.update { it.copy(sceneMusicTracks = tracks) }
-            }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeStoryTtsProfiles().collect { profiles ->
-                val mapped = profiles.associateBy(StoryTtsProfileEntity::storyId)
-                mutableState.update { it.copy(storyTtsProfiles = mapped) }
-                val active = mapped[PlaybackQueueStore.state.value.storyId]
-                if (active != null) PlaybackQueueStore.updateVoice(active.rate, active.pitch, active.volume)
-            }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeVoiceRoles().collect { roles ->
-                mutableState.update { it.copy(voiceRoles = roles) }
-            }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeAudioExports().collect { jobs ->
-                mutableState.update { it.copy(audioExports = jobs) }
+
+            RoomObserverGroup.AUDIO_EXPORTS -> viewModelScope.launch {
+                container.libraryRepository.observeAudioExports()
+                    .distinctUntilChanged()
+                    .collect { jobs -> mutableState.update { it.copy(audioExports = jobs) } }
             }
         }
     }
@@ -581,6 +738,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun observePlayback() {
         viewModelScope.launch {
             PlaybackQueueStore.state.collect { playback ->
+                if (playback.storyId.isNotBlank()) ensureRoomObserverGroup(RoomObserverGroup.TTS_PROFILES)
                 val previousChapterId = chapterSleepLastChapterId
                 val currentChapterId = playback.chapterId
                 val remaining = chapterSleepRemaining
@@ -1487,20 +1645,27 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun refreshSourcePlatformState() {
-        container.sourceRegistry.refreshSourcePacks(container.sourcePlatformManager.activeStorySources())
-        mutableState.update { current ->
-            current.copy(
-                sources = container.sourceRegistry.descriptors(),
-                sourcePacks = container.sourcePlatformManager.installedPacks(),
-                sourceRepositories = container.sourcePlatformManager.repositories(),
-                sourceRepositoryPackages = container.sourcePlatformManager.repositoryPackages(),
-                sourceTrustKeys = container.sourcePlatformManager.trustKeys(),
-                sourceDiagnosticCount = visibleDiagnosticEvents().size,
-                sourceDiagnostics = visibleDiagnosticSummaries(),
-                sourceTraces = container.sourcePlatformManager.diagnosticTraces(100),
-                diagnosticActiveOperations = container.sourceDiagnostics.activityLines(),
-                diagnosticPersistentCriticalCount = container.sourceDiagnostics.persistentCriticalCount(),
-            )
+        viewModelScope.launch {
+            val snapshot = withContext(Dispatchers.IO) {
+                val active = container.sourcePlatformManager.activeStorySources()
+                container.sourceRegistry.refreshSourcePacks(active)
+                SourcePlatformUiSnapshot(
+                    sources = container.sourceRegistry.descriptors(),
+                    packs = container.sourcePlatformManager.installedPacks(),
+                    repositories = container.sourcePlatformManager.repositories(),
+                    packages = container.sourcePlatformManager.repositoryPackages(),
+                    trustKeys = container.sourcePlatformManager.trustKeys(),
+                )
+            }
+            mutableState.update { current ->
+                current.copy(
+                    sources = snapshot.sources,
+                    sourcePacks = snapshot.packs,
+                    sourceRepositories = snapshot.repositories,
+                    sourceRepositoryPackages = snapshot.packages,
+                    sourceTrustKeys = snapshot.trustKeys,
+                )
+            }
         }
     }
 
@@ -1518,9 +1683,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             .sortedBy(DiagnosticEvent::timestampEpochMs)
     }
-
-    private fun visibleDiagnosticSummaries(): List<SourceDiagnosticUi> =
-        diagnosticSummaries(visibleDiagnosticEvents())
 
     private fun diagnosticSummaries(events: List<DiagnosticEvent>): List<SourceDiagnosticUi> = events
         .takeLast(2_000)
@@ -1579,7 +1741,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 installed = container.sourcePlatformManager.installedPacks(),
                 repositories = container.sourcePlatformManager.repositories(),
                 runtimeState = diagnosticsRuntimeSnapshot(),
-                backupLogTail = state.value.backupLogText.takeLast(64_000),
+                backupLogTail = withContext(Dispatchers.IO) { container.backupHistoryStore.logText().takeLast(64_000) },
             )
             getApplication<Application>().contentResolver.openOutputStream(uri, "w")?.use { output ->
                 output.write(payload)
@@ -1601,10 +1763,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun refreshSourceSessions() {
-        val active = container.sourceRegistry.descriptors()
-            .filter { container.sourceSessionStore.hasSession(it.id) }
-            .mapTo(linkedSetOf()) { it.id }
-        mutableState.update { it.copy(sourceSessions = active) }
+        sourceSessionRefreshJob?.cancel()
+        sourceSessionRefreshJob = viewModelScope.launch {
+            if (!StartupWorkGate.awaitFirstFrameAsync()) return@launch
+            val descriptors = container.sourceRegistry.descriptors()
+            val active = withContext(Dispatchers.IO) {
+                descriptors
+                    .filter { container.sourceSessionStore.hasSession(it.id) }
+                    .mapTo(linkedSetOf()) { it.id }
+            }
+            mutableState.update { it.copy(sourceSessions = active) }
+        }
     }
 
     fun checkSource(sourceId: String) {
@@ -1685,7 +1854,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setRootTab(tab: RootTab) {
         mutableState.update { it.copy(destination = Destination.Root, rootTab = tab, message = null) }
-        if (tab == RootTab.PERSONAL) refreshSourcePlatformState()
     }
 
     fun setLibrarySection(section: LibrarySection) {
@@ -1701,10 +1869,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun consumeStoryAdvancedOptionsRequest() {
         mutableState.update { it.copy(storyAdvancedOptionsRequested = false, storyAdvancedOptionsMode = null) }
     }
-
-    fun openStoryAiOptions() = openStoryAdvancedOptions("ai")
-
-    fun openStoryVoiceCastOptions() = openStoryAdvancedOptions("voice")
 
     private fun openStoryAdvancedOptions(mode: String) {
         mutableState.update { it.copy(storyAdvancedOptionsRequested = true, storyAdvancedOptionsMode = mode, loading = false) }
@@ -1907,23 +2071,34 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 val result = if (cleanQuery.isBlank()) source.home(page = 1) else source.search(cleanQuery, page = 1)
                 when (result) {
-                    is AppResult.Success -> mutableState.update {
-                        it.copy(
+                    is AppResult.Success -> {
+                        val merged = mergeExploreStories(
+                            existing = emptyList(),
+                            incoming = result.value,
+                            source = source.descriptor,
+                            query = cleanQuery,
+                            sortMode = snapshot.searchSortMode,
+                            mode = if (cleanQuery.isBlank()) ExploreMode.HOME else ExploreMode.SEARCH,
+                        )
+                        if (cleanQuery.isBlank()) withContext(Dispatchers.IO) {
+                            exploreHomeCache.save(source.descriptor.id, merged)
+                        }
+                        mutableState.update {
+                            it.copy(
+                                loading = false,
+                                stories = merged,
+                                canLoadMoreStories = result.value.isNotEmpty(),
+                                searchedSourceCount = 1,
+                                totalSearchSourceCount = 1,
+                            )
+                        }
+                    }
+                    is AppResult.Failure -> mutableState.update { current ->
+                        current.copy(
                             loading = false,
-                            stories = mergeExploreStories(
-                                existing = emptyList(),
-                                incoming = result.value,
-                                source = source.descriptor,
-                                query = cleanQuery,
-                                sortMode = snapshot.searchSortMode,
-                                mode = if (cleanQuery.isBlank()) ExploreMode.HOME else ExploreMode.SEARCH,
-                            ),
-                            canLoadMoreStories = result.value.isNotEmpty(),
-                            searchedSourceCount = 1,
-                            totalSearchSourceCount = 1,
+                            message = if (current.stories.isEmpty()) result.message else current.message,
                         )
                     }
-                    is AppResult.Failure -> mutableState.update { it.copy(loading = false, message = result.message) }
                 }
             }
         }
@@ -2157,14 +2332,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 is AppResult.Failure -> mutableState.update { it.copy(loading = false, message = result.message) }
             }
-        }
-    }
-
-    fun openLibraryStory(entity: StoryEntity) {
-        if (entity.sourceId == "offline") {
-            openOfflineStory(entity)
-        } else {
-            openRemoteStory(entity.toStorySummary())
         }
     }
 
@@ -3024,6 +3191,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     ReferenceVoiceRoleExtras.remove(getApplication(), oldId)
                 }
                 ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
+                refreshVoiceRolesFromDatabase(seedGlobals = true)
                 showMessage("Đã lưu hồ sơ giọng chung ${draft.roleName}.")
             }.onFailure { showMessage(it.message ?: "Không lưu được hồ sơ giọng chung.") }
         }
@@ -3032,6 +3200,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun setGlobalVoiceRoleEnabled(id: String, enabled: Boolean) {
         viewModelScope.launch {
             container.libraryRepository.setVoiceRoleEnabled(id, enabled)
+            refreshVoiceRolesFromDatabase(seedGlobals = true)
             ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
         }
     }
@@ -3045,6 +3214,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             container.libraryRepository.deleteVoiceRole(id)
             ReferenceVoiceRoleExtras.remove(getApplication(), id)
+            refreshVoiceRolesFromDatabase(seedGlobals = true)
             ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
             showMessage("Đã xóa hồ sơ giọng chung ${role.roleName}.")
         }
@@ -3053,6 +3223,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun restoreGlobalVoiceProfiles() {
         viewModelScope.launch {
             val roles = container.libraryRepository.restoreGlobalVoiceProfiles()
+            refreshVoiceRolesFromDatabase(seedGlobals = false)
             ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
             showMessage("Đã khôi phục 7 hồ sơ mẫu; hiện có ${roles.size} hồ sơ giọng chung.")
         }
@@ -3701,11 +3872,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun refreshBackupLog(): Boolean {
-        val path = container.backupHistoryStore.logPath()
-        val text = container.backupHistoryStore.logText()
-        mutableState.update { it.copy(backupLogPath = path, backupLogText = text) }
-        if (text.isBlank()) showMessage("Chưa có nhật ký sao lưu hoặc khôi phục.")
-        return text.isNotBlank()
+        viewModelScope.launch {
+            val snapshot = withContext(Dispatchers.IO) {
+                Triple(
+                    container.backupHistoryStore.entries(),
+                    container.backupHistoryStore.logPath(),
+                    container.backupHistoryStore.logText(),
+                )
+            }
+            mutableState.update {
+                it.copy(backupHistory = snapshot.first, backupLogPath = snapshot.second, backupLogText = snapshot.third)
+            }
+            if (snapshot.third.isBlank()) showMessage("Chưa có nhật ký sao lưu hoặc khôi phục.")
+        }
+        return true
     }
 
     fun clearBackupLog() {
@@ -3805,11 +3985,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 is AppResult.Success -> {
                     val message = "Đã sao lưu ${result.value.components.size} nhóm dữ liệu, ${result.value.stories} truyện và ${result.value.chapters} chương."
                     container.backupHistoryStore.record("BACKUP", true, message, components = result.value.components.map { it.name })
-                    mutableState.update { it.copy(loading = false, message = message, backupHistory = container.backupHistoryStore.entries(), backupLogPath = container.backupHistoryStore.logPath(), backupLogText = container.backupHistoryStore.logText()) }
+                    mutableState.update { it.copy(loading = false, message = message, backupHistory = container.backupHistoryStore.entries(), backupLogPath = container.backupHistoryStore.logPath(), backupLogText = "") }
                 }
                 is AppResult.Failure -> {
                     container.backupHistoryStore.record("BACKUP", false, result.message, result.code, selected.map { it.name })
-                    mutableState.update { it.copy(loading = false, message = result.message, backupHistory = container.backupHistoryStore.entries(), backupLogPath = container.backupHistoryStore.logPath(), backupLogText = container.backupHistoryStore.logText()) }
+                    mutableState.update { it.copy(loading = false, message = result.message, backupHistory = container.backupHistoryStore.entries(), backupLogPath = container.backupHistoryStore.logPath(), backupLogText = "") }
                 }
             }
         }
@@ -3823,11 +4003,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 is AppResult.Success -> {
                     val message = "Đã khôi phục ${result.value.components.size} nhóm dữ liệu, ${result.value.stories} truyện và ${result.value.chapters} chương."
                     container.backupHistoryStore.record("RESTORE", true, message, components = result.value.components.map { it.name })
-                    mutableState.update { it.copy(loading = false, message = message, backupHistory = container.backupHistoryStore.entries(), backupLogPath = container.backupHistoryStore.logPath(), backupLogText = container.backupHistoryStore.logText()) }
+                    mutableState.update { it.copy(loading = false, message = message, backupHistory = container.backupHistoryStore.entries(), backupLogPath = container.backupHistoryStore.logPath(), backupLogText = "") }
                 }
                 is AppResult.Failure -> {
                     container.backupHistoryStore.record("RESTORE", false, result.message, result.code, selected.map { it.name })
-                    mutableState.update { it.copy(loading = false, message = result.message, backupHistory = container.backupHistoryStore.entries(), backupLogPath = container.backupHistoryStore.logPath(), backupLogText = container.backupHistoryStore.logText()) }
+                    mutableState.update { it.copy(loading = false, message = result.message, backupHistory = container.backupHistoryStore.entries(), backupLogPath = container.backupHistoryStore.logPath(), backupLogText = "") }
                 }
             }
         }
@@ -4212,12 +4392,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshAiCredentialState() {
         val provider = mutableState.value.aiOnline.provider
-        mutableState.update {
-            it.copy(
-                aiHasApiKey = container.aiCredentialStore.hasApiKey(provider),
-                aiHasGeminiApiKey = container.aiCredentialStore.hasApiKey(AiProvider.GEMINI),
-                aiHasOpenAiApiKey = container.aiCredentialStore.hasApiKey(AiProvider.OPENAI_COMPATIBLE),
-            )
+        viewModelScope.launch {
+            val flags = withContext(Dispatchers.IO) {
+                Triple(
+                    container.aiCredentialStore.hasApiKey(provider),
+                    container.aiCredentialStore.hasApiKey(AiProvider.GEMINI),
+                    container.aiCredentialStore.hasApiKey(AiProvider.OPENAI_COMPATIBLE),
+                )
+            }
+            mutableState.update {
+                it.copy(
+                    aiHasApiKey = flags.first,
+                    aiHasGeminiApiKey = flags.second,
+                    aiHasOpenAiApiKey = flags.third,
+                )
+            }
         }
     }
 
@@ -4448,9 +4637,48 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun setSceneMusicTrackEnabled(id: String, enabled: Boolean) { viewModelScope.launch { container.libraryRepository.setSceneMusicTrackEnabled(id, enabled) } }
     fun deleteSceneMusicTrack(id: String) { viewModelScope.launch { container.libraryRepository.deleteSceneMusicTrack(id) } }
 
+    private fun bumpLibraryRevision() {
+        mutableLibraryRevision.update { current -> if (current == Long.MAX_VALUE) 1L else current + 1L }
+    }
+
+    private fun restoreCachedHomeAndRefresh() {
+        if (StartupWorkGate.isBeforeFirstFrame()) return
+        val snapshot = state.value
+        if (snapshot.destination != Destination.Root || snapshot.rootTab != RootTab.EXPLORE || snapshot.query.isNotBlank() || snapshot.searchAllSources) return
+        viewModelScope.launch {
+            val cached = withContext(Dispatchers.IO) { exploreHomeCache.load(snapshot.selectedSourceId) }
+            if (cached.isNotEmpty()) {
+                mutableState.update { current ->
+                    if (current.selectedSourceId != snapshot.selectedSourceId || current.query.isNotBlank() || current.searchAllSources) current
+                    else current.copy(
+                        stories = cached,
+                        exploreMode = ExploreMode.HOME,
+                        canLoadMoreStories = true,
+                    )
+                }
+            }
+            search("")
+        }
+    }
+
+    private data class DiagnosticUiDetails(
+        val count: Int,
+        val summaries: List<SourceDiagnosticUi>,
+        val traces: List<SourceTraceUi>,
+    )
+
+    private data class SourcePlatformUiSnapshot(
+        val sources: List<SourceDescriptor>,
+        val packs: List<SourcePackUiInfo>,
+        val repositories: List<SourceRepositoryUiInfo>,
+        val packages: List<SourceRepositoryPackageUiInfo>,
+        val trustKeys: List<SourceTrustKeyUi>,
+    )
+
     private companion object {
         const val MANUAL_NARRATION_RETRY_DELAY_MS = 5_000L
         const val MAX_READER_CATALOG_PAGE_HOPS = 30
+        const val DIAGNOSTIC_UI_DEBOUNCE_MS = 120L
     }
 
     private fun providerLabel(provider: AiProvider): String = when (provider) {
@@ -4459,8 +4687,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun transformId(chapterId: String, kind: String) = UUID.nameUUIDFromBytes("$chapterId\u0000$kind".toByteArray()).toString()
-    private fun assignmentId(chapterId: String, paragraphIndex: Int) = UUID.nameUUIDFromBytes("$chapterId\u0000voice\u0000$paragraphIndex".toByteArray()).toString()
-    private fun sceneCueId(chapterId: String, paragraphIndex: Int) = UUID.nameUUIDFromBytes("$chapterId\u0000scene\u0000$paragraphIndex".toByteArray()).toString()
 
     fun back() {
         when (state.value.destination) {
@@ -4611,4 +4837,74 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun showMessage(message: String) {
         mutableState.update { it.copy(message = message) }
     }
+}
+
+private fun MainUiState.forActiveComposition(personalPage: String): MainUiState = when {
+    destination == Destination.Root && rootTab == RootTab.EXPLORE -> copy(
+        readingStories = emptyList(),
+        readingProgress = emptyMap(),
+        readingChapterTitles = emptyMap(),
+        readingHistory = emptyList(),
+        downloadedStories = emptyList(),
+        bookmarks = emptyList(),
+        notes = emptyList(),
+        following = emptyList(),
+        downloads = emptyList(),
+        downloadFailures = emptyList(),
+        playback = PlaybackSnapshot(),
+        offlineStorage = emptyMap(),
+        downloadedChapterIds = emptySet(),
+        storageUsage = StorageUsage(0, 0, 0, 0),
+        pronunciations = emptyList(),
+        vietPhraseRules = emptyList(),
+        vietPhraseSnapshots = emptyList(),
+        vietPhraseDictionaryStates = emptyList(),
+        vietPhraseSuggestions = emptyList(),
+        backupHistory = emptyList(),
+        backupLogPath = "",
+        backupLogText = "",
+        sceneMusicTracks = emptyList(),
+        storyTtsProfiles = emptyMap(),
+        storyAiProfiles = emptyMap(),
+        voiceRoles = emptyList(),
+        audioExports = emptyList(),
+        sourcePacks = emptyList(),
+        sourceRepositories = emptyList(),
+        sourceRepositoryPackages = emptyList(),
+        sourceTrustKeys = emptyList(),
+    )
+    destination == Destination.Root && rootTab == RootTab.LIBRARY -> copy(
+        stories = emptyList(),
+        sourceSuggestions = emptyList(),
+        playback = PlaybackSnapshot(),
+        pronunciations = emptyList(),
+        vietPhraseRules = emptyList(),
+        vietPhraseSnapshots = emptyList(),
+        vietPhraseDictionaryStates = emptyList(),
+        vietPhraseSuggestions = emptyList(),
+        backupHistory = emptyList(),
+        backupLogPath = "",
+        backupLogText = "",
+        sceneMusicTracks = emptyList(),
+        storyTtsProfiles = emptyMap(),
+        storyAiProfiles = emptyMap(),
+        voiceRoles = emptyList(),
+        audioExports = emptyList(),
+        sourcePacks = emptyList(),
+        sourceRepositories = emptyList(),
+        sourceRepositoryPackages = emptyList(),
+        sourceTrustKeys = emptyList(),
+    )
+    destination == Destination.Root && rootTab == RootTab.PERSONAL -> copy(
+        stories = emptyList(),
+        sourceSuggestions = emptyList(),
+        chapterContent = null,
+        originalChapterContent = null,
+        playback = if (personalPage == "settings_tts") PlaybackSnapshot(
+            rate = playback.rate,
+            pitch = playback.pitch,
+            volume = playback.volume,
+        ) else PlaybackSnapshot(),
+    )
+    else -> this
 }

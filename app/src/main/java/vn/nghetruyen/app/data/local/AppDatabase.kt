@@ -56,6 +56,22 @@ data class ReadingProgressEntity(
     val updatedAt: Long,
 )
 
+data class ReadingProgressWithChapterTitle(
+    val storyId: String,
+    val chapterId: String,
+    val paragraphIndex: Int,
+    val totalParagraphs: Int,
+    val updatedAt: Long,
+    val chapterTitle: String,
+)
+
+data class ChapterStorageSnapshot(
+    val chapterId: String,
+    val storyId: String,
+    val downloadedAt: Long?,
+    val bytes: Long,
+)
+
 @Entity(
     tableName = "reading_history",
     indices = [
@@ -524,9 +540,6 @@ interface ChapterDao {
     @Query("SELECT id FROM chapters WHERE storyId = :storyId AND downloadedAt IS NOT NULL AND content IS NOT NULL AND TRIM(content) != ''")
     suspend fun listDownloadedIds(storyId: String): List<String>
 
-    @Query("SELECT id FROM chapters WHERE downloadedAt IS NOT NULL AND content IS NOT NULL AND TRIM(content) != ''")
-    fun observeDownloadedIds(): Flow<List<String>>
-
     @Query("SELECT * FROM chapters ORDER BY storyId, chapterIndex")
     suspend fun listAll(): List<ChapterEntity>
 
@@ -540,25 +553,12 @@ interface ChapterDao {
     suspend fun clearTransientCache()
 
     @Query("""
-        SELECT c.storyId AS storyId, COUNT(*) AS chapterCount,
-               COALESCE(SUM(LENGTH(CAST(c.content AS BLOB))), 0) AS bytes
+        SELECT c.id AS chapterId, c.storyId AS storyId, c.downloadedAt AS downloadedAt,
+               COALESCE(LENGTH(CAST(c.content AS BLOB)), 0) AS bytes
         FROM chapters c
-        INNER JOIN stories s ON s.id = c.storyId
-        WHERE c.downloadedAt IS NOT NULL AND c.content IS NOT NULL AND TRIM(c.content) != ''
-        GROUP BY c.storyId
+        WHERE c.content IS NOT NULL AND TRIM(c.content) != ''
     """)
-    fun observeOfflineStorage(): Flow<List<OfflineStoryStorage>>
-
-    @Query("""
-        SELECT
-          COALESCE(SUM(CASE WHEN c.downloadedAt IS NOT NULL AND c.content IS NOT NULL AND TRIM(c.content) != '' THEN 1 ELSE 0 END), 0) AS downloadedChapters,
-          COALESCE(SUM(CASE WHEN c.downloadedAt IS NOT NULL THEN LENGTH(CAST(c.content AS BLOB)) ELSE 0 END), 0) AS downloadedBytes,
-          COALESCE(SUM(CASE WHEN c.downloadedAt IS NULL AND c.content IS NOT NULL AND TRIM(c.content) != '' THEN 1 ELSE 0 END), 0) AS cachedChapters,
-          COALESCE(SUM(CASE WHEN c.downloadedAt IS NULL THEN LENGTH(CAST(c.content AS BLOB)) ELSE 0 END), 0) AS cachedBytes
-        FROM chapters c
-        INNER JOIN stories s ON s.id = c.storyId
-    """)
-    fun observeStorageUsage(): Flow<StorageUsage>
+    fun observeStorageSnapshot(): Flow<List<ChapterStorageSnapshot>>
 
     @Query("""
         SELECT c.id AS chapterId,
@@ -586,8 +586,14 @@ interface ProgressDao {
     @Query("SELECT * FROM reading_progress WHERE storyId = :storyId LIMIT 1")
     suspend fun get(storyId: String): ReadingProgressEntity?
 
-    @Query("SELECT * FROM reading_progress ORDER BY updatedAt DESC")
-    fun observeAll(): Flow<List<ReadingProgressEntity>>
+    @Query("""
+        SELECT p.storyId AS storyId, p.chapterId AS chapterId, p.paragraphIndex AS paragraphIndex,
+               p.totalParagraphs AS totalParagraphs, p.updatedAt AS updatedAt, COALESCE(c.title, '') AS chapterTitle
+        FROM reading_progress p
+        LEFT JOIN chapters c ON c.id = p.chapterId
+        ORDER BY p.updatedAt DESC
+    """)
+    fun observeAllWithChapterTitle(): Flow<List<ReadingProgressWithChapterTitle>>
 
     @Query("SELECT * FROM reading_progress ORDER BY updatedAt DESC")
     suspend fun listAll(): List<ReadingProgressEntity>

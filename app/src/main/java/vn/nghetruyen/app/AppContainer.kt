@@ -1,9 +1,6 @@
 package vn.nghetruyen.app
 
 import android.content.Context
-import com.nghetruyen.source.platform.SourceArtifactDescriptor
-import com.nghetruyen.source.platform.SourceTrustState
-import com.nghetruyen.source.repository.VBookUpdateResult
 import vn.nghetruyen.app.ai.EncryptedAiCredentialStore
 import vn.nghetruyen.app.ai.AiRequestGovernor
 import vn.nghetruyen.app.ai.OnlineTextAiServices
@@ -47,11 +44,13 @@ class AppContainer(context: Context) {
     val settingsRepository: SettingsRepository by lazy { SettingsRepository(appContext) }
     val libraryRepository: LibraryRepository by lazy { LibraryRepository(database) }
     val sourceSessionStore: EncryptedSourceSessionStore by lazy { EncryptedSourceSessionStore(appContext) }
-    val sourceDiagnostics: SourceDiagnosticRuntime = SourceDiagnosticRuntime(appContext)
-    private val screenScopedSourceEvidence = ScreenScopedDiagnosticEvidenceSink(
-        scope = sourceDiagnostics.recorder,
-        delegate = sourceDiagnostics.evidence,
-    )
+    val sourceDiagnostics: SourceDiagnosticRuntime by lazy { SourceDiagnosticRuntime(appContext) }
+    private val screenScopedSourceEvidence by lazy {
+        ScreenScopedDiagnosticEvidenceSink(
+            scope = sourceDiagnostics.recorder,
+            delegate = sourceDiagnostics.evidence,
+        )
+    }
 
     private val vBookQuickTranslationInstalled: Unit by lazy {
         AndroidVBookQuickTranslationRegistry.install(libraryRepository)
@@ -99,10 +98,10 @@ class AppContainer(context: Context) {
 
     val sourcePlatformManager: UnifiedSourcePlatformManager by lazy {
         UnifiedSourcePlatformManager(
-            legacy = legacySourcePlatformManager,
-            vBook = vBookSourcePlatform,
-            vBookRepositories = vBookRepositoryClient,
-            vBookRepositorySubscriptions = vBookRepositorySubscriptionStore,
+            legacyProvider = { legacySourcePlatformManager },
+            vBookProvider = { vBookSourcePlatform },
+            vBookRepositoriesProvider = { vBookRepositoryClient },
+            vBookRepositorySubscriptionsProvider = { vBookRepositorySubscriptionStore },
             onExternalSourcesChanged = { refreshSourceRegistry() },
         )
     }
@@ -118,30 +117,6 @@ class AppContainer(context: Context) {
     /** One authoritative refresh point after native or vBook install/update/rollback. */
     fun refreshSourceRegistry() {
         sourceRegistry.replaceExternalSources(currentExternalStorySources())
-    }
-
-    fun installOrUpdateVBook(
-        repositoryId: String,
-        remoteIdentity: String,
-        version: String?,
-        packageBytes: ByteArray,
-        trust: SourceTrustState = SourceTrustState.REPOSITORY_TRUSTED,
-    ): VBookUpdateResult {
-        val result = vBookSourcePlatform.installOrUpdate(
-            repositoryId = repositoryId,
-            remoteIdentity = remoteIdentity,
-            version = version,
-            packageBytes = packageBytes,
-            trust = trust,
-        )
-        refreshSourceRegistry()
-        return result
-    }
-
-    fun rollbackVBook(repositoryId: String, remoteIdentity: String): SourceArtifactDescriptor {
-        val restored = vBookSourcePlatform.rollback(repositoryId, remoteIdentity)
-        refreshSourceRegistry()
-        return restored
     }
 
     private fun currentExternalStorySources() = sourcePlatformManager.activeStorySources()

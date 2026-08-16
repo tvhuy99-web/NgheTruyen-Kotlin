@@ -173,7 +173,7 @@ object VBookStoryNormalizer {
             element.text().trim().takeIf(String::isNotBlank)
         }
         if (blockTexts.isNotEmpty()) return blockTexts
-        val whole = doc.body()?.wholeText().orEmpty()
+        val whole = doc.body().wholeText()
         return whole.split(Regex("\\r?\\n+"))
             .map(String::trim)
             .filter(String::isNotBlank)

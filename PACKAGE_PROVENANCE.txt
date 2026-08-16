@@ -1,8 +1,0 @@
-version=2.7.0-source-fidelity-priority1-complete
-implementation_commit=ce91e46204ccdf54ae2c0834eada3ff7015cbcfb
-room_schema=18
-backup_format=15
-signed_source_assets=7
-source_fixture_cases=63
-build_verification=static_and_fixture_gates
-android_apk_build=not_run

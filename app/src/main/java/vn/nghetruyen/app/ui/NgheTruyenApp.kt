@@ -57,6 +57,9 @@ fun NgheTruyenApp(
         snackbarHostState.showSnackbar(message)
         viewModel.clearMessage()
     }
+    LaunchedEffect(state.destination, state.rootTab, state.librarySection) {
+        viewModel.ensureRoomObserversForUi(state.destination, state.rootTab, state.librarySection)
+    }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -121,7 +124,7 @@ fun NgheTruyenApp(
                         onOpenTtsSettings = viewModel::openTtsSettings,
                         onInterruptionModeChange = viewModel::setAudioInterruptionMode,
                         onDiagnosticsModeChange = viewModel::setDiagnosticsMode,
-                        onDiagnosticScreenChanged = {},
+                        onDiagnosticScreenChanged = viewModel::onPersonalPageChanged,
                         onHeadsetMultiClickChange = viewModel::setHeadsetMultiClickEnabled,
                         onHeadsetSingleActionChange = viewModel::setHeadsetSingleClickAction,
                         onHeadsetDoubleActionChange = viewModel::setHeadsetDoubleClickAction,

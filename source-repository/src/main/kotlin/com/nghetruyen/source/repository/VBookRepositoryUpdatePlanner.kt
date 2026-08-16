@@ -36,7 +36,7 @@ object VBookRepositoryUpdatePlanner {
             .associateBy { it.identity.repositoryId to it.identity.remoteIdentity }
         val rows = snapshot.items.map { item ->
             val local = active[item.repositoryId to item.remoteIdentity]
-            VBookRepositoryUpdateRow(item, local, state(local?.version, item.item.version?.toString()))
+            VBookRepositoryUpdateRow(item, local, state(local?.version, item.item.version))
         }
         return VBookRepositoryUpdatePlan(rows)
     }

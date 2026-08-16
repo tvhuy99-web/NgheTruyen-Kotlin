@@ -1,7 +1,11 @@
 package vn.nghetruyen.app.sources
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import vn.nghetruyen.app.core.common.AppResult
 import vn.nghetruyen.app.core.model.ChapterContent
 import vn.nghetruyen.app.core.model.ChapterSummary
@@ -9,6 +13,7 @@ import vn.nghetruyen.app.core.model.SourceHealth
 import vn.nghetruyen.app.core.model.StoryDetail
 import vn.nghetruyen.app.core.model.StorySummary
 import vn.nghetruyen.app.sourceplatform.SourceDiagnosticRuntime
+import vn.nghetruyen.app.startup.StartupWorkGate
 
 class SourceRegistry(
     sources: List<StorySource>? = null,
@@ -18,11 +23,31 @@ class SourceRegistry(
 ) {
     private val diagnosticRuntime = diagnostics
     private val legacySources = (sources ?: defaultSources(sessionStore)).distinctBy { it.descriptor.id }
+    private val refreshGeneration = MutableStateFlow(0)
     @Volatile
     private var byId: Map<String, StorySource> = merge(sourcePackSources)
 
     fun descriptors(): List<SourceDescriptor> = byId.values.map { it.descriptor }
-    fun get(id: String): StorySource? = byId[id]
+
+    fun get(id: String): StorySource? {
+        val current = byId[id]
+        if (diagnosticRuntime != null && StartupWorkGate.isBeforeFirstFrame() && id.isNotBlank()) {
+            val generation = refreshGeneration.value
+            val descriptor = current?.descriptor ?: SourceDescriptor(
+                id = id,
+                displayName = id,
+                baseUrl = "deferred://startup",
+                health = SourceHealth.DEGRADED,
+                supportsHome = false,
+                implementationKind = SourceImplementationKind.PLACEHOLDER,
+            )
+            return DeferredStartupStorySource(descriptor) {
+                awaitResolvedSource(id, generation) ?: current
+            }
+        }
+        return current
+    }
+
     fun searchableSources(): List<StorySource> = byId.values.filter {
         it.descriptor.health == SourceHealth.READY || it.descriptor.health == SourceHealth.DEGRADED
     }
@@ -44,12 +69,14 @@ class SourceRegistry(
                 source.descriptor.id !in incomingIds
         }
         byId = merge(normalizedSources + preservedVBook)
+        refreshGeneration.value += 1
     }
 
     /** Full external-runtime refresh. Callers supply every active external ecosystem. */
     @Synchronized
     fun replaceExternalSources(externalSources: List<StorySource>) {
         byId = merge(externalSources)
+        refreshGeneration.value += 1
     }
 
     private fun merge(sourcePackSources: List<StorySource>): Map<String, StorySource> {
@@ -78,15 +105,25 @@ class SourceRegistry(
                 selected[id] = candidate
             }
         }
-        return selected.mapValues { (_, source) ->
-            source.withExecutionAndDiagnostics(diagnosticRuntime)
+        return selected.mapValues { (_, source) -> source.withExecutionAndDiagnostics(diagnosticRuntime) }
+    }
+
+    private suspend fun awaitResolvedSource(id: String, afterGeneration: Int): StorySource? {
+        if (!StartupWorkGate.awaitFirstFrameAsync()) return byId[id]
+        if (refreshGeneration.value > afterGeneration) return byId[id]
+        val refreshed = withTimeoutOrNull(SOURCE_REFRESH_WAIT_MILLIS) {
+            refreshGeneration.filter { it > afterGeneration }.first()
+            byId[id]
         }
+        return refreshed ?: byId[id]
     }
 
     private fun normalizeExternalSources(sources: List<StorySource>): List<StorySource> =
         sources.map { source -> source.withStableDefaultLuaId() }
 
     companion object {
+        private const val SOURCE_REFRESH_WAIT_MILLIS = 5_000L
+
         private fun defaultSources(sessionStore: SourceSessionStore): List<StorySource> = listOf(
             DemoStorySource(),
             TruyenFullSource(),
@@ -98,6 +135,26 @@ class SourceRegistry(
             NotPortedSource("wattpad", "Wattpad / vBook", "https://www.wattpad.com"),
         )
     }
+}
+
+private class DeferredStartupStorySource(
+    override val descriptor: SourceDescriptor,
+    private val resolver: suspend () -> StorySource?,
+) : StorySource {
+    override suspend fun search(query: String, page: Int): AppResult<List<StorySummary>> =
+        resolver()?.search(query, page) ?: AppResult.Success(emptyList())
+
+    override suspend fun category(category: String, page: Int): AppResult<List<StorySummary>> =
+        resolver()?.category(category, page) ?: AppResult.Success(emptyList())
+
+    override suspend fun home(page: Int): AppResult<List<StorySummary>> =
+        resolver()?.home(page) ?: AppResult.Success(emptyList())
+
+    override suspend fun story(url: String): AppResult<StoryDetail> =
+        resolver()?.story(url) ?: AppResult.Failure("SOURCE_STARTUP_DEFERRED", "Nguồn chưa sẵn sàng sau khi khởi động.")
+
+    override suspend fun chapter(url: String): AppResult<ChapterContent> =
+        resolver()?.chapter(url) ?: AppResult.Failure("SOURCE_STARTUP_DEFERRED", "Nguồn chưa sẵn sàng sau khi khởi động.")
 }
 
 private fun StorySource.withExecutionAndDiagnostics(diagnostics: SourceDiagnosticRuntime?): StorySource {

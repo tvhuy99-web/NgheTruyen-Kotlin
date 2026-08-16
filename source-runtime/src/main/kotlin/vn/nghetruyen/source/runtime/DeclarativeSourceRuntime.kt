@@ -489,7 +489,7 @@ private class ExecutionContext(
         val value = step.string("path")?.let { resolvePath(source, it) } ?: source
         return when (value) {
             is JsonValue.Str -> value.value
-            else -> scalar(value ?: JsonValue.Null)
+            else -> scalar(value)
         }
     }
 
@@ -498,7 +498,7 @@ private class ExecutionContext(
         step.string("baseUrlFrom")?.let { name ->
             val source = variable(name)
             val value = step.string("baseUrlPath")?.let { resolvePath(source, it) } ?: source
-            return scalar(value ?: JsonValue.Null)
+            return scalar(value)
         }
         return manifest.origins.first()
     }
@@ -603,7 +603,7 @@ private class ExecutionContext(
                     }
                     else -> JsonValue.Null
                 }
-                put(name, value ?: JsonValue.Null)
+                put(name, value)
             }
         })
         set(step.requiredString("as"), output)

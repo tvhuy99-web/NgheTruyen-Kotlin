@@ -128,6 +128,31 @@ class PrimaryFallbackVBookActionRuntimeTest {
         assertEquals(0, fallbackCalls)
     }
 
+    @Test
+    fun platformRuntimeFactoryIsLazyAndInitializedOnlyOnce() {
+        var factoryCalls = 0
+        var primaryCalls = 0
+        VBookActionRuntimeRegistry.install { _, _ ->
+            factoryCalls += 1
+            VBookActionRuntime { _, _, request ->
+                primaryCalls += 1
+                SourcePlatformResult.Success(SourceActionResponse(JsonValue.Str("primary"), request.traceId, 1))
+            }
+        }
+        try {
+            val runtime = RhinoVBookActionRuntime()
+            assertEquals(0, factoryCalls)
+
+            runtime.execute(manifest(), resources(), request())
+            runtime.execute(manifest(), resources(), request())
+
+            assertEquals(1, factoryCalls)
+            assertEquals(2, primaryCalls)
+        } finally {
+            VBookActionRuntimeRegistry.clear()
+        }
+    }
+
     private fun request(input: JsonValue.Obj = JsonValue.Obj()) = SourceActionRequest(
         sourceId = "vn.nghetruyen.sources.chromiumtest",
         action = SourceActionName.UI_ACTION,

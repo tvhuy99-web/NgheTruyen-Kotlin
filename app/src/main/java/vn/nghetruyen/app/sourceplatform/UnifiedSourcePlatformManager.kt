@@ -4,6 +4,7 @@ import com.nghetruyen.source.platform.SourceArtifactIdentity
 import com.nghetruyen.source.platform.SourceEcosystem
 import com.nghetruyen.source.repository.VBookUpdateDisposition
 import vn.nghetruyen.app.sources.StorySource
+import vn.nghetruyen.app.startup.StartupWorkGate
 import vn.nghetruyen.source.api.SourceRuntimeMode
 import vn.nghetruyen.source.diagnostics.DiagnosticJsonExporter
 import vn.nghetruyen.source.diagnostics.SourceTraceExplorer
@@ -22,89 +23,105 @@ import java.security.MessageDigest
  * to the correct ecosystem. vBook artifacts never flow back through SourcePackStore.
  */
 class UnifiedSourcePlatformManager(
-    private val legacy: SourcePlatformManager,
-    private val vBook: VBookSourcePlatform,
-    private val vBookRepositories: VBookRepositoryClient,
-    private val vBookRepositorySubscriptions: VBookRepositorySubscriptionStore,
+    legacyProvider: () -> SourcePlatformManager,
+    vBookProvider: () -> VBookSourcePlatform,
+    vBookRepositoriesProvider: () -> VBookRepositoryClient,
+    vBookRepositorySubscriptionsProvider: () -> VBookRepositorySubscriptionStore,
     private val onExternalSourcesChanged: () -> Unit,
 ) {
+    private val legacy by lazy(legacyProvider)
+    private val vBook by lazy(vBookProvider)
+    private val vBookRepositories by lazy(vBookRepositoriesProvider)
+    private val vBookRepositorySubscriptions by lazy(vBookRepositorySubscriptionsProvider)
     private val vBookSnapshots = linkedMapOf<String, VBookRepositorySnapshot>()
-    private val vBookCatalog = VBookCatalogInstallService(vBookRepositories, vBook)
+    private val vBookCatalog by lazy { VBookCatalogInstallService(vBookRepositories, vBook) }
     private var pendingVBookCatalog: VBookPreparedCatalogInstall? = null
 
-    fun activeStorySources(): List<StorySource> = legacy.activeStorySources() + vBook.activeStorySources()
+    fun activeStorySources(): List<StorySource> {
+        if (StartupWorkGate.isBeforeFirstFrame()) return emptyList()
+        return legacy.activeStorySources() + vBook.activeStorySources()
+    }
 
-    fun installedPacks(): List<SourcePackUiInfo> = buildList {
-        addAll(legacy.installedPacks())
-        addAll(vBook.installedSources().map(::installedUi))
-    }.distinctBy(SourcePackUiInfo::id)
+    fun installedPacks(): List<SourcePackUiInfo> {
+        if (StartupWorkGate.isBeforeFirstFrame()) return emptyList()
+        return buildList {
+            addAll(legacy.installedPacks())
+            addAll(vBook.installedSources().map(::installedUi))
+        }.distinctBy(SourcePackUiInfo::id)
+    }
 
-    fun repositories(): List<SourceRepositoryUiInfo> = buildList {
-        addAll(legacy.repositories())
-        addAll(vBookSnapshots.map { (uiId, snapshot) ->
-            SourceRepositoryUiInfo(
-                id = uiId,
-                name = "vBook · ${snapshot.repositories.size} catalog",
-                url = snapshot.indexUrl,
-                generatedAtEpochMs = 0L,
-                expiresAtEpochMs = 0L,
-                packageCount = snapshot.items.size,
-                signerKeyId = if (snapshot.complete) "vbook-index-hash" else "vbook-index-partial",
-            )
-        })
-        vBookRepositorySubscriptions.urls().forEach { url ->
-            val uiId = vBookIndexUiId(url)
-            if (uiId !in vBookSnapshots) {
-                add(SourceRepositoryUiInfo(
+    fun repositories(): List<SourceRepositoryUiInfo> {
+        if (StartupWorkGate.isBeforeFirstFrame()) return emptyList()
+        return buildList {
+            addAll(legacy.repositories())
+            addAll(vBookSnapshots.map { (uiId, snapshot) ->
+                SourceRepositoryUiInfo(
                     id = uiId,
-                    name = "vBook · Đã lưu",
-                    url = url,
+                    name = "vBook · ${snapshot.repositories.size} catalog",
+                    url = snapshot.indexUrl,
                     generatedAtEpochMs = 0L,
                     expiresAtEpochMs = 0L,
-                    packageCount = 0,
-                    signerKeyId = "vbook-index-saved",
-                ))
+                    packageCount = snapshot.items.size,
+                    signerKeyId = if (snapshot.complete) "vbook-index-hash" else "vbook-index-partial",
+                )
+            })
+            vBookRepositorySubscriptions.urls().forEach { url ->
+                val uiId = vBookIndexUiId(url)
+                if (uiId !in vBookSnapshots) {
+                    add(SourceRepositoryUiInfo(
+                        id = uiId,
+                        name = "vBook · Đã lưu",
+                        url = url,
+                        generatedAtEpochMs = 0L,
+                        expiresAtEpochMs = 0L,
+                        packageCount = 0,
+                        signerKeyId = "vbook-index-saved",
+                    ))
+                }
             }
-        }
-    }.distinctBy(SourceRepositoryUiInfo::id)
+        }.distinctBy(SourceRepositoryUiInfo::id)
+    }
 
-    fun repositoryPackages(): List<SourceRepositoryPackageUiInfo> = buildList {
-        addAll(legacy.repositoryPackages())
-        val installed = vBook.installedSources().associateBy { it.repositoryId to it.remoteIdentity }
-        vBookSnapshots.forEach { (uiId, snapshot) ->
-            snapshot.items.forEach { aggregated ->
-                val local = installed[aggregated.repositoryId to aggregated.remoteIdentity]
-                val state = repositoryState(local?.version, aggregated.item.version)
-                val packageIsHttps = aggregated.item.packageUrl.startsWith("https://", ignoreCase = true)
-                add(SourceRepositoryPackageUiInfo(
-                    repositoryId = uiId,
-                    sourceId = aggregated.installIdentity,
-                    name = aggregated.item.name.ifBlank { aggregated.remoteIdentity },
-                    version = aggregated.item.version,
-                    installedVersion = local?.version,
-                    description = buildString {
-                        if (aggregated.item.description.isNotBlank()) append(aggregated.item.description.trim())
-                        if (aggregated.repository.author.isNotBlank()) {
-                            if (isNotEmpty()) append(" · ")
-                            append("Catalog: ").append(aggregated.repository.author)
-                        }
-                        if (!packageIsHttps) {
-                            if (isNotEmpty()) append(" · ")
-                            append("Gói HTTP không an toàn")
-                        }
-                    },
-                    changelog = "",
-                    packageBytes = 0,
-                    status = if (packageIsHttps) state else "INSECURE_PACKAGE_URL",
-                    // Lua-style compatibility: let the user deliberately reinstall the same version
-                    // or install an older repository version. Exact-byte preview/validation still runs.
-                    canInstall = packageIsHttps && state in setOf(
-                        "NOT_INSTALLED", "UPDATE_AVAILABLE", "VERSION_UNKNOWN", "CURRENT", "REMOTE_OLDER",
-                    ),
-                ))
+    fun repositoryPackages(): List<SourceRepositoryPackageUiInfo> {
+        if (StartupWorkGate.isBeforeFirstFrame()) return emptyList()
+        return buildList {
+            addAll(legacy.repositoryPackages())
+            val installed = vBook.installedSources().associateBy { it.repositoryId to it.remoteIdentity }
+            vBookSnapshots.forEach { (uiId, snapshot) ->
+                snapshot.items.forEach { aggregated ->
+                    val local = installed[aggregated.repositoryId to aggregated.remoteIdentity]
+                    val state = repositoryState(local?.version, aggregated.item.version)
+                    val packageIsHttps = aggregated.item.packageUrl.startsWith("https://", ignoreCase = true)
+                    add(SourceRepositoryPackageUiInfo(
+                        repositoryId = uiId,
+                        sourceId = aggregated.installIdentity,
+                        name = aggregated.item.name.ifBlank { aggregated.remoteIdentity },
+                        version = aggregated.item.version,
+                        installedVersion = local?.version,
+                        description = buildString {
+                            if (aggregated.item.description.isNotBlank()) append(aggregated.item.description.trim())
+                            if (aggregated.repository.author.isNotBlank()) {
+                                if (isNotEmpty()) append(" · ")
+                                append("Catalog: ").append(aggregated.repository.author)
+                            }
+                            if (!packageIsHttps) {
+                                if (isNotEmpty()) append(" · ")
+                                append("Gói HTTP không an toàn")
+                            }
+                        },
+                        changelog = "",
+                        packageBytes = 0,
+                        status = if (packageIsHttps) state else "INSECURE_PACKAGE_URL",
+                        // Lua-style compatibility: let the user deliberately reinstall the same version
+                        // or install an older repository version. Exact-byte preview/validation still runs.
+                        canInstall = packageIsHttps && state in setOf(
+                            "NOT_INSTALLED", "UPDATE_AVAILABLE", "VERSION_UNKNOWN", "CURRENT", "REMOTE_OLDER",
+                        ),
+                    ))
+                }
             }
-        }
-    }.distinctBy { it.repositoryId to it.sourceId }
+        }.distinctBy { it.repositoryId to it.sourceId }
+    }
 
     /** Try the native signed-repository schema first; fall back to the canonical vBook index schema. */
     fun refreshRepository(url: String): Result<SourceRepositoryUiInfo> {
@@ -151,6 +168,7 @@ class UnifiedSourcePlatformManager(
 
     /** Rehydrates saved vBook repositories. Failed/offline URLs stay subscribed and remain visible. */
     fun restorePersistedRepositories(): Int {
+        StartupWorkGate.awaitFirstFrame()
         clearPendingCatalogInstall()
         var restored = 0
         vBookRepositorySubscriptions.urls().forEach { url ->
@@ -288,7 +306,11 @@ class UnifiedSourcePlatformManager(
         legacy.cancelPendingInstall()
     }
 
-    fun trustKeys() = legacy.trustKeys()
+    fun trustKeys(): List<SourceTrustKeyUi> {
+        if (StartupWorkGate.isBeforeFirstFrame()) return emptyList()
+        return legacy.trustKeys()
+    }
+
     fun enrollTrustKey(keyId: String, algorithm: String, publicKeyBase64: String, fingerprint: String) =
         legacy.enrollTrustKey(keyId, algorithm, publicKeyBase64, fingerprint)
     fun revokeTrustKey(keyId: String) = legacy.revokeTrustKey(keyId)
@@ -378,10 +400,14 @@ class UnifiedSourcePlatformManager(
     }
 
     fun inspectSelector(html: String, selector: String, baseUrl: String) = legacy.inspectSelector(html, selector, baseUrl)
-    fun diagnosticsSnapshot(sourceId: String? = null) =
+
+    fun diagnosticsSnapshot(sourceId: String? = null) = if (StartupWorkGate.isBeforeFirstFrame()) {
+        emptyList()
+    } else {
         (legacy.diagnosticsSnapshot(sourceId) + vBook.diagnosticsSnapshot(sourceId))
             .distinct()
             .sortedBy { it.timestampEpochMs }
+    }
 
     fun diagnosticTraces(limit: Int = 20): List<SourceTraceUi> = SourceTraceExplorer.summarize(diagnosticsSnapshot())
         .take(limit.coerceIn(1, 200))

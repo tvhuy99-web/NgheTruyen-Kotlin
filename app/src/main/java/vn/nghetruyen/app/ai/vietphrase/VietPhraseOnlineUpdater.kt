@@ -294,11 +294,11 @@ class VietPhraseOnlineUpdater(
         val response = executeFollowingTrustedRedirects(request)
         response.use {
             if (!it.isSuccessful) throw IOException("HTTP ${it.code} khi tải ${url.take(160)}")
-            val declared = it.body?.contentLength() ?: -1L
+            val declared = it.body.contentLength()
             require(declared <= 0 || declared <= maxBytes) { "Tệp tải về vượt giới hạn an toàn." }
             val contentType = it.header("Content-Type").orEmpty().lowercase(Locale.ROOT)
             val output = ByteArrayOutputStream(minOf(maxBytes, 1 shl 20))
-            val input = it.body?.byteStream() ?: throw IOException("Máy chủ không trả nội dung.")
+            val input = it.body.byteStream()
             input.use { stream ->
                 val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                 var total = 0

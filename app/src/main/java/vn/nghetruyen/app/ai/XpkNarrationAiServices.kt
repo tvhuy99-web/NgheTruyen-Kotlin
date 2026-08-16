@@ -265,7 +265,7 @@ class XpkNarrationAiServices(
                         lastFailure = failure("AI_REDIRECT_BLOCKED", "Endpoint AI trả redirect; yêu cầu URL API trực tiếp.")
                         return@forEachIndexed
                     }
-                    val raw = response.body?.charStream()?.use { reader ->
+                    val raw = response.body.charStream().use { reader ->
                         buildString {
                             val buffer = CharArray(8_192)
                             while (length <= MAX_RESPONSE_CHARS) {

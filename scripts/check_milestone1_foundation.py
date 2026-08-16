@@ -193,7 +193,7 @@ def check_build_contract() -> None:
     require(
         ".github/workflows/android-ci.yml",
         "Run Milestone 0 gate",
-        "./scripts/m0_gate.sh",
+        "bash scripts/m0_gate.sh",
         "connectedDebugAndroidTest",
         "reactivecircus/android-emulator-runner@v2.37.0",
         "actions/checkout@v6",

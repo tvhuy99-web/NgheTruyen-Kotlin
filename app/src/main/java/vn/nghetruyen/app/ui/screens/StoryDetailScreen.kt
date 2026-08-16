@@ -1013,21 +1013,3 @@ private fun ReferencePercentSlider(label: String, value: Int, onChange: (Int) ->
     Text("$label: ±${value.coerceIn(0, 100)}%", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 6.dp))
     Slider(value = value.coerceIn(0, 100).toFloat(), onValueChange = { onChange(it.toInt().coerceIn(0, 100)) }, valueRange = 0f..100f, steps = 99, modifier = Modifier.fillMaxWidth().semantics { contentDescription = "$label: ±${value.coerceIn(0, 100)}%" })
 }
-
-@Composable
-private fun ReferenceFloatSlider(
-    label: String,
-    value: Float,
-    minimum: Float,
-    maximum: Float,
-    percent: Boolean = false,
-    onChange: (Float) -> Unit,
-) {
-    val shown = value.coerceIn(minimum, maximum)
-    Text(
-        if (percent) "$label: ${"%.0f".format(shown * 100)}%" else "$label: ${"%.2f".format(shown)}x",
-        fontWeight = FontWeight.SemiBold,
-        modifier = Modifier.padding(top = 6.dp),
-    )
-    Slider(value = shown, onValueChange = onChange, valueRange = minimum..maximum)
-}

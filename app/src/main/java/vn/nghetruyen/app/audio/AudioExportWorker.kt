@@ -276,13 +276,13 @@ class AudioExportWorker(
                         configured = null
                     }
                     if (voice != configured) {
-                        synthesizer!!.configure(voice)
+                        synthesizer.configure(voice)
                         configured = voice
                     }
                     val spoken = PronunciationProcessor.apply(expression.text, rules).ifBlank { expression.text }
                     val rawOutput = File(workDir, "raw-${index.toString().padStart(6, '0')}.wav")
                     val pcmOutput = File(workDir, "gain-${index.toString().padStart(6, '0')}.wav")
-                    synthesizer!!.synthesize(spoken, rawOutput, "${job.id}:$index")
+                    synthesizer.synthesize(spoken, rawOutput, "${job.id}:$index")
                     val roleExtra = role?.let { ReferenceVoiceRoleExtras.load(applicationContext, it.id) }
                     val useSonic = roleExtra?.processingMethod?.equals("sonic") ?: settings.sonicProcessingEnabled
                     val accurateSonic = roleExtra?.sonicAccurate ?: settings.sonicAccurateMode

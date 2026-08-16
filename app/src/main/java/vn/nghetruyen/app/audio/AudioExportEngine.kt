@@ -31,9 +31,3 @@ data class AudioExportRequest(
         return copy(startChapterNumber = start, endChapterNumber = end)
     }
 }
-
-data class AudioExportProgress(
-    val completedSegments: Int,
-    val totalSegments: Int,
-    val stage: String,
-)

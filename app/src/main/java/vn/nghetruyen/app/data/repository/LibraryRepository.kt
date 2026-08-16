@@ -15,6 +15,7 @@ import vn.nghetruyen.app.data.local.AiUsageDailyEntity
 import vn.nghetruyen.app.data.local.AudioExportJobEntity
 import vn.nghetruyen.app.data.local.BookmarkEntity
 import vn.nghetruyen.app.data.local.ChapterEntity
+import vn.nghetruyen.app.data.local.ChapterStorageSnapshot
 import vn.nghetruyen.app.data.local.ChapterNoteEntity
 import vn.nghetruyen.app.data.local.ChapterDownloadFailureEntity
 import vn.nghetruyen.app.data.local.ChapterTransformEntity
@@ -46,6 +47,7 @@ import vn.nghetruyen.app.data.local.StoryTtsProfileEntity
 import vn.nghetruyen.app.data.local.StoryAiProfileEntity
 import vn.nghetruyen.app.data.local.VoiceRoleEntity
 import vn.nghetruyen.app.data.local.ReadingProgressEntity
+import vn.nghetruyen.app.data.local.ReadingProgressWithChapterTitle
 import vn.nghetruyen.app.data.local.ReadingHistoryEntity
 import vn.nghetruyen.app.data.local.StoryEntity
 import java.util.Locale
@@ -59,7 +61,8 @@ data class CacheTrimResult(
 
 class LibraryRepository(private val db: AppDatabase) {
     fun observeReading(): Flow<List<StoryEntity>> = db.storyDao().observeReading()
-    fun observeReadingProgress(): Flow<List<ReadingProgressEntity>> = db.progressDao().observeAll()
+    fun observeReadingProgressWithChapterTitle(): Flow<List<ReadingProgressWithChapterTitle>> =
+        db.progressDao().observeAllWithChapterTitle()
     fun observeReadingHistory(): Flow<List<ReadingHistoryEntity>> = db.readingHistoryDao().observeRecent()
     fun observeOffline(): Flow<List<StoryEntity>> = db.storyDao().observeOffline()
     fun observeBookmarks(): Flow<List<BookmarkEntity>> = db.bookmarkDao().observeAll()
@@ -67,9 +70,7 @@ class LibraryRepository(private val db: AppDatabase) {
     fun observeFollowing(): Flow<List<FollowedStoryEntity>> = db.followingDao().observeAll()
     fun observeDownloads(): Flow<List<DownloadJobEntity>> = db.downloadJobDao().observeAll()
     fun observeDownloadFailures(): Flow<List<ChapterDownloadFailureEntity>> = db.chapterDownloadFailureDao().observeAll()
-    fun observeOfflineStorage(): Flow<List<OfflineStoryStorage>> = db.chapterDao().observeOfflineStorage()
-    fun observeDownloadedChapterIds(): Flow<List<String>> = db.chapterDao().observeDownloadedIds()
-    fun observeStorageUsage(): Flow<StorageUsage> = db.chapterDao().observeStorageUsage()
+    fun observeChapterStorageSnapshot(): Flow<List<ChapterStorageSnapshot>> = db.chapterDao().observeStorageSnapshot()
     fun observePronunciations(): Flow<List<PronunciationEntity>> = db.pronunciationDao().observeAll()
     fun observeVietPhraseRules(): Flow<List<VietPhraseEntity>> = db.vietPhraseDao().observeAll()
     fun observeVietPhraseSnapshots(): Flow<List<VietPhraseSnapshotEntity>> = db.vietPhraseSnapshotDao().observeAll()
@@ -79,12 +80,11 @@ class LibraryRepository(private val db: AppDatabase) {
     fun observeSceneMusicTracks(): Flow<List<SceneMusicTrackEntity>> = db.sceneMusicTrackDao().observeAll()
     fun observeStoryTtsProfiles(): Flow<List<StoryTtsProfileEntity>> = db.storyTtsProfileDao().observeAll()
     fun observeVoiceRoles(): Flow<List<VoiceRoleEntity>> = db.voiceRoleDao().observeAll()
+    suspend fun listAllVoiceRoles(): List<VoiceRoleEntity> = db.voiceRoleDao().listAll()
     fun observeAudioExports(): Flow<List<AudioExportJobEntity>> = db.audioExportJobDao().observeAll()
-    fun observeAiUsage(): Flow<List<AiUsageDailyEntity>> = db.aiUsageDailyDao().observeRecent()
 
     suspend fun savePlaybackCheckpoint(item: PlaybackCheckpointEntity) = db.playbackCheckpointDao().upsert(item)
     suspend fun loadPlaybackCheckpoint(): PlaybackCheckpointEntity? = db.playbackCheckpointDao().get()
-    suspend fun clearPlaybackCheckpoint() = db.playbackCheckpointDao().clear()
 
     suspend fun replacePlaybackQueue(items: List<PlaybackQueueChapterEntity>) = db.withTransaction {
         db.playbackQueueChapterDao().clear()
@@ -200,8 +200,6 @@ class LibraryRepository(private val db: AppDatabase) {
     }
 
     suspend fun getFollowing(storyId: String): FollowedStoryEntity? = db.followingDao().get(storyId)
-
-    suspend fun listFollowing(): List<FollowedStoryEntity> = db.followingDao().listAll()
 
     suspend fun listFollowingForUpdate(limit: Int): List<FollowedStoryEntity> =
         db.followingDao().listForUpdate(limit.coerceAtLeast(1))
@@ -348,9 +346,6 @@ class LibraryRepository(private val db: AppDatabase) {
 
     suspend fun getDownloadJob(jobId: String): DownloadJobEntity? = db.downloadJobDao().get(jobId)
 
-    suspend fun latestDownloadJob(storyId: String): DownloadJobEntity? =
-        db.downloadJobDao().latestForStory(storyId)
-
     suspend fun getProgress(storyId: String): ReadingProgressEntity? = db.progressDao().get(storyId)
 
     suspend fun saveProgress(storyId: String, chapterId: String, paragraphIndex: Int, totalParagraphs: Int = 0) {
@@ -388,8 +383,6 @@ class LibraryRepository(private val db: AppDatabase) {
             totalParagraphs = totalParagraphs,
         )
     }
-
-    suspend fun listOfflineChapters(storyId: String): List<ChapterEntity> = db.chapterDao().listForStory(storyId)
 
     /**
      * Chapters that can actually be opened without network access. Imported books may use every
@@ -498,9 +491,6 @@ class LibraryRepository(private val db: AppDatabase) {
 
     suspend fun listDownloadedChapterIds(storyId: String): Set<String> =
         db.chapterDao().listDownloadedIds(storyId).toHashSet()
-
-    suspend fun hasDownloadedChapter(chapterId: String): Boolean =
-        db.chapterDao().get(chapterId)?.let { it.downloadedAt != null && !it.content.isNullOrBlank() } == true
 
     suspend fun saveStoryTtsProfile(
         storyId: String,
@@ -679,10 +669,6 @@ class LibraryRepository(private val db: AppDatabase) {
         )
     }
 
-    suspend fun deleteAudioExportJob(jobId: String) {
-        db.audioExportJobDao().delete(jobId)
-    }
-
     suspend fun listExportableChapters(storyId: String): List<ChapterEntity> =
         db.chapterDao().listExportableForStory(storyId)
 
@@ -694,19 +680,11 @@ class LibraryRepository(private val db: AppDatabase) {
 
     suspend fun getChapter(chapterId: String): ChapterEntity? = db.chapterDao().get(chapterId)
 
-    suspend fun getChapterAt(storyId: String, chapterIndex: Int): ChapterEntity? =
-        db.chapterDao().getAt(storyId, chapterIndex)
-
-    suspend fun getChapterByRemoteUrl(storyId: String, remoteUrl: String): ChapterEntity? =
-        db.chapterDao().getByRemoteUrl(storyId, remoteUrl)
-
     suspend fun loadCachedChapter(chapterId: String): ChapterContent? =
         db.chapterDao().get(chapterId)?.toContentWithNeighbors()
 
     suspend fun loadCachedChapterByUrl(storyId: String, remoteUrl: String): ChapterContent? =
         db.chapterDao().getByRemoteUrl(storyId, remoteUrl)?.toContentWithNeighbors()
-
-    suspend fun loadOfflineChapter(chapterId: String): ChapterContent? = loadCachedChapter(chapterId)
 
     suspend fun loadNextCachedChapter(storyId: String, chapterIndex: Int): ChapterContent? =
         db.chapterDao().getNextAfter(storyId, chapterIndex)?.toContentWithNeighbors()

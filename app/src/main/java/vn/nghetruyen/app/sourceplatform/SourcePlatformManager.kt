@@ -862,6 +862,9 @@ class SourcePlatformManager(
     }
 
     private fun bootstrapLuaBuiltin(spec: BuiltinLuaSourceSpec) {
+        builtinSourceIds += spec.sourceId
+        if (isBuiltinRemoved(spec.sourceId) || store.hasStoredSource(spec.sourceId, spec.sourceSha256)) return
+
         runCatching {
             val legacyPack = runCatching { readLegacyBuiltinPack(spec.legacySourcePackAsset) }
                 .onFailure { error ->
@@ -948,7 +951,7 @@ class SourcePlatformManager(
             } == true) { "BUILTIN_LUA_INSTALL_NOT_VISIBLE:${spec.sourceId}" }
 
             if (legacyIsExactBundledCopy && exactActive) {
-                if (installedByBootstrap && legacyInstalled != null && legacyInstalled.enabled != exactInstalled.enabled) {
+                if (installedByBootstrap && legacyInstalled.enabled != exactInstalled.enabled) {
                     when (val result = store.setEnabled(imported.manifest.id, legacyInstalled.enabled)) {
                         is SourcePlatformResult.Success -> Unit
                         is SourcePlatformResult.Failure -> error("${result.error.code}: ${result.error.message}")

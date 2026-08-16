@@ -9,50 +9,68 @@ import kotlinx.coroutines.withTimeout
 import vn.nghetruyen.app.core.common.AppResult
 import vn.nghetruyen.app.core.model.TtsEngineOption
 import vn.nghetruyen.app.core.model.TtsVoiceOption
+import vn.nghetruyen.app.startup.StartupWorkGate
 import java.util.Locale
 
 class TtsVoiceCatalog(context: Context) {
     private val appContext = context.applicationContext
 
-    suspend fun loadEngines(): AppResult<List<TtsEngineOption>> = withEngine(null) { engine ->
-        val defaultPackage = engine.defaultEngine
-        engine.engines.orEmpty()
-            .map { info ->
-                TtsEngineOption(
-                    packageName = info.name,
-                    label = info.label?.toString()?.ifBlank { info.name } ?: info.name,
-                    isDefault = info.name == defaultPackage,
-                )
-            }
-            .distinctBy(TtsEngineOption::packageName)
-            .sortedWith(compareByDescending<TtsEngineOption> { it.isDefault }.thenBy { it.label.lowercase() })
+    @Volatile
+    private var skipNextVoiceLoad = false
+
+    suspend fun loadEngines(): AppResult<List<TtsEngineOption>> {
+        if (StartupWorkGate.isBeforeFirstFrame()) {
+            skipNextVoiceLoad = true
+            return AppResult.Success(emptyList())
+        }
+        skipNextVoiceLoad = false
+        return withEngine(null) { engine ->
+            val defaultPackage = engine.defaultEngine
+            engine.engines.orEmpty()
+                .map { info ->
+                    TtsEngineOption(
+                        packageName = info.name,
+                        label = info.label?.toString()?.ifBlank { info.name } ?: info.name,
+                        isDefault = info.name == defaultPackage,
+                    )
+                }
+                .distinctBy(TtsEngineOption::packageName)
+                .sortedWith(compareByDescending<TtsEngineOption> { it.isDefault }.thenBy { it.label.lowercase() })
+        }
     }
 
-    suspend fun load(enginePackage: String? = null): AppResult<List<TtsVoiceOption>> = withEngine(enginePackage) { engine ->
-        engine.voices.orEmpty()
-            .map { voice ->
-                val locale = voice.locale
-                TtsVoiceOption(
-                    name = voice.name,
-                    displayName = buildString {
-                        append(locale.getDisplayName(Locale.forLanguageTag("vi-VN")).ifBlank { locale.toLanguageTag() })
-                        append(" • ")
-                        append(voice.name.substringAfterLast('.'))
-                        if (voice.isNetworkConnectionRequired) append(" • mạng")
-                    },
-                    languageTag = locale.toLanguageTag().ifBlank { "und" },
-                    networkRequired = voice.isNetworkConnectionRequired,
-                    quality = voice.quality,
-                    enginePackage = enginePackage ?: engine.defaultEngine,
+    suspend fun load(enginePackage: String? = null): AppResult<List<TtsVoiceOption>> {
+        if (skipNextVoiceLoad) {
+            skipNextVoiceLoad = false
+            return AppResult.Success(emptyList())
+        }
+        if (StartupWorkGate.isBeforeFirstFrame()) return AppResult.Success(emptyList())
+        return withEngine(enginePackage) { engine ->
+            engine.voices.orEmpty()
+                .map { voice ->
+                    val locale = voice.locale
+                    TtsVoiceOption(
+                        name = voice.name,
+                        displayName = buildString {
+                            append(locale.getDisplayName(Locale.forLanguageTag("vi-VN")).ifBlank { locale.toLanguageTag() })
+                            append(" • ")
+                            append(voice.name.substringAfterLast('.'))
+                            if (voice.isNetworkConnectionRequired) append(" • mạng")
+                        },
+                        languageTag = locale.toLanguageTag().ifBlank { "und" },
+                        networkRequired = voice.isNetworkConnectionRequired,
+                        quality = voice.quality,
+                        enginePackage = enginePackage ?: engine.defaultEngine,
+                    )
+                }
+                .distinctBy(TtsVoiceOption::name)
+                .sortedWith(
+                    compareByDescending<TtsVoiceOption> { it.languageTag.startsWith("vi", ignoreCase = true) }
+                        .thenBy { it.networkRequired }
+                        .thenByDescending { it.quality }
+                        .thenBy { it.displayName },
                 )
-            }
-            .distinctBy(TtsVoiceOption::name)
-            .sortedWith(
-                compareByDescending<TtsVoiceOption> { it.languageTag.startsWith("vi", ignoreCase = true) }
-                    .thenBy { it.networkRequired }
-                    .thenByDescending { it.quality }
-                    .thenBy { it.displayName },
-            )
+        }
     }
 
     private suspend fun <T> withEngine(

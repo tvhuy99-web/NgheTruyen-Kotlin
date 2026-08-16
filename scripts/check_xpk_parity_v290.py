@@ -162,6 +162,28 @@ def verify_screen_calls() -> None:
                 )
 
 
+def verify_version_floor() -> None:
+    """Keep the 2.9.0 parity baseline while allowing normal future version bumps."""
+    build = source("app/build.gradle.kts")
+    code_match = re.search(r"\bversionCode\s*=\s*(\d+)", build)
+    name_match = re.search(r'\bversionName\s*=\s*"([^"]+)"', build)
+    if code_match is None or name_match is None:
+        raise AssertionError("app/build.gradle.kts: cannot parse versionCode/versionName")
+
+    version_code = int(code_match.group(1))
+    core_name = name_match.group(1).split("-", 1)[0]
+    parts = core_name.split(".")
+    if len(parts) != 3 or any(not part.isdigit() for part in parts):
+        raise AssertionError(f"app/build.gradle.kts: invalid semantic version: {name_match.group(1)}")
+    semantic = tuple(int(part) for part in parts)
+
+    if version_code < 33 or semantic < (2, 9, 0):
+        raise AssertionError(
+            "app/build.gradle.kts: XPK parity requires versionCode >= 33 and versionName >= 2.9.0; "
+            f"found versionCode={version_code}, versionName={name_match.group(1)}",
+        )
+
+
 def verify_history_migration() -> None:
     database = source("app/src/main/java/vn/nghetruyen/app/data/local/AppDatabase.kt")
     match = re.search(
@@ -334,11 +356,7 @@ def main() -> int:
         "app/src/main/java/vn/nghetruyen/app/sourceplatform/SourcePlatformManager.kt",
         "SemanticVersion.parse(BuildConfig.VERSION_NAME)",
     )
-    require(
-        "app/build.gradle.kts",
-        "versionCode = 33",
-        'versionName = "2.9.0-xpk-parity"',
-    )
+    verify_version_floor()
 
     verify_screen_calls()
     verify_history_migration()

@@ -106,7 +106,7 @@ class OnlineAiServices(
         )
         try {
             client.newCall(request).execute().use { response ->
-                val raw = response.body?.charStream()?.use { reader ->
+                val raw = response.body.charStream().use { reader ->
                     buildString {
                         val buffer = CharArray(8_192)
                         while (length <= MAX_MODEL_LIST_CHARS) {
@@ -599,7 +599,7 @@ class OnlineAiServices(
                         if (response.isRedirect) {
                             lastFailure = failure("AI_REDIRECT_BLOCKED", "Endpoint AI trả redirect; yêu cầu URL API trực tiếp.")
                         } else {
-                            val raw = response.body?.charStream()?.use { reader ->
+                            val raw = response.body.charStream().use { reader ->
                                 buildString {
                                     val buffer = CharArray(8_192)
                                     while (length <= MAX_RESPONSE_CHARS) {

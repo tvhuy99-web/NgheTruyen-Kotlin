@@ -56,7 +56,12 @@ checks = {
         '"settings_diagnostics" -> PersonalSubPage("CHẨN ĐOÁN")' in personal
         and "SourceDiagnosticsSection(" in personal
     ),
-    "large live event window": "takeLast(2_000)" in vm and "visibleDiagnosticSummaries" in vm,
+    "large live event window is bounded and lazy": (
+        "takeLast(2_000)" in vm
+        and "diagnosticSummaries" in vm
+        and "shouldMaterializeDiagnosticDetails" in vm
+        and "refreshDiagnosticUi(loadDetails = visible || shouldMaterializeDiagnosticDetails())" in vm
+    ),
     "large live trace window": "diagnosticTraces(100)" in vm,
     "shared app diagnostic mark API": "fun mark(" in runtime and "DIAGNOSTICS_MODE_CHANGED" in runtime,
     "three diagnostic modes": all(token in runtime for token in (

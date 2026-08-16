@@ -20,7 +20,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.serialization import load_der_public_key
 
 ROOT = Path(__file__).resolve().parents[1]
-PACK_NAMES = ["demo", "truyenfull", "truyencv", "truyencom", "truyenyy", "wikidich", "sangtacviet", "wattpad"]
+PACK_NAMES = ["truyenfull", "truyencv", "truyencom", "truyenyy", "wikidich", "sangtacviet", "wattpad"]
 DECLARATIVE = ["truyenfull", "truyencv", "truyencom", "truyenyy", "wikidich", "sangtacviet"]
 
 
@@ -291,8 +291,7 @@ def main() -> None:
         pack = assets / f"{name}.ntsource"
         assert pack.is_file(), f"missing built-in pack {pack.name}"
         signers[name] = verify_pack(pack, keys)
-    assert signers["demo"] == "nghe-truyen-builtin-p256-v1"
-    for name in PACK_NAMES[1:]:
+    for name in PACK_NAMES:
         assert signers[name] == "nghe-truyen-priority1-p256-v2", f"unexpected signer for {name}"
 
     fixture_count = 0

@@ -52,7 +52,7 @@ object SourceOriginPolicy {
         val uri = runCatching { URI(rawUrl) }.getOrNull() ?: error("SOURCE_NETWORK_URL_INVALID")
         val network = manifest.capabilities.network
         val publicInternet = network?.publicInternet == true
-        val cleartext = publicInternet && network?.allowCleartext == true
+        val cleartext = publicInternet && network.allowCleartext
         val scheme = uri.scheme?.lowercase(Locale.ROOT)
         require(scheme == "https" || (cleartext && scheme == "http")) {
             if (scheme == "http") "SOURCE_NETWORK_CLEARTEXT_DENIED" else "SOURCE_NETWORK_HTTPS_REQUIRED"

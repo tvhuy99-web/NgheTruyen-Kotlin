@@ -3,6 +3,7 @@ package vn.nghetruyen.app
 import android.app.Application
 import android.webkit.WebView
 import vn.nghetruyen.app.ai.vietphrase.ReferenceVietPhraseRuntime
+import vn.nghetruyen.app.playback.ChapterPaginationDiagnostics
 import vn.nghetruyen.app.sourceplatform.AndroidChromiumVBookRuntime
 import vn.nghetruyen.app.sourceplatform.ChromiumVBookBrowserReplayRuntime
 import vn.nghetruyen.app.sourceplatform.ChromiumVBookDispatcherParityRuntime
@@ -14,6 +15,8 @@ import vn.nghetruyen.app.sourceplatform.replayAwareChromiumDiagnostics
 import vn.nghetruyen.source.api.SourceErrorCode
 import vn.nghetruyen.source.api.SourcePlatformFailure
 import vn.nghetruyen.source.api.SourcePlatformResult
+import vn.nghetruyen.source.diagnostics.DiagnosticCategory
+import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 import vn.nghetruyen.source.vbook.VBookActionRuntime
 import vn.nghetruyen.source.vbook.VBookActionRuntimeRegistry
 import java.util.IdentityHashMap
@@ -27,6 +30,15 @@ class NgheTruyenApplication : Application() {
         super.onCreate()
         registerActivityLifecycleCallbacks(DiagnosticScreenRestoreLifecycleCallbacks())
         SourceBrowserViewportHost.initialize(this)
+        ChapterPaginationDiagnostics.install { name, isError, attributes ->
+            container.sourceDiagnostics.mark(
+                name = name,
+                category = DiagnosticCategory.RUNTIME,
+                severity = if (isError) DiagnosticSeverity.ERROR else DiagnosticSeverity.DEBUG,
+                sourceId = "app",
+                attributes = attributes,
+            )
+        }
         VBookActionRuntimeRegistry.install { brokers, diagnostics ->
             if (WebView.getCurrentWebViewPackage() == null) {
                 VBookActionRuntime { _, _, request ->

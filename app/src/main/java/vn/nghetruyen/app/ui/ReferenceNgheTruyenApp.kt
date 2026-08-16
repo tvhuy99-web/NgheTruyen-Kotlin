@@ -50,7 +50,7 @@ fun ReferenceNgheTruyenApp(
     onTogglePlayback: () -> Unit,
     onFollowingUpdatesChange: (Boolean) -> Unit,
 ) {
-    val state by viewModel.state.collectAsStateWithLifecycle()
+    val state by viewModel.compositionState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val app = LocalContext.current.applicationContext as NgheTruyenApplication
     val diagnosticScreenKey = referenceDiagnosticScreenKey(state)
@@ -87,6 +87,7 @@ fun ReferenceNgheTruyenApp(
                     state = state,
                     onExport = onExportSourceDiagnostics,
                     onClear = viewModel::clearSourceDiagnostics,
+                    onVisibilityChanged = viewModel::setDiagnosticOverlayVisible,
                 )
                 if (state.destination == Destination.Root) {
                     ReferencePrimaryBottomBar(selected = state.rootTab, onSelect = viewModel::setRootTab)
@@ -192,6 +193,7 @@ fun ReferenceNgheTruyenApp(
                         onDiagnosticsModeChange = viewModel::setDiagnosticsMode,
                         onDiagnosticScreenChanged = { key ->
                             app.container.sourceDiagnostics.onScreenChanged("personal:$key")
+                            viewModel.onPersonalPageChanged(key)
                         },
                         onHeadsetMultiClickChange = viewModel::setHeadsetMultiClickEnabled,
                         onHeadsetSingleActionChange = viewModel::setHeadsetSingleClickAction,

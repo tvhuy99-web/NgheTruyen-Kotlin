@@ -16,7 +16,7 @@ import java.time.Duration
 import java.util.LinkedHashMap
 
 class HttpHtmlClient(
-    private val client: OkHttpClient = defaultClient(),
+    private val client: OkHttpClient = SHARED_CLIENT,
     private val maxResponseBytes: Int = DEFAULT_MAX_RESPONSE_BYTES,
     private val userAgent: String = DEFAULT_USER_AGENT,
     private val governor: HostRequestGovernor = HostRequestGovernor(),
@@ -127,7 +127,7 @@ class HttpHtmlClient(
 
         private val REDIRECT_STATUS_CODES = setOf(301, 302, 303, 307, 308)
 
-        private fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
+        private val SHARED_CLIENT: OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(Duration.ofSeconds(15))
             .readTimeout(Duration.ofSeconds(30))
             .callTimeout(Duration.ofSeconds(45))

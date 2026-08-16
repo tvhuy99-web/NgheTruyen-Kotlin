@@ -15,7 +15,7 @@ import java.util.LinkedHashMap
 /** HTTPS-only bounded text client used by sources that intentionally consume
  * plain text/Markdown rather than DOM HTML. Redirects are checked per hop. */
 class HttpTextClient(
-    private val client: OkHttpClient = defaultClient(),
+    private val client: OkHttpClient = SHARED_CLIENT,
     private val maxResponseBytes: Int = DEFAULT_MAX_RESPONSE_BYTES,
     private val governor: HostRequestGovernor = HostRequestGovernor(),
     private val cacheTtlMillis: Long = DEFAULT_CACHE_TTL_MILLIS,
@@ -99,7 +99,7 @@ class HttpTextClient(
         const val MAX_REDIRECTS = 5
         private val REDIRECT_CODES = setOf(301, 302, 303, 307, 308)
 
-        private fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
+        private val SHARED_CLIENT: OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(Duration.ofSeconds(15))
             .readTimeout(Duration.ofSeconds(30))
             .callTimeout(Duration.ofSeconds(45))

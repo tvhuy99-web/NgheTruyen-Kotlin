@@ -7,8 +7,13 @@ import org.json.JSONObject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import vn.nghetruyen.app.BuildConfig
+import vn.nghetruyen.app.startup.StartupWorkGate
 import vn.nghetruyen.source.diagnostics.BoundedDiagnosticEvidenceRecorder
 import vn.nghetruyen.source.diagnostics.BoundedDiagnosticRecorder
 import vn.nghetruyen.source.diagnostics.DiagnosticCategory
@@ -62,7 +67,9 @@ data class DiagnosticActiveOperation(
 class SourceDiagnosticRuntime(private val context: Context) {
     private val prefs = context.getSharedPreferences("source_diagnostics", Context.MODE_PRIVATE)
     private val activityTracker = DiagnosticActivityTracker()
-    private val criticalStore = CriticalDiagnosticStore(context)
+    private val diskScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val criticalStoreDelegate = lazy { CriticalDiagnosticStore(context) }
+    private val criticalStore by criticalStoreDelegate
     private val continuousStoreDelegate = lazy { ContinuousDiagnosticStore(context) }
     private val continuousStore by continuousStoreDelegate
     private val changeVersion = MutableStateFlow(0L)
@@ -76,18 +83,19 @@ class SourceDiagnosticRuntime(private val context: Context) {
     }
 
     private val criticalMirror = DiagnosticSink { event ->
+        if (!PersistentCriticalDiagnosticPolicy.shouldPersist(event)) return@DiagnosticSink
         criticalStore.emit(event)
-        if (PersistentCriticalDiagnosticPolicy.shouldPersist(event)) signalChanged()
+        signalChanged()
     }
     private val mirror = DiagnosticSink { event ->
         activityTracker.emit(event)
-        if (mode == MODE_CONTINUOUS) continuousStore.emit(event)
+        if (mode == MODE_CONTINUOUS) continuousStoreForWrite().emit(event)
         signalChanged()
     }
     private val evidenceMirror = object : DiagnosticEvidenceSink {
         override val enabled: Boolean get() = mode == MODE_CONTINUOUS
         override fun capture(evidence: DiagnosticEvidence) {
-            if (mode == MODE_CONTINUOUS) continuousStore.capture(evidence)
+            if (mode == MODE_CONTINUOUS) continuousStoreForWrite().capture(evidence)
             signalChanged()
         }
     }
@@ -116,10 +124,26 @@ class SourceDiagnosticRuntime(private val context: Context) {
         val restoredMode = normalizeMode(prefs.getString(KEY_MODE, MODE_OFF).orEmpty())
         mode = restoredMode
         applyMode(restoredMode)
-        if (restoredMode == MODE_CONTINUOUS) {
-            recorder.restore(continuousStore.restoreRecentEvents(MAX_IN_MEMORY_EVENTS))
+        if (StartupWorkGate.isBeforeFirstFrame()) {
+            diskScope.launch {
+                if (StartupWorkGate.awaitFirstFrame()) hydratePersistentState()
+            }
+        } else {
+            hydratePersistentState()
+        }
+    }
+
+    private fun hydratePersistentState() {
+        criticalStore
+        if (mode == MODE_CONTINUOUS) {
+            recorder.restore(continuousStoreForWrite().restoreRecentEvents(MAX_IN_MEMORY_EVENTS))
             restoreCriticalHistory()
         }
+        signalChanged()
+    }
+
+    private fun continuousStoreForWrite(): ContinuousDiagnosticStore = continuousStore.apply {
+        enabled = mode == MODE_CONTINUOUS
     }
 
     fun setMode(requested: String): String {
@@ -287,6 +311,11 @@ class SourceDiagnosticRuntime(private val context: Context) {
 
     fun persistentCriticalCount(): Int = criticalStore.eventCount
 
+    fun cachedPersistentCriticalCount(): Int =
+        if (criticalStoreDelegate.isInitialized()) criticalStore.eventCount else 0
+
+    fun sessionEventCount(): Int = recorder.stats().itemCount
+
     /**
      * Durable install/import history is visible as a fallback only while session diagnostics are off.
      * Screen/continuous modes must never mix old persisted failures into their live timeline.
@@ -406,10 +435,8 @@ class SourceDiagnosticRuntime(private val context: Context) {
             else -> DiagnosticLevel.OFF
         }
         evidence.enabled = value == MODE_SCREEN || value == MODE_CONTINUOUS
-        if (value == MODE_CONTINUOUS) {
-            continuousStore.enabled = true
-        } else if (continuousStoreDelegate.isInitialized()) {
-            continuousStore.enabled = false
+        if (continuousStoreDelegate.isInitialized()) {
+            continuousStore.enabled = value == MODE_CONTINUOUS
         }
         if (value == MODE_OFF) activityTracker.clear()
     }

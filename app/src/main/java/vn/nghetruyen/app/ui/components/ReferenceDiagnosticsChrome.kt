@@ -14,6 +14,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -40,13 +41,23 @@ fun ReferenceDiagnosticsChrome(
     state: MainUiState,
     onExport: () -> Unit,
     onClear: () -> Unit,
+    onVisibilityChanged: (Boolean) -> Unit = {},
 ) {
-    if (state.diagnosticsMode == "off" && state.diagnosticPersistentCriticalCount == 0) return
-
     var showLog by remember { mutableStateOf(false) }
     LaunchedEffect(state.diagnosticsMode) {
-        if (state.diagnosticsMode == "off") showLog = false
+        if (state.diagnosticsMode == "off") {
+            showLog = false
+            onVisibilityChanged(false)
+        }
     }
+    LaunchedEffect(showLog) {
+        onVisibilityChanged(showLog)
+    }
+    DisposableEffect(Unit) {
+        onDispose { onVisibilityChanged(false) }
+    }
+
+    if (state.diagnosticsMode == "off" && state.diagnosticPersistentCriticalCount == 0) return
 
     val recording = state.diagnosticActiveOperations.isNotEmpty()
     val label = when {
@@ -71,7 +82,7 @@ fun ReferenceDiagnosticsChrome(
             state = state,
             onExport = onExport,
             onClear = onClear,
-            onDismiss = { showLog = false },
+            onDismiss = { showLog = false; onVisibilityChanged(false) },
         )
     }
 }

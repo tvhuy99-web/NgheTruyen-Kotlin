@@ -44,11 +44,13 @@ class AppContainer(context: Context) {
     val settingsRepository: SettingsRepository by lazy { SettingsRepository(appContext) }
     val libraryRepository: LibraryRepository by lazy { LibraryRepository(database) }
     val sourceSessionStore: EncryptedSourceSessionStore by lazy { EncryptedSourceSessionStore(appContext) }
-    val sourceDiagnostics: SourceDiagnosticRuntime = SourceDiagnosticRuntime(appContext)
-    private val screenScopedSourceEvidence = ScreenScopedDiagnosticEvidenceSink(
-        scope = sourceDiagnostics.recorder,
-        delegate = sourceDiagnostics.evidence,
-    )
+    val sourceDiagnostics: SourceDiagnosticRuntime by lazy { SourceDiagnosticRuntime(appContext) }
+    private val screenScopedSourceEvidence by lazy {
+        ScreenScopedDiagnosticEvidenceSink(
+            scope = sourceDiagnostics.recorder,
+            delegate = sourceDiagnostics.evidence,
+        )
+    }
 
     private val vBookQuickTranslationInstalled: Unit by lazy {
         AndroidVBookQuickTranslationRegistry.install(libraryRepository)

@@ -45,6 +45,7 @@ def static_gate() -> None:
         "!snapshot.storyCommentsRefreshable",
         "current.storyDetail?.story?.id != detail.story.id",
         "commentsLoadJob?.cancel()",
+        "storyCommentsFromCache",
     ):
         assert token in vm, token
     for token in (
@@ -53,7 +54,6 @@ def static_gate() -> None:
         "state.storyComments",
         "onLoadComments(false)",
         "TẢI THÊM BÌNH LUẬN",
-        "state.storyCommentsFromCache",
         "onLoadMoreComments",
     ):
         assert token in ui, token

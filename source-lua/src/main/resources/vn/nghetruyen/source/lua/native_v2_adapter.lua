@@ -766,8 +766,8 @@ function Adapter.build(sourceInput, metadata, options)
     ["native_v2_stories.js"] = wrapper("stories", "input, page", [[{input: input || "", query: input || "", page: page || "", url: input || ""}]]),
     ["native_v2_latest.js"] = wrapper("latest", "input, page", [[{input: input || "", query: input || "", page: page || "", url: input || ""}]]),
     ["native_v2_detail.js"] = actions.detail and wrapper("detail", "url", [[{input: url || "", url: url || ""}]]) or [[function execute(url) { return Response.success({name:String(url || "Truyện"), url:String(url || "")}); }]],
-    -- In the Lua application the current TOC URL doubles as the opaque page token. Preserve that
-    -- contract so paged chapter sources can inspect `$page` as well as `$input`.
+                                                                                                 
+                                                                                 
     ["native_v2_toc.js"] = wrapper("chapters", "url", [[{input: url || "", page: url || "", url: url || ""}]]),
     ["native_v2_chap.js"] = wrapper("content", "url", [[{input: url || "", url: url || ""}]]),
   }
@@ -809,8 +809,8 @@ function Adapter.build(sourceInput, metadata, options)
     "}",
   }, "\n")
 
-  -- SourcePack HOME is a story feed, unlike vBook's home.js menu of shortcut descriptors. Route it
-  -- to the Lua source's real feed action so valid Native results are not normalized to an empty list.
+                                                                                                   
+                                                                                                      
   local homeAction = actions.latest and "latest" or (actions.stories and "stories" or (actions.search and "search" or nil))
   if homeAction then
     files["native_v2_home.js"] = wrapper(homeAction, "input, page", [[{input: input || "", query: input || "", page: page || "", url: input || ""}]])

@@ -1777,10 +1777,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         mutableState.update { it.copy(storyAdvancedOptionsRequested = false, storyAdvancedOptionsMode = null) }
     }
 
-    fun openStoryAiOptions() = openStoryAdvancedOptions("ai")
-
-    fun openStoryVoiceCastOptions() = openStoryAdvancedOptions("voice")
-
     private fun openStoryAdvancedOptions(mode: String) {
         mutableState.update { it.copy(storyAdvancedOptionsRequested = true, storyAdvancedOptionsMode = mode, loading = false) }
     }
@@ -4534,8 +4530,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun transformId(chapterId: String, kind: String) = UUID.nameUUIDFromBytes("$chapterId\u0000$kind".toByteArray()).toString()
-    private fun assignmentId(chapterId: String, paragraphIndex: Int) = UUID.nameUUIDFromBytes("$chapterId\u0000voice\u0000$paragraphIndex".toByteArray()).toString()
-    private fun sceneCueId(chapterId: String, paragraphIndex: Int) = UUID.nameUUIDFromBytes("$chapterId\u0000scene\u0000$paragraphIndex".toByteArray()).toString()
 
     fun back() {
         when (state.value.destination) {

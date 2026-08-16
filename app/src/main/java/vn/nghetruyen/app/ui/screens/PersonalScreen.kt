@@ -462,14 +462,12 @@ fun PersonalScreen(
             InstalledSourcesSection(
                 state = state,
                 onEnabledChange = onSourcePackEnabledChange,
-                onRollback = onRollbackSourcePack,
                 onUpdate = onUpdateSourcePack,
                 onExport = onExportSourcePack,
                 onRemove = onRemoveSourcePack,
                 onCheck = onCheckSourcePack,
                 onSaveConfig = onSaveSourceConfig,
                 onResetConfig = onResetSourceConfig,
-                onLogin = onOpenSourceLogin,
                 onExportDiagnostics = onExportSourceDiagnostics,
                 onClearDiagnostics = onClearSourceDiagnostics,
             )
@@ -1031,25 +1029,6 @@ private fun extensionEditDistance(left: String, right: String, limit: Int): Int?
     return previous[right.length].takeIf { it <= limit }
 }
 
-private fun extensionDiagnosticLabel(name: String, severity: String): String {
-    val action = when {
-        name.contains("INSTALL", ignoreCase = true) -> "Cài đặt tiện ích"
-        name.contains("PACKAGE", ignoreCase = true) || name.contains("FETCH", ignoreCase = true) -> "Tải dữ liệu"
-        name.contains("NETWORK", ignoreCase = true) || name.contains("HTTP", ignoreCase = true) -> "Kết nối mạng"
-        name.contains("PARSE", ignoreCase = true) || name.contains("PARSER", ignoreCase = true) -> "Phân tích dữ liệu"
-        name.contains("BROWSER", ignoreCase = true) || name.contains("WEBVIEW", ignoreCase = true) -> "Trình duyệt"
-        name.contains("LOGIN", ignoreCase = true) || name.contains("SESSION", ignoreCase = true) -> "Phiên đăng nhập"
-        name.contains("ACTION", ignoreCase = true) || name.contains("RUNTIME", ignoreCase = true) -> "Chạy tiện ích"
-        else -> name.replace('_', ' ').lowercase(Locale.ROOT).replaceFirstChar { it.titlecase(Locale.ROOT) }
-    }
-    return when {
-        severity.equals("ERROR", ignoreCase = true) || name.contains("FAILED", ignoreCase = true) -> "$action thất bại"
-        name.contains("STARTED", ignoreCase = true) -> "Bắt đầu $action"
-        name.contains("COMPLETED", ignoreCase = true) || name.contains("SUCCEEDED", ignoreCase = true) -> "$action hoàn tất"
-        else -> action
-    }
-}
-
 private fun repositoryUpdatedLabel(epochMs: Long): String = if (epochMs > 0L) {
     "Cập nhật: ${SimpleDateFormat("HH:mm dd/MM/yyyy", Locale.getDefault()).format(Date(epochMs))}"
 } else {
@@ -1060,14 +1039,12 @@ private fun repositoryUpdatedLabel(epochMs: Long): String = if (epochMs > 0L) {
 private fun InstalledSourcesSection(
     state: MainUiState,
     onEnabledChange: (String, Boolean) -> Unit,
-    onRollback: (String) -> Unit,
     onUpdate: (String) -> Unit,
     onExport: (String, String) -> Unit,
     onRemove: (String) -> Unit,
     onCheck: (String) -> Unit,
     onSaveConfig: (String, Map<String, String>) -> Unit,
     onResetConfig: (String) -> Unit,
-    onLogin: (String) -> Unit,
     onExportDiagnostics: () -> Unit,
     onClearDiagnostics: () -> Unit,
 ) {
@@ -1078,11 +1055,6 @@ private fun InstalledSourcesSection(
     var removePackId by remember { mutableStateOf<String?>(null) }
     var logPackId by remember { mutableStateOf<String?>(null) }
     var installedQuery by remember { mutableStateOf("") }
-
-    // Kept in the signature because the runtime still supports them, but the primary action
-    // surface intentionally follows the Lua menu and therefore does not expose these here.
-    @Suppress("UNUSED_VARIABLE")
-    val retainedRuntimeActions = listOf(onRollback, onLogin)
 
     val rankedPacks = state.sourcePacks.mapNotNull { pack ->
         val searchable = listOf(

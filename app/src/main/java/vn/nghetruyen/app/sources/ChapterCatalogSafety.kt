@@ -100,7 +100,8 @@ private fun recoverNextPageUrl(currentPageUrl: String, entries: List<PagerEntry>
 
 private fun truyenFullPagerPage(url: String): Int? {
     if (!url.contains("#list-chapter", ignoreCase = true)) return null
-    return truyenFullPageNumber(url)
+    // TruyenFull links page 1 back to the story root instead of /trang-1/.
+    return truyenFullPageNumber(url) ?: 1
 }
 
 private fun truyenFullPageNumber(url: String): Int? {

@@ -24,7 +24,8 @@ internal fun roomObserverGroupsForUi(
     librarySection: LibrarySection,
 ): Set<RoomObserverGroup> = when (destination) {
     Destination.Root -> when (rootTab) {
-        RootTab.EXPLORE, RootTab.PERSONAL -> emptySet()
+        RootTab.EXPLORE -> emptySet()
+        RootTab.PERSONAL -> setOf(RoomObserverGroup.VOICE_ROLES)
         RootTab.LIBRARY -> when (librarySection) {
             LibrarySection.READING -> setOf(
                 RoomObserverGroup.READING,

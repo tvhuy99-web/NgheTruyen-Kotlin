@@ -15,21 +15,6 @@ import vn.nghetruyen.app.core.model.DownloadSelectionMode
 class DownloadScheduler(context: Context) {
     private val workManager = WorkManager.getInstance(context.applicationContext)
 
-    fun enqueueStory(
-        sourceId: String,
-        storyId: String,
-        wifiOnly: Boolean = false,
-        chargingOnly: Boolean = false,
-    ): DownloadRequest = enqueue(
-        DownloadRequest.create(
-            sourceId = sourceId,
-            storyId = storyId,
-            selectionMode = DownloadSelectionMode.ALL,
-            wifiOnly = wifiOnly,
-            chargingOnly = chargingOnly,
-        ),
-    )
-
     fun enqueueUnread(
         sourceId: String,
         storyId: String,

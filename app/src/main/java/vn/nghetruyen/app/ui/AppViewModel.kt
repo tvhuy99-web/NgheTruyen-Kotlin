@@ -2231,14 +2231,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun openLibraryStory(entity: StoryEntity) {
-        if (entity.sourceId == "offline") {
-            openOfflineStory(entity)
-        } else {
-            openRemoteStory(entity.toStorySummary())
-        }
-    }
-
     fun openReadingStoryFromLibrary(entity: StoryEntity) {
         viewModelScope.launch {
             val progress = container.libraryRepository.getProgress(entity.id)

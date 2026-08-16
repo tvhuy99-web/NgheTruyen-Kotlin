@@ -1,0 +1,236 @@
+name: One-shot voice role state repair
+
+on:
+  push:
+    branches: [agent/remove-unused-files]
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Repair voice-role state synchronization
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          repo = Path('app/src/main/java/vn/nghetruyen/app/data/repository/LibraryRepository.kt')
+          text = repo.read_text(encoding='utf-8')
+          old = '    fun observeVoiceRoles(): Flow<List<VoiceRoleEntity>> = db.voiceRoleDao().observeAll()\n'
+          new = old + '    suspend fun listAllVoiceRoles(): List<VoiceRoleEntity> = db.voiceRoleDao().listAll()\n'
+          if old not in text:
+              raise SystemExit('LibraryRepository voice-role observer marker missing')
+          if 'suspend fun listAllVoiceRoles()' not in text:
+              text = text.replace(old, new, 1)
+          repo.write_text(text, encoding='utf-8')
+
+          vm = Path('app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt')
+          text = vm.read_text(encoding='utf-8')
+
+          old = '''    fun onPersonalPageChanged(page: String) {
+        activePersonalPage = page
+        mutablePersonalPage.value = page
+        ensureRoomObserversForPersonalPage(page)
+        val needsSourcePlatform = page.startsWith("extensions_") || page == "settings_diagnostics"
+'''
+          new = '''    fun onPersonalPageChanged(page: String) {
+        activePersonalPage = page
+        mutablePersonalPage.value = page
+        ensureRoomObserversForPersonalPage(page)
+        if (page == "settings_automation") {
+            viewModelScope.launch { refreshVoiceRolesFromDatabase(seedGlobals = true) }
+        }
+        val needsSourcePlatform = page.startsWith("extensions_") || page == "settings_diagnostics"
+'''
+          if old not in text:
+              raise SystemExit('onPersonalPageChanged marker missing')
+          text = text.replace(old, new, 1)
+
+          marker = '    private fun shouldMaterializeDiagnosticDetails(): Boolean =\n'
+          helper = '''    private suspend fun refreshVoiceRolesFromDatabase(seedGlobals: Boolean = false) {
+        val (roles, error) = withContext(Dispatchers.IO) {
+            var failure: Throwable? = null
+            if (seedGlobals) {
+                runCatching { container.libraryRepository.ensureGlobalVoiceProfiles() }
+                    .onFailure { failure = it }
+            }
+            val loaded = runCatching { container.libraryRepository.listAllVoiceRoles() }
+                .onFailure { failure = it }
+                .getOrDefault(emptyList())
+            loaded to failure
+        }
+        mutableState.update { current ->
+            current.copy(
+                voiceRoles = roles,
+                message = error?.let { it.message ?: "Không nạp được hồ sơ giọng." } ?: current.message,
+            )
+        }
+    }
+
+'''
+          if marker not in text:
+              raise SystemExit('diagnostic helper marker missing')
+          if 'private suspend fun refreshVoiceRolesFromDatabase' not in text:
+              text = text.replace(marker, helper + marker, 1)
+
+          old = '''            RoomObserverGroup.VOICE_ROLES -> viewModelScope.launch {
+                // Seed required role names only when a screen actually needs voice roles.
+                // Voice/engine selection intentionally remains empty for the user to choose.
+                withContext(Dispatchers.IO) { container.libraryRepository.ensureGlobalVoiceProfiles() }
+                container.libraryRepository.observeVoiceRoles()
+                    .distinctUntilChanged()
+                    .collect { roles -> mutableState.update { it.copy(voiceRoles = roles) } }
+            }
+'''
+          new = '''            RoomObserverGroup.VOICE_ROLES -> viewModelScope.launch {
+                try {
+                    // Load a direct snapshot first so this screen never depends exclusively on a
+                    // Room invalidation callback to display persisted/default roles.
+                    refreshVoiceRolesFromDatabase(seedGlobals = true)
+                    container.libraryRepository.observeVoiceRoles()
+                        .distinctUntilChanged()
+                        .collect { roles -> mutableState.update { it.copy(voiceRoles = roles) } }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Throwable) {
+                    synchronized(startedRoomObserverGroups) {
+                        startedRoomObserverGroups.remove(RoomObserverGroup.VOICE_ROLES)
+                    }
+                    mutableState.update { current ->
+                        current.copy(message = error.message ?: "Luồng hồ sơ giọng đã dừng; sẽ thử lại khi mở màn hình.")
+                    }
+                }
+            }
+'''
+          if old not in text:
+              raise SystemExit('VOICE_ROLES observer block missing')
+          text = text.replace(old, new, 1)
+
+          # Every global mutation immediately reloads persisted data. Room Flow remains useful for
+          # continuous updates but is no longer the sole path back into MainUiState.
+          old = '''                ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
+                showMessage("Đã lưu hồ sơ giọng chung ${draft.roleName}.")
+'''
+          new = '''                ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
+                refreshVoiceRolesFromDatabase(seedGlobals = true)
+                showMessage("Đã lưu hồ sơ giọng chung ${draft.roleName}.")
+'''
+          if old not in text:
+              raise SystemExit('save global voice-role success marker missing')
+          text = text.replace(old, new, 1)
+
+          old = '''            container.libraryRepository.setVoiceRoleEnabled(id, enabled)
+            ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
+'''
+          new = '''            container.libraryRepository.setVoiceRoleEnabled(id, enabled)
+            refreshVoiceRolesFromDatabase(seedGlobals = true)
+            ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
+'''
+          if old not in text:
+              raise SystemExit('enable global voice-role marker missing')
+          text = text.replace(old, new, 1)
+
+          old = '''            container.libraryRepository.deleteVoiceRole(id)
+            ReferenceVoiceRoleExtras.remove(getApplication(), id)
+            ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
+            showMessage("Đã xóa hồ sơ giọng chung ${role.roleName}.")
+'''
+          new = '''            container.libraryRepository.deleteVoiceRole(id)
+            ReferenceVoiceRoleExtras.remove(getApplication(), id)
+            refreshVoiceRolesFromDatabase(seedGlobals = true)
+            ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
+            showMessage("Đã xóa hồ sơ giọng chung ${role.roleName}.")
+'''
+          if old not in text:
+              raise SystemExit('delete global voice-role marker missing')
+          text = text.replace(old, new, 1)
+
+          old = '''        viewModelScope.launch {
+            val roles = container.libraryRepository.restoreGlobalVoiceProfiles()
+            ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
+            showMessage("Đã khôi phục 7 hồ sơ mẫu; hiện có ${roles.size} hồ sơ giọng chung.")
+        }
+'''
+          new = '''        viewModelScope.launch {
+            val roles = container.libraryRepository.restoreGlobalVoiceProfiles()
+            refreshVoiceRolesFromDatabase(seedGlobals = false)
+            ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
+            showMessage("Đã khôi phục 7 hồ sơ mẫu; hiện có ${roles.size} hồ sơ giọng chung.")
+        }
+'''
+          if old not in text:
+              raise SystemExit('restore global voice-role marker missing')
+          text = text.replace(old, new, 1)
+          vm.write_text(text, encoding='utf-8')
+
+          # Keep the alternate app root wired to the same full personal-page callback too.
+          app = Path('app/src/main/java/vn/nghetruyen/app/ui/NgheTruyenApp.kt')
+          text = app.read_text(encoding='utf-8')
+          old = '                        onDiagnosticScreenChanged = viewModel::ensureRoomObserversForPersonalPage,\n'
+          new = '                        onDiagnosticScreenChanged = viewModel::onPersonalPageChanged,\n'
+          if old not in text:
+              raise SystemExit('NgheTruyenApp personal-page callback marker missing')
+          text = text.replace(old, new, 1)
+          app.write_text(text, encoding='utf-8')
+
+          # Make an empty data state explicit rather than rendering a visually unexplained gap.
+          screen = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt')
+          text = screen.read_text(encoding='utf-8')
+          old = '''            roles.forEach { role ->
+'''
+          new = '''            if (roles.isEmpty()) {
+                Text(
+                    "Đang nạp hồ sơ giọng…",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(vertical = 6.dp),
+                )
+            }
+            roles.forEach { role ->
+'''
+          # Only replace the one in ReferenceVoiceCastSettingsCard by anchoring after its explanatory text.
+          anchor = '                modifier = Modifier.padding(bottom = 8.dp),\n            )\n            roles.forEach { role ->\n'
+          anchored_new = '                modifier = Modifier.padding(bottom = 8.dp),\n            )\n            if (roles.isEmpty()) {\n                Text(\n                    "Đang nạp hồ sơ giọng…",\n                    style = MaterialTheme.typography.bodySmall,\n                    modifier = Modifier.padding(vertical = 6.dp),\n                )\n            }\n            roles.forEach { role ->\n'
+          if anchor not in text:
+              raise SystemExit('voice-role UI list marker missing')
+          text = text.replace(anchor, anchored_new, 1)
+          screen.write_text(text, encoding='utf-8')
+
+          # Static regression checks.
+          vm_text = vm.read_text(encoding='utf-8')
+          repo_text = repo.read_text(encoding='utf-8')
+          app_text = app.read_text(encoding='utf-8')
+          screen_text = screen.read_text(encoding='utf-8')
+          checks = [
+              ('repo list snapshot', 'suspend fun listAllVoiceRoles()' in repo_text),
+              ('page direct refresh', 'if (page == "settings_automation")' in vm_text and 'refreshVoiceRolesFromDatabase(seedGlobals = true)' in vm_text),
+              ('observer direct snapshot', 'RoomObserverGroup.VOICE_ROLES -> viewModelScope.launch' in vm_text and 'startedRoomObserverGroups.remove(RoomObserverGroup.VOICE_ROLES)' in vm_text),
+              ('save refresh', 'Đã lưu hồ sơ giọng chung' in vm_text and vm_text.count('refreshVoiceRolesFromDatabase(seedGlobals = true)') >= 4),
+              ('restore refresh', 'refreshVoiceRolesFromDatabase(seedGlobals = false)' in vm_text),
+              ('alternate root callback', 'onDiagnosticScreenChanged = viewModel::onPersonalPageChanged' in app_text),
+              ('empty state label', 'Đang nạp hồ sơ giọng…' in screen_text),
+          ]
+          failed = [name for name, ok in checks if not ok]
+          if failed:
+              raise SystemExit('static regression checks failed: ' + ', '.join(failed))
+          print('VOICE_ROLE_STATE_REPAIR_OK')
+          PY
+      - name: Commit repair and remove one-shot workflow
+        shell: bash
+        run: |
+          rm -f .github/workflows/repair-voice-role-state.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/vn/nghetruyen/app/data/repository/LibraryRepository.kt \
+                  app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt \
+                  app/src/main/java/vn/nghetruyen/app/ui/NgheTruyenApp.kt \
+                  app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt \
+                  .github/workflows/repair-voice-role-state.yml
+          git commit -m 'fix: make voice role settings self-synchronizing'
+          git push origin HEAD:agent/remove-unused-files

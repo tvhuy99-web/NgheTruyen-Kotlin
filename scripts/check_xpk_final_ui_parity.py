@@ -6,6 +6,9 @@ from pathlib import Path
 reader = Path("app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt").read_text()
 story = Path("app/src/main/java/vn/nghetruyen/app/ui/screens/StoryReferenceAdvancedDialogs.kt").read_text()
 component = Path("app/src/main/java/vn/nghetruyen/app/ui/components/AudioDirectionLayerSwitches.kt").read_text()
+unified_audio_manager = Path("app/src/main/java/vn/nghetruyen/app/ui/components/UnifiedAudioAssetManagerDialog.kt")
+if unified_audio_manager.exists():
+    component += "\n" + unified_audio_manager.read_text()
 
 required_reader = [
     "if (!ttsLoading && state.ttsEngines.isEmpty())",
@@ -47,17 +50,20 @@ for marker in [
     'label = "QUẢN LÝ HIỆU ỨNG ÂM THANH',
     'label = { Text("Tên") }',
     'label = { Text("Mô tả") }',
-    'Text("THÊM NHIỀU TỆP")',
+    'Text("THÊM TỆP")',
     '"NGHE THỬ"',
-    '"NGHE LẠI"',
-    'Text("DỪNG")',
-    'Text("CHUẨN HÓA")',
+    'Text("DỪNG NGHE")',
     'Text("LƯU")',
     'Text("XÓA")',
     'Text("ĐÓNG")',
 ]:
     if marker not in component:
         raise SystemExit("XPK_FINAL_UI complete audio manager marker missing: " + marker)
+if not any(marker in component for marker in [
+    'Text("CHUẨN HÓA")',
+    'UnifiedAssetActionButton("CHUẨN HÓA")',
+]):
+    raise SystemExit("XPK_FINAL_UI complete audio manager marker missing: CHUẨN HÓA")
 
 manager_positions = [
     component.find('label = "QUẢN LÝ NHẠC ($musicTrackCount)"'),

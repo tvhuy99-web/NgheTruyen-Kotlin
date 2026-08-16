@@ -77,19 +77,40 @@ fun wav(file:File, sample:Int, frames:Int=200) {
     o.write("data".toByteArray()); o.write(le32(data.size)); o.write(data)
   }
 }
-fun sample(file:File):Int { val s=WaveFileAssembler.inspect(file); RandomAccessFile(file,"r").use{ it.seek(s.dataOffset); val lo=it.read(); val hi=it.read(); return ((hi shl 8) or lo).toShort().toInt() } }
+fun sampleAt(file:File, frame:Int):Int {
+  val s=WaveFileAssembler.inspect(file)
+  RandomAccessFile(file,"r").use{
+    it.seek(s.dataOffset + frame.toLong()*s.blockAlign)
+    val lo=it.read(); val hi=it.read()
+    return ((hi shl 8) or lo).toShort().toInt()
+  }
+}
 fun main(args:Array<String>) {
-  val dir=File(args[0]); dir.mkdirs(); val voice=File(dir,"voice.wav"); val music=File(dir,"music.wav"); val sfx=File(dir,"sfx.wav"); val mixed=File(dir,"mixed.wav")
-  wav(voice,1000); wav(music,2000); wav(sfx,500,20)
+  val dir=File(args[0]); dir.mkdirs()
+  val voice=File(dir,"voice.wav"); val music=File(dir,"music.wav"); val sfx=File(dir,"sfx.wav")
+  val musicMixed=File(dir,"music-mixed.wav"); val sfxMixed=File(dir,"sfx-mixed.wav")
+  wav(voice,1000,400); wav(music,2000,200); wav(sfx,500,20)
+
+  // Sample at the exact midpoint. Newer mixers deliberately fade/crossfade looping
+  // MUSIC/AMBIENCE at boundaries, while the midpoint has full gain and must still mix
+  // 1000 narration + (2000 * 0.25) = 1500. Frame 200 is also the first frame beyond
+  // the 200-frame source, so it proves looping without depending on a hard-loop seam.
   Pcm16SceneMixer.mix(
     voice,
-    listOf(
-      SceneMixLayer(music,0,200,0.25f,0,looping=true),
-      SceneMixLayer(sfx,50,200,0.20f,0,looping=false),
-    ),
-    mixed,
+    listOf(SceneMixLayer(music,0,400,0.25f,0,looping=true)),
+    musicMixed,
   )
-  check(sample(mixed) in 1499..1501) { sample(mixed) }
+  check(sampleAt(musicMixed,200) in 1499..1501) { sampleAt(musicMixed,200) }
+
+  // SFX is a one-shot: it contributes exactly while its 20 source frames exist and does not loop.
+  Pcm16SceneMixer.mix(
+    voice,
+    listOf(SceneMixLayer(sfx,50,400,0.20f,0,looping=false)),
+    sfxMixed,
+  )
+  check(sampleAt(sfxMixed,50) in 1099..1101) { sampleAt(sfxMixed,50) }
+  check(sampleAt(sfxMixed,70) in 999..1001) { sampleAt(sfxMixed,70) }
+
   val out=ByteArrayOutputStream(); Id3v23Writer.write(out,Id3v23Writer.Metadata("Truyện","Tác giả","Truyện",chapters=listOf(Id3v23Writer.Chapter("Chương 1",0,1000)))); val b=out.toByteArray()
   check(String(b.copyOfRange(0,3))=="ID3"); check(String(b).contains("TIT2")); check(String(b).contains("TPE1")); check(String(b).contains("CHAP")); check(String(b).contains("CTOC"))
   println("MILESTONE5_AUDIO_CORE_SMOKE_OK")

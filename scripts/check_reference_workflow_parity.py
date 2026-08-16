@@ -5,6 +5,11 @@ from pathlib import Path
 
 reader = Path("app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt").read_text()
 component = Path("app/src/main/java/vn/nghetruyen/app/ui/components/AudioDirectionLayerSwitches.kt").read_text()
+unified_audio_manager = Path("app/src/main/java/vn/nghetruyen/app/ui/components/UnifiedAudioAssetManagerDialog.kt")
+if unified_audio_manager.exists():
+    # MUSIC/AMBIENCE/SFX editing is now hosted by the unified manager. Validate the complete audio
+    # workflow surface instead of requiring editor controls to remain in their historical file.
+    component += "\n" + unified_audio_manager.read_text()
 vm = Path("app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt").read_text()
 library = Path("app/src/main/java/vn/nghetruyen/app/ui/screens/LibraryScreen.kt").read_text()
 settings = Path("app/src/main/java/vn/nghetruyen/app/data/settings/SettingsRepository.kt").read_text()
@@ -33,12 +38,16 @@ for marker in [
     'label = "QUẢN LÝ ÂM THANH MÔI TRƯỜNG',
     'label = "QUẢN LÝ HIỆU ỨNG ÂM THANH',
     'label = { Text("Mô tả") }',
-    'Text("CHUẨN HÓA")',
     'Text("LƯU")',
     'Text("XÓA")',
 ]:
     if marker not in component:
         raise SystemExit("REFERENCE_WORKFLOW audio manager marker missing: " + marker)
+if not any(marker in component for marker in [
+    'Text("CHUẨN HÓA")',
+    'UnifiedAssetActionButton("CHUẨN HÓA")',
+]):
+    raise SystemExit("REFERENCE_WORKFLOW audio manager marker missing: CHUẨN HÓA")
 
 manager_positions = [
     component.find('label = "QUẢN LÝ NHẠC ($musicTrackCount)"'),

@@ -5,6 +5,9 @@ ROOT = Path(__file__).resolve().parents[1]
 personal = (ROOT / "app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt").read_text(encoding="utf-8")
 reader = (ROOT / "app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt").read_text(encoding="utf-8")
 component = (ROOT / "app/src/main/java/vn/nghetruyen/app/ui/components/AudioDirectionLayerSwitches.kt").read_text(encoding="utf-8")
+unified_audio_manager = ROOT / "app/src/main/java/vn/nghetruyen/app/ui/components/UnifiedAudioAssetManagerDialog.kt"
+if unified_audio_manager.exists():
+    component += "\n" + unified_audio_manager.read_text(encoding="utf-8")
 coordinator = (ROOT / "app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt").read_text(encoding="utf-8")
 debug_strings = (ROOT / "app/src/debug/res/values/strings.xml").read_text(encoding="utf-8")
 ui_test = (ROOT / "app/src/androidTest/java/vn/nghetruyen/app/AudioDirectorMusicSettingsUiTest.kt").read_text(encoding="utf-8")
@@ -83,11 +86,9 @@ required_component_tokens = (
     'label = "QUẢN LÝ HIỆU ỨNG ÂM THANH',
     'label = { Text("Tên") }',
     'label = { Text("Mô tả") }',
-    'Text("THÊM NHIỀU TỆP")',
+    'Text("THÊM TỆP")',
     '"NGHE THỬ"',
-    '"NGHE LẠI"',
-    'Text("DỪNG")',
-    'Text("CHUẨN HÓA")',
+    'Text("DỪNG NGHE")',
     'Text("LƯU")',
     'Text("XÓA")',
     'Text("ĐÓNG")',
@@ -96,6 +97,10 @@ required_component_tokens = (
 )
 for token in required_component_tokens:
     assert token in component, f"missing complete audio UI token: {token}"
+assert any(token in component for token in (
+    'Text("CHUẨN HÓA")',
+    'UnifiedAssetActionButton("CHUẨN HÓA")',
+)), "missing complete audio UI token: CHUẨN HÓA"
 
 music_manager = component.find('label = "QUẢN LÝ NHẠC ($musicTrackCount)"')
 ambience_manager = component.find('label = "QUẢN LÝ ÂM THANH MÔI TRƯỜNG')
@@ -175,8 +180,11 @@ for token in (
     'assertTextDoesNotExist("Nhạc cảnh AI")',
     'assertTextDoesNotExist("Âm thanh môi trường AI")',
     'assertTextDoesNotExist("Hiệu ứng âm thanh AI")',
-    '.fetchSemanticsNodes().isEmpty()',
 ):
     assert token in ui_test, f"music-page regression UI test missing token: {token}"
+assert (
+    '.fetchSemanticsNodes().isEmpty()' in ui_test
+    or 'check(!hasText(text))' in ui_test
+), "music-page regression UI test must assert absent controls through the Compose semantics tree"
 
 print("AUDIO_DIRECTION_UI_WIRING=PASS")

@@ -345,19 +345,24 @@ require(
 
 require(
     "app/src/main/java/vn/nghetruyen/app/ui/components/AudioDirectionLayerSwitches.kt",
-    "ActivityResultContracts.OpenMultipleDocuments()",
-    'Text("THÊM NHIỀU TỆP")',
     "AudioAssetKind.MUSIC",
     "AudioAssetKind.AMBIENCE",
     "AudioAssetKind.SFX",
 )
+require(
+    "app/src/main/java/vn/nghetruyen/app/ui/components/UnifiedAudioAssetManagerDialog.kt",
+    "ActivityResultContracts.OpenMultipleDocuments()",
+    'Text("THÊM TỆP")',
+)
 
 require(
     "app/src/main/java/vn/nghetruyen/app/playback/SceneMusicController.kt",
-    "startXpkSequentialTransition(next, XPK_SCENE_SWITCH_MILLIS)",
-    "XPK_SCENE_SWITCH_MILLIS = 2_200",
-    "val fadeOutMillis = if (old == null) 0 else duration / 2",
-    "val fadeInMillis = if (old == null) duration else duration - fadeOutMillis",
+    "XpkPlaybackRuntime.isCanonicalScenePlanActive() && requested == 0",
+    "XPK_DEFAULT_CROSSFADE_MILLIS = 2_200",
+    "startCrossfadeTransition(next, duration)",
+    "next.fadeMultiplier = if (durationMillis > 0 && old != null) 0f else 1f",
+    "next.fadeMultiplier = fraction",
+    "old.fadeMultiplier = 1f - fraction",
 )
 
 require(

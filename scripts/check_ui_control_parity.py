@@ -7,6 +7,11 @@ reader = (ROOT / "screens/ReaderScreen.kt").read_text(encoding="utf-8")
 story = (ROOT / "screens/StoryDetailScreen.kt").read_text(encoding="utf-8")
 role = (ROOT / "components/GlobalVoiceRoleEditorDialog.kt").read_text(encoding="utf-8")
 component = (ROOT / "components/AudioDirectionLayerSwitches.kt").read_text(encoding="utf-8")
+unified_audio_manager = ROOT / "components/UnifiedAudioAssetManagerDialog.kt"
+if unified_audio_manager.exists():
+    # The canonical MUSIC/AMBIENCE/SFX editor moved out of AudioDirectionLayerSwitches. Keep the
+    # parity gate tied to the controls themselves rather than to their historical source file.
+    component += "\n" + unified_audio_manager.read_text(encoding="utf-8")
 
 required = {
     "PersonalScreen.kt": [
@@ -92,7 +97,6 @@ required = {
         'label = "QUẢN LÝ HIỆU ỨNG ÂM THANH',
         'label = { Text("Tên") }',
         'label = { Text("Mô tả") }',
-        'Text("CHUẨN HÓA")',
         'Text("LƯU")',
         'Text("XÓA")',
     ],
@@ -108,6 +112,14 @@ for name, tokens in required.items():
     for token in tokens:
         if token not in texts[name]:
             raise SystemExit(f"{name}: missing reference control token: {token}")
+
+# The legacy inline editor rendered the normalize action as Text inside a button. The canonical
+# unified manager represents the same control as a named action component. Both are valid parity.
+if not any(token in component for token in [
+    'Text("CHUẨN HÓA")',
+    'UnifiedAssetActionButton("CHUẨN HÓA")',
+]):
+    raise SystemExit("Audio audio-manager normalize control is missing")
 
 for token in [
     'Text("CHẬM")', 'Text("NHANH")', 'Text("TRẦM")', 'Text("CAO")',

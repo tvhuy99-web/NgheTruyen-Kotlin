@@ -28,13 +28,26 @@ class SourceRegistry(
     private var byId: Map<String, StorySource> = merge(sourcePackSources)
 
     fun descriptors(): List<SourceDescriptor> = byId.values.map { it.descriptor }
-    fun get(id: String): StorySource? = byId[id] ?: if (
-        diagnosticRuntime != null && StartupWorkGate.isBeforeFirstFrame() && id.isNotBlank()
-    ) {
-        DeferredStartupStorySource(id) { awaitResolvedSource(id) }
-    } else {
-        null
+
+    fun get(id: String): StorySource? {
+        val current = byId[id]
+        if (diagnosticRuntime != null && StartupWorkGate.isBeforeFirstFrame() && id.isNotBlank()) {
+            val generation = refreshGeneration.value
+            val descriptor = current?.descriptor ?: SourceDescriptor(
+                id = id,
+                displayName = id,
+                baseUrl = "deferred://startup",
+                health = SourceHealth.DEGRADED,
+                supportsHome = false,
+                implementationKind = SourceImplementationKind.PLACEHOLDER,
+            )
+            return DeferredStartupStorySource(descriptor) {
+                awaitResolvedSource(id, generation) ?: current
+            }
+        }
+        return current
     }
+
     fun searchableSources(): List<StorySource> = byId.values.filter {
         it.descriptor.health == SourceHealth.READY || it.descriptor.health == SourceHealth.DEGRADED
     }
@@ -92,24 +105,17 @@ class SourceRegistry(
                 selected[id] = candidate
             }
         }
-        return selected.mapValues { (_, source) ->
-            val runtimeSource = source.withExecutionAndDiagnostics(diagnosticRuntime)
-            if (diagnosticRuntime == null) runtimeSource else runtimeSource.withStartupHomeGuard()
-        }
+        return selected.mapValues { (_, source) -> source.withExecutionAndDiagnostics(diagnosticRuntime) }
     }
 
-    private suspend fun awaitResolvedSource(id: String): StorySource? {
-        if (!StartupWorkGate.awaitFirstFrameAsync()) return null
-        byId[id]?.let { return it }
-        return withTimeoutOrNull(SOURCE_REFRESH_WAIT_MILLIS) {
-            var generation = refreshGeneration.value
-            var resolved = byId[id]
-            while (resolved == null) {
-                generation = refreshGeneration.filter { it > generation }.first()
-                resolved = byId[id]
-            }
-            resolved
+    private suspend fun awaitResolvedSource(id: String, afterGeneration: Int): StorySource? {
+        if (!StartupWorkGate.awaitFirstFrameAsync()) return byId[id]
+        if (refreshGeneration.value > afterGeneration) return byId[id]
+        val refreshed = withTimeoutOrNull(SOURCE_REFRESH_WAIT_MILLIS) {
+            refreshGeneration.filter { it > afterGeneration }.first()
+            byId[id]
         }
+        return refreshed ?: byId[id]
     }
 
     private fun normalizeExternalSources(sources: List<StorySource>): List<StorySource> =
@@ -132,18 +138,9 @@ class SourceRegistry(
 }
 
 private class DeferredStartupStorySource(
-    id: String,
+    override val descriptor: SourceDescriptor,
     private val resolver: suspend () -> StorySource?,
 ) : StorySource {
-    override val descriptor = SourceDescriptor(
-        id = id,
-        displayName = id,
-        baseUrl = "deferred://startup",
-        health = SourceHealth.DEGRADED,
-        supportsHome = false,
-        implementationKind = SourceImplementationKind.PLACEHOLDER,
-    )
-
     override suspend fun search(query: String, page: Int): AppResult<List<StorySummary>> =
         resolver()?.search(query, page) ?: AppResult.Success(emptyList())
 
@@ -163,20 +160,6 @@ private class DeferredStartupStorySource(
 private fun StorySource.withExecutionAndDiagnostics(diagnostics: SourceDiagnosticRuntime?): StorySource {
     if (this is DiagnosticStorySource) return this
     return withVBookExecutionBoundary().withDiagnostics(diagnostics)
-}
-
-private fun StorySource.withStartupHomeGuard(): StorySource =
-    if (this is StartupHomeGuardStorySource) this else StartupHomeGuardStorySource(this)
-
-private class StartupHomeGuardStorySource(
-    private val delegate: StorySource,
-) : StorySource by delegate {
-    override suspend fun home(page: Int): AppResult<List<StorySummary>> {
-        if (StartupWorkGate.isBeforeFirstFrame() && !StartupWorkGate.awaitFirstFrameAsync()) {
-            return AppResult.Success(emptyList())
-        }
-        return delegate.home(page)
-    }
 }
 
 /**

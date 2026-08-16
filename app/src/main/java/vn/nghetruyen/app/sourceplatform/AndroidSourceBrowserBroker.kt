@@ -91,7 +91,6 @@ class AndroidSourceBrowserBroker(
     @Volatile private var suspendFuture: ScheduledFuture<*>? = null
     @Volatile private var destroyFuture: ScheduledFuture<*>? = null
     private val recoveredSources = linkedSetOf<String>()
-    private val serviceWorkerClientInstalled = AtomicBoolean(false)
 
     override fun readWebViewCookieHeader(sourceId: String, requestUrl: String): String? {
         if (!requestUrl.startsWith("https://", ignoreCase = true)) return null
@@ -121,7 +120,41 @@ class AndroidSourceBrowserBroker(
                 require(request.timeoutMs in 100L..120_000L) { "SOURCE_BROWSER_TIMEOUT_INVALID" }
                 require(request.maxOutputBytes in 1024..4 * 1024 * 1024) { "SOURCE_BROWSER_OUTPUT_LIMIT_INVALID" }
                 requireCapability(manifest, request.action)
+                if (request.action == SourceBrowserAction.CLOSE_SESSION || request.action == SourceBrowserAction.CLEAR_SESSION) {
+                    val existing = active?.takeIf { it.manifest.id == manifest.id }
+                    val metadata = existing?.metadata?.toList().orEmpty()
+                    val dialogs = existing?.dialogs?.toList().orEmpty()
+                    val finalUrl = existing?.logicalPageUrl
+                    diagnostics.emit(event(manifest, request, "BROWSER_ACTION_STARTED", attributes = mapOf(
+                        "action" to request.action.name,
+                        "flow" to "browser",
+                        "stage" to "action_start",
+                        "timeoutMs" to request.timeoutMs.toString(),
+                        "deadlineEpochMs" to (started + request.timeoutMs).toString(),
+                        "requestId" to requestId,
+                        "sessionId" to existing?.sessionId.orEmpty(),
+                        "navigationGeneration" to (existing?.navigationGeneration ?: 0L).toString(),
+                        "url" to diagnosticUrl(request.url.orEmpty()),
+                    )))
+                    if (existing != null) {
+                        destroyActive(clearCookies = request.action == SourceBrowserAction.CLEAR_SESSION)
+                    } else if (request.action == SourceBrowserAction.CLEAR_SESSION) {
+                        cookiePartition.clear(manifest.id)
+                    }
+                    if (request.action == SourceBrowserAction.CLEAR_SESSION) clearWebViewCookies()
+                    return@runCatching SourceBrowserResponse(
+                        finalUrl = finalUrl,
+                        title = null,
+                        value = null,
+                        requestMetadata = metadata,
+                        dialogs = dialogs,
+                        degradedIsolation = true,
+                        rendererRecovered = recoveredSources.remove(manifest.id),
+                        traceId = request.traceId,
+                    )
+                }
                 val session = ensureSession(manifest, request.url)
+                serviceWorkerOwner.set(this)
                 resumeSession(session)
                 if (request.action == SourceBrowserAction.NAVIGATE || request.action == SourceBrowserAction.LOAD_HTML) {
                     session.startNavigationGeneration()
@@ -157,15 +190,8 @@ class AndroidSourceBrowserBroker(
                     SourceBrowserAction.SYNC_SESSION -> syncSession(session, manifest, request)
                     SourceBrowserAction.SET_COOKIES -> setCookies(session, manifest, request)
                     SourceBrowserAction.CLEAR_COOKIES -> clearCookies(session, manifest, request)
-                    SourceBrowserAction.CLOSE_SESSION -> {
-                        destroyActive(clearCookies = false)
-                        null
-                    }
-                    SourceBrowserAction.CLEAR_SESSION -> {
-                        destroyActive(clearCookies = true)
-                        clearWebViewCookies()
-                        null
-                    }
+                    SourceBrowserAction.CLOSE_SESSION, SourceBrowserAction.CLEAR_SESSION ->
+                        error("SOURCE_BROWSER_SESSION_ACTION_FAST_PATH_MISSED")
                 }
                 if (session.rendererGone) error("SOURCE_BROWSER_RENDERER_GONE")
                 val webViewState = snapshotWebView(session)
@@ -466,28 +492,20 @@ class AndroidSourceBrowserBroker(
         session.suspended = false
     }
 
-    private fun ensureServiceWorkerClientInstalled() {
-        if (!serviceWorkerClientInstalled.compareAndSet(false, true)) return
-        val installed = runCatching {
-            ServiceWorkerController.getInstance().setServiceWorkerClient(object : ServiceWorkerClient() {
-                override fun shouldInterceptRequest(request: WebResourceRequest): WebResourceResponse? {
-                    val session = active ?: return blockedResponse()
-                    return when (val decision = evaluateWithBackgroundDns(session, request.url.toString())) {
-                        is BrowserNavigationPolicy.Decision.Allowed -> {
-                            session.takeIf { it.manifest.capabilities.browser.serviceWorkerCapture }
-                                ?.record(request, resourceType = "service-worker")
-                            null
-                        }
-                        else -> {
-                            session.record(request, resourceType = "service-worker-blocked")
-                            emitUrlPolicyDecision(session, "service_worker", decision, DiagnosticSeverity.WARN)
-                            blockedResponse()
-                        }
-                    }
-                }
-            })
-        }.isSuccess
-        if (!installed) serviceWorkerClientInstalled.set(false)
+    private fun interceptServiceWorkerRequest(request: WebResourceRequest): WebResourceResponse? {
+        val session = active ?: return blockedResponse()
+        return when (val decision = evaluateWithBackgroundDns(session, request.url.toString())) {
+            is BrowserNavigationPolicy.Decision.Allowed -> {
+                session.takeIf { it.manifest.capabilities.browser.serviceWorkerCapture }
+                    ?.record(request, resourceType = "service-worker")
+                null
+            }
+            else -> {
+                session.record(request, resourceType = "service-worker-blocked")
+                emitUrlPolicyDecision(session, "service_worker", decision, DiagnosticSeverity.WARN)
+                blockedResponse()
+            }
+        }
     }
 
     private fun ensureSession(manifest: SourceManifest, initialUrl: String?): Session {
@@ -502,7 +520,7 @@ class AndroidSourceBrowserBroker(
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun createSession(manifest: SourceManifest): Session {
-        ensureServiceWorkerClientInstalled()
+        ensureProcessServiceWorkerClientInstalled()
         val sessionRef = AtomicReference<Session?>()
         val webView = WebView(appContext)
         ExtensionWebViewAuthority.apply(appContext, webView)
@@ -1509,6 +1527,7 @@ class AndroidSourceBrowserBroker(
             session.webView.destroy()
         } }
         active = null
+        serviceWorkerOwner.compareAndSet(this, null)
         if (clearCookies) cookiePartition.clear(session.manifest.id)
     }
 
@@ -1790,6 +1809,27 @@ class AndroidSourceBrowserBroker(
     private data class DialogDecision(val accepted: Boolean, val value: String?)
 
     private companion object {
+        private val serviceWorkerClientInstalled = AtomicBoolean(false)
+        private val serviceWorkerOwner = AtomicReference<AndroidSourceBrowserBroker?>(null)
+
+        private fun ensureProcessServiceWorkerClientInstalled() {
+            if (!serviceWorkerClientInstalled.compareAndSet(false, true)) return
+            val installed = runCatching {
+                ServiceWorkerController.getInstance().setServiceWorkerClient(object : ServiceWorkerClient() {
+                    override fun shouldInterceptRequest(request: WebResourceRequest): WebResourceResponse? =
+                        serviceWorkerOwner.get()?.interceptServiceWorkerRequest(request)
+                            ?: blockedServiceWorkerResponse()
+                })
+            }.isSuccess
+            if (!installed) serviceWorkerClientInstalled.set(false)
+        }
+
+        private fun blockedServiceWorkerResponse(): WebResourceResponse = WebResourceResponse(
+            "text/plain",
+            "utf-8",
+            ByteArrayInputStream(ByteArray(0)),
+        )
+
         const val INTERNAL_DIAGNOSTIC_REQUEST_ID = "__nghetruyenDiagnosticRequestId"
         const val INTERNAL_DIAGNOSTIC_OPERATION_ID = "__nghetruyenDiagnosticOperationId"
         const val SESSION_SUSPEND_AFTER_MS = 30_000L

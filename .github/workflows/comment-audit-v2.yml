@@ -1,0 +1,29 @@
+name: Comment Audit V2
+
+on:
+  push:
+    branches:
+      - chore/remove-code-comments-20260816
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Run broadened comment audit
+        run: python3 scripts/comment_audit_cleanup.py --json comment-audit-v2.json --tsv comment-audit-v2.tsv
+
+      - name: Upload audit report
+        uses: actions/upload-artifact@v7
+        with:
+          name: comment-audit-v2
+          path: |
+            comment-audit-v2.json
+            comment-audit-v2.tsv

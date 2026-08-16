@@ -946,7 +946,7 @@ class VBookJsRuntime(
                         ?: unwrapped.array("suggestions")?.values
                         ?: emptyList()
                     else -> emptyList()
-                }.mapNotNull(::normalizeSuggestion).distinctBy { (it as JsonValue.Str).value.lowercase() }.take(20)
+                }.mapNotNull(::normalizeSuggestion).distinctBy { it.value.lowercase() }.take(20)
                 JsonValue.Obj(linkedMapOf(
                     "items" to JsonValue.Arr(items),
                     "nextPageUrl" to responseData2?.let(JsonValue::Str).orNull(),
@@ -1347,7 +1347,7 @@ private class JsoupDocumentObject(private val document: Document, private val ow
         "outerHtml" -> fn { document.outerHtml() }
         "title" -> fn { document.title() }
         "location", "baseUri" -> fn { document.location() }
-        "body" -> fn { document.body()?.let { JsoupElementObject(it, ownerScope) } ?: Context.getUndefinedValue() }
+        "body" -> fn { JsoupElementObject(document.body(), ownerScope) }
         else -> super.get(name, start)
     }
     private fun fn(block: (Array<out Any>) -> Any): BaseFunction = object : BaseFunction() {
@@ -1752,7 +1752,7 @@ private class BrowserCompatObject(
         do {
             val found = requestMetadata().firstOrNull { metadata ->
                 (patterns.isEmpty() || patterns.any { matches(metadata.url, it) }) &&
-                    (options?.propertyString("method").isNullOrBlank() || metadata.method.equals(options?.propertyString("method"), true)) &&
+                    (options?.propertyString("method").isNullOrBlank() || metadata.method.equals(options.propertyString("method"), true)) &&
                     (options?.propertyString("mainFrame")?.toBooleanStrictOrNull() != true || metadata.mainFrame)
             }
             if (found != null) return metadataObject(found)

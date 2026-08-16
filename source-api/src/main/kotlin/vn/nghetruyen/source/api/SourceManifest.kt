@@ -127,7 +127,7 @@ data class SourceManifest(
         require(origins.isNotEmpty() && origins.size <= 32) { "SOURCE_ORIGINS_INVALID" }
         val network = capabilities.network
         val extensionPublicInternet = network?.publicInternet == true
-        val extensionCleartext = extensionPublicInternet && network?.allowCleartext == true
+        val extensionCleartext = extensionPublicInternet && network.allowCleartext
         (origins + redirectOrigins).forEach { validateOrigin(it, allowCleartext = extensionCleartext) }
         require(actions.keys.containsAll(REQUIRED_ACTIONS)) { "SOURCE_REQUIRED_ACTION_MISSING" }
         actions.values.forEach { action ->

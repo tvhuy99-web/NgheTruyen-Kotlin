@@ -50,6 +50,16 @@ jobs:
               raise SystemExit(f'Priority1 exact-version block count={text.count(old)}')
           p1.write_text(text.replace(old, new, 1), encoding='utf-8')
 
+          v250 = Path('scripts/check_v250_tool_parity.py')
+          text = v250.read_text(encoding='utf-8')
+          if 'import re\n' not in text:
+              text = text.replace('import shutil, subprocess, tempfile\n', 'import re\nimport shutil, subprocess, tempfile\n', 1)
+          old = '''    require('app/build.gradle.kts','versionCode = 28','versionName = "2.8.0-ai-narration-priority2-complete"')\n'''
+          new = '''    build=(ROOT/'app/build.gradle.kts').read_text(encoding='utf-8')\n    code_match=re.search(r'\\bversionCode\\s*=\\s*(\\d+)',build)\n    name_match=re.search(r'\\bversionName\\s*=\\s*"([^"]+)"',build)\n    assert code_match is not None and name_match is not None, 'cannot parse app version'\n    parts=name_match.group(1).split('-',1)[0].split('.')\n    assert len(parts)==3 and all(part.isdigit() for part in parts), f'invalid app version: {name_match.group(1)}'\n    assert int(code_match.group(1))>=28 and tuple(map(int,parts))>=(2,8,0), 'v2.5 parity baseline requires app version >= 2.8.0 / code 28'\n'''
+          if text.count(old) != 1:
+              raise SystemExit(f'v250 exact-version line count={text.count(old)}')
+          v250.write_text(text.replace(old, new, 1), encoding='utf-8')
+
           validator = Path('scripts/validate_release.py')
           text = validator.read_text(encoding='utf-8')
           old = '''        "CÀI .NTSOURCE / VBOOK / LUA API 2",\n        "THÊM / LÀM MỚI REPOSITORY",\n        "Self-test:",\n        "ROLLBACK PHIÊN BẢN NGUỒN",\n'''
@@ -60,6 +70,10 @@ jobs:
 
           Path('.github/workflows/repair-ai-version-gate.yml').unlink()
           PY
+      - name: Scan remaining historical version assertions
+        shell: bash
+        run: |
+          grep -R -nE 'versionCode = (2[0-9]|3[0-5])|versionName = "2\.' scripts || true
       - name: Validate aggregate release gates
         shell: bash
         run: |
@@ -67,6 +81,7 @@ jobs:
           python3 scripts/check_ai_gemini_story_vietphrase.py
           python3 scripts/check_priority2_complete.py
           python3 scripts/check_priority1_complete.py
+          python3 scripts/check_v250_tool_parity.py
           python3 scripts/validate_release.py
       - name: Commit repair
         shell: bash

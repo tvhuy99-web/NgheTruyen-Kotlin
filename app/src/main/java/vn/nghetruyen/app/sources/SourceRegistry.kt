@@ -23,7 +23,13 @@ class SourceRegistry(
     private var byId: Map<String, StorySource> = merge(sourcePackSources)
 
     fun descriptors(): List<SourceDescriptor> = byId.values.map { it.descriptor }
-    fun get(id: String): StorySource? = byId[id]
+    fun get(id: String): StorySource? = byId[id] ?: if (
+        diagnosticRuntime != null && StartupWorkGate.isBeforeFirstFrame() && id.isNotBlank()
+    ) {
+        DeferredStartupStorySource(id)
+    } else {
+        null
+    }
     fun searchableSources(): List<StorySource> = byId.values.filter {
         it.descriptor.health == SourceHealth.READY || it.descriptor.health == SourceHealth.DEGRADED
     }
@@ -100,6 +106,22 @@ class SourceRegistry(
             NotPortedSource("wattpad", "Wattpad / vBook", "https://www.wattpad.com"),
         )
     }
+}
+
+private class DeferredStartupStorySource(id: String) : StorySource {
+    override val descriptor = SourceDescriptor(
+        id = id,
+        displayName = id,
+        baseUrl = "deferred://startup",
+        health = SourceHealth.DEGRADED,
+        supportsHome = false,
+        implementationKind = SourceImplementationKind.PLACEHOLDER,
+    )
+
+    override suspend fun search(query: String, page: Int): AppResult<List<StorySummary>> = AppResult.Success(emptyList())
+    override suspend fun category(category: String, page: Int): AppResult<List<StorySummary>> = AppResult.Success(emptyList())
+    override suspend fun story(url: String): AppResult<StoryDetail> = AppResult.Failure("SOURCE_STARTUP_DEFERRED", "Nguồn đang được nạp sau khung hình đầu tiên.")
+    override suspend fun chapter(url: String): AppResult<ChapterContent> = AppResult.Failure("SOURCE_STARTUP_DEFERRED", "Nguồn đang được nạp sau khung hình đầu tiên.")
 }
 
 private fun StorySource.withExecutionAndDiagnostics(diagnostics: SourceDiagnosticRuntime?): StorySource {

@@ -17,6 +17,18 @@ class RoomObserverDemandTest {
     }
 
     @Test
+    fun personalTabStartsVoiceRolesBeforeOpeningAutomationPage() {
+        assertEquals(
+            setOf(RoomObserverGroup.VOICE_ROLES),
+            roomObserverGroupsForUi(
+                Destination.Root,
+                RootTab.PERSONAL,
+                LibrarySection.READING,
+            ),
+        )
+    }
+
+    @Test
     fun libraryStartsOnlyCurrentSectionData() {
         assertEquals(
             setOf(RoomObserverGroup.READING, RoomObserverGroup.HISTORY, RoomObserverGroup.DOWNLOADS),

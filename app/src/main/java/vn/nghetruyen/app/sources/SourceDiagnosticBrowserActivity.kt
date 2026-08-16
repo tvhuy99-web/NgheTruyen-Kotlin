@@ -534,8 +534,16 @@ class SourceDiagnosticBrowserActivity : ComponentActivity() {
         manager.flush()
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (::webView.isInitialized) webView.onResume()
+    }
+
     override fun onPause() {
-        if (::webView.isInitialized) captureSession()
+        if (::webView.isInitialized) {
+            captureSession()
+            webView.onPause()
+        }
         super.onPause()
     }
 

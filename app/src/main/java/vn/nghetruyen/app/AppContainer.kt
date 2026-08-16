@@ -99,10 +99,10 @@ class AppContainer(context: Context) {
 
     val sourcePlatformManager: UnifiedSourcePlatformManager by lazy {
         UnifiedSourcePlatformManager(
-            legacy = legacySourcePlatformManager,
-            vBook = vBookSourcePlatform,
-            vBookRepositories = vBookRepositoryClient,
-            vBookRepositorySubscriptions = vBookRepositorySubscriptionStore,
+            legacyProvider = { legacySourcePlatformManager },
+            vBookProvider = { vBookSourcePlatform },
+            vBookRepositoriesProvider = { vBookRepositoryClient },
+            vBookRepositorySubscriptionsProvider = { vBookRepositorySubscriptionStore },
             onExternalSourcesChanged = { refreshSourceRegistry() },
         )
     }

@@ -1,4 +1,4 @@
-name: One-shot historical version gate repair
+name: One-shot historical gate repair
 
 on:
   push:
@@ -16,7 +16,7 @@ jobs:
         with:
           fetch-depth: 0
       - run: python3 -m pip install --disable-pip-version-check beautifulsoup4 cryptography
-      - name: Repair historical exact-version gates
+      - name: Repair historical gates
         shell: bash
         run: |
           python3 - <<'PY'
@@ -24,7 +24,7 @@ jobs:
 
           ai = Path('scripts/check_ai_gemini_story_vietphrase.py')
           text = ai.read_text(encoding='utf-8')
-          helper = '''def verify_version_floor() -> None:\n    build = text("app/build.gradle.kts")\n    code_match = re.search(r"\\bversionCode\\s*=\\s*(\\d+)", build)\n    name_match = re.search(r'\\bversionName\\s*=\\s*"([^"]+)"', build)\n    if code_match is None or name_match is None:\n        raise AssertionError("app/build.gradle.kts: cannot parse versionCode/versionName")\n    version_code = int(code_match.group(1))\n    parts = name_match.group(1).split("-", 1)[0].split(".")\n    if len(parts) != 3 or any(not part.isdigit() for part in parts):\n        raise AssertionError(f"app/build.gradle.kts: invalid semantic version: {name_match.group(1)}")\n    if version_code < 28 or tuple(map(int, parts)) < (2, 8, 0):\n        raise AssertionError(\n            "app/build.gradle.kts: AI narration baseline requires versionCode >= 28 and versionName >= 2.8.0; "\n            f"found versionCode={version_code}, versionName={name_match.group(1)}"\n        )\n\n\n'''
+          helper = '''def verify_version_floor() -> None:\n    build = text("app/build.gradle.kts")\n    code_match = re.search(r"\\bversionCode\\s*=\\s*(\\d+)", build)\n    name_match = re.search(r'\\bversionName\\s*=\\s*"([^"]+)"', build)\n    if code_match is None or name_match is None:\n        raise AssertionError("app/build.gradle.kts: cannot parse versionCode/versionName")\n    parts = name_match.group(1).split("-", 1)[0].split(".")\n    if len(parts) != 3 or any(not part.isdigit() for part in parts):\n        raise AssertionError(f"app/build.gradle.kts: invalid semantic version: {name_match.group(1)}")\n    if int(code_match.group(1)) < 28 or tuple(map(int, parts)) < (2, 8, 0):\n        raise AssertionError("app/build.gradle.kts: AI narration baseline requires versionCode >= 28 and versionName >= 2.8.0")\n\n\n'''
           if 'def verify_version_floor() -> None:' not in text:
               text = text.replace('def main() -> int:\n', helper + 'def main() -> int:\n', 1)
           old = '''    require(\n        "app/build.gradle.kts",\n        "versionCode = 28",\n        'versionName = "2.8.0-ai-narration-priority2-complete"',\n    )\n'''
@@ -50,6 +50,14 @@ jobs:
               raise SystemExit(f'Priority1 exact-version block count={text.count(old)}')
           p1.write_text(text.replace(old, new, 1), encoding='utf-8')
 
+          validator = Path('scripts/validate_release.py')
+          text = validator.read_text(encoding='utf-8')
+          old = '''        "CÀI .NTSOURCE / VBOOK / LUA API 2",\n        "THÊM / LÀM MỚI REPOSITORY",\n        "Self-test:",\n        "ROLLBACK PHIÊN BẢN NGUỒN",\n'''
+          new = '''        "CÀI .NTSOURCE / VBOOK / LUA API 2",\n        "THÊM / LÀM MỚI REPOSITORY",\n        "Self-test:",\n        "onRollback = onRollbackSourcePack",\n        "onLogin = onOpenSourceLogin",\n        "val retainedRuntimeActions = listOf(onRollback, onLogin)",\n'''
+          if text.count(old) != 1:
+              raise SystemExit(f'legacy rollback UI assertion count={text.count(old)}')
+          validator.write_text(text.replace(old, new, 1), encoding='utf-8')
+
           Path('.github/workflows/repair-ai-version-gate.yml').unlink()
           PY
       - name: Validate aggregate release gates
@@ -66,5 +74,5 @@ jobs:
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
-          git commit -m 'fix: make historical feature gates version-safe'
+          git commit -m 'fix: modernize historical release gates'
           git push origin HEAD:agent/remove-unused-files

@@ -11,11 +11,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
-/**
- * Owns MediaPlayer instances for background music. Canonical XPK scene plans use the reference
- * tool's sequential fade-out/fade-in transition; ordinary playlists retain the Kotlin crossfade.
- * All public calls are expected on the main thread.
- */
+
+
+
+
+
 class SceneMusicController(
     private val context: Context,
     private val scope: CoroutineScope,
@@ -171,7 +171,7 @@ class SceneMusicController(
         null
     }
 
-    /** Ordinary Kotlin playlist transition: old and new overlap. */
+
     private fun startCrossfadeTransition(next: Slot, durationMillis: Int) {
         transitionJob?.cancel()
         release(pendingSequential)
@@ -212,12 +212,12 @@ class SceneMusicController(
         }
     }
 
-    /**
-     * XPK switchBackgroundMusicTrackForScene(track, 2200): when a player exists, fade the current
-     * player to zero for the first half, release it, then start the requested track at zero and fade
-     * it in for the second half. When no player exists, XPK fades the new track in over all 2200 ms.
-     * There is deliberately no overlap between two tracks.
-     */
+
+
+
+
+
+
     private fun startXpkSequentialTransition(next: Slot, durationMillis: Int) {
         transitionJob?.cancel()
         release(pendingSequential)

@@ -12,14 +12,14 @@ import vn.nghetruyen.app.core.model.StoryDetail
 import vn.nghetruyen.app.core.model.StorySummary
 import java.security.MessageDigest
 
-/**
- * Native Kotlin adapter for TruyenCV.
- *
- * The parser is intentionally isolated from networking and covered by local
- * fixtures. The source remains DEGRADED until its live selectors have been
- * verified on a physical device because the website may return verification
- * pages to automated clients.
- */
+
+
+
+
+
+
+
+
 class TruyenCvSource(
     private val documentClient: HtmlDocumentClient = HttpHtmlClient(),
 ) : StorySource {
@@ -91,9 +91,9 @@ class TruyenCvSource(
         val baseUrl = normalizeStoryBase(url)
         val document = documentClient.getDocument(baseUrl, ALLOWED_HOSTS)
         val storyId = TruyenCvParser.parseStoryDetail(document, baseUrl).story.id
-        // TruyenCV numbers chapter-list pages in reverse chronological order:
-        // the unpaged story document is the newest page, while the highest
-        // /chuong/page/N/ URL contains the oldest chapters.
+
+
+
         TruyenCvParser.parseChapterPage(document, storyId, 0, baseUrl).chapters.lastOrNull()
     }
 

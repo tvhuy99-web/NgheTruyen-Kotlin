@@ -103,9 +103,9 @@ for token in [
 if "ValueStepper(" in reader:
     raise SystemExit("ReaderScreen.kt: ValueStepper remains")
 
-# The XPK reader music dialog contains target LUFS/duck/attack/release. Kotlin-only
-# extensions such as crossfade/avoid-repeat may remain in Personal advanced settings,
-# but must not be required inside the reference Reader workflow.
+
+
+
 for token in [
     'TextButton({ ttsDraft = ttsDraft.copy(processingMethod',
     'TextButton({ ttsDraft = ttsDraft.copy(sonicAccurate',

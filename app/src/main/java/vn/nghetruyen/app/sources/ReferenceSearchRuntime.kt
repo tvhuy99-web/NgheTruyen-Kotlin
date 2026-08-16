@@ -1,9 +1,9 @@
 package vn.nghetruyen.app.sources
 
-/**
- * Process-local search options mirroring the XPK search dialog.
- * The dialog updates these values immediately before invoking AppViewModel.search().
- */
+
+
+
+
 object ReferenceSearchRuntime {
     @Volatile
     var selectedSourceIds: Set<String> = emptySet()

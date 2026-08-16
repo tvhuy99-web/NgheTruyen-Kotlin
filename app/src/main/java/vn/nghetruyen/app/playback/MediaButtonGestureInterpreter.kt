@@ -70,13 +70,13 @@ private fun MediaButtonCommand.allowedForGesture(): MediaButtonCommand = when (t
     MediaButtonCommand.REWIND, MediaButtonCommand.STOP -> this
 }
 
-/**
- * Converts headset/media key events into deterministic app commands.
- *
- * A headset-hook or play/pause key uses a short multi-click window:
- * one click toggles, two clicks advance, three clicks go back. A long
- * press stops playback. Dedicated transport keys are handled immediately.
- */
+
+
+
+
+
+
+
 class MediaButtonGestureInterpreter(
     private val multiClickWindowMillis: Long = 360L,
 ) {
@@ -173,7 +173,7 @@ class MediaButtonGestureInterpreter(
         }
 }
 
-/** Suppresses the same physical KeyEvent when both a receiver and MediaSession deliver it. */
+
 class MediaButtonEventDeduplicator(
     private val retentionMillis: Long = 1_500L,
 ) {

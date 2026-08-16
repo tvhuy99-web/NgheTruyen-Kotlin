@@ -15,10 +15,10 @@ def require(path: str, *tokens: str) -> None:
 
 
 def main() -> None:
-    # PersonalScreen is now the full production Android/Compose settings surface.
-    # The previous fake-Compose compiler no longer models its real dependencies
-    # (BackHandler, menus, scrolling, reference components, etc.). M0 performs the
-    # authoritative Gradle test/lint/assemble compile against the real Android SDK.
+
+
+
+
     require(
         "app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt",
         "fun PersonalScreen(",

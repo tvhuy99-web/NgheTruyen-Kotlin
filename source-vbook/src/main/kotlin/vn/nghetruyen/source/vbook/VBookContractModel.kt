@@ -4,7 +4,7 @@ import vn.nghetruyen.source.api.JsonCodec
 import vn.nghetruyen.source.api.JsonValue
 import vn.nghetruyen.source.api.SourceManifest
 
-/** vBook contracts are intentionally independent from NgheTruyen SourceManifest. */
+
 enum class VBookContractProfile {
     LEGACY_JS,
     CURRENT_JS,
@@ -303,9 +303,9 @@ object VBookContractDetector {
         }
 
         val profile = when {
-            // The documented current contract is the canonical baseline. Signal-free minimal packages
-            // are valid current extensions; legacy must be positively identified by historical fields
-            // or response/config syntax instead of making current authors add artificial markers.
+
+
+
             current == 0 && legacy == 0 -> VBookContractProfile.CURRENT_JS
             current >= legacy + 2 -> VBookContractProfile.CURRENT_JS
             legacy >= current + 2 -> VBookContractProfile.LEGACY_JS
@@ -324,8 +324,8 @@ object VBookRequiredScripts {
         }
         val required = when (manifest.metadata.type) {
             VBookContentType.NOVEL, VBookContentType.CHINESE_NOVEL -> setOf("search", "detail", "toc", "chap")
-            // Both page and chap are optional in the documented current comic contract. If neither
-            // exists, the host renders the raw chapter URL as a single page.
+
+
             VBookContentType.COMIC -> setOf("search", "detail", "toc")
             VBookContentType.VIDEO, VBookContentType.AUDIO -> setOf("search", "detail", "toc", "track")
             VBookContentType.TTS -> setOf("voice", "tts")

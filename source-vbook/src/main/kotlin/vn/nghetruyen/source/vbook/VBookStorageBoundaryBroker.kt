@@ -5,7 +5,7 @@ import vn.nghetruyen.source.api.SourcePlatformResult
 import vn.nghetruyen.source.api.SourceStorageBroker
 import vn.nghetruyen.source.api.SourceStorageRequest
 
-/** Installs the vBook host-value boundary before storage bootstrap exposes key collections. */
+
 class VBookStorageBoundaryBroker(
     private val delegate: SourceStorageBroker,
 ) : SourceStorageBroker {

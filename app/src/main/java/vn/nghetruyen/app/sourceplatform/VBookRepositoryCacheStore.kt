@@ -9,12 +9,12 @@ data class VBookCachedRepositoryDocument(
     val updatedAtEpochMs: Long,
 )
 
-/**
- * Small bounded on-disk cache for vBook repository index/catalog JSON.
- *
- * This cache never stores install ZIPs and is only used to rebuild repository listings when the
- * network is unavailable. Package installation still goes through the normal download/verify path.
- */
+
+
+
+
+
+
 class VBookRepositoryCacheStore(context: Context) {
     private val directory = File(context.applicationContext.filesDir, DIRECTORY).apply { mkdirs() }
 

@@ -23,7 +23,7 @@ data class VBookTtsAudio(
 data class VBookTranslateLanguage(
     val id: String,
     val name: String,
-    /** `from`, `to`, or null for both directions. */
+
     val type: String?,
 )
 
@@ -55,12 +55,12 @@ data class VBookMediaTrack(
     val raw: JsonValue.Obj,
 )
 
-/**
- * Content-type provider facade over one immutable vBook package.
- *
- * This is deliberately not an Android StorySource. Comic/media/TTS/translate keep their native
- * vBook contracts and only normalize their return values at this provider boundary.
- */
+
+
+
+
+
+
 class VBookProviderSession(
     artifactIdentity: String,
     packageBytes: ByteArray,
@@ -92,7 +92,7 @@ class VBookProviderSession(
         }
     }
 
-    /** `chap` is optional for video/audio. Without it the episode URL is passed straight to track. */
+
     fun mediaSources(episodeUrl: String, traceId: String = ""): SourcePlatformResult<List<VBookMediaSourceOption>> {
         if (contentType !in setOf(VBookContentType.VIDEO, VBookContentType.AUDIO)) {
             return invalid("VBOOK_MEDIA_CONTENT_TYPE_REQUIRED", traceId)

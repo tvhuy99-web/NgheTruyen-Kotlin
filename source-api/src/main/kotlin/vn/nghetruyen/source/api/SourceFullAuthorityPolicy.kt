@@ -1,13 +1,13 @@
 package vn.nghetruyen.source.api
 
-/**
- * The single authority model for installed NgheTruyen extensions.
- *
- * This is intentionally not a trust tier. Once an extension is installed it receives the complete
- * host capability surface that can be expressed by SourceManifest. Runtime budgets still exist to
- * contain hangs/crashes, while the hard boundary stays below the source API: no raw Android/Java
- * object bridge, host-secret extraction, arbitrary process execution, file:// or content:// escape.
- */
+
+
+
+
+
+
+
+
 object SourceFullAuthorityPolicy {
     const val AUTHORITY_ID = "FULL_IN_APP"
 

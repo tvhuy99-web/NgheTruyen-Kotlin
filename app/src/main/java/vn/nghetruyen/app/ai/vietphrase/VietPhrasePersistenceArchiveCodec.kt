@@ -7,7 +7,7 @@ import java.util.Base64
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 
-/** Lossless persistence snapshot for rules and per-dictionary enabled state. */
+
 object VietPhrasePersistenceArchiveCodec {
     data class DictionaryState(
         val id: String,
@@ -97,7 +97,7 @@ object VietPhrasePersistenceArchiveCodec {
         return Archive(rules, states)
     }
 
-    /** Reads new snapshots and keeps backward compatibility with rule-only archives. */
+
     fun decodeCompatible(bytes: ByteArray): Archive = runCatching { decode(bytes) }.getOrElse {
         Archive(VietPhraseArchiveCodec.decode(bytes).rules, emptyList(), legacyRuleOnly = true)
     }

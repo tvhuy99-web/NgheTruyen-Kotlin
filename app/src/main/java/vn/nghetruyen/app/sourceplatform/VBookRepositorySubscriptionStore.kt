@@ -2,7 +2,7 @@ package vn.nghetruyen.app.sourceplatform
 
 import android.content.Context
 
-/** Persists user-added vBook repository index URLs across process/app restarts. */
+
 class VBookRepositorySubscriptionStore(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
 

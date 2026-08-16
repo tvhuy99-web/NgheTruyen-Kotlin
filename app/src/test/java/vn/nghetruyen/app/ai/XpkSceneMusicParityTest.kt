@@ -160,9 +160,9 @@ class XpkSceneMusicParityTest {
             block()
             fail("Expected validation to fail")
         } catch (_: IllegalArgumentException) {
-            // expected
+
         } catch (_: IllegalStateException) {
-            // expected
+
         }
     }
 }

@@ -16,15 +16,15 @@ import vn.nghetruyen.source.api.SourceWebSocketCapability
 import java.net.URI
 import java.security.MessageDigest
 
-/**
- * Builds NgheTruyen's internal execution envelope for an unmodified vBook extension.
- *
- * Installed extensions run with one authority model: all in-app source capabilities are available.
- * The manifest is therefore a host execution envelope, not a per-extension permission prompt. The
- * hard boundary is enforced below this layer: extensions do not receive raw Android/Java objects,
- * host credentials, file:// access, content:// access, or an arbitrary native process bridge.
- * plugin.json and the original script bytes remain the source of truth.
- */
+
+
+
+
+
+
+
+
+
 object VBookHostManifestFactory {
     private const val DISPATCH_PATH = "src/__nghe_vbook_dispatch.js"
     private val allMethods = setOf("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE")
@@ -35,8 +35,8 @@ object VBookHostManifestFactory {
         resources: vn.nghetruyen.source.runtime.SourceResourceProvider,
     ): SourceManifest {
         val sourceId = stableSourceId(artifactIdentity)
-        // One extension mode: HTTP is a compatibility capability, not a permission that depends on
-        // whether a static scanner happened to notice an http:// literal before execution.
+
+
         val allowCleartext = true
         val origin = sourceOrigin(plugin.metadata.source, allowCleartext)
         val connection = VBookConfigValues.resolve(plugin).connectionSettings()
@@ -58,8 +58,8 @@ object VBookHostManifestFactory {
             adult = plugin.metadata.nsfw,
             runtime = SourceRuntimePolicy(
                 mode = SourceRuntimeMode.VBOOK_JS_COMPAT,
-                // These are crash-containment budgets, not feature permissions. They protect the app
-                // from a runaway script while leaving the complete host API available to extensions.
+
+
                 instructionBudget = 1_000_000,
                 memoryBudgetBytes = 64 * 1024 * 1024,
                 actionTimeoutMs = 120_000,
@@ -132,7 +132,7 @@ object VBookHostManifestFactory {
                 if (port != -1 && port != default) append(':').append(port)
             }
         }
-        // Reserved invalid TLD; used only as a validation anchor because publicInternet handles real requests.
+
         return "https://vbook.invalid"
     }
 }

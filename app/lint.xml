@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <lint>
-    <!-- Keep this Compose locale detector visible without blocking the release gate.
-         PersonalScreen's VietPhrase timestamp is presentation-only; functional/XPK parity is covered separately. -->
+
+
     <issue id="NonObservableLocale" severity="warning" />
 </lint>

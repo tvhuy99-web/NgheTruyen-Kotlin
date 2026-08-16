@@ -12,8 +12,8 @@ import java.io.InputStream
 import java.time.Duration
 import java.util.LinkedHashMap
 
-/** HTTPS-only bounded text client used by sources that intentionally consume
- * plain text/Markdown rather than DOM HTML. Redirects are checked per hop. */
+
+
 class HttpTextClient(
     private val client: OkHttpClient = defaultClient(),
     private val maxResponseBytes: Int = DEFAULT_MAX_RESPONSE_BYTES,

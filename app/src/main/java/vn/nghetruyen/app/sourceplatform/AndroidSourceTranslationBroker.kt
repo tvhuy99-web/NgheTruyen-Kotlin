@@ -13,10 +13,10 @@ import vn.nghetruyen.source.api.SourceTranslationRequest
 import vn.nghetruyen.source.api.SourceTranslationResponse
 import vn.nghetruyen.source.vbook.VBookTranslationBrokerRouter
 
-/**
- * Generic source translation uses the configured AI provider. vBook Quick Translator targets
- * (`vp`/`hv`) are intercepted before the disclosure/AI path and stay offline.
- */
+
+
+
+
 class AndroidSourceTranslationBroker(
     private val engine: TranslationEngine,
     private val quickTranslation: SourceTranslationBroker = AndroidVBookQuickTranslationRegistry,

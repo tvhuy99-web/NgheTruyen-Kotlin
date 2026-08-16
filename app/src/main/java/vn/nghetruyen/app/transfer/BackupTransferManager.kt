@@ -58,16 +58,16 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
-/**
- * Versioned, merge-only backup format for user data.
- *
- * The archive contains manifest.json, data.json and optional portable attachments.
- * Attachments can include installed source packages, non-secret extension storage,
- * trust metadata and physical scene-music files.
- *
- * Restore never executes code from the archive and rejects unknown entries,
- * duplicate names, path traversal, oversized files and checksum mismatches.
- */
+
+
+
+
+
+
+
+
+
+
 class BackupTransferManager(
     context: Context,
     private val database: AppDatabase,
@@ -495,7 +495,7 @@ class BackupTransferManager(
 
     companion object {
         private const val FORMAT_NAME = "vn.nghetruyen.backup"
-        // Legacy release-gate token: FORMAT_VERSION = 15
+
         private const val FORMAT_VERSION = 16
         private const val DATA_ENTRY = "data.json"
         private const val MANIFEST_ENTRY = "manifest.json"
@@ -546,7 +546,7 @@ class BackupTransferManager(
         name("ttsVoiceName"); nullableValue(value.ttsVoiceName)
         name("ttsLanguageTag").value(value.ttsLanguageTag)
         name("audioInterruptionMode").value(value.audioInterruptionMode.name)
-        // SAF URI grants are device-local and are intentionally excluded from portable backups.
+
         name("backgroundMusicEnabled").value(false)
         name("backgroundMusicVolume").value(value.backgroundMusicVolume.toDouble())
         name("backgroundMusicDuckFactor").value(value.backgroundMusicDuckFactor.toDouble())
@@ -598,7 +598,7 @@ class BackupTransferManager(
         name("aiDailyInputCharsLimit").value(value.aiOnline.dailyInputCharsLimit.toLong())
         name("aiMaxRetries").value(value.aiOnline.maxRetries.toLong())
         name("aiRetryBaseDelayMillis").value(value.aiOnline.retryBaseDelayMillis.toLong())
-        // Consent and API key are device/user-session specific and are never exported.
+
         name("aiOnlineEnabled").value(false)
         name("aiConsentGranted").value(false)
         endObject()
@@ -1735,7 +1735,7 @@ class BackupTransferManager(
             }
             endObject()
             require(id.isNotBlank() && title.isNotBlank() && uri.isNotBlank()) { "Track nhạc cảnh không hợp lệ." }
-            // URI có thể không còn quyền trên thiết bị mới; khôi phục ở trạng thái tắt để người dùng xác nhận lại.
+
             SceneMusicTrackEntity(
                 id = id, title = title, uri = uri, tagsCsv = tags, volume = volume, enabled = false,
                 loudnessLufsEstimate = loudness, playCount = playCount, lastPlayedAt = lastPlayedAt,

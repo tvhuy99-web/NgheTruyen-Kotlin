@@ -2,10 +2,10 @@ package vn.nghetruyen.source.vbook
 
 import vn.nghetruyen.source.api.JsonValue
 
-/**
- * Finds executable `{title,input,script}` descriptors anywhere in a vBook result tree.
- * Traversal is bounded because extension output is untrusted and may be deeply/numerously nested.
- */
+
+
+
+
 object VBookDynamicActionCollector {
     fun collect(
         root: JsonValue,

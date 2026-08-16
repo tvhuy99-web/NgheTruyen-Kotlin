@@ -9,7 +9,7 @@ import kotlin.io.path.isDirectory
 import kotlin.io.path.name
 import kotlin.io.path.readText
 
-/** Offline corpus analyzer. Acquisition is handled by scripts/fetch_vbook_corpus.py. */
+
 fun main(args: Array<String>) {
     val root = Path.of(args.getOrNull(0) ?: "build/vbook-corpus/packages")
     require(root.exists() && root.isDirectory()) { "VBOOK_CORPUS_DIRECTORY_MISSING:$root" }

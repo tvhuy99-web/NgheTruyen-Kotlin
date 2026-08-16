@@ -13,13 +13,13 @@ import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
 
-/**
- * Device-bound encrypted storage for vBook localStorage/cache values.
- *
- * File names retain the broker's opaque key encoding so prefix operations keep working, while every
- * value is authenticated with its source id and logical key. Quotas are enforced against plaintext;
- * encryption overhead is never charged to an extension.
- */
+
+
+
+
+
+
+
 class EncryptedSourceStorageBroker(
     root: File,
     private val secretKeyProvider: SourceSecretKeyProvider = AndroidSourceSecretKeyProvider(),
@@ -126,9 +126,9 @@ class EncryptedSourceStorageBroker(
 
     private fun encrypt(sourceId: String, key: String, plaintext: ByteArray): ByteArray {
         val cipher = Cipher.getInstance(TRANSFORMATION)
-        // Android Keystore keys created with randomizedEncryptionRequired reject a caller-supplied
-        // GCM IV during encryption. Let the provider generate it, then persist that IV beside the
-        // ciphertext. Decryption still receives the stored IV explicitly.
+
+
+
         cipher.init(Cipher.ENCRYPT_MODE, secretKeyProvider.keyFor(sourceId), random)
         val iv = cipher.iv ?: error("SOURCE_STORAGE_IV_UNAVAILABLE")
         require(iv.size == IV_BYTES) { "SOURCE_STORAGE_IV_INVALID" }

@@ -6,16 +6,16 @@ import vn.nghetruyen.app.core.model.VoiceRoleDraft
 import vn.nghetruyen.app.data.local.VoiceRoleEntity
 import java.util.UUID
 
-/** Stores reference voice profiles without the legacy UI's narrower rate/volume clamps. */
+
 object ReferenceVoiceRolePersistence {
     suspend fun save(context: Context, storyId: String, draft: VoiceRoleDraft): String {
         val app = context.applicationContext as NgheTruyenApplication
         val id = draft.originalRoleId ?: UUID.randomUUID().toString()
         val narrator = draft.isNarrator
         val method = if (draft.processingMethod == "sonic") "sonic" else "system"
-        // XPK has one method-specific profile.volume. Keep inactive system/Sonic values in Extras, but
-        // persist the active method's volume in VoiceRoleEntity so playback and the AI prompt share the
-        // same base value after every save.
+
+
+
         val activeVolume = if (method == "sonic") {
             draft.sonicVolume.coerceIn(0f, 2f)
         } else {

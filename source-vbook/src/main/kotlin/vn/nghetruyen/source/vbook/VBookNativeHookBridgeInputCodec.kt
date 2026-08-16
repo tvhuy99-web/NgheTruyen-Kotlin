@@ -8,14 +8,14 @@ internal data class VBookNativeHookBridgeInput(
     val mode: String,
 )
 
-/**
- * Decodes the Native Source API 2 bridge contract without losing the payload value.
- *
- * Current adapters send `{name, input: JSON.stringify({value,args,context})}`. Older callers may
- * still send `{name,value,args,context}` directly, so that shape remains a compatibility fallback.
- * When packed input is present it is authoritative: malformed packed data must fail visibly instead
- * of falling back and silently discarding `value`, which is what broke story -> TOC on STV.
- */
+
+
+
+
+
+
+
+
 internal object VBookNativeHookBridgeInputCodec {
     fun resolve(
         packedInput: String?,

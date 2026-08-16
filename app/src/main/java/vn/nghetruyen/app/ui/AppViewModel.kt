@@ -1163,7 +1163,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Runs the same prepare/verify path as installation, but never commits the staged package. */
+
     fun prepareRepositorySourceInstall(repositoryId: String, sourceId: String) {
         if (state.value.sourceInstallBusy || state.value.sourceRepositoryRefreshing) return
         viewModelScope.launch {
@@ -1195,7 +1195,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Prepare + verify + commit in one user action. Security checks remain mandatory. */
+
     fun installRepositorySource(repositoryId: String, sourceId: String) {
         if (state.value.sourceInstallBusy || state.value.sourceRepositoryRefreshing) return
         val requested = state.value.sourceRepositoryPackages.firstOrNull {
@@ -2054,9 +2054,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val combined = (existing + incoming).distinctBy { story ->
             story.url.ifBlank { "${story.sourceId}:${story.id}" }
         }
-        // A source home/category is already ordered by recency or ranking. Relevance
-        // sorting with a blank query used to alphabetize it and silently destroy the
-        // website order. Preserve that order unless the user explicitly chooses a sort.
+
+
+
         if (mode != ExploreMode.SEARCH && sortMode == SearchSortMode.RELEVANCE) return combined
         return StorySearch.merge(
             results = combined,
@@ -3560,10 +3560,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * Replays the same story-detail load used by Home before optionally opening a stored chapter.
-     * Only a genuinely imported book (`sourceId == offline`) is allowed to take the cache-only path.
-     */
+
+
+
+
     private fun openStoredLibraryEntry(
         story: StoryEntity,
         chapter: ChapterEntity?,

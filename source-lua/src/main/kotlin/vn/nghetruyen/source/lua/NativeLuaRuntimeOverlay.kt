@@ -5,14 +5,14 @@ import vn.nghetruyen.source.api.JsonValue
 import vn.nghetruyen.source.api.SourceRuntimeMode
 import vn.nghetruyen.source.packagekit.VerifiedSourcePack
 
-/**
- * Refreshes only NgheTruyen-generated NativeV2 JavaScript for an already-installed Native Lua pack.
- *
- * The signed/source-owned bytes stay untouched on disk. Older app builds generated src/native_v2_*.js
- * at import time, so updating the APK alone previously left installed sources pinned to an old host
- * adapter forever. This overlay reconstructs the original Lua archive from preserved native archive bytes
- * and regenerates only host-owned src/native_v2_* resources in memory.
- */
+
+
+
+
+
+
+
+
 object NativeLuaRuntimeOverlay {
     const val HOST_RUNTIME_MARKER = "NGHETRUYEN_NATIVE_V2_HOST_RUNTIME:2026-08-15.1"
     private const val CORE_PATH = "src/native_v2_core.js"

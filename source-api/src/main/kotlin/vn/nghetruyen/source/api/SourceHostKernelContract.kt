@@ -1,12 +1,12 @@
 package vn.nghetruyen.source.api
 
-/**
- * Stable wire contract between an installed extension and NgheTruyen-owned host surfaces.
- *
- * This is not a permission list. Installed extensions already run under FULL_IN_APP authority.
- * The contract only gives host-facing commands/events stable names so JavaScript, Lua and future
- * runtimes can target the same NgheTruyen API without receiving Android/Java implementation objects.
- */
+
+
+
+
+
+
+
 object SourceHostKernelContract {
     const val API_VERSION = 2
     const val COMMAND_KIND = "nghetruyen.host-command"

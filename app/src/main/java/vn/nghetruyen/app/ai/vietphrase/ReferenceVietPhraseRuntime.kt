@@ -2,7 +2,7 @@ package vn.nghetruyen.app.ai.vietphrase
 
 import android.content.Context
 
-/** Small compatibility state used by the XPK-style VietPhrase settings dialog. */
+
 object ReferenceVietPhraseRuntime {
     private const val PREFS = "reference_vietphrase_settings"
     private const val KEY_ENABLED = "enabled"

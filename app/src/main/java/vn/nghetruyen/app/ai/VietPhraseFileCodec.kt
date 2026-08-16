@@ -3,7 +3,7 @@ package vn.nghetruyen.app.ai
 import vn.nghetruyen.app.data.local.VietPhraseEntity
 import java.util.Locale
 
-/** Portable UTF-8 VietPhrase format. TSV is canonical; source=target is accepted for legacy files. */
+
 object VietPhraseFileCodec {
     data class Record(
         val source: String,

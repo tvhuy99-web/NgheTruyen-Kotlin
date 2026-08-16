@@ -17,10 +17,10 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.security.MessageDigest
 
-/**
- * UI-facing facade that preserves the existing source-management surface while routing ownership
- * to the correct ecosystem. vBook artifacts never flow back through SourcePackStore.
- */
+
+
+
+
 class UnifiedSourcePlatformManager(
     private val legacy: SourcePlatformManager,
     private val vBook: VBookSourcePlatform,
@@ -96,8 +96,8 @@ class UnifiedSourcePlatformManager(
                     changelog = "",
                     packageBytes = 0,
                     status = if (packageIsHttps) state else "INSECURE_PACKAGE_URL",
-                    // Lua-style compatibility: let the user deliberately reinstall the same version
-                    // or install an older repository version. Exact-byte preview/validation still runs.
+
+
                     canInstall = packageIsHttps && state in setOf(
                         "NOT_INSTALLED", "UPDATE_AVAILABLE", "VERSION_UNKNOWN", "CURRENT", "REMOTE_OLDER",
                     ),
@@ -106,7 +106,7 @@ class UnifiedSourcePlatformManager(
         }
     }.distinctBy { it.repositoryId to it.sourceId }
 
-    /** Try the native signed-repository schema first; fall back to the canonical vBook index schema. */
+
     fun refreshRepository(url: String): Result<SourceRepositoryUiInfo> {
         clearPendingCatalogInstall()
         val native = legacy.probeRepository(url)
@@ -149,7 +149,7 @@ class UnifiedSourcePlatformManager(
         return legacy.removeRepository(repositoryId)
     }
 
-    /** Rehydrates saved vBook repositories. Failed/offline URLs stay subscribed and remain visible. */
+
     fun restorePersistedRepositories(): Int {
         clearPendingCatalogInstall()
         var restored = 0
@@ -171,11 +171,11 @@ class UnifiedSourcePlatformManager(
         return restored
     }
 
-    /**
-     * Bind repository preview and confirmation to the same exact ZIP and canonical catalog identity.
-     * The legacy manager is used only to render the existing permission-preview UI; it never owns
-     * confirmation for a catalog vBook package.
-     */
+
+
+
+
+
     fun prepareRepositoryInstall(repositoryId: String, sourceId: String): Result<SourceInstallPreview> {
         val snapshot = vBookSnapshots[repositoryId] ?: run {
             clearPendingCatalogInstall()
@@ -213,10 +213,10 @@ class UnifiedSourcePlatformManager(
         }
     }
 
-    /**
-     * Generic file import must never convert a newly supplied vBook ZIP back into SourcePack.
-     * Detect the exact raw package at the ecosystem facade and route it to the S4 vBook transaction.
-     */
+
+
+
+
     fun prepareInstall(input: InputStream): Result<SourceInstallPreview> {
         clearPendingCatalogInstall()
         return runCatching { readBounded(input, MAX_IMPORT_BYTES) }.fold(
@@ -365,7 +365,7 @@ class UnifiedSourcePlatformManager(
         vBook.loginInfoBySourceId(sourceId)
     }.getOrNull()
 
-    /** vBook export is the exact immutable ZIP originally staged, not a reconstructed archive. */
+
     fun exportInstalledPack(sourceId: String, output: OutputStream): Result<Unit> {
         val installed = vBook.installedSources().firstOrNull { it.sourceId == sourceId }
             ?: return legacy.exportInstalledPack(sourceId, output)

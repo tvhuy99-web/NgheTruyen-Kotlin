@@ -3,7 +3,7 @@ package vn.nghetruyen.source.api
 import java.nio.charset.Charset
 import java.util.UUID
 
-/** Network response representation requested by a declarative SourcePack action. */
+
 enum class SourceNetworkResponseMode { TEXT, JSON, BASE64, BYTES }
 
 data class SourceNetworkRequest(
@@ -48,9 +48,9 @@ data class SourceNetworkResponse(
     val cipherSuite: String? = null,
     val timing: SourceNetworkTiming,
     val traceId: String,
-    /** HTTP reason phrase when the transport exposes one. HTTP/2+ may legitimately return an empty string. */
+
     val statusText: String = "",
-    /** Actual final request metadata after host defaults, cookies and redirect handling are applied. */
+
     val requestUrl: String? = null,
     val requestHeaders: Map<String, List<String>> = emptyMap(),
     val fromReplay: Boolean = false,
@@ -59,7 +59,7 @@ data class SourceNetworkResponse(
         body.toString(charsetName?.let { runCatching { Charset.forName(it) }.getOrNull() } ?: defaultCharset)
 }
 
-/** Capability boundary used by the runtime. Implementations must enforce the manifest, not trust the action program. */
+
 fun interface SourceNetworkBroker {
     fun execute(manifest: SourceManifest, request: SourceNetworkRequest): SourcePlatformResult<SourceNetworkResponse>
 
@@ -76,20 +76,20 @@ fun interface SourceNetworkBroker {
     }
 }
 
-/** Cookie storage is partitioned strictly by SourcePack ID. */
+
 interface SourceCookiePartition {
-    /** Legacy source-wide header. New implementations should override the URL-aware methods below. */
+
     fun readCookieHeader(sourceId: String): String?
     fun mergeSetCookieHeaders(sourceId: String, setCookieHeaders: List<String>)
 
-    /** RFC 6265-aware lookup for one request URL. */
+
     fun readCookieHeader(sourceId: String, requestUrl: String): String? = readCookieHeader(sourceId)
 
-    /** RFC 6265-aware merge using the response URL as the default domain/path context. */
+
     fun mergeSetCookieHeaders(sourceId: String, responseUrl: String, setCookieHeaders: List<String>) =
         mergeSetCookieHeaders(sourceId, setCookieHeaders)
 
-    /** Export Set-Cookie lines suitable for importing into a browser profile. */
+
     fun exportSetCookieHeaders(sourceId: String, requestUrl: String): List<String> =
         readCookieHeader(sourceId, requestUrl)?.split("; ")?.filter(String::isNotBlank).orEmpty()
 

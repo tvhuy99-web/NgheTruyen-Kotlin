@@ -1,14 +1,14 @@
 package vn.nghetruyen.source.vbook
 
-/**
- * Unified extension-kernel facade exposed to vBook JavaScript.
- *
- * vBook historically grows by adding globals (Http, Engine, localStorage, Qt, ...). `App` does not
- * remove those globals; it gives new extensions one stable root that represents NgheTruyen itself.
- * The surface deliberately exposes host capabilities and serializable host-command messages rather
- * than Java/Android implementation objects. That is the containment boundary for the full-authority
- * extension model.
- */
+
+
+
+
+
+
+
+
+
 object VBookAppKernelPrelude {
     fun build(): String = """
         (function(global){

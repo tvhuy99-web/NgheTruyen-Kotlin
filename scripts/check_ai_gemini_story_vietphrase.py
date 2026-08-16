@@ -151,7 +151,7 @@ def main() -> int:
     if set(columns) != expected_columns or columns["storyId"][5] != 1:
         raise AssertionError(f"Migration 16->17 schema mismatch: {sorted(columns)}")
 
-    # The improvement flow must queue proposals for review rather than writing AI_REPLACE directly.
+
     vm = text("app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt")
     start = vm.index("fun improveVietPhraseForCurrentChapter")
     end = vm.index("fun aiTranslate", start)
@@ -163,7 +163,7 @@ def main() -> int:
     if re.search(r"VietPhraseEntity\s*\(", improve_block):
         raise AssertionError("Improvement flow writes VietPhrase rules without review")
 
-    # No accidental multiline ordinary string literal from generated patches.
+
     if 'joinToString("\\n\\n")' not in vm:
         raise AssertionError("Chapter payload separator is not the expected escaped double newline")
 

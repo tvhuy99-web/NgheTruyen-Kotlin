@@ -12,7 +12,7 @@ internal data class ParsedVBookDiagnosticLog(
     val attributes: Map<String, String>,
 )
 
-/** Turns Lua/Native Log.log arguments into searchable fields instead of one lossy text blob. */
+
 internal object VBookDiagnosticLogParser {
     fun parse(
         rawArguments: List<String>,

@@ -7,14 +7,14 @@ import vn.nghetruyen.source.api.SourceManifest
 import vn.nghetruyen.source.api.SourcePlatformResult
 import vn.nghetruyen.source.runtime.SourceResourceProvider
 
-/**
- * Selects a primary engine without replaying extension side effects after ordinary script failures.
- *
- * Android's Chromium implementation now yields Browser host calls out of its synchronous WebView
- * bridge and replays them with cached results. Browser-using scripts therefore stay on the primary
- * Chromium engine instead of being pre-routed to Rhino. Fallback remains restricted to explicit
- * pre-execution unavailable states where no extension code or host side effect could have run.
- */
+
+
+
+
+
+
+
+
 class PrimaryFallbackVBookActionRuntime(
     private val primary: VBookActionRuntime,
     private val fallback: VBookActionRuntime,

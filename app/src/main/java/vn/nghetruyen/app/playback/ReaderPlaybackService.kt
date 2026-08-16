@@ -1966,8 +1966,8 @@ class ReaderPlaybackService : Service() {
                     }
                     val warning = result?.warnings?.firstOrNull()?.takeIf(String::isNotBlank)
                         ?: attempt.exceptionOrNull()?.message
-                    // Do not let a late prefetch result overwrite CURRENT_PLANNING/READY after the
-                    // reader has already promoted this chapter into the foreground.
+
+
                     if (PlaybackQueueStore.state.value.chapterId == parentChapterId) {
                         PlaybackQueueStore.setNarrationAutomation(
                             stage = if (failed) NarrationAutomationStage.FAILED else NarrationAutomationStage.NEXT_READY,

@@ -24,16 +24,16 @@ import java.util.concurrent.ConcurrentHashMap
 
 internal const val CHROMIUM_BROWSER_REPLAY_REQUIRED = "SOURCE_BROWSER_REPLAY_REQUIRED"
 
-/**
- * Runs Browser host calls between Chromium evaluation passes instead of inside a pending JS prompt.
- *
- * Android WebView keeps the action renderer's prompt rendezvous on the main thread. A production
- * Browser broker also needs that thread to drive its own WebView, so invoking Browser.* directly
- * from the prompt bridge can gate both WebViews until the action timeout. This wrapper lets the
- * Chromium pass yield at the first uncached Browser call, executes that call after the action
- * WebView has been destroyed, caches the result, and restarts the same script. Network calls that
- * happened before the yield are cached too so replay does not repeat HTTP side effects.
- */
+
+
+
+
+
+
+
+
+
+
 internal class ChromiumVBookBrowserReplayRuntime(
     private val delegate: VBookActionRuntime,
     private val replay: ChromiumVBookReplayCoordinator,
@@ -153,7 +153,7 @@ internal class ChromiumVBookBrowserReplayRuntime(
     }
 }
 
-/** Per-trace replay state shared by Chromium's Browser and network broker facades. */
+
 internal class ChromiumVBookReplayCoordinator(
     private val browserDelegate: SourceBrowserBroker,
     private val networkDelegate: SourceNetworkBroker,

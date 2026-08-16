@@ -18,14 +18,14 @@ import vn.nghetruyen.source.diagnostics.DiagnosticRedactor
 import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 import java.util.UUID
 
-/**
- * Top-level diagnostic boundary for every StorySource implementation.
- *
- * Lower runtimes (native Lua, vBook, built-in HTTP/parser code) may emit richer events, but the UI
- * must never become diagnostically silent just because a particular adapter does not. This wrapper
- * guarantees one start and one terminal event for every user-facing source call while preserving the
- * original AppResult and exception semantics.
- */
+
+
+
+
+
+
+
+
 internal class DiagnosticStorySource(
     private val delegate: StorySource,
     private val diagnostics: SourceDiagnosticRuntime,

@@ -37,16 +37,16 @@ import java.security.MessageDigest
 import java.util.Locale
 import java.util.zip.ZipInputStream
 
-/**
- * Deep repair pass for real XPK backups.
- *
- * The legacy database uses order_index=0 for many chapters that were merely opened/read. Room,
- * however, requires (storyId, chapterIndex) to be unique. A direct 0 -> 0 mapping therefore
- * collapses hundreds of legacy chapter rows into a handful of Room rows. This layer reconstructs
- * a unique chapter index for every legacy URL, restores the voice-cast profile model that lived in
- * SharedPreferences/settings rows, and retries legacy plugin.zip files through the current vBook
- * importer instead of the signed SourcePack importer.
- */
+
+
+
+
+
+
+
+
+
+
 class LegacyXpkDeepRepairCoordinator(
     context: Context,
     private val delegate: LegacyXpkVerifiedRestoreCoordinator,
@@ -624,8 +624,8 @@ class LegacyXpkDeepRepairCoordinator(
         luaDir.listFiles().orEmpty().filter(File::isFile).sortedBy(File::getName).forEach { file ->
             if (!file.extension.equals("lua", true)) return@forEach
             luaCount += 1
-            // A vBook ZIP and Lua file commonly represent the same extension in XPK backups. Once
-            // the vBook package is active, the obsolete Lua companion does not need a second runtime.
+
+
             val stem = normalizedName(file.nameWithoutExtension)
             if (activatedNames.any { it == stem || it.contains(stem) || stem.contains(it) }) return@forEach
             val result = runCatching {
@@ -669,8 +669,8 @@ class LegacyXpkDeepRepairCoordinator(
         repair: DeepRepair,
         extensions: ExtensionRepair,
     ): List<String> = buildList {
-        // Keep non-stale warnings from the first pass. Chapter-count and extension-pipeline errors are
-        // recalculated below after deep repair.
+
+
         base.warnings.forEach { warning ->
             val lower = warning.lowercase(Locale.ROOT)
             val staleChapter = lower.contains("importer xử lý") && lower.contains("chương") && lower.contains("room")

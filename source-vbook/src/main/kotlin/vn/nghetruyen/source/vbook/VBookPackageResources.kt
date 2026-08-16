@@ -2,7 +2,7 @@ package vn.nghetruyen.source.vbook
 
 import vn.nghetruyen.source.runtime.SourceResourceProvider
 
-/** Read-only resource view over the exact files retained by [VBookPackageReader]. */
+
 class VBookPackageResourceProvider(
     private val pkg: VBookPackage,
 ) : SourceResourceProvider {

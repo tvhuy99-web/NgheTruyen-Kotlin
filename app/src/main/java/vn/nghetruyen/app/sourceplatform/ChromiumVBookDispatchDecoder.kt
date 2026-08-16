@@ -3,15 +3,15 @@ package vn.nghetruyen.app.sourceplatform
 import vn.nghetruyen.source.api.JsonCodec
 import vn.nghetruyen.source.api.JsonValue
 
-/**
- * Decodes the string/envelope layers introduced by WebView evaluateJavascript plus the vBook
- * compatibility dispatcher. The decoder is intentionally target-aware: Chromium is only selected
- * for the generated compatibility UI_ACTION, so success means reaching the exact dispatcher data
- * object consumed by VBookCompatibilityRuntime.
- *
- * [checkpoint] exposes Lua-style micro stages without coupling this pure decoder to Android or the
- * diagnostics module. The callback must be side-effect safe; decoder correctness never depends on it.
- */
+
+
+
+
+
+
+
+
+
 internal object ChromiumVBookDispatchDecoder {
     fun decode(
         raw: String,

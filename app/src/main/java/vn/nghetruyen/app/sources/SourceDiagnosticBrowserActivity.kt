@@ -42,11 +42,11 @@ import java.util.Date
 import java.util.Locale
 import java.util.UUID
 
-/**
- * Source-scoped diagnostics browser matching the option hierarchy of the reference XPK.
- * Only redacted metadata is recorded. Passwords, form values, response bodies and cookie values
- * are never written to the diagnostic log.
- */
+
+
+
+
+
 class SourceDiagnosticBrowserActivity : ComponentActivity() {
     private lateinit var sourceId: String
     private lateinit var initialUrl: String

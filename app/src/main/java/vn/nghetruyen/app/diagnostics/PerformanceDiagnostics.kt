@@ -9,7 +9,7 @@ import vn.nghetruyen.app.core.model.ChapterSummary
 import vn.nghetruyen.app.sources.ChapterCatalogIndex
 import kotlin.system.measureNanoTime
 
-/** Small, repeatable on-device health snapshot. It does not upload diagnostics. */
+
 object PerformanceDiagnostics {
     data class Snapshot(
         val createdAt: Long,

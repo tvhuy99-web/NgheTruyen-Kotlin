@@ -618,8 +618,8 @@ class VBookJsRuntime(
                 diagnostics.emit(event(manifest, request, parsed.name, parsed.severity, attributes = parsed.attributes))
                 true
             }.apply {
-                // NativeV2 uses Log.log.apply(...). Give the host logger the normal Function
-                // prototype so JavaScript apply/call helpers remain available in Rhino.
+
+
                 parentScope = scope
                 prototype = ScriptableObject.getFunctionPrototype(scope)
             }
@@ -862,8 +862,8 @@ class VBookJsRuntime(
         }
 
     private fun hostFunction(block: (Array<out Any>) -> Any?): BaseFunction = object : BaseFunction() {
-        // Function.prototype.apply(null, args) is valid JavaScript and Rhino forwards a null
-        // thisObj. Kotlin must not insert a non-null check before the host callback can run.
+
+
         override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable?, args: Array<out Any>): Any? = block(args)
     }
 
@@ -875,9 +875,9 @@ class VBookJsRuntime(
     ): Array<Any> {
         fun js(value: JsonValue?): Any = jsonToJs(cx, scope, value ?: JsonValue.Null)
         val page = if (manifest.runtime.mode == SourceRuntimeMode.NATIVE_LUA_COMPAT) {
-            // Native Source API 2 uses the second vBook argument as an opaque continuation URL.
-            // Passing vBook's numeric item offset ("0", "30", ...) makes `$page` win over the
-            // source's real first-page URL and sends requests to paths such as /0.
+
+
+
             request.input.string("pageToken").orEmpty()
         } else {
             (max(0, (request.input.int("page") ?: 1) - 1) * 30).toString()

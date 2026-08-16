@@ -5,7 +5,7 @@ import java.util.Locale
 import kotlin.math.floor
 import vn.nghetruyen.app.data.local.VoiceRoleEntity
 
-/** Prompt formatter matching the XPK VoiceCast transcript and unified narration contract. */
+
 object XpkVoiceCastPrompt {
     data class Bundle(
         val prompt: String,
@@ -16,7 +16,7 @@ object XpkVoiceCastPrompt {
         val sceneTrackIds: List<String> = emptyList(),
     )
 
-    /** Exact method-specific settings that XPK profilesForPrompt() exposes to AI. */
+
     data class PromptProfileSettings(
         val processingMethod: String = "system",
         val speed: Float = 1f,

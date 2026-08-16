@@ -2,7 +2,7 @@ load("config.js");
 
 function execute() {
   return Response.success([
-    // === THỂ LOẠI CHÍNH ===
+
     { title: "Lãng mạn",             input: "lãng mạn",              script: "genrecontent.js" },
     { title: "Đam mỹ / BL",          input: "đam mỹ",               script: "genrecontent.js" },
     { title: "Bách hợp / GL",         input: "bách hợp",             script: "genrecontent.js" },
@@ -15,7 +15,7 @@ function execute() {
     { title: "Phiêu lưu",             input: "phiêu lưu",             script: "genrecontent.js" },
     { title: "Tiểu thuyết",           input: "tiểu thuyết",           script: "genrecontent.js" },
     { title: "Fanfiction",            input: "fanfic",                script: "genrecontent.js" },
-    // === BỐI CẢNH ===
+
     { title: "Hiện đại",              input: "hiện đại",              script: "genrecontent.js" },
     { title: "Cổ đại",                input: "cổ đại",                script: "genrecontent.js" },
     { title: "Cung đình",             input: "cung đình",             script: "genrecontent.js" },
@@ -23,7 +23,7 @@ function execute() {
     { title: "Hào môn",               input: "hào môn",               script: "genrecontent.js" },
     { title: "Giới giải trí",         input: "giới giải trí",         script: "genrecontent.js" },
     { title: "Vườn trường",           input: "vườn trường",           script: "genrecontent.js" },
-    // === THỂ LOẠI HUYỀN HUYỄN ===
+
     { title: "Tu tiên / Tu chân",     input: "tu chân",               script: "genrecontent.js" },
     { title: "Xuyên không",           input: "xuyên không",           script: "genrecontent.js" },
     { title: "Xuyên nhanh",           input: "xuyên nhanh",           script: "genrecontent.js" },
@@ -37,7 +37,7 @@ function execute() {
     { title: "Siêu nhiên",            input: "siêu nhiên",            script: "genrecontent.js" },
     { title: "Võ hiệp",               input: "võ hiệp",               script: "genrecontent.js" },
     { title: "Khoa học viễn tưởng",   input: "khoa học viễn tưởng",   script: "genrecontent.js" },
-    // === CẢM XÚC / TÍNH CHẤT ===
+
     { title: "Ngọt sủng / HE",        input: "ngọt sủng",             script: "genrecontent.js" },
     { title: "Sảng văn",              input: "sảng văn",              script: "genrecontent.js" },
     { title: "Ngọt văn",              input: "ngọt văn",              script: "genrecontent.js" },
@@ -47,7 +47,7 @@ function execute() {
     { title: "Gia đình",              input: "gia đình",              script: "genrecontent.js" },
     { title: "Chữa lành",             input: "chữa lành",             script: "genrecontent.js" },
     { title: "Mạo hiểm",              input: "mạo hiểm",              script: "genrecontent.js" },
-    // === ĐỊNH DẠNG ===
+
     { title: "Oneshot / Truyện ngắn", input: "oneshot",               script: "genrecontent.js" },
     { title: "Tản văn",               input: "tản văn",               script: "genrecontent.js" },
     { title: "Thơ",                   input: "thơ",                   script: "genrecontent.js" },

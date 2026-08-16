@@ -45,7 +45,7 @@ class ReaderTextChunkerTest {
         assertEquals("Bạn đang nghe: Chương 1", initial.currentSpeechText)
 
         val firstParagraphChunks = initial.speechChunks.filter { it.paragraphIndex == 0 }
-        assertEquals(7, firstParagraphChunks.size) // TITLE + six 1200-byte narration units.
+        assertEquals(7, firstParagraphChunks.size)
         assertTrue(firstParagraphChunks.drop(1).all { it.text.toByteArray(Charsets.UTF_8).size <= 1_200 })
 
         repeat(6) {

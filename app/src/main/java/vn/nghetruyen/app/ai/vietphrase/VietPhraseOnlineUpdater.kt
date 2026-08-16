@@ -16,11 +16,11 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 import java.util.zip.GZIPInputStream
 
-/**
- * Discovers and installs the public recommended VietPhrase dictionaries without executing remote code.
- * Only HTTPS resources from an explicit host allow-list are accepted. Downloads are bounded, redirects
- * are revalidated, HTML error pages are rejected, and the repository commit remains transactional.
- */
+
+
+
+
+
 class VietPhraseOnlineUpdater(
     private val repository: LibraryRepository,
     private val client: OkHttpClient = OkHttpClient.Builder()

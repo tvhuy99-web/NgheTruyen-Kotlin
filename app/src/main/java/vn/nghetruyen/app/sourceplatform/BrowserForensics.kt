@@ -2,12 +2,12 @@ package vn.nghetruyen.app.sourceplatform
 
 import org.json.JSONObject
 
-/**
- * Safe, read-only WebView page probe modeled after the useful parts of the Lua/XPK browser
- * diagnostics. It intentionally excludes resource URLs, cookie names/values, storage keys/values,
- * form values and script source URLs. The full JSON is suitable for diagnostic evidence after the
- * normal redaction layer; [summary] is small enough to attach to the structured event stream.
- */
+
+
+
+
+
+
 object BrowserForensics {
     val pageScript: String = """
         (()=>{try{

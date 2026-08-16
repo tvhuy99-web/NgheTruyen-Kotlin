@@ -16,7 +16,7 @@ import vn.nghetruyen.app.downloads.DownloadStorageGuard
 import vn.nghetruyen.app.downloads.StoryDownloadPlanner
 import java.util.concurrent.atomic.AtomicReference
 
-/** Keeps the main UI wiring explicit while downloaded-library behavior lives beside its workflow. */
+
 object DownloadedLibraryCallbacks {
     private val selectedChapter = AtomicReference<ChapterEntity?>(null)
 
@@ -28,7 +28,7 @@ object DownloadedLibraryCallbacks {
         viewModel.updateDownloadedStoryFromLibrary(story)
     }
 
-    /** Returns only chapter bodies that still exist locally, in canonical chapter order. */
+
     suspend fun chapters(app: NgheTruyenApplication, story: StoryEntity): List<ChapterEntity> =
         app.container.libraryRepository.listReadableOfflineChapters(
             storyId = story.id,
@@ -36,7 +36,7 @@ object DownloadedLibraryCallbacks {
         )
             .sortedWith(compareBy<ChapterEntity> { it.chapterIndex }.thenBy { it.title })
 
-    /** Hands one selected downloaded chapter to the existing story-open callback exactly once. */
+
     fun selectChapter(chapter: ChapterEntity) {
         selectedChapter.set(chapter)
     }
@@ -45,12 +45,12 @@ object DownloadedLibraryCallbacks {
         selectedChapter.getAndSet(null)?.takeIf { it.storyId == storyId }
 }
 
-/** XPK-style entry point for a story on the Downloaded shelf. */
+
 fun AppViewModel.openDownloadedStoryFromLibrary(entity: StoryEntity) {
     val chapter = DownloadedLibraryCallbacks.consumeSelectedChapter(entity.id)
-    // This entry point belongs exclusively to the Downloaded shelf. A downloaded
-    // remote story intentionally stays cache-only here; other shelves use the
-    // canonical online story loader.
+
+
+
     openOfflineStory(entity)
     if (chapter == null) return
     viewModelScope.launch {
@@ -69,11 +69,11 @@ fun AppViewModel.openDownloadedStoryFromLibrary(entity: StoryEntity) {
     }
 }
 
-/**
- * Continue a remote download from the first chapter after the highest downloaded
- * chapter. This mirrors the reference tool's CẬP NHẬT / TẢI TIẾP action while
- * still using the Kotlin worker's resumable range download pipeline.
- */
+
+
+
+
+
 fun AppViewModel.updateDownloadedStoryFromLibrary(entity: StoryEntity) {
     if (entity.sourceId == "offline") {
         readerActionMessage("Truyện nhập từ tệp không có nguồn trực tuyến để cập nhật.")

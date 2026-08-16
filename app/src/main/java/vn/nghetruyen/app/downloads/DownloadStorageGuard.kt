@@ -3,7 +3,7 @@ package vn.nghetruyen.app.downloads
 import android.content.Context
 import android.os.StatFs
 
-/** Conservative free-space check used before and during offline downloads. */
+
 object DownloadStorageGuard {
     data class Estimate(
         val chapterCount: Int,

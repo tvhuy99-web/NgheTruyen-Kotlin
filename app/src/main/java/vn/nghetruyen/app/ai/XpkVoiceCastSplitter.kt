@@ -2,13 +2,13 @@ package vn.nghetruyen.app.ai
 
 import java.nio.charset.StandardCharsets
 
-/**
- * Kotlin port of the XPK VoiceCast unit builder.
- *
- * This class intentionally keeps XPK's internal paragraph/unit model even when the reader UI renders
- * a chapter as one continuous block. The paragraph boundary is only a parser boundary used to create
- * stable Pxxxx-Uxx / Pxxxx-Dxx ids for AI narration planning.
- */
+
+
+
+
+
+
+
 object XpkVoiceCastSplitter {
     const val NARRATOR_ID: String = "voice_narrator"
     const val ENGINE_VERSION: Int = 8
@@ -514,7 +514,7 @@ object XpkVoiceCastSplitter {
             val supersededBySpeech = speech != null && speech.first > narration.second
             if (closeEnough && !supersededBySpeech) return true
         }
-        // XPK currently keeps QUOTED_NARRATION_AFTER_CUES empty, so afterText is reserved for parity.
+
         @Suppress("UNUSED_VARIABLE") val reservedAfterText = afterText
         return false
     }

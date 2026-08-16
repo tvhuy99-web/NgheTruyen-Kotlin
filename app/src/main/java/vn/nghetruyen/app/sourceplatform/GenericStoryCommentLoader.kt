@@ -14,7 +14,7 @@ import vn.nghetruyen.source.api.SourceNetworkRequest
 import vn.nghetruyen.source.api.SourceNetworkResponseMode
 import vn.nghetruyen.source.api.SourcePlatformResult
 
-/** Best-effort comment compatibility for sources that do not declare an explicit COMMENTS action. */
+
 class GenericStoryCommentLoader(
     private val network: SourceNetworkBroker,
     private val browser: SourceBrowserBroker,

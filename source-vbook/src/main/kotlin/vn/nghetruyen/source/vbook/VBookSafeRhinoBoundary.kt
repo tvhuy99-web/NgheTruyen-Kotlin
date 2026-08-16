@@ -6,10 +6,10 @@ import org.mozilla.javascript.ScriptableObject
 import org.mozilla.javascript.WrapFactory
 import java.lang.reflect.Array as ReflectArray
 
-/**
- * Keeps the deny-all ClassShutter intact while converting host-owned data containers to native JS.
- * Unknown Java objects are deliberately delegated to Rhino and remain subject to the ClassShutter.
- */
+
+
+
+
 internal object VBookSafeRhinoBoundary {
     fun installCurrentContext() {
         val cx = Context.getCurrentContext() ?: return

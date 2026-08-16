@@ -51,20 +51,20 @@ object NativeLuaSourceImporter {
         )
         val packageValue = sourceSandbox.evaluate(sourceText, "@native/$entryPath")
         require(packageValue.istable()) { "NATIVE_LUA_PACKAGE_TABLE_REQUIRED" }
-        // Strip metatables and reject cyclic/shared object graphs before trusted validation.
+
         val packageTable = sanitizePackage(packageValue).checktable()
         require(packageTable.get("api_version").optint(0) == 2 || packageTable.get("native_source_api").optint(0) == 2) {
             "NATIVE_LUA_API_VERSION_UNSUPPORTED"
         }
 
-        // Installation itself is the authority grant. Legacy permission declarations remain readable
-        // for file compatibility, but they are not allowed to reduce what a Native Source can do
-        // inside NgheTruyen. The hard boundary stays below the Source API in the broker/sandbox layer.
+
+
+
         val sourceTable = packageTable.get("source").checktable()
         promoteFullInternalAuthority(sourceTable)
 
-        // Validation and adapter generation use fresh globals. An extension cannot replace
-        // require/type/pairs in its own environment and influence these trusted phases.
+
+
         val validationSandbox = LuaSandbox(
             modules = mapOf(NATIVE_API_MODULE to nativeApi),
             instructionBudget = 500_000,
@@ -212,10 +212,10 @@ object NativeLuaSourceImporter {
         source.set("permissions", permissions)
     }
 
-    /**
-     * Applies narrowly-scoped host compatibility migrations to the sanitized source table after
-     * package validation. Original Lua/package bytes remain untouched and export provenance stays exact.
-     */
+
+
+
+
     private fun applyHostCompatibilityMigrations(source: LuaTable): List<String> {
         val hooks = source.get("hooks")
         if (!hooks.istable() || !hooks.get("stv_page_window").isfunction()) return emptyList()
@@ -308,7 +308,7 @@ object NativeLuaSourceImporter {
             value.isboolean() -> LuaValue.valueOf(value.toboolean())
             value.isnumber() -> LuaValue.valueOf(value.todouble())
             value.isstring() -> LuaValue.valueOf(value.tojstring())
-            value.isfunction() -> value // Validator checks hooks by type; adapter never executes them.
+            value.isfunction() -> value
             value.istable() -> {
                 require(seen.put(value, true) == null) { "NATIVE_LUA_PACKAGE_CYCLIC" }
                 try {
@@ -341,7 +341,7 @@ object NativeLuaSourceImporter {
         else -> emptyList()
     }
 
-    /** Static category labels are part of the native package contract and safe to expose to Android UI. */
+
     private fun staticCategoryNames(source: LuaTable): List<String> {
         val items = source.get("actions").takeIf(LuaValue::istable)
             ?.get("categories")?.takeIf(LuaValue::istable)

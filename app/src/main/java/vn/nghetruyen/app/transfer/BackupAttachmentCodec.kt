@@ -37,7 +37,7 @@ internal data class BackupAttachmentRestore(
     val sceneMusicFiles: Int = 0,
 )
 
-/** Stages and restores portable non-database data without exporting credentials or cookies. */
+
 internal class BackupAttachmentCodec(context: Context) {
     private val appContext = context.applicationContext
 

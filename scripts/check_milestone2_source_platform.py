@@ -17,9 +17,9 @@ from cryptography.hazmat.primitives.asymmetric import ec
 ROOT = Path(__file__).resolve().parents[1]
 KOTLINC = shutil.which("kotlinc")
 
-# This lightweight M2 compiler intentionally covers the generic repository contract only. The
-# vBook coordinator/planner are compiled with their real source-vbook/Rhino graph by Gradle and the
-# dedicated vBook workflow; duplicating that graph with handwritten stubs here creates stale gates.
+
+
+
 MANUAL_COMPILE_EXCLUSIONS = {
     "source-repository": {
         "VBookRepositoryUpdatePlanner.kt",
@@ -149,7 +149,7 @@ def signed_repository(path: Path) -> str:
     }
     canonical_bytes = json.dumps(canonical, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     signature = key.sign(canonical_bytes, ec.ECDSA(hashes.SHA256()))
-    # Deliberately reorder package fields. Kotlin must reconstruct canonical order before verification.
+
     shuffled_package = {key: package[key] for key in reversed(list(package))}
     raw = {
         "signature": base64.b64encode(signature).decode("ascii"),

@@ -1121,7 +1121,7 @@ interface ChapterDownloadFailureDao {
         ChapterDownloadFailureEntity::class,
     ],
     version = 23,
-    // Legacy wiring validator token: version = 18
+
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -1314,11 +1314,11 @@ abstract class AppDatabase : RoomDatabase() {
 
         val MIGRATION_6_7 = object : Migration(6, 7) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                // Version 6 source builds declared DownloadJobEntity but the 5 -> 6
-                // migration did not create its table. They also had SQL defaults
-                // introduced by migrations without matching @ColumnInfo metadata.
-                // Rebuilding the affected tables normalizes both fresh version-6
-                // databases and databases upgraded through older versions.
+
+
+
+
+
                 createDownloadJobsTable(db)
                 normalizeFollowingDefaults(db)
                 normalizeStoryTtsProfileDefaults(db)
@@ -1747,8 +1747,8 @@ abstract class AppDatabase : RoomDatabase() {
 
         val MIGRATION_20_21 = object : Migration(20, 21) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                // Older builds stamped downloadedAt for ordinary reader cache too. Reset online
-                // chapters, then reconstruct the chapters that download jobs actually made local.
+
+
                 db.execSQL(
                     "UPDATE chapters SET downloadedAt = NULL " +
                         "WHERE storyId IN (SELECT id FROM stories WHERE sourceId <> 'offline')",

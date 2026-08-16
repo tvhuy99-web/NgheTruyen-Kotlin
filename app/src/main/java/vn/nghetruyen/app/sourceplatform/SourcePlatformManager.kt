@@ -862,6 +862,9 @@ class SourcePlatformManager(
     }
 
     private fun bootstrapLuaBuiltin(spec: BuiltinLuaSourceSpec) {
+        builtinSourceIds += spec.sourceId
+        if (isBuiltinRemoved(spec.sourceId) || store.hasStoredSource(spec.sourceId)) return
+
         runCatching {
             val legacyPack = runCatching { readLegacyBuiltinPack(spec.legacySourcePackAsset) }
                 .onFailure { error ->

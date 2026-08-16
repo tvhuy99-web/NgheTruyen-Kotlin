@@ -458,9 +458,32 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         activePersonalPage = page
         mutablePersonalPage.value = page
         ensureRoomObserversForPersonalPage(page)
+        if (page == "settings_automation") {
+            viewModelScope.launch { refreshVoiceRolesFromDatabase(seedGlobals = true) }
+        }
         val needsSourcePlatform = page.startsWith("extensions_") || page == "settings_diagnostics"
         if (needsSourcePlatform) refreshSourcePlatformState()
         refreshDiagnosticUi(loadDetails = shouldMaterializeDiagnosticDetails())
+    }
+
+    private suspend fun refreshVoiceRolesFromDatabase(seedGlobals: Boolean = false) {
+        val (roles, error) = withContext(Dispatchers.IO) {
+            var failure: Throwable? = null
+            if (seedGlobals) {
+                runCatching { container.libraryRepository.ensureGlobalVoiceProfiles() }
+                    .onFailure { failure = it }
+            }
+            val loaded = runCatching { container.libraryRepository.listAllVoiceRoles() }
+                .onFailure { failure = it }
+                .getOrDefault(emptyList())
+            loaded to failure
+        }
+        mutableState.update { current ->
+            current.copy(
+                voiceRoles = roles,
+                message = error?.let { it.message ?: "Không nạp được hồ sơ giọng." } ?: current.message,
+            )
+        }
     }
 
     private fun shouldMaterializeDiagnosticDetails(): Boolean =
@@ -685,12 +708,23 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             RoomObserverGroup.VOICE_ROLES -> viewModelScope.launch {
-                // Seed required role names only when a screen actually needs voice roles.
-                // Voice/engine selection intentionally remains empty for the user to choose.
-                withContext(Dispatchers.IO) { container.libraryRepository.ensureGlobalVoiceProfiles() }
-                container.libraryRepository.observeVoiceRoles()
-                    .distinctUntilChanged()
-                    .collect { roles -> mutableState.update { it.copy(voiceRoles = roles) } }
+                try {
+                    // Load a direct snapshot first so this screen never depends exclusively on a
+                    // Room invalidation callback to display persisted/default roles.
+                    refreshVoiceRolesFromDatabase(seedGlobals = true)
+                    container.libraryRepository.observeVoiceRoles()
+                        .distinctUntilChanged()
+                        .collect { roles -> mutableState.update { it.copy(voiceRoles = roles) } }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Throwable) {
+                    synchronized(startedRoomObserverGroups) {
+                        startedRoomObserverGroups.remove(RoomObserverGroup.VOICE_ROLES)
+                    }
+                    mutableState.update { current ->
+                        current.copy(message = error.message ?: "Luồng hồ sơ giọng đã dừng; sẽ thử lại khi mở màn hình.")
+                    }
+                }
             }
 
             RoomObserverGroup.AUDIO_EXPORTS -> viewModelScope.launch {
@@ -3157,6 +3191,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     ReferenceVoiceRoleExtras.remove(getApplication(), oldId)
                 }
                 ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
+                refreshVoiceRolesFromDatabase(seedGlobals = true)
                 showMessage("Đã lưu hồ sơ giọng chung ${draft.roleName}.")
             }.onFailure { showMessage(it.message ?: "Không lưu được hồ sơ giọng chung.") }
         }
@@ -3165,6 +3200,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun setGlobalVoiceRoleEnabled(id: String, enabled: Boolean) {
         viewModelScope.launch {
             container.libraryRepository.setVoiceRoleEnabled(id, enabled)
+            refreshVoiceRolesFromDatabase(seedGlobals = true)
             ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
         }
     }
@@ -3178,6 +3214,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             container.libraryRepository.deleteVoiceRole(id)
             ReferenceVoiceRoleExtras.remove(getApplication(), id)
+            refreshVoiceRolesFromDatabase(seedGlobals = true)
             ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
             showMessage("Đã xóa hồ sơ giọng chung ${role.roleName}.")
         }
@@ -3186,6 +3223,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun restoreGlobalVoiceProfiles() {
         viewModelScope.launch {
             val roles = container.libraryRepository.restoreGlobalVoiceProfiles()
+            refreshVoiceRolesFromDatabase(seedGlobals = false)
             ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
             showMessage("Đã khôi phục 7 hồ sơ mẫu; hiện có ${roles.size} hồ sơ giọng chung.")
         }

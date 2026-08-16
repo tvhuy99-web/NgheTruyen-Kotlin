@@ -80,6 +80,7 @@ class LibraryRepository(private val db: AppDatabase) {
     fun observeSceneMusicTracks(): Flow<List<SceneMusicTrackEntity>> = db.sceneMusicTrackDao().observeAll()
     fun observeStoryTtsProfiles(): Flow<List<StoryTtsProfileEntity>> = db.storyTtsProfileDao().observeAll()
     fun observeVoiceRoles(): Flow<List<VoiceRoleEntity>> = db.voiceRoleDao().observeAll()
+    suspend fun listAllVoiceRoles(): List<VoiceRoleEntity> = db.voiceRoleDao().listAll()
     fun observeAudioExports(): Flow<List<AudioExportJobEntity>> = db.audioExportJobDao().observeAll()
 
     suspend fun savePlaybackCheckpoint(item: PlaybackCheckpointEntity) = db.playbackCheckpointDao().upsert(item)

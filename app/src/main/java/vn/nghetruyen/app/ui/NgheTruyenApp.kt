@@ -124,7 +124,7 @@ fun NgheTruyenApp(
                         onOpenTtsSettings = viewModel::openTtsSettings,
                         onInterruptionModeChange = viewModel::setAudioInterruptionMode,
                         onDiagnosticsModeChange = viewModel::setDiagnosticsMode,
-                        onDiagnosticScreenChanged = viewModel::ensureRoomObserversForPersonalPage,
+                        onDiagnosticScreenChanged = viewModel::onPersonalPageChanged,
                         onHeadsetMultiClickChange = viewModel::setHeadsetMultiClickEnabled,
                         onHeadsetSingleActionChange = viewModel::setHeadsetSingleClickAction,
                         onHeadsetDoubleActionChange = viewModel::setHeadsetDoubleClickAction,

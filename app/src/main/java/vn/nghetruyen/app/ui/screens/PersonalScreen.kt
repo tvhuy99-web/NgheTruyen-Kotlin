@@ -1780,6 +1780,13 @@ private fun ReferenceVoiceCastSettingsCard(
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(bottom = 8.dp),
             )
+            if (roles.isEmpty()) {
+                Text(
+                    "Đang nạp hồ sơ giọng…",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(vertical = 6.dp),
+                )
+            }
             roles.forEach { role ->
                 ReferenceActionButton(
                     text = (if (role.enabled) "" else "TẮT • ") +

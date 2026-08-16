@@ -1,0 +1,79 @@
+name: Comment Whitespace Cleanup
+
+on:
+  push:
+    branches:
+      - chore/remove-code-comments-20260816
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: chore/remove-code-comments-20260816
+          fetch-depth: 0
+
+      - name: Remove trailing whitespace introduced by comment removal
+        env:
+          BASE_SHA: 375adf8ab1583f21de48cb3421ddcca43df0cc87
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os, re, subprocess
+          from pathlib import Path
+
+          base = os.environ['BASE_SHA']
+          proc = subprocess.run(
+              ['git', 'diff', '--check', f'{base}...HEAD'],
+              text=True,
+              stdout=subprocess.PIPE,
+              stderr=subprocess.STDOUT,
+          )
+          targets = {}
+          for raw in proc.stdout.splitlines():
+              m = re.match(r'^(.*?):(\d+): trailing whitespace\.$', raw)
+              if m:
+                  targets.setdefault(m.group(1), set()).add(int(m.group(2)))
+          print('Trailing-whitespace lines to clean:', sum(map(len, targets.values())))
+          for name, numbers in targets.items():
+              p = Path(name)
+              if not p.is_file():
+                  continue
+              data = p.read_text(encoding='utf-8')
+              lines = data.splitlines(keepends=True)
+              for number in numbers:
+                  if not (1 <= number <= len(lines)):
+                      continue
+                  line = lines[number - 1]
+                  if line.endswith('\r\n'):
+                      body, ending = line[:-2], '\r\n'
+                  elif line.endswith('\n'):
+                      body, ending = line[:-1], '\n'
+                  else:
+                      body, ending = line, ''
+                  lines[number - 1] = body.rstrip(' \t') + ending
+              p.write_text(''.join(lines), encoding='utf-8', newline='')
+          PY
+
+          git add -u
+          if ! git diff --cached --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "Clean whitespace after comment removal"
+          fi
+
+          if git diff --check "${BASE_SHA}...HEAD"; then
+            echo "No whitespace errors remain in the PR diff"
+          else
+            echo "Whitespace errors remain"
+            exit 1
+          fi
+
+          git push origin HEAD:chore/remove-code-comments-20260816

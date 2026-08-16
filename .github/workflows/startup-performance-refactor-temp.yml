@@ -1,0 +1,66 @@
+name: Startup Performance Refactor Temp
+
+on:
+  push:
+    branches: [agent/remove-unused-files]
+    paths:
+      - .github/workflows/startup-performance-refactor-temp.yml
+      - scripts/startup_performance_refactor_temp.py.gz
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: startup-performance-refactor-temp
+  cancel-in-progress: false
+
+jobs:
+  refactor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/remove-unused-files
+          fetch-depth: 1
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v6
+      - uses: android-actions/setup-android@v3
+      - name: Install SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+      - name: Apply startup and state refactor
+        run: |
+          gzip -dc scripts/startup_performance_refactor_temp.py.gz | python3
+          git diff --check
+          git status --short
+      - name: Validate diagnostics module
+        run: ./gradlew --no-daemon --stacktrace :source-diagnostics:test
+      - name: Validate app
+        run: ./gradlew --no-daemon --stacktrace :app:testDebugUnitTest :app:compileDebugKotlin
+      - name: Commit product changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git reset .github/workflows/startup-performance-refactor-temp.yml scripts/startup_performance_refactor_temp.py.gz
+          test -n "$(git diff --cached --name-only)"
+          git commit -m 'perf: reduce startup and UI state overhead'
+          git push origin HEAD:agent/remove-unused-files
+      - name: Remove temporary files
+        if: always()
+        run: |
+          git reset --hard HEAD
+          rm -f .github/workflows/startup-performance-refactor-temp.yml scripts/startup_performance_refactor_temp.py.gz
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m 'chore: remove startup performance refactor temp files'
+            git push origin HEAD:agent/remove-unused-files
+          fi

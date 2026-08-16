@@ -208,19 +208,33 @@ class SourcePackStore(
 
     /**
      * Cheap startup probe. This intentionally avoids parsing manifests or hashing stored payloads;
-     * callers use it only to decide whether an already-processed bundled source can skip bootstrap.
-     * Full integrity verification still happens whenever the source is actually loaded or executed.
+     * callers use it only to decide whether the exact bundled source can skip bootstrap. A package
+     * SHA mismatch deliberately falls back to the full verification/install path after an app update.
      */
-    fun hasStoredSource(sourceId: String): Boolean = synchronized(lock) {
+    fun hasStoredSource(
+        sourceId: String,
+        expectedPackageSha256: String? = null,
+    ): Boolean = synchronized(lock) {
         val root = sourceRoot(sourceId)
         if (!root.isDirectory) return@synchronized false
         val activeVersion = File(root, ACTIVE_FILE).takeIf(File::isFile)?.readText()?.trim().orEmpty()
         if (activeVersion.isBlank()) return@synchronized false
         val activeDirectory = runCatching { child(File(root, "versions"), activeVersion) }.getOrNull()
             ?: return@synchronized false
-        activeDirectory.isDirectory &&
-            File(activeDirectory, "source.json").isFile &&
-            File(activeDirectory, META_FILE).isFile
+        val sourceFile = File(activeDirectory, "source.json")
+        val metaFile = File(activeDirectory, META_FILE)
+        if (!activeDirectory.isDirectory || !sourceFile.isFile || !metaFile.isFile) return@synchronized false
+
+        val expectedSha = expectedPackageSha256?.trim().orEmpty()
+        if (expectedSha.isNotEmpty()) {
+            val metadata = runCatching {
+                Properties().apply { metaFile.inputStream().use(::load) }
+            }.getOrNull() ?: return@synchronized false
+            if (!metadata.getProperty("packageSha256").orEmpty().equals(expectedSha, ignoreCase = true)) {
+                return@synchronized false
+            }
+        }
+        true
     }
 
     fun load(sourceId: String): InstalledSource? = synchronized(lock) {

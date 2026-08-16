@@ -1,0 +1,136 @@
+name: Full Project Audit Fast Temp
+
+on:
+  push:
+    branches: [agent/remove-unused-files]
+    paths: [.github/workflows/full-project-audit-fast-temp.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/remove-unused-files
+      - name: Fast repository-wide audit
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, hashlib, subprocess, collections
+
+          tracked=[Path(x) for x in subprocess.check_output(['git','ls-files'],text=True).splitlines()]
+          text_ext={'.kt','.kts','.java','.xml','.gradle','.properties','.toml','.py','.sh','.ps1','.yml','.yaml','.md','.txt','.json','.lua'}
+          texts={}
+          for p in tracked:
+              if p.suffix.lower() in text_ext:
+                  try: texts[p]=p.read_text(encoding='utf-8',errors='replace')
+                  except Exception: pass
+          prod={p:t for p,t in texts.items() if '/src/test/' not in '/'+p.as_posix() and '/src/androidTest/' not in '/'+p.as_posix() and not p.as_posix().startswith('.github/')}
+          token_counts=collections.Counter()
+          for t in prod.values(): token_counts.update(re.findall(r'\b[A-Za-z_][A-Za-z0-9_]*\b',t))
+
+          print('=== SUMMARY ===')
+          print('tracked_files',len(tracked))
+          print('text_files',len(texts))
+          print('production_text_files',len(prod))
+          print('production_text_bytes',sum(len(t.encode('utf-8')) for t in prod.values()))
+
+          pats={
+            'TODO_FIXME_HACK':r'\b(?:TODO|FIXME|HACK|XXX)\b',
+            'DEPRECATED':r'@Deprecated\b|\bdeprecated\b',
+            'SUPPRESS_UNUSED':r'@Suppress\([^\n]*(?:UNUSED|unused)',
+            'PRINT_DEBUG':r'\b(?:println|printStackTrace)\s*\(',
+            'ANDROID_LOG':r'\bLog\.(?:v|d|i|w|e|wtf)\s*\(',
+            'GLOBAL_SCOPE':r'\bGlobalScope\b',
+            'RUN_BLOCKING':r'\brunBlocking\s*\(',
+            'THREAD_SLEEP':r'\bThread\.sleep\s*\(',
+            'WHILE_TRUE':r'while\s*\(\s*true\s*\)',
+          }
+          for label,pat in pats.items():
+              rx=re.compile(pat,re.I if label in {'TODO_FIXME_HACK','DEPRECATED'} else 0)
+              hits=[]
+              for p,t in texts.items():
+                  for n,line in enumerate(t.splitlines(),1):
+                      if rx.search(line): hits.append((p,n,line.strip()))
+              print(f'\n=== {label} {len(hits)} ===')
+              for p,n,line in hits[:250]: print(f'{p}:{n}: {line[:260]}')
+
+          decl=re.compile(r'(?m)^\s*(?:(private|internal|public|protected)\s+)?(?:(?:data|sealed|enum|value|open|abstract|suspend|inline|tailrec|operator|infix)\s+)*(class|object|interface|fun|val|var)\s+([A-Za-z_][A-Za-z0-9_]*)')
+          one=[]; two=[]
+          for p,t in prod.items():
+              if p.suffix.lower() not in {'.kt','.java'}: continue
+              for m in decl.finditer(t):
+                  vis=m.group(1) or 'default'; kind=m.group(2); name=m.group(3); c=token_counts[name]
+                  if len(name)>=4 and c<=2:
+                      line=t.count('\n',0,m.start())+1
+                      (one if c==1 else two).append((str(p),line,vis,kind,name,c))
+          print(f'\n=== SYMBOL_OCCURS_ONCE {len(one)} ===')
+          for x in one[:500]: print(':'.join(map(str,x)))
+          print(f'\n=== SYMBOL_OCCURS_TWICE {len(two)} ===')
+          for x in two[:500]: print(':'.join(map(str,x)))
+
+          # Dedicated retired AI symbols
+          ai=['OnlineAiServices','VoiceCastEngine','SceneMusicPlanner','NarrationPlanner','VoiceCastPlan','SceneMusicCue','NarrationPlan','parseVoiceCast','parseSceneCues']
+          print('\n=== RETIRED_AI_COUNTS ===')
+          for name in ai: print(name,token_counts[name])
+
+          scripts=[p for p in texts if p.as_posix().startswith('scripts/')]
+          print(f'\n=== SCRIPTS {len(scripts)} ===')
+          for p in sorted(scripts):
+              name=p.name
+              refs=[]
+              for q,t in texts.items():
+                  if q!=p and (name in t or p.as_posix() in t): refs.append(str(q))
+              marker=bool(re.search(r'^(?:apply_|build-milestone|m[0-9]+_|check_(?:milestone|priority|roadmap|v2|xpk)|reference_.*(?:part|c\d\d|b64))',name,re.I))
+              if marker or not refs: print(f'{p}|refs={len(refs)}|{refs[:12]}')
+
+          print('\n=== ROOT_REPORT_DOCS ===')
+          for p,t in sorted(texts.items(), key=lambda kv:str(kv[0])):
+              if p.parent==Path('.') and p.suffix.lower()=='.md' and re.search(r'(REPORT|STATUS|CHECKLIST|BASELINE|PHASE|MILESTONE|QUICKSTART|WIREFLOW|PARITY)',p.name,re.I):
+                  refs=[str(q) for q,u in texts.items() if q!=p and p.name in u]
+                  print(f'{p}|refs={len(refs)}|{refs[:12]}')
+
+          sizes=[]
+          for p in tracked:
+              try: sizes.append((p.stat().st_size,p))
+              except OSError: pass
+          print('\n=== LARGEST_FILES ===')
+          for s,p in sorted(sizes,reverse=True)[:80]: print(s,p)
+          print('\n=== LARGE_RUNTIME_ASSETS_100K ===')
+          for s,p in sorted(sizes,reverse=True):
+              if s<100000: break
+              q='/'+p.as_posix()
+              if '/src/main/assets/' in q or '/src/main/res/' in q: print(s,p)
+
+          hashes={}
+          for p in tracked:
+              try: b=p.read_bytes()
+              except OSError: continue
+              if len(b)<256: continue
+              hashes.setdefault(hashlib.sha256(b).hexdigest(),[]).append((str(p),len(b)))
+          dup=[v for v in hashes.values() if len(v)>1]
+          print(f'\n=== EXACT_DUPLICATES {len(dup)} ===')
+          for g in sorted(dup,key=lambda x:-x[0][1])[:150]: print(g)
+
+          # Build/dependency markers
+          print('\n=== BUILD_MARKERS ===')
+          for name in ['org.jetbrains.kotlin.kapt','kapt(','m0_gate.sh','RELEASE_PROFILE_ID','LEGACY_XPK_PROFILE_ID','final-apk-build-v2.yml']:
+              loc=[]
+              for p,t in texts.items():
+                  if name in t: loc.append(str(p))
+              print(name,len(loc),loc[:30])
+          PY
+      - name: Remove temporary workflow
+        run: rm .github/workflows/full-project-audit-fast-temp.yml
+      - name: Commit cleanup
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'chore: remove temporary fast audit workflow'
+          git push origin HEAD:agent/remove-unused-files

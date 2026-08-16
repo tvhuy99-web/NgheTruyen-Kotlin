@@ -25,10 +25,12 @@ class RhinoVBookActionRuntime(
     private val fallback = VBookActionRuntime { manifest, resources, request ->
         delegate.execute(manifest, resources, request)
     }
-    private val selected: VBookActionRuntime = VBookActionRuntimeRegistry
-        .platformRuntime(brokers, diagnostics)
-        ?.let { primary -> PrimaryFallbackVBookActionRuntime(primary, fallback) }
-        ?: fallback
+    private val selected: VBookActionRuntime by lazy {
+        VBookActionRuntimeRegistry
+            .platformRuntime(brokers, diagnostics)
+            ?.let { primary -> PrimaryFallbackVBookActionRuntime(primary, fallback) }
+            ?: fallback
+    }
 
     override fun execute(
         manifest: SourceManifest,

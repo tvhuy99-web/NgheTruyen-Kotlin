@@ -38,7 +38,6 @@ import vn.nghetruyen.source.vbook.VBookStoryNormalizer
 import java.net.URI
 import java.util.Base64
 import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Story adapter for an immutable active vBook artifact.
@@ -60,8 +59,8 @@ class VBookStorySource(
     private val hostManifest = VBookHostManifestFactory.create(artifact.identity.canonicalKey(), plugin, resources)
     private val runtime = VBookCompatibilityRuntime(brokers, diagnostics)
     private val configKey = artifact.identity.canonicalKey()
-    private val pageCache = ConcurrentHashMap<PageKey, VBookCompatibilityRuntime.ExecutionResult>()
-    private val chapterByUrl = ConcurrentHashMap<String, ChapterSummary>()
+    private val pageCache = BoundedLruCache<PageKey, VBookCompatibilityRuntime.ExecutionResult>(MAX_PAGE_CACHE_ENTRIES)
+    private val chapterByUrl = BoundedLruCache<String, ChapterSummary>(MAX_CHAPTER_CACHE_ENTRIES)
 
     init {
         require(plugin.metadata.type in setOf(VBookContentType.NOVEL, VBookContentType.CHINESE_NOVEL)) {
@@ -484,5 +483,7 @@ class VBookStorySource(
         private const val COMMENT_CURSOR_PREFIX = "vbook-comment:"
         private const val MAX_COMMENT_CURSOR_CHARS = 64 * 1024
         private const val MAX_SUGGESTIONS = 30
+        private const val MAX_PAGE_CACHE_ENTRIES = 128
+        private const val MAX_CHAPTER_CACHE_ENTRIES = 4_096
     }
 }

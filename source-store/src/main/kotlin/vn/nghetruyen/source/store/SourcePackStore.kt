@@ -56,6 +56,8 @@ class SourcePackStore(
     private val sourcesDir = File(rootDir, "sources")
     private val stagingDir = File(rootDir, "staging")
     private val lock = Any()
+    private val installedCache = linkedMapOf<String, InstalledSource?>()
+    private val activePackCache = linkedMapOf<String, VerifiedSourcePack?>()
 
     init {
         require(maxRetainedVersions in 2..10) { "SOURCE_STORE_RETENTION_INVALID" }
@@ -75,6 +77,7 @@ class SourcePackStore(
                     val existing = loadVersion(finalVersionDir)
                     require(existing.packageSha256 == pack.packageSha256) { "SOURCE_VERSION_HASH_CONFLICT" }
                     if (activate) activateInternal(sourceRoot, pack.manifest.version)
+                    invalidateCache(pack.manifest.id)
                     return@synchronized SourcePlatformResult.Success(load(pack.manifest.id)!!)
                 }
                 val stage = child(stagingDir, "${pack.manifest.id}-${pack.manifest.version}-${UUID.randomUUID()}")
@@ -93,6 +96,7 @@ class SourcePackStore(
                 } finally {
                     if (stage.exists()) stage.deleteRecursively()
                 }
+                invalidateCache(pack.manifest.id)
                 load(pack.manifest.id) ?: error("SOURCE_INSTALL_NOT_VISIBLE")
             }.fold(
                 onSuccess = { installed ->
@@ -141,6 +145,7 @@ class SourcePackStore(
             val root = sourceRoot(sourceId)
             require(root.isDirectory) { "SOURCE_NOT_INSTALLED" }
             atomicWrite(File(root, ENABLED_FILE), enabled.toString().toByteArray(StandardCharsets.UTF_8))
+            invalidateCache(sourceId)
             load(sourceId) ?: error("SOURCE_NOT_INSTALLED")
         }.fold(
             { SourcePlatformResult.Success(it) },
@@ -154,6 +159,7 @@ class SourcePackStore(
             val versionDir = child(File(root, "versions"), version.toString())
             require(versionDir.isDirectory) { "SOURCE_VERSION_NOT_INSTALLED" }
             activateInternal(root, version)
+            invalidateCache(sourceId)
             load(sourceId) ?: error("SOURCE_NOT_INSTALLED")
         }.fold(
             { SourcePlatformResult.Success(it) },
@@ -173,6 +179,7 @@ class SourcePackStore(
                 ?: listVersions(root).map { it.manifest.version }.filter { it != active }.maxOrNull()
                 ?: error("SOURCE_ROLLBACK_UNAVAILABLE")
             activateInternal(root, target)
+            invalidateCache(sourceId)
             load(sourceId) ?: error("SOURCE_NOT_INSTALLED")
         }.fold(
             onSuccess = {
@@ -194,7 +201,9 @@ class SourcePackStore(
 
     fun remove(sourceId: String): Boolean = synchronized(lock) {
         val root = sourceRoot(sourceId)
-        root.exists() && root.deleteRecursively()
+        val removed = root.exists() && root.deleteRecursively()
+        if (removed) invalidateCache(sourceId)
+        removed
     }
 
     /**
@@ -215,15 +224,21 @@ class SourcePackStore(
     }
 
     fun load(sourceId: String): InstalledSource? = synchronized(lock) {
+        if (installedCache.containsKey(sourceId)) return@synchronized installedCache[sourceId]
         val root = sourceRoot(sourceId)
-        if (!root.isDirectory) return@synchronized null
-        val versions = listVersions(root)
-        InstalledSource(
-            sourceId = sourceId,
-            enabled = File(root, ENABLED_FILE).takeIf(File::isFile)?.readText()?.trim()?.toBooleanStrictOrNull() ?: true,
-            activeVersion = readActiveVersion(root),
-            versions = versions,
-        )
+        val installed = if (!root.isDirectory) {
+            null
+        } else {
+            val versions = listVersions(root)
+            InstalledSource(
+                sourceId = sourceId,
+                enabled = File(root, ENABLED_FILE).takeIf(File::isFile)?.readText()?.trim()?.toBooleanStrictOrNull() ?: true,
+                activeVersion = readActiveVersion(root),
+                versions = versions,
+            )
+        }
+        installedCache[sourceId] = installed
+        installed
     }
 
     fun list(): List<InstalledSource> = synchronized(lock) {
@@ -231,22 +246,37 @@ class SourcePackStore(
     }
 
     fun readActivePack(sourceId: String): VerifiedSourcePack? = synchronized(lock) {
-        val installed = load(sourceId) ?: return@synchronized null
-        if (!installed.enabled) return@synchronized null
-        val active = installed.active ?: return@synchronized null
-        val entries = linkedMapOf<String, ByteArray>()
-        active.directory.walkTopDown().filter(File::isFile).forEach { file ->
-            if (file.name == META_FILE) return@forEach
-            val relative = active.directory.toPath().relativize(file.toPath()).toString().replace(File.separatorChar, '/')
-            entries[SourcePackArchiveVerifier.canonicalArchivePath(relative)] = file.readBytes()
+        if (activePackCache.containsKey(sourceId)) return@synchronized activePackCache[sourceId]
+        val installed = load(sourceId)
+        val pack = if (installed == null || !installed.enabled) {
+            null
+        } else {
+            val active = installed.active
+            if (active == null) {
+                null
+            } else {
+                val entries = linkedMapOf<String, ByteArray>()
+                active.directory.walkTopDown().filter(File::isFile).forEach { file ->
+                    if (file.name == META_FILE) return@forEach
+                    val relative = active.directory.toPath().relativize(file.toPath()).toString().replace(File.separatorChar, '/')
+                    entries[SourcePackArchiveVerifier.canonicalArchivePath(relative)] = file.readBytes()
+                }
+                VerifiedSourcePack(
+                    manifest = active.manifest,
+                    entries = entries,
+                    packageSha256 = active.packageSha256,
+                    signerKeyId = active.signerKeyId,
+                    signatureAlgorithm = vn.nghetruyen.source.packagekit.SourceSignatureAlgorithm.valueOf(active.signatureAlgorithm),
+                )
+            }
         }
-        VerifiedSourcePack(
-            manifest = active.manifest,
-            entries = entries,
-            packageSha256 = active.packageSha256,
-            signerKeyId = active.signerKeyId,
-            signatureAlgorithm = vn.nghetruyen.source.packagekit.SourceSignatureAlgorithm.valueOf(active.signatureAlgorithm),
-        )
+        activePackCache[sourceId] = pack
+        pack
+    }
+
+    private fun invalidateCache(sourceId: String) {
+        installedCache.remove(sourceId)
+        activePackCache.remove(sourceId)
     }
 
     private fun writePack(stage: File, pack: VerifiedSourcePack) {
@@ -308,7 +338,6 @@ class SourcePackStore(
             installedAtEpochMs = meta.getProperty("installedAtEpochMs")?.toLongOrNull() ?: 0L,
         )
     }
-
 
     private fun payloadTreeSha256(entries: Map<String, ByteArray>): String {
         val digest = MessageDigest.getInstance("SHA-256")

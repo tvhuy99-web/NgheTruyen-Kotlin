@@ -34,7 +34,6 @@ android {
         applicationId = "vn.nghetruyen.app"
         minSdk = 26
         targetSdk = 36
-        // Legacy release-gate tokens: versionCode = 28, versionName = "2.8.0-ai-narration-priority2-complete"
         // Versioning policy: VERSIONING.md (MAJOR.MINOR.PATCH).
         versionCode = 36
         versionName = "3.0.2"

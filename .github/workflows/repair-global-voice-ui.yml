@@ -1,0 +1,224 @@
+name: One-shot global voice UI repair
+
+on:
+  push:
+    branches:
+      - agent/remove-unused-files
+    paths:
+      - .github/workflows/repair-global-voice-ui.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/remove-unused-files
+          fetch-depth: 1
+
+      - name: Make global voice profiles impossible to render blank
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          vm_path = Path('app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt')
+          ui_path = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt')
+          vm = vm_path.read_text()
+          ui = ui_path.read_text()
+
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly 1 match, got {count}')
+              return text.replace(old, new, 1)
+
+          vm = replace_once(
+              vm,
+              'import vn.nghetruyen.app.core.model.VoiceRoleDraft\nimport vn.nghetruyen.app.core.model.GLOBAL_VOICE_PROFILE_STORY_ID\n',
+              'import vn.nghetruyen.app.core.model.VoiceRoleDraft\nimport vn.nghetruyen.app.core.model.DEFAULT_GLOBAL_VOICE_PROFILES\nimport vn.nghetruyen.app.core.model.GLOBAL_VOICE_PROFILE_STORY_ID\n',
+              'default profile import',
+          )
+
+          helper = '''private fun defaultGlobalVoiceRolesForUi(): List<VoiceRoleEntity> =
+              DEFAULT_GLOBAL_VOICE_PROFILES.map { seed ->
+                  VoiceRoleEntity(
+                      id = UUID.nameUUIDFromBytes(
+                          "$GLOBAL_VOICE_PROFILE_STORY_ID\\u0000${seed.name.lowercase(Locale.ROOT)}".toByteArray(),
+                      ).toString(),
+                      storyId = GLOBAL_VOICE_PROFILE_STORY_ID,
+                      roleName = seed.name,
+                      aliasesCsv = "",
+                      description = seed.description,
+                      enginePackage = null,
+                      voiceName = null,
+                      languageTag = "vi-VN",
+                      rate = 1f,
+                      pitch = 1f,
+                      volume = 1f,
+                      expression = "NEUTRAL",
+                      expressionStrength = 0.5f,
+                      sonicSpeed = 1f,
+                      sonicPitch = 1f,
+                      isNarrator = seed.narrator,
+                      enabled = true,
+                      updatedAt = 0L,
+                  )
+              }
+
+'''
+          vm = replace_once(
+              vm,
+              'data class MainUiState(\n',
+              helper + 'data class MainUiState(\n',
+              'default global role helper',
+          )
+
+          vm = replace_once(
+              vm,
+              '    val voiceRoles: List<VoiceRoleEntity> = emptyList(),\n    val audioExports: List<AudioExportJobEntity> = emptyList(),\n',
+              '    val voiceRoles: List<VoiceRoleEntity> = emptyList(),\n    val globalVoiceRoles: List<VoiceRoleEntity> = defaultGlobalVoiceRolesForUi(),\n    val audioExports: List<AudioExportJobEntity> = emptyList(),\n',
+              'global voice state field',
+          )
+
+          old_refresh = '''    private suspend fun refreshVoiceRolesFromDatabase(seedGlobals: Boolean = false) {
+              val (roles, error) = withContext(Dispatchers.IO) {
+                  var failure: Throwable? = null
+                  if (seedGlobals) {
+                      runCatching { container.libraryRepository.ensureGlobalVoiceProfiles() }
+                          .onFailure { failure = it }
+                  }
+                  val loaded = runCatching { container.libraryRepository.listAllVoiceRoles() }
+                      .onFailure { failure = it }
+                      .getOrDefault(emptyList())
+                  loaded to failure
+              }
+              mutableState.update { current ->
+                  current.copy(
+                      voiceRoles = roles,
+                      message = error?.let { it.message ?: "Không nạp được hồ sơ giọng." } ?: current.message,
+                  )
+              }
+          }
+'''
+          new_refresh = '''    private suspend fun refreshVoiceRolesFromDatabase(seedGlobals: Boolean = false) {
+              val (roles, globalRoles, error) = withContext(Dispatchers.IO) {
+                  var failure: Throwable? = null
+                  if (seedGlobals) {
+                      runCatching { container.libraryRepository.ensureGlobalVoiceProfiles() }
+                          .onFailure { failure = it }
+                  }
+                  val loaded = runCatching { container.libraryRepository.listAllVoiceRoles() }
+                      .onFailure { failure = it }
+                      .getOrDefault(emptyList())
+                  val globals = runCatching {
+                      container.libraryRepository.listVoiceRoles(GLOBAL_VOICE_PROFILE_STORY_ID)
+                  }
+                      .onFailure { failure = it }
+                      .getOrDefault(emptyList())
+                  Triple(loaded, globals, failure)
+              }
+              mutableState.update { current ->
+                  current.copy(
+                      voiceRoles = roles,
+                      globalVoiceRoles = globalRoles.ifEmpty { current.globalVoiceRoles.ifEmpty { defaultGlobalVoiceRolesForUi() } },
+                      message = error?.let { it.message ?: "Không nạp được hồ sơ giọng." } ?: current.message,
+                  )
+              }
+          }
+'''
+          vm = replace_once(vm, old_refresh, new_refresh, 'direct voice refresh')
+
+          old_collect = '''                    container.libraryRepository.observeVoiceRoles()
+                              .distinctUntilChanged()
+                              .collect { roles -> mutableState.update { it.copy(voiceRoles = roles) } }
+'''
+          new_collect = '''                    container.libraryRepository.observeVoiceRoles()
+                              .distinctUntilChanged()
+                              .collect { roles ->
+                                  val globals = roles.filter { it.storyId == GLOBAL_VOICE_PROFILE_STORY_ID }
+                                  mutableState.update { current ->
+                                      current.copy(
+                                          voiceRoles = roles,
+                                          globalVoiceRoles = globals.ifEmpty { current.globalVoiceRoles },
+                                      )
+                                  }
+                              }
+'''
+          vm = replace_once(vm, old_collect, new_collect, 'voice observer collection')
+
+          vm = replace_once(
+              vm,
+              '''            container.libraryRepository.setVoiceRoleEnabled(id, enabled)
+                  refreshVoiceRolesFromDatabase(seedGlobals = true)
+                  ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
+''',
+              '''            container.libraryRepository.setVoiceRoleEnabled(id, enabled)
+                  mutableState.update { current ->
+                      current.copy(globalVoiceRoles = current.globalVoiceRoles.map { role ->
+                          if (role.id == id) role.copy(enabled = enabled) else role
+                      })
+                  }
+                  refreshVoiceRolesFromDatabase(seedGlobals = true)
+                  ReaderPlaybackService.command(getApplication(), ReaderPlaybackService.ACTION_REFRESH)
+''',
+              'global enabled optimistic state',
+          )
+
+          vm = replace_once(
+              vm,
+              '''            container.libraryRepository.deleteVoiceRole(id)
+                  ReferenceVoiceRoleExtras.remove(getApplication(), id)
+                  refreshVoiceRolesFromDatabase(seedGlobals = true)
+''',
+              '''            container.libraryRepository.deleteVoiceRole(id)
+                  ReferenceVoiceRoleExtras.remove(getApplication(), id)
+                  mutableState.update { current ->
+                      current.copy(globalVoiceRoles = current.globalVoiceRoles.filterNot { it.id == id })
+                  }
+                  refreshVoiceRolesFromDatabase(seedGlobals = true)
+''',
+              'global delete optimistic state',
+          )
+
+          vm = replace_once(
+              vm,
+              '''            val roles = container.libraryRepository.restoreGlobalVoiceProfiles()
+                  refreshVoiceRolesFromDatabase(seedGlobals = false)
+''',
+              '''            val roles = container.libraryRepository.restoreGlobalVoiceProfiles()
+                  mutableState.update { it.copy(globalVoiceRoles = roles) }
+                  refreshVoiceRolesFromDatabase(seedGlobals = false)
+''',
+              'global restore direct state',
+          )
+
+          ui = replace_once(
+              ui,
+              '    val roles = state.voiceRoles.filter { it.storyId == GLOBAL_VOICE_PROFILE_STORY_ID }.take(10)\n',
+              '    val roles = state.globalVoiceRoles.take(10)\n',
+              'voice cast UI source',
+          )
+
+          vm_path.write_text(vm)
+          ui_path.write_text(ui)
+          PY
+
+          grep -q 'globalVoiceRoles: List<VoiceRoleEntity> = defaultGlobalVoiceRolesForUi()' app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt
+          grep -q 'val roles = state.globalVoiceRoles.take(10)' app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt
+          grep -q 'listVoiceRoles(GLOBAL_VOICE_PROFILE_STORY_ID)' app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt
+
+      - name: Commit product fix and remove one-shot workflow
+        shell: bash
+        run: |
+          rm .github/workflows/repair-global-voice-ui.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt \
+                  app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt \
+                  .github/workflows/repair-global-voice-ui.yml
+          git commit -m 'fix: keep global voice profiles visible'
+          git push origin HEAD:agent/remove-unused-files

@@ -74,7 +74,7 @@ object M4aAacEncoder {
                         MediaCodec.INFO_TRY_AGAIN_LATER -> Unit
                         MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                             if (muxerStarted) throw IOException("AAC encoder đổi format nhiều lần.")
-                            val activeMuxer = muxer ?: throw IOException("M4A muxer chưa được tạo.")
+                            val activeMuxer = muxer
                             trackIndex = activeMuxer.addTrack(codec.outputFormat)
                             activeMuxer.start()
                             muxerStarted = true
@@ -87,8 +87,7 @@ object M4aAacEncoder {
                                 if (!muxerStarted || trackIndex < 0) throw IOException("M4A muxer chưa sẵn sàng.")
                                 buffer.position(info.offset)
                                 buffer.limit(info.offset + info.size)
-                                (muxer ?: throw IOException("M4A muxer chưa được tạo."))
-                                    .writeSampleData(trackIndex, buffer, info)
+                                muxer.writeSampleData(trackIndex, buffer, info)
                             }
                             outputDone = (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
                             codec.releaseOutputBuffer(outputIndex, false)

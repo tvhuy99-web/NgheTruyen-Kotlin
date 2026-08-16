@@ -1,0 +1,326 @@
+name: Temporary JS Lua HTML comment cleanup
+
+on:
+  push:
+    branches:
+      - chore/remove-code-comments-20260816
+
+permissions:
+  contents: write
+
+concurrency:
+  group: comment-cleanup-js-lua-html-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout cleanup branch
+        uses: actions/checkout@v6
+        with:
+          ref: chore/remove-code-comments-20260816
+          fetch-depth: 0
+
+      - name: Install JavaScript parser
+        run: npm install --silent --prefix /tmp/comment-js acorn@8 acorn-loose@8
+
+      - name: Remove JavaScript and HTML comments
+        shell: bash
+        run: |
+          cat > /tmp/cleanup_js_html.js <<'JS'
+          const fs = require('fs');
+          const cp = require('child_process');
+          const acorn = require('/tmp/comment-js/node_modules/acorn');
+          const acornLoose = require('/tmp/comment-js/node_modules/acorn-loose');
+
+          const legalMarkers = [
+            'copyright', 'spdx-', 'licensed under', 'apache license', 'mit license',
+            'mozilla public license', 'gnu general public license', 'gnu lesser general public license',
+            'permission is hereby granted', 'all rights reserved', 'redistribution and use'
+          ];
+          const legal = s => {
+            const low = s.toLowerCase();
+            return legalMarkers.some(m => low.includes(m));
+          };
+          const lineCount = s => s.length ? s.split(/\r\n|\r|\n/).length : 0;
+          const mask = s => s.replace(/[^\r\n]/g, ' ');
+          const gitFiles = pattern => cp.execFileSync('git', ['ls-files', pattern], {encoding:'utf8'}).split(/\r?\n/).filter(Boolean);
+
+          function parseComments(source) {
+            let comments = [];
+            const collect = (block, text, start, end) => comments.push({block, text, start, end});
+            const opts = {ecmaVersion:'latest', sourceType:'module', allowHashBang:true, onComment:collect};
+            try {
+              acorn.parse(source, opts);
+            } catch (_) {
+              comments = [];
+              acornLoose.parse(source, opts);
+            }
+            return comments;
+          }
+
+          function removableJsSpans(source, base = 0) {
+            const spans = [];
+            let preserved = 0;
+            for (const c of parseComments(source)) {
+              const raw = source.slice(c.start, c.end);
+              if (legal(raw)) {
+                preserved++;
+                continue;
+              }
+              spans.push({start:base + c.start, end:base + c.end, raw, kind:c.block ? 'block' : 'line'});
+            }
+            return {spans, preserved};
+          }
+
+          function cssSpans(source, base = 0) {
+            const spans = [];
+            let preserved = 0;
+            let i = 0;
+            let quote = null;
+            while (i < source.length) {
+              const ch = source[i];
+              if (quote) {
+                if (ch === '\\') { i += 2; continue; }
+                if (ch === quote) quote = null;
+                i++;
+                continue;
+              }
+              if (ch === '"' || ch === "'") { quote = ch; i++; continue; }
+              if (source.startsWith('/*', i)) {
+                const endPos = source.indexOf('*/', i + 2);
+                const end = endPos < 0 ? source.length : endPos + 2;
+                const raw = source.slice(i, end);
+                if (legal(raw)) preserved++;
+                else spans.push({start:base+i, end:base+end, raw, kind:'css-block'});
+                i = end;
+                continue;
+              }
+              i++;
+            }
+            return {spans, preserved};
+          }
+
+          function applySpans(source, spans) {
+            let out = source;
+            for (const s of [...spans].sort((a,b) => b.start - a.start)) {
+              out = out.slice(0, s.start) + mask(out.slice(s.start, s.end)) + out.slice(s.end);
+            }
+            return out;
+          }
+
+          const files = [];
+          let commentsRemoved = 0;
+          let commentLinesRemoved = 0;
+          let legalPreserved = 0;
+          for (const path of gitFiles('*.js')) {
+            const source = fs.readFileSync(path, 'utf8');
+            const result = removableJsSpans(source, 0);
+            const out = applySpans(source, result.spans);
+            if (out !== source) fs.writeFileSync(path, out, 'utf8');
+            if (result.spans.length || result.preserved) {
+              files.push({path, syntax:'javascript', removed:result.spans.length, removed_lines:result.spans.reduce((n,s)=>n+lineCount(s.raw),0), legal_preserved:result.preserved, changed:out!==source});
+            }
+            commentsRemoved += result.spans.length;
+            commentLinesRemoved += result.spans.reduce((n,s)=>n+lineCount(s.raw),0);
+            legalPreserved += result.preserved;
+          }
+
+          for (const path of gitFiles('*.html')) {
+            const source = fs.readFileSync(path, 'utf8');
+            const spans = [];
+            let preserved = 0;
+            const htmlComment = /<!--[\s\S]*?-->/g;
+            for (const m of source.matchAll(htmlComment)) {
+              const raw = m[0];
+              const functional = /^<!--\s*\[if\b/i.test(raw) || /<!\[endif\]\s*-->$/i.test(raw);
+              if (legal(raw) || functional) preserved++;
+              else spans.push({start:m.index, end:m.index+raw.length, raw, kind:'html'});
+            }
+            const scriptRe = /<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi;
+            for (const m of source.matchAll(scriptRe)) {
+              const attrs = m[1] || '';
+              const body = m[2] || '';
+              const typeMatch = attrs.match(/\btype\s*=\s*["']?([^\s"'>]+)/i);
+              const type = typeMatch ? typeMatch[1].toLowerCase() : '';
+              if (type && !type.includes('javascript') && type !== 'module' && type !== 'text/ecmascript') continue;
+              const bodyOffset = m.index + m[0].indexOf(body);
+              const r = removableJsSpans(body, bodyOffset);
+              spans.push(...r.spans);
+              preserved += r.preserved;
+            }
+            const styleRe = /<style\b[^>]*>([\s\S]*?)<\/style\s*>/gi;
+            for (const m of source.matchAll(styleRe)) {
+              const body = m[1] || '';
+              const bodyOffset = m.index + m[0].indexOf(body);
+              const r = cssSpans(body, bodyOffset);
+              spans.push(...r.spans);
+              preserved += r.preserved;
+            }
+            const unique = [];
+            const seen = new Set();
+            for (const s of spans) {
+              const key = `${s.start}:${s.end}`;
+              if (!seen.has(key)) { seen.add(key); unique.push(s); }
+            }
+            const out = applySpans(source, unique);
+            if (out !== source) fs.writeFileSync(path, out, 'utf8');
+            if (unique.length || preserved) {
+              files.push({path, syntax:'html', removed:unique.length, removed_lines:unique.reduce((n,s)=>n+lineCount(s.raw),0), legal_or_functional_preserved:preserved, changed:out!==source});
+            }
+            commentsRemoved += unique.length;
+            commentLinesRemoved += unique.reduce((n,s)=>n+lineCount(s.raw),0);
+            legalPreserved += preserved;
+          }
+
+          const report = {
+            js_files_scanned: gitFiles('*.js').length,
+            html_files_scanned: gitFiles('*.html').length,
+            files_changed: files.filter(f => f.changed).length,
+            comments_removed: commentsRemoved,
+            comment_lines_removed: commentLinesRemoved,
+            legal_or_functional_preserved: legalPreserved,
+            files
+          };
+          fs.writeFileSync('/tmp/js-html-report.json', JSON.stringify(report, null, 2));
+          console.log('JS_HTML_COMMENT_SUMMARY=' + JSON.stringify({...report, files:undefined}));
+
+          let remaining = 0;
+          for (const path of gitFiles('*.js')) remaining += removableJsSpans(fs.readFileSync(path,'utf8')).spans.length;
+          if (remaining !== 0) throw new Error(`JavaScript removable comments remain: ${remaining}`);
+          JS
+          node /tmp/cleanup_js_html.js
+
+      - name: Remove Lua comments
+        shell: bash
+        run: |
+          cat > /tmp/cleanup_lua.py <<'PY'
+          import json
+          import pathlib
+          import re
+          import subprocess
+
+          LEGAL = (
+              'copyright', 'spdx-', 'licensed under', 'apache license', 'mit license',
+              'mozilla public license', 'gnu general public license', 'gnu lesser general public license',
+              'permission is hereby granted', 'all rights reserved', 'redistribution and use'
+          )
+
+          def legal(text):
+              low = text.lower()
+              return any(x in low for x in LEGAL)
+
+          def long_open(text, i):
+              m = re.match(r'\[(=*)\[', text[i:])
+              return m.group(1) if m else None
+
+          def spans(text):
+              out = []
+              preserved = 0
+              i = 0
+              n = len(text)
+              while i < n:
+                  if i == 0 and text.startswith('#!'):
+                      nl = text.find('\n', i)
+                      i = n if nl < 0 else nl + 1
+                      continue
+                  if text.startswith('--', i):
+                      eq = long_open(text, i + 2)
+                      if eq is not None:
+                          close = ']' + eq + ']'
+                          start = i
+                          j = text.find(close, i + 4 + len(eq))
+                          end = n if j < 0 else j + len(close)
+                      else:
+                          start = i
+                          j = text.find('\n', i + 2)
+                          end = n if j < 0 else j
+                      raw = text[start:end]
+                      if legal(raw): preserved += 1
+                      else: out.append((start, end, raw))
+                      i = end
+                      continue
+                  ch = text[i]
+                  if ch in ('\'', '"'):
+                      q = ch
+                      i += 1
+                      while i < n:
+                          if text[i] == '\\': i += 2; continue
+                          if text[i] == q: i += 1; break
+                          i += 1
+                      continue
+                  eq = long_open(text, i)
+                  if eq is not None:
+                      close = ']' + eq + ']'
+                      j = text.find(close, i + 2 + len(eq))
+                      i = n if j < 0 else j + len(close)
+                      continue
+                  i += 1
+              return out, preserved
+
+          paths = subprocess.check_output(['git','ls-files','*.lua'], text=True).splitlines()
+          files = []
+          total = 0
+          total_lines = 0
+          total_preserved = 0
+          for path in paths:
+              text = pathlib.Path(path).read_text(encoding='utf-8')
+              found, preserved = spans(text)
+              chars = list(text)
+              for start, end, _ in found:
+                  for j in range(start, end):
+                      if chars[j] not in ('\r','\n'): chars[j] = ' '
+              new = ''.join(chars)
+              if new != text: pathlib.Path(path).write_text(new, encoding='utf-8', newline='')
+              lines = sum(raw.count('\n') + 1 for _,_,raw in found)
+              if found or preserved:
+                  files.append({'path':path,'removed':len(found),'removed_lines':lines,'legal_preserved':preserved,'changed':new!=text})
+              total += len(found)
+              total_lines += lines
+              total_preserved += preserved
+          remaining = 0
+          for path in paths:
+              found, _ = spans(pathlib.Path(path).read_text(encoding='utf-8'))
+              remaining += len(found)
+          if remaining: raise SystemExit(f'Lua removable comments remain: {remaining}')
+          report = {'files_scanned':len(paths),'files_changed':sum(1 for x in files if x['changed']),'comments_removed':total,'comment_lines_removed':total_lines,'legal_preserved':total_preserved,'removable_remaining':remaining,'files':files}
+          pathlib.Path('/tmp/lua-report.json').write_text(json.dumps(report,indent=2,ensure_ascii=False),encoding='utf-8')
+          print('LUA_COMMENT_SUMMARY=' + json.dumps({k:v for k,v in report.items() if k != 'files'},sort_keys=True))
+          PY
+          python3 /tmp/cleanup_lua.py
+
+      - name: Record special source paths
+        shell: bash
+        run: |
+          {
+            echo '[JavaScript]'; git ls-files '*.js'
+            echo '[Lua]'; git ls-files '*.lua'
+            echo '[HTML]'; git ls-files '*.html'
+            echo '[Example]'; git ls-files '*.example'
+            echo '[No extension]'; git ls-files | awk 'BEGIN{FS="/"} {n=$NF; if (n !~ /\./) print}'
+          } > /tmp/special-source-paths.txt
+          cat /tmp/special-source-paths.txt
+
+      - name: Upload audit
+        uses: actions/upload-artifact@v7
+        with:
+          name: js-lua-html-comment-audit-${{ github.run_id }}
+          path: |
+            /tmp/js-html-report.json
+            /tmp/lua-report.json
+            /tmp/special-source-paths.txt
+
+      - name: Commit and push cleanup
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'No JS Lua HTML cleanup changes to commit.'
+            exit 0
+          fi
+          git commit -m 'Remove JavaScript Lua and HTML comments'
+          git push origin HEAD:chore/remove-code-comments-20260816

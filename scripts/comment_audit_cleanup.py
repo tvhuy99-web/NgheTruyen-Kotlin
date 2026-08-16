@@ -8,6 +8,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SLASH_EXT = {'.kt','.kts','.java','.groovy','.gradle','.c','.cc','.cpp','.h','.hpp','.js','.jsx','.ts','.tsx','.rs','.swift'}
 XML_EXT = {'.xml','.html','.htm','.svg'}
 HASH_EXT = {'.yml','.yaml','.properties','.toml','.env','.pro','.cfg','.ini','.sh','.bash','.zsh','.py','.rb','.pl'}
+POWERSHELL_EXT = {'.ps1','.psm1','.psd1'}
+LUA_EXT = {'.lua'}
+SQL_EXT = {'.sql'}
 HASH_NAMES = {'Dockerfile','Makefile','.gitignore','.gitattributes','.env.example'}
 EXCLUDE_DIRS = {'.git','build','.gradle','.idea','.kotlin','node_modules','dist','out'}
 LICENSE_HINTS = (
@@ -27,6 +30,14 @@ def is_license(text):
 def blank_like(s):
     return ''.join('\n' if c == '\n' else ('\r' if c == '\r' else ' ') for c in s)
 
+def is_escaped(text, pos):
+    backslashes = 0
+    j = pos - 1
+    while j >= 0 and text[j] == '\\':
+        backslashes += 1
+        j -= 1
+    return (backslashes % 2) == 1
+
 def scan_slash(text):
     spans=[]
     i=0; n=len(text)
@@ -38,17 +49,17 @@ def scan_slash(text):
             c=text[i]
             if c in ('"', "'", '`'):
                 state=('string',c); i+=1; continue
-            if text.startswith('//', i):
+            if text.startswith('//', i) and not is_escaped(text, i):
                 j=text.find('\n', i+2)
                 if j<0: j=n
                 spans.append((i,j,'line',text[i:j]))
                 i=j; continue
-            if text.startswith('/*', i):
+            if text.startswith('/*', i) and not is_escaped(text, i):
                 start=i; i+=2; depth=1
                 while i<n and depth:
-                    if text.startswith('/*',i):
+                    if text.startswith('/*',i) and not is_escaped(text,i):
                         depth+=1; i+=2
-                    elif text.startswith('*/',i):
+                    elif text.startswith('*/',i) and not is_escaped(text,i):
                         depth-=1; i+=2
                     else:
                         i+=1
@@ -134,11 +145,118 @@ def scan_hash(text, path):
                     i+=1
     return spans
 
+def scan_powershell(text):
+    spans=[]
+    i=0; n=len(text); state=None
+    while i<n:
+        if state is None:
+            line_start = i == 0 or text[i-1] == '\n'
+            if line_start and text.startswith("@'", i):
+                end=text.find("\n'@", i+2)
+                i=n if end<0 else end+3
+                continue
+            if line_start and text.startswith('@"', i):
+                end=text.find('\n"@', i+2)
+                i=n if end<0 else end+3
+                continue
+            if text.startswith('<#',i):
+                e=text.find('#>',i+2)
+                if e<0: e=n
+                else: e+=2
+                spans.append((i,e,'ps-block',text[i:e])); i=e; continue
+            c=text[i]
+            if c in ('"',"'"):
+                state=c; i+=1; continue
+            if c=='#':
+                ls=text.rfind('\n',0,i)+1
+                prefix=text[ls:i].strip()
+                line=text[ls:text.find('\n',i) if text.find('\n',i)>=0 else n]
+                if prefix=='' and line.lstrip().lower().startswith('#requires'):
+                    j=text.find('\n',i)
+                    i=n if j<0 else j
+                    continue
+                j=text.find('\n',i+1)
+                if j<0: j=n
+                spans.append((i,j,'ps-line',text[i:j])); i=j; continue
+            i+=1
+        else:
+            c=text[i]
+            if state=='"' and c=='`':
+                i+=2
+            elif c==state:
+                if state=="'" and i+1<n and text[i+1]=="'":
+                    i+=2
+                else:
+                    i+=1; state=None
+            else:
+                i+=1
+    return spans
+
+def scan_lua(text):
+    spans=[]
+    i=0; n=len(text); state=None
+    while i<n:
+        if state is None:
+            if text.startswith('--[[',i):
+                e=text.find(']]',i+4)
+                if e<0: e=n
+                else: e+=2
+                spans.append((i,e,'lua-block',text[i:e])); i=e; continue
+            if text.startswith('--',i):
+                j=text.find('\n',i+2)
+                if j<0: j=n
+                spans.append((i,j,'lua-line',text[i:j])); i=j; continue
+            if text.startswith('[[',i):
+                e=text.find(']]',i+2)
+                i=n if e<0 else e+2
+                continue
+            c=text[i]
+            if c in ('"',"'"):
+                state=c; i+=1; continue
+            i+=1
+        else:
+            c=text[i]
+            if c=='\\': i+=2
+            elif c==state: i+=1; state=None
+            else: i+=1
+    return spans
+
+def scan_sql(text):
+    spans=[]
+    i=0; n=len(text); state=None
+    while i<n:
+        if state is None:
+            if text.startswith('--',i):
+                j=text.find('\n',i+2)
+                if j<0: j=n
+                spans.append((i,j,'sql-line',text[i:j])); i=j; continue
+            if text.startswith('/*',i):
+                e=text.find('*/',i+2)
+                if e<0: e=n
+                else: e+=2
+                spans.append((i,e,'sql-block',text[i:e])); i=e; continue
+            c=text[i]
+            if c in ('"',"'"):
+                state=c; i+=1; continue
+            i+=1
+        else:
+            c=text[i]
+            if c==state:
+                if i+1<n and text[i+1]==state:
+                    i+=2
+                else:
+                    i+=1; state=None
+            else: i+=1
+    return spans
+
 def file_mode(path):
     ext=path.suffix.lower()
     if ext in SLASH_EXT: return 'slash'
     if ext in XML_EXT: return 'xml'
     if ext in HASH_EXT or path.name in HASH_NAMES: return 'hash'
+    if ext in POWERSHELL_EXT: return 'powershell'
+    if ext in LUA_EXT: return 'lua'
+    if ext in SQL_EXT: return 'sql'
     return None
 
 def iter_files(root):
@@ -148,6 +266,15 @@ def iter_files(root):
         if any(part in EXCLUDE_DIRS for part in rel.parts): continue
         mode=file_mode(p)
         if mode: yield p,mode
+
+def scan_for_mode(text, path, mode):
+    if mode=='slash': return scan_slash(text)
+    if mode=='xml': return scan_xml(text)
+    if mode=='hash': return scan_hash(text,path)
+    if mode=='powershell': return scan_powershell(text)
+    if mode=='lua': return scan_lua(text)
+    if mode=='sql': return scan_sql(text)
+    return []
 
 def main():
     ap=argparse.ArgumentParser()
@@ -167,7 +294,7 @@ def main():
             text=raw.decode('utf-8')
         except Exception:
             continue
-        spans = scan_slash(text) if mode=='slash' else scan_xml(text) if mode=='xml' else scan_hash(text,p)
+        spans=scan_for_mode(text,p,mode)
         if not spans: continue
         repl=list(text)
         removable=0

@@ -345,11 +345,14 @@ require(
 
 require(
     "app/src/main/java/vn/nghetruyen/app/ui/components/AudioDirectionLayerSwitches.kt",
-    "ActivityResultContracts.OpenMultipleDocuments()",
-    'Text("THÊM NHIỀU TỆP")',
     "AudioAssetKind.MUSIC",
     "AudioAssetKind.AMBIENCE",
     "AudioAssetKind.SFX",
+)
+require(
+    "app/src/main/java/vn/nghetruyen/app/ui/components/UnifiedAudioAssetManagerDialog.kt",
+    "ActivityResultContracts.OpenMultipleDocuments()",
+    'Text("THÊM TỆP")',
 )
 
 require(

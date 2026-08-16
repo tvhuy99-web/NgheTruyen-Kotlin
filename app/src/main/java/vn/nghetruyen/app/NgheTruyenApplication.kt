@@ -11,7 +11,6 @@ import vn.nghetruyen.app.sourceplatform.DiagnosticScreenRestoreLifecycleCallback
 import vn.nghetruyen.app.sourceplatform.SourceBrowserViewportHost
 import vn.nghetruyen.app.sourceplatform.SourceWebViewCookieReader
 import vn.nghetruyen.app.sourceplatform.replayAwareChromiumDiagnostics
-import vn.nghetruyen.app.startup.StartupWorkGate
 import vn.nghetruyen.source.api.SourceErrorCode
 import vn.nghetruyen.source.api.SourcePlatformFailure
 import vn.nghetruyen.source.api.SourcePlatformResult
@@ -26,7 +25,6 @@ class NgheTruyenApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        StartupWorkGate.install(this)
         registerActivityLifecycleCallbacks(DiagnosticScreenRestoreLifecycleCallbacks())
         SourceBrowserViewportHost.initialize(this)
         VBookActionRuntimeRegistry.install { brokers, diagnostics ->

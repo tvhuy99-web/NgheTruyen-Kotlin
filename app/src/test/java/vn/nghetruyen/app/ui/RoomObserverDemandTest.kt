@@ -76,6 +76,18 @@ class RoomObserverDemandTest {
             roomObserverGroupsForPersonalPage("settings_vietphrase"),
         )
         assertEquals(
+            setOf(RoomObserverGroup.VOICE_ROLES),
+            roomObserverGroupsForPersonalPage("settings_automation"),
+        )
+        assertEquals(
+            setOf(RoomObserverGroup.SCENE_MUSIC),
+            roomObserverGroupsForPersonalPage("settings_music"),
+        )
+        assertEquals(
+            setOf(RoomObserverGroup.FOLLOWING),
+            roomObserverGroupsForPersonalPage("settings_following"),
+        )
+        assertEquals(
             setOf(RoomObserverGroup.OFFLINE, RoomObserverGroup.STORAGE),
             roomObserverGroupsForPersonalPage("settings_storage"),
         )

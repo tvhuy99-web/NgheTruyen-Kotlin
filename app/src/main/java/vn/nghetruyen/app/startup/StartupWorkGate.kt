@@ -38,8 +38,14 @@ object StartupWorkGate {
 
     /** For background startup tasks only; never call this from the main thread. */
     fun awaitFirstFrame(timeoutMillis: Long = FIRST_FRAME_WAIT_TIMEOUT_MILLIS): Boolean {
-        if (isBeforeFirstFrame()) firstFrameLatch.await(timeoutMillis, TimeUnit.MILLISECONDS)
-        return !isBeforeFirstFrame()
+        if (!isBeforeFirstFrame()) return true
+        val reachedFirstFrame = firstFrameLatch.await(timeoutMillis, TimeUnit.MILLISECONDS)
+        if (!reachedFirstFrame) {
+            // The gate is only an optimization; timeout must never cancel initialization.
+            firstActivityStartupActive = false
+            firstFrameLatch.countDown()
+        }
+        return true
     }
 
     /** Suspend callers without blocking the main thread, then allow their optional work to continue. */

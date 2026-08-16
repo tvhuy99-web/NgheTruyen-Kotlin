@@ -353,7 +353,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             refreshSourcePlatformState()
             restorePersistedSourceRepositories()
             refreshAiCredentialState()
-            withContext(Dispatchers.IO) { container.libraryRepository.ensureGlobalVoiceProfiles() }
             restoreCachedHomeAndRefresh()
         }
     }
@@ -457,6 +456,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onPersonalPageChanged(page: String) {
         activePersonalPage = page
+        mutablePersonalPage.value = page
+        ensureRoomObserversForPersonalPage(page)
         val needsSourcePlatform = page.startsWith("extensions_") || page == "settings_diagnostics"
         if (needsSourcePlatform) refreshSourcePlatformState()
         refreshDiagnosticUi(loadDetails = shouldMaterializeDiagnosticDetails())
@@ -684,6 +685,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             RoomObserverGroup.VOICE_ROLES -> viewModelScope.launch {
+                // Seed required role names only when a screen actually needs voice roles.
+                // Voice/engine selection intentionally remains empty for the user to choose.
+                withContext(Dispatchers.IO) { container.libraryRepository.ensureGlobalVoiceProfiles() }
                 container.libraryRepository.observeVoiceRoles()
                     .distinctUntilChanged()
                     .collect { roles -> mutableState.update { it.copy(voiceRoles = roles) } }

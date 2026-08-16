@@ -59,6 +59,16 @@ fun ReferenceNgheTruyenApp(
         app.container.sourceDiagnostics.onScreenChanged(diagnosticScreenKey)
     }
 
+    // Keep Room observers demand-driven, but guarantee that every visible destination
+    // activates the data groups declared for it.
+    LaunchedEffect(state.destination, state.rootTab, state.librarySection) {
+        viewModel.ensureRoomObserversForUi(
+            destination = state.destination,
+            rootTab = state.rootTab,
+            librarySection = state.librarySection,
+        )
+    }
+
     fun activateExploreDiagnosticContext(
         sourceId: String = state.selectedSourceId.orEmpty(),
         mode: ExploreMode,

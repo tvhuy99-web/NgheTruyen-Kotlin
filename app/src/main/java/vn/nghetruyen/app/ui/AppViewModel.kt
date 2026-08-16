@@ -114,6 +114,7 @@ import vn.nghetruyen.app.sourceplatform.SourceRepositoryUiInfo
 import vn.nghetruyen.app.sourceplatform.SourceSelectorInspectionUi
 import vn.nghetruyen.app.sourceplatform.SourceTraceUi
 import vn.nghetruyen.app.sourceplatform.SourceTrustKeyUi
+import vn.nghetruyen.app.startup.StartupWorkGate
 import vn.nghetruyen.app.downloads.DownloadRequest
 import vn.nghetruyen.app.downloads.DownloadStorageGuard
 import vn.nghetruyen.app.downloads.StoryDownloadPlanner
@@ -319,6 +320,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var appliedCacheLimitMiB: Int? = null
     private var searchJob: Job? = null
     private var suggestionJob: Job? = null
+    private var sourceSessionRefreshJob: Job? = null
     private var storyLoadJob: Job? = null
     private var chapterLoadJob: Job? = null
     private var chapterPageJob: Job? = null
@@ -1615,10 +1617,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun refreshSourceSessions() {
-        val active = container.sourceRegistry.descriptors()
-            .filter { container.sourceSessionStore.hasSession(it.id) }
-            .mapTo(linkedSetOf()) { it.id }
-        mutableState.update { it.copy(sourceSessions = active) }
+        sourceSessionRefreshJob?.cancel()
+        sourceSessionRefreshJob = viewModelScope.launch {
+            if (!StartupWorkGate.awaitFirstFrameAsync()) return@launch
+            val descriptors = container.sourceRegistry.descriptors()
+            val active = withContext(Dispatchers.IO) {
+                descriptors
+                    .filter { container.sourceSessionStore.hasSession(it.id) }
+                    .mapTo(linkedSetOf()) { it.id }
+            }
+            mutableState.update { it.copy(sourceSessions = active) }
+        }
     }
 
     fun checkSource(sourceId: String) {

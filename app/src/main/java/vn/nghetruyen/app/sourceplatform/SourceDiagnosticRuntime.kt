@@ -7,6 +7,7 @@ import org.json.JSONObject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import vn.nghetruyen.app.BuildConfig
 import vn.nghetruyen.source.diagnostics.BoundedDiagnosticEvidenceRecorder
 import vn.nghetruyen.source.diagnostics.BoundedDiagnosticRecorder
@@ -71,7 +72,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
         private set
 
     private fun signalChanged() {
-        changeVersion.value = if (changeVersion.value == Long.MAX_VALUE) 1L else changeVersion.value + 1L
+        changeVersion.update { version -> if (version == Long.MAX_VALUE) 1L else version + 1L }
     }
 
     private val criticalMirror = DiagnosticSink { event ->

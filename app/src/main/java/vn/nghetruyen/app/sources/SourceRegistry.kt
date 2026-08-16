@@ -80,7 +80,8 @@ class SourceRegistry(
             }
         }
         return selected.mapValues { (_, source) ->
-            source.withExecutionAndDiagnostics(diagnosticRuntime).withStartupHomeGuard()
+            val runtimeSource = source.withExecutionAndDiagnostics(diagnosticRuntime)
+            if (diagnosticRuntime == null) runtimeSource else runtimeSource.withStartupHomeGuard()
         }
     }
 

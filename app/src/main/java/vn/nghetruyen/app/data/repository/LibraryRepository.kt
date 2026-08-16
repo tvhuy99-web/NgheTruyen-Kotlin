@@ -81,11 +81,9 @@ class LibraryRepository(private val db: AppDatabase) {
     fun observeStoryTtsProfiles(): Flow<List<StoryTtsProfileEntity>> = db.storyTtsProfileDao().observeAll()
     fun observeVoiceRoles(): Flow<List<VoiceRoleEntity>> = db.voiceRoleDao().observeAll()
     fun observeAudioExports(): Flow<List<AudioExportJobEntity>> = db.audioExportJobDao().observeAll()
-    fun observeAiUsage(): Flow<List<AiUsageDailyEntity>> = db.aiUsageDailyDao().observeRecent()
 
     suspend fun savePlaybackCheckpoint(item: PlaybackCheckpointEntity) = db.playbackCheckpointDao().upsert(item)
     suspend fun loadPlaybackCheckpoint(): PlaybackCheckpointEntity? = db.playbackCheckpointDao().get()
-    suspend fun clearPlaybackCheckpoint() = db.playbackCheckpointDao().clear()
 
     suspend fun replacePlaybackQueue(items: List<PlaybackQueueChapterEntity>) = db.withTransaction {
         db.playbackQueueChapterDao().clear()
@@ -201,8 +199,6 @@ class LibraryRepository(private val db: AppDatabase) {
     }
 
     suspend fun getFollowing(storyId: String): FollowedStoryEntity? = db.followingDao().get(storyId)
-
-    suspend fun listFollowing(): List<FollowedStoryEntity> = db.followingDao().listAll()
 
     suspend fun listFollowingForUpdate(limit: Int): List<FollowedStoryEntity> =
         db.followingDao().listForUpdate(limit.coerceAtLeast(1))
@@ -349,9 +345,6 @@ class LibraryRepository(private val db: AppDatabase) {
 
     suspend fun getDownloadJob(jobId: String): DownloadJobEntity? = db.downloadJobDao().get(jobId)
 
-    suspend fun latestDownloadJob(storyId: String): DownloadJobEntity? =
-        db.downloadJobDao().latestForStory(storyId)
-
     suspend fun getProgress(storyId: String): ReadingProgressEntity? = db.progressDao().get(storyId)
 
     suspend fun saveProgress(storyId: String, chapterId: String, paragraphIndex: Int, totalParagraphs: Int = 0) {
@@ -389,8 +382,6 @@ class LibraryRepository(private val db: AppDatabase) {
             totalParagraphs = totalParagraphs,
         )
     }
-
-    suspend fun listOfflineChapters(storyId: String): List<ChapterEntity> = db.chapterDao().listForStory(storyId)
 
     /**
      * Chapters that can actually be opened without network access. Imported books may use every
@@ -499,9 +490,6 @@ class LibraryRepository(private val db: AppDatabase) {
 
     suspend fun listDownloadedChapterIds(storyId: String): Set<String> =
         db.chapterDao().listDownloadedIds(storyId).toHashSet()
-
-    suspend fun hasDownloadedChapter(chapterId: String): Boolean =
-        db.chapterDao().get(chapterId)?.let { it.downloadedAt != null && !it.content.isNullOrBlank() } == true
 
     suspend fun saveStoryTtsProfile(
         storyId: String,
@@ -680,10 +668,6 @@ class LibraryRepository(private val db: AppDatabase) {
         )
     }
 
-    suspend fun deleteAudioExportJob(jobId: String) {
-        db.audioExportJobDao().delete(jobId)
-    }
-
     suspend fun listExportableChapters(storyId: String): List<ChapterEntity> =
         db.chapterDao().listExportableForStory(storyId)
 
@@ -695,19 +679,11 @@ class LibraryRepository(private val db: AppDatabase) {
 
     suspend fun getChapter(chapterId: String): ChapterEntity? = db.chapterDao().get(chapterId)
 
-    suspend fun getChapterAt(storyId: String, chapterIndex: Int): ChapterEntity? =
-        db.chapterDao().getAt(storyId, chapterIndex)
-
-    suspend fun getChapterByRemoteUrl(storyId: String, remoteUrl: String): ChapterEntity? =
-        db.chapterDao().getByRemoteUrl(storyId, remoteUrl)
-
     suspend fun loadCachedChapter(chapterId: String): ChapterContent? =
         db.chapterDao().get(chapterId)?.toContentWithNeighbors()
 
     suspend fun loadCachedChapterByUrl(storyId: String, remoteUrl: String): ChapterContent? =
         db.chapterDao().getByRemoteUrl(storyId, remoteUrl)?.toContentWithNeighbors()
-
-    suspend fun loadOfflineChapter(chapterId: String): ChapterContent? = loadCachedChapter(chapterId)
 
     suspend fun loadNextCachedChapter(storyId: String, chapterIndex: Int): ChapterContent? =
         db.chapterDao().getNextAfter(storyId, chapterIndex)?.toContentWithNeighbors()

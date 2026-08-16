@@ -20,35 +20,48 @@ jobs:
       - name: Install validator dependencies
         run: python3 -m pip install --disable-pip-version-check beautifulsoup4 cryptography
 
-      - name: Make AI feature gate forward-compatible
+      - name: Make historical feature gates forward-compatible
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
+          # AI Gemini/story/VietPhrase baseline: 2.8.0 / code 28 is a minimum, not an exact forever-version.
           path = Path('scripts/check_ai_gemini_story_vietphrase.py')
           text = path.read_text(encoding='utf-8')
-
           anchor = '''def main() -> int:\n'''
           helper = '''def verify_version_floor() -> None:\n    \"\"\"Retain the 2.8.0 AI feature baseline while allowing later releases.\"\"\"\n    build = text(\"app/build.gradle.kts\")\n    code_match = re.search(r\"\\bversionCode\\s*=\\s*(\\d+)\", build)\n    name_match = re.search(r'\\bversionName\\s*=\\s*\"([^\"]+)\"', build)\n    if code_match is None or name_match is None:\n        raise AssertionError(\"app/build.gradle.kts: cannot parse versionCode/versionName\")\n\n    version_code = int(code_match.group(1))\n    core_name = name_match.group(1).split(\"-\", 1)[0]\n    parts = core_name.split(\".\")\n    if len(parts) != 3 or any(not part.isdigit() for part in parts):\n        raise AssertionError(f\"app/build.gradle.kts: invalid semantic version: {name_match.group(1)}\")\n    semantic = tuple(int(part) for part in parts)\n\n    if version_code < 28 or semantic < (2, 8, 0):\n        raise AssertionError(\n            \"app/build.gradle.kts: AI narration baseline requires versionCode >= 28 and versionName >= 2.8.0; \"\n            f\"found versionCode={version_code}, versionName={name_match.group(1)}\",\n        )\n\n\n'''
           if 'def verify_version_floor() -> None:' not in text:
               if text.count(anchor) != 1:
-                  raise SystemExit(f'main anchor count={text.count(anchor)}')
+                  raise SystemExit(f'AI main anchor count={text.count(anchor)}')
               text = text.replace(anchor, helper + anchor, 1)
-
           old = '''    require(\n        \"app/build.gradle.kts\",\n        \"versionCode = 28\",\n        'versionName = \"2.8.0-ai-narration-priority2-complete\"',\n    )\n'''
           if text.count(old) != 1:
               raise SystemExit(f'exact AI version block count={text.count(old)}')
           text = text.replace(old, '    verify_version_floor()\n', 1)
           path.write_text(text, encoding='utf-8')
+
+          # Priority-2 completeness gate uses the same 2.8.0 baseline.
+          path = Path('scripts/check_priority2_complete.py')
+          text = path.read_text(encoding='utf-8')
+          if 'import re\n' not in text:
+              text = text.replace('from pathlib import Path\n', 'from pathlib import Path\nimport re\n', 1)
+          helper_anchor = '''\n\nrequire('app/build.gradle.kts', 'versionCode = 28', 'versionName = \"2.8.0-ai-narration-priority2-complete\"')\n'''
+          helper = '''\n\ndef verify_version_floor() -> None:\n    build = read('app/build.gradle.kts')\n    code_match = re.search(r'\\bversionCode\\s*=\\s*(\\d+)', build)\n    name_match = re.search(r'\\bversionName\\s*=\\s*\"([^\"]+)\"', build)\n    if code_match is None or name_match is None:\n        raise AssertionError('app/build.gradle.kts: cannot parse versionCode/versionName')\n    version_code = int(code_match.group(1))\n    core_name = name_match.group(1).split('-', 1)[0]\n    parts = core_name.split('.')\n    if len(parts) != 3 or any(not part.isdigit() for part in parts):\n        raise AssertionError(f'app/build.gradle.kts: invalid semantic version: {name_match.group(1)}')\n    semantic = tuple(int(part) for part in parts)\n    if version_code < 28 or semantic < (2, 8, 0):\n        raise AssertionError(\n            'app/build.gradle.kts: Priority 2 baseline requires versionCode >= 28 and versionName >= 2.8.0; '\n            f'found versionCode={version_code}, versionName={name_match.group(1)}'\n        )\n\n\nverify_version_floor()\n'''
+          if text.count(helper_anchor) != 1:
+              raise SystemExit(f'Priority2 exact version line count={text.count(helper_anchor)}')
+          text = text.replace(helper_anchor, helper, 1)
+          path.write_text(text, encoding='utf-8')
+
           Path('.github/workflows/repair-ai-version-gate.yml').unlink()
           PY
 
-      - name: Verify AI gate and aggregate release validator
+      - name: Verify gates and aggregate release validator
         shell: bash
         run: |
           git diff --check
           python3 scripts/check_ai_gemini_story_vietphrase.py
+          python3 scripts/check_priority2_complete.py
           python3 scripts/validate_release.py
 
       - name: Commit repair
@@ -57,5 +70,5 @@ jobs:
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
-          git commit -m 'fix: make AI feature gate version-safe'
+          git commit -m 'fix: make AI feature gates version-safe'
           git push origin HEAD:agent/remove-unused-files

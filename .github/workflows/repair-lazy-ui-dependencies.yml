@@ -24,129 +24,118 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
-          def replace_once(path: str, old: str, new: str) -> None:
-              file = Path(path)
-              text = file.read_text(encoding="utf-8")
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f"Expected exactly one match in {path}, found {count}: {old[:100]!r}")
-              file.write_text(text.replace(old, new, 1), encoding="utf-8")
+          def read_lines(path: str):
+              return Path(path).read_text(encoding="utf-8").splitlines()
+
+          def write_lines(path: str, lines):
+              Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
 
           reference_app = "app/src/main/java/vn/nghetruyen/app/ui/ReferenceNgheTruyenApp.kt"
-          old = '''    LaunchedEffect(state.diagnosticsMode, diagnosticScreenKey) {
-              app.container.sourceDiagnostics.onScreenChanged(diagnosticScreenKey)
-          }
-          '''
-          new = '''    LaunchedEffect(state.diagnosticsMode, diagnosticScreenKey) {
-              app.container.sourceDiagnostics.onScreenChanged(diagnosticScreenKey)
-          }
-
-          // Keep Room observers demand-driven, but guarantee that every visible destination
-          // activates the data groups declared for it.
-          LaunchedEffect(state.destination, state.rootTab, state.librarySection) {
-              viewModel.ensureRoomObserversForUi(
-                  destination = state.destination,
-                  rootTab = state.rootTab,
-                  librarySection = state.librarySection,
-              )
-          }
-          '''
-          replace_once(reference_app, old, new)
+          lines = read_lines(reference_app)
+          marker = "    LaunchedEffect(state.diagnosticsMode, diagnosticScreenKey) {"
+          if lines.count(marker) != 1:
+              raise SystemExit(f"Reference diagnostics marker count={lines.count(marker)}")
+          start = lines.index(marker)
+          end = next(i for i in range(start + 1, len(lines)) if lines[i] == "    }")
+          addition = [
+              "",
+              "    // Keep Room observers demand-driven, but guarantee that every visible destination",
+              "    // activates the data groups declared for it.",
+              "    LaunchedEffect(state.destination, state.rootTab, state.librarySection) {",
+              "        viewModel.ensureRoomObserversForUi(",
+              "            destination = state.destination,",
+              "            rootTab = state.rootTab,",
+              "            librarySection = state.librarySection,",
+              "        )",
+              "    }",
+          ]
+          if not any("ensureRoomObserversForUi(" in line for line in lines):
+              lines[end + 1:end + 1] = addition
+          write_lines(reference_app, lines)
 
           view_model = "app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt"
-          old = '''    fun onPersonalPageChanged(page: String) {
-              activePersonalPage = page
-              val needsSourcePlatform = page.startsWith("extensions_") || page == "settings_diagnostics"
-              if (needsSourcePlatform) refreshSourcePlatformState()
-              refreshDiagnosticUi(loadDetails = shouldMaterializeDiagnosticDetails())
-          }
-          '''
-          new = '''    fun onPersonalPageChanged(page: String) {
-              activePersonalPage = page
-              mutablePersonalPage.value = page
-              ensureRoomObserversForPersonalPage(page)
-              val needsSourcePlatform = page.startsWith("extensions_") || page == "settings_diagnostics"
-              if (needsSourcePlatform) refreshSourcePlatformState()
-              refreshDiagnosticUi(loadDetails = shouldMaterializeDiagnosticDetails())
-          }
-          '''
-          replace_once(view_model, old, new)
+          lines = read_lines(view_model)
+          page_line = "        activePersonalPage = page"
+          if lines.count(page_line) != 1:
+              raise SystemExit(f"activePersonalPage marker count={lines.count(page_line)}")
+          idx = lines.index(page_line)
+          additions = [
+              "        mutablePersonalPage.value = page",
+              "        ensureRoomObserversForPersonalPage(page)",
+          ]
+          for offset, line in enumerate(additions, start=1):
+              if line not in lines:
+                  lines.insert(idx + offset, line)
 
-          old = '''            RoomObserverGroup.VOICE_ROLES -> viewModelScope.launch {
-                  container.libraryRepository.observeVoiceRoles()
-                      .distinctUntilChanged()
-                      .collect { roles -> mutableState.update { it.copy(voiceRoles = roles) } }
-              }
-          '''
-          new = '''            RoomObserverGroup.VOICE_ROLES -> viewModelScope.launch {
-                  // Seed the required role names only when a screen actually needs voice roles.
-                  // Voice/engine selection intentionally remains empty for the user to choose.
-                  withContext(Dispatchers.IO) { container.libraryRepository.ensureGlobalVoiceProfiles() }
-                  container.libraryRepository.observeVoiceRoles()
-                      .distinctUntilChanged()
-                      .collect { roles -> mutableState.update { it.copy(voiceRoles = roles) } }
-              }
-          '''
-          replace_once(view_model, old, new)
+          startup_seed = "            withContext(Dispatchers.IO) { container.libraryRepository.ensureGlobalVoiceProfiles() }"
+          seed_indexes = [i for i, line in enumerate(lines) if line == startup_seed]
+          if len(seed_indexes) != 1:
+              raise SystemExit(f"startup seed marker count={len(seed_indexes)}")
+          del lines[seed_indexes[0]]
 
-          startup_seed = '''            withContext(Dispatchers.IO) { container.libraryRepository.ensureGlobalVoiceProfiles() }
-          '''
-          replace_once(view_model, startup_seed, "")
+          role_marker = "            RoomObserverGroup.VOICE_ROLES -> viewModelScope.launch {"
+          if lines.count(role_marker) != 1:
+              raise SystemExit(f"VOICE_ROLES marker count={lines.count(role_marker)}")
+          role_idx = lines.index(role_marker)
+          observe_idx = next(
+              i for i in range(role_idx + 1, min(role_idx + 12, len(lines)))
+              if "container.libraryRepository.observeVoiceRoles()" in lines[i]
+          )
+          role_addition = [
+              "                // Seed required role names only when a screen actually needs voice roles.",
+              "                // Voice/engine selection intentionally remains empty for the user to choose.",
+              "                withContext(Dispatchers.IO) { container.libraryRepository.ensureGlobalVoiceProfiles() }",
+          ]
+          lines[observe_idx:observe_idx] = role_addition
+          write_lines(view_model, lines)
 
           gate = "app/src/main/java/vn/nghetruyen/app/startup/StartupWorkGate.kt"
-          old = '''    fun awaitFirstFrame(timeoutMillis: Long = FIRST_FRAME_WAIT_TIMEOUT_MILLIS): Boolean {
-              if (isBeforeFirstFrame()) firstFrameLatch.await(timeoutMillis, TimeUnit.MILLISECONDS)
-              return !isBeforeFirstFrame()
-          }
-          '''
-          new = '''    fun awaitFirstFrame(timeoutMillis: Long = FIRST_FRAME_WAIT_TIMEOUT_MILLIS): Boolean {
-              if (!isBeforeFirstFrame()) return true
-              val reachedFirstFrame = firstFrameLatch.await(timeoutMillis, TimeUnit.MILLISECONDS)
-              if (!reachedFirstFrame) {
-                  // The first-frame gate is an optimization, never a reason to permanently skip
-                  // required initialization. Release the gate after the bounded wait.
-                  firstActivityStartupActive = false
-                  firstFrameLatch.countDown()
-              }
-              return true
-          }
-          '''
-          replace_once(gate, old, new)
+          lines = read_lines(gate)
+          gate_marker = "    fun awaitFirstFrame(timeoutMillis: Long = FIRST_FRAME_WAIT_TIMEOUT_MILLIS): Boolean {"
+          if lines.count(gate_marker) != 1:
+              raise SystemExit(f"Startup gate marker count={lines.count(gate_marker)}")
+          start = lines.index(gate_marker)
+          end = next(i for i in range(start + 1, len(lines)) if lines[i] == "    }")
+          replacement = [
+              gate_marker,
+              "        if (!isBeforeFirstFrame()) return true",
+              "        val reachedFirstFrame = firstFrameLatch.await(timeoutMillis, TimeUnit.MILLISECONDS)",
+              "        if (!reachedFirstFrame) {",
+              "            // The gate is only an optimization; timeout must never cancel initialization.",
+              "            firstActivityStartupActive = false",
+              "            firstFrameLatch.countDown()",
+              "        }",
+              "        return true",
+              "    }",
+          ]
+          lines[start:end + 1] = replacement
+          write_lines(gate, lines)
 
           demand_test = "app/src/test/java/vn/nghetruyen/app/ui/RoomObserverDemandTest.kt"
-          old = '''        assertEquals(
-              setOf(RoomObserverGroup.VIETPHRASE),
-              roomObserverGroupsForPersonalPage("settings_vietphrase"),
-          )
-          assertEquals(
-              setOf(RoomObserverGroup.OFFLINE, RoomObserverGroup.STORAGE),
-              roomObserverGroupsForPersonalPage("settings_storage"),
-          )
-          '''
-          new = '''        assertEquals(
-              setOf(RoomObserverGroup.VIETPHRASE),
-              roomObserverGroupsForPersonalPage("settings_vietphrase"),
-          )
-          assertEquals(
-              setOf(RoomObserverGroup.VOICE_ROLES),
-              roomObserverGroupsForPersonalPage("settings_automation"),
-          )
-          assertEquals(
-              setOf(RoomObserverGroup.SCENE_MUSIC),
-              roomObserverGroupsForPersonalPage("settings_music"),
-          )
-          assertEquals(
-              setOf(RoomObserverGroup.FOLLOWING),
-              roomObserverGroupsForPersonalPage("settings_following"),
-          )
-          assertEquals(
-              setOf(RoomObserverGroup.OFFLINE, RoomObserverGroup.STORAGE),
-              roomObserverGroupsForPersonalPage("settings_storage"),
-          )
-          '''
-          replace_once(demand_test, old, new)
+          lines = read_lines(demand_test)
+          viet_marker = '            roomObserverGroupsForPersonalPage("settings_vietphrase"),'
+          if lines.count(viet_marker) != 1:
+              raise SystemExit(f"VietPhrase test marker count={lines.count(viet_marker)}")
+          marker_idx = lines.index(viet_marker)
+          insert_at = marker_idx + 2
+          extra_tests = [
+              "        assertEquals(",
+              "            setOf(RoomObserverGroup.VOICE_ROLES),",
+              '            roomObserverGroupsForPersonalPage("settings_automation"),',
+              "        )",
+              "        assertEquals(",
+              "            setOf(RoomObserverGroup.SCENE_MUSIC),",
+              '            roomObserverGroupsForPersonalPage("settings_music"),',
+              "        )",
+              "        assertEquals(",
+              "            setOf(RoomObserverGroup.FOLLOWING),",
+              '            roomObserverGroupsForPersonalPage("settings_following"),',
+              "        )",
+          ]
+          if not any('settings_automation' in line for line in lines):
+              lines[insert_at:insert_at] = extra_tests
+          write_lines(demand_test, lines)
 
-          # This workflow exists only to apply the patch without retaining repair machinery.
           Path(".github/workflows/repair-lazy-ui-dependencies.yml").unlink()
           PY
 
@@ -157,8 +146,11 @@ jobs:
           grep -F 'viewModel.ensureRoomObserversForUi(' app/src/main/java/vn/nghetruyen/app/ui/ReferenceNgheTruyenApp.kt
           grep -F 'mutablePersonalPage.value = page' app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt
           grep -F 'ensureRoomObserversForPersonalPage(page)' app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt
-          grep -F 'ensureGlobalVoiceProfiles()' app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt
-          grep -F 'firstActivityStartupActive = false' app/src/main/java/vn/nghetruyen/app/startup/StartupWorkGate.kt
+          test "$(grep -c 'ensureGlobalVoiceProfiles()' app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt)" -ge 2
+          grep -F 'val reachedFirstFrame = firstFrameLatch.await' app/src/main/java/vn/nghetruyen/app/startup/StartupWorkGate.kt
+          grep -F 'settings_automation' app/src/test/java/vn/nghetruyen/app/ui/RoomObserverDemandTest.kt
+          grep -F 'settings_music' app/src/test/java/vn/nghetruyen/app/ui/RoomObserverDemandTest.kt
+          grep -F 'settings_following' app/src/test/java/vn/nghetruyen/app/ui/RoomObserverDemandTest.kt
 
       - name: Commit repair
         shell: bash

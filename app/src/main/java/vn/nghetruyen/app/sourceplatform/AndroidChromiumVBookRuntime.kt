@@ -977,13 +977,7 @@ private fun jsonValueType(value: JsonValue): String = when (value) {
     JsonValue.Null -> "null"
 }
 
-private fun JsonValue.Obj.string(name: String): String? = (values[name] as? JsonValue.Str)?.value
-private fun JsonValue.Obj.obj(name: String): JsonValue.Obj? = values[name] as? JsonValue.Obj
-private fun JsonValue.Obj.array(name: String): JsonValue.Arr? = values[name] as? JsonValue.Arr
-private fun JsonValue.Obj.int(name: String): Int? = (values[name] as? JsonValue.Num)?.raw?.toIntOrNull()
-private fun JsonValue.Obj.long(name: String): Long? = (values[name] as? JsonValue.Num)?.raw?.toLongOrNull()
 private fun JsonValue.Obj.double(name: String): Double? = (values[name] as? JsonValue.Num)?.raw?.toDoubleOrNull()
-private fun JsonValue.Obj.bool(name: String): Boolean? = (values[name] as? JsonValue.Bool)?.value
 private fun JsonValue.Obj.stringMap(): Map<String, String> = values.mapNotNull { (key, value) ->
     (value as? JsonValue.Str)?.value?.let { key to it }
 }.toMap(LinkedHashMap())

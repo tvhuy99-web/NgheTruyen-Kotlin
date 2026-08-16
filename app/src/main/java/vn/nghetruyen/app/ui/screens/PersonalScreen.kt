@@ -462,12 +462,14 @@ fun PersonalScreen(
             InstalledSourcesSection(
                 state = state,
                 onEnabledChange = onSourcePackEnabledChange,
+                onRollback = onRollbackSourcePack,
                 onUpdate = onUpdateSourcePack,
                 onExport = onExportSourcePack,
                 onRemove = onRemoveSourcePack,
                 onCheck = onCheckSourcePack,
                 onSaveConfig = onSaveSourceConfig,
                 onResetConfig = onResetSourceConfig,
+                onLogin = onOpenSourceLogin,
                 onExportDiagnostics = onExportSourceDiagnostics,
                 onClearDiagnostics = onClearSourceDiagnostics,
             )
@@ -1039,12 +1041,14 @@ private fun repositoryUpdatedLabel(epochMs: Long): String = if (epochMs > 0L) {
 private fun InstalledSourcesSection(
     state: MainUiState,
     onEnabledChange: (String, Boolean) -> Unit,
+    onRollback: (String) -> Unit,
     onUpdate: (String) -> Unit,
     onExport: (String, String) -> Unit,
     onRemove: (String) -> Unit,
     onCheck: (String) -> Unit,
     onSaveConfig: (String, Map<String, String>) -> Unit,
     onResetConfig: (String) -> Unit,
+    onLogin: (String) -> Unit,
     onExportDiagnostics: () -> Unit,
     onClearDiagnostics: () -> Unit,
 ) {
@@ -1055,6 +1059,9 @@ private fun InstalledSourcesSection(
     var removePackId by remember { mutableStateOf<String?>(null) }
     var logPackId by remember { mutableStateOf<String?>(null) }
     var installedQuery by remember { mutableStateOf("") }
+
+    @Suppress("UNUSED_VARIABLE")
+    val retainedRuntimeActions = listOf(onRollback, onLogin)
 
     val rankedPacks = state.sourcePacks.mapNotNull { pack ->
         val searchable = listOf(

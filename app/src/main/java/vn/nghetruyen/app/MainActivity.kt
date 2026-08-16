@@ -69,7 +69,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        StartupWorkGate.beginFirstActivityStartup()
+        StartupWorkGate.beginFirstActivityStartup(this)
         installExtensionHostKernel(viewModel)
         handleFollowingIntent(intent)
         setContent {

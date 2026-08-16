@@ -10,7 +10,7 @@ import com.nghetruyen.source.sandbox.JsSyntaxValidator
 data class VBookCandidate(
     val artifactId: String,
     val pluginJson: String,
-    /** Keys may be either `name.js` or `src/name.js`; the validator normalizes them. */
+     
     val scripts: Map<String, String>,
 )
 

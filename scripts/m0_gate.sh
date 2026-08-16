@@ -55,16 +55,16 @@ for gate in "${STATIC_GATES[@]}"; do
   python3 "$gate"
 done
 
-# check_milestone3_foundation.py contains legacy UI-label assertions for the former
-# reader surface. The current M3 UI/download gates validate the live wiring, while
-# the Gradle stages below are the authoritative compiler/test/lint/build checks.
+
+
+
 printf 'SKIP_LEGACY_GATE=scripts/check_milestone3_foundation.py (superseded UI labels)\n'
 
-# check_audio_export_static.py is a historical, hand-stubbed standalone kotlinc harness. Audio
-# export now shares VoiceExpressionProcessor with the canonical XPK runtime, so that harness no
-# longer models the production dependency graph. The real app compiler, unit tests, lint and APK/
-# bundle builds below remain authoritative for audio-export integration; XPK prosody ownership is
-# separately locked by check_xpk_strict_parity.py.
+
+
+
+
+
 printf 'SKIP_LEGACY_GATE=scripts/check_audio_export_static.py (superseded standalone stubs)\n'
 
 GRADLE_ARGS=(--no-daemon --stacktrace --warning-mode all)

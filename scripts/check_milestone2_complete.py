@@ -25,8 +25,8 @@ DECLARATIVE = ["truyenfull", "truyencv", "truyencom", "truyenyy", "wikidich", "s
 
 
 def run_script(name: str) -> None:
-    # Kotlin compiler launchers can leave inherited pipes open. A real temporary
-    # file prevents the aggregate gate from appearing frozen after child exit.
+    
+    
     with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as log:
         completed = subprocess.run(
             [sys.executable, str(ROOT / "scripts" / name)],

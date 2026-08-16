@@ -15,11 +15,11 @@ def require(path: str, *tokens: str) -> None:
 
 
 def main() -> None:
-    # Explore/Library are production Compose screens. The previous hand-written
-    # Compose stubs lagged the actual UI (reading history, accessibility LocalView,
-    # reference components and download prioritization). Keep the static gate on
-    # feature wiring and let m0_gate.sh's real Gradle test/lint/assemble compile
-    # the screens with the Android SDK.
+    
+    
+    
+    
+    
     require(
         "app/src/main/java/vn/nghetruyen/app/ui/screens/ExploreScreen.kt",
         "fun ExploreScreen(",

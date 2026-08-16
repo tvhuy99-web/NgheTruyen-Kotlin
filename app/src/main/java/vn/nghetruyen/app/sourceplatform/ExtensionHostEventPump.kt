@@ -20,12 +20,12 @@ import java.util.WeakHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
-/**
- * Converts NgheTruyen-owned UI/application state transitions into runtime-neutral host events.
- *
- * No Activity or ViewModel is stored strongly. Events are queued by [SourceHostEventBus] when a
- * short-lived extension runtime is not executing and are replayed when the extension subscribes.
- */
+
+
+
+
+
+
 object ExtensionHostEventPump {
     private val jobs = WeakHashMap<AppViewModel, Job>()
     private val activeHost = AtomicReference<WeakReference<AppViewModel>?>(null)

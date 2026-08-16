@@ -4,7 +4,7 @@ import com.nghetruyen.source.platform.SourceCompatibilityProfile
 import com.nghetruyen.source.platform.SourceCompatibilityState
 import com.nghetruyen.source.platform.SourceEcosystem
 
-/** Stable JSON-shaped snapshot format used by corpus and differential tests. */
+ 
 sealed interface CompatValue {
     object Null : CompatValue
     data class Bool(val value: Boolean) : CompatValue
@@ -273,10 +273,10 @@ data class CompatibilityMatrix(
         .mapTo(linkedSetOf()) { it.featureId }
 }
 
-/**
- * Guardrail used by CI to keep compatibility engines site-agnostic.
- * It intentionally scans only explicit URL literals to avoid matching package names.
- */
+
+
+
+
 object SourceSpecificityGuard {
     private val urlLiteral = Regex("(?i)https?://([a-z0-9.-]+)")
 

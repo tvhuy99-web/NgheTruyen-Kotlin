@@ -12,7 +12,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/** Device-bound encrypted storage for vBook credentials, tokens, cookies, and other secrets. */
+ 
 class AndroidVBookSecretStore(context: Context) : VBookConfigStore {
     private val preferences = context.applicationContext.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
 

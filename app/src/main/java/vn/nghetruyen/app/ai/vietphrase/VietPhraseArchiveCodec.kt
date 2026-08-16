@@ -7,7 +7,7 @@ import java.util.Base64
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 
-/** Lossless snapshot codec for every advanced VietPhrase rule field. */
+ 
 object VietPhraseArchiveCodec {
     data class Archive(val rules: List<VietPhraseRule>, val checksum: String)
 

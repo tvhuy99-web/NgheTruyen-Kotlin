@@ -1,6 +1,6 @@
 package vn.nghetruyen.source.vbook
 
-/** JavaScript injected by [VBookCompatibilityRuntime] around the legacy Qt host bridge. */
+ 
 object VBookQuickTranslatorPrelude {
     fun build(): String = """
         var __vbookNativeQtTranslate = Qt.translate;

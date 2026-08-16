@@ -30,7 +30,7 @@ data class SourceConfigFieldUi(
     val key: String,
     val title: String,
     val subtitle: String,
-    /** Sensitive values are always blank in UI snapshots. */
+     
     val value: String,
     val defaultValue: String,
     val options: List<String>,
@@ -50,7 +50,7 @@ data class SourceInstallPreview(
     val fixtureCount: Int,
 )
 
-/** Safe metadata from Android's document provider; raw content URIs are never logged. */
+ 
 data class SourceImportFileMetadata(
     val displayName: String = "",
     val mimeType: String = "",
@@ -113,10 +113,10 @@ data class SourceSelectorInspectionUi(
     val samples: List<String>,
 )
 
-/**
- * Plain-text report for the normal UI. This follows the Lua/XPK idea: errors explain what failed,
- * why it may have failed, and what the user can try, while raw events/evidence stay in the export.
- */
+
+
+
+
 object DiagnosticHumanFormatter {
     fun formatEvents(events: List<DiagnosticEvent>, mode: String, title: String = "NHẬT KÝ CHẨN ĐOÁN"): String =
         buildReport(title, mode, events.sortedBy(DiagnosticEvent::timestampEpochMs).map { event ->

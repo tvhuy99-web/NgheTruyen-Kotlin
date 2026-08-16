@@ -21,7 +21,7 @@ data class TtsSynthesisVoice(
     val pitch: Float,
 )
 
-/** Small coroutine wrapper around Android's asynchronous TTS file API. */
+ 
 class TtsFileSynthesizer(
     context: Context,
     enginePackage: String? = null,

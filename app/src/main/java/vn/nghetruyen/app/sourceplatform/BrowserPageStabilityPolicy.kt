@@ -1,6 +1,6 @@
 package vn.nghetruyen.app.sourceplatform
 
-/** Pure state machine used by the Android WebView broker to avoid snapshotting redirect/WAF pages. */
+ 
 internal class BrowserPageStabilityPolicy(
     private val deadlineMs: Long,
 ) {

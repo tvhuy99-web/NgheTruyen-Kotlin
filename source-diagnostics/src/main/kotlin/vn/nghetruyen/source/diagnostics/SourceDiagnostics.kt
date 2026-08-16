@@ -27,13 +27,13 @@ data class DiagnosticEvent(
     val attributes: Map<String, String> = emptyMap(),
 )
 
-/**
- * Stable operation metadata shared by every diagnostic producer.
- *
- * The Lua/XPK black box updates an explicit operation object. Keeping the same contract in the APK
- * means reports do not have to guess operation state from event-name suffixes. Old events remain
- * supported by the report layer, but all new instrumentation should populate this contract.
- */
+
+
+
+
+
+
+
 object DiagnosticOperationContract {
     const val ID = "operationId"
     const val KIND = "operationKind"
@@ -68,11 +68,11 @@ object DiagnosticOperationContract {
     fun id(event: DiagnosticEvent): String? = event.attributes[ID]?.takeIf(String::isNotBlank)
 }
 
-/**
- * Legacy classification helper kept for source compatibility. DiagnosticLevel.OFF remains a true
- * off switch for the recorder; an application may separately configure a filtered always-mirror
- * sink for bounded, user-actionable install failures.
- */
+
+
+
+
+
 fun DiagnosticEvent.shouldRetainWhenDiagnosticsOff(): Boolean =
     severity == DiagnosticSeverity.ERROR ||
         (severity == DiagnosticSeverity.WARN && category in setOf(
@@ -98,14 +98,14 @@ data class DiagnosticRecorderStats(
     val screenHandoffEventsRetained: Long = 0,
 )
 
-/**
- * Bounded diagnostic timeline with immutable screen-generation ownership.
- *
- * A trace/operation is bound to the generation in which it first starts. When screen mode rotates,
- * the visible timeline is cleared but those origin bindings intentionally survive. A callback from
- * an older generation is therefore still mirrored to lifecycle/critical sinks (so operations can
- * close correctly) but is never appended to the new screen's timeline.
- */
+
+
+
+
+
+
+
+
 class BoundedDiagnosticRecorder(
     private val maxEvents: Int = 2_000,
     @Volatile var level: DiagnosticLevel = DiagnosticLevel.BASIC,
@@ -130,11 +130,11 @@ class BoundedDiagnosticRecorder(
         emitScoped(event, explicitOriginGeneration = null)
     }
 
-    /**
-     * Emits an event whose producer already captured a generation. The event is always delivered to
-     * mirror/critical lifecycle sinks, but only the current generation may enter the visible RAM
-     * timeline. Most callers can use [emit]; this overload is useful for explicit async boundaries.
-     */
+    
+
+
+
+
     fun emitScoped(event: DiagnosticEvent, originGeneration: Long) {
         emitScoped(event, explicitOriginGeneration = originGeneration)
     }
@@ -157,8 +157,8 @@ class BoundedDiagnosticRecorder(
             retainInTimeline = inferredOrigin == currentGeneration
         }
 
-        // Critical/actionable failures and active-operation lifecycle tracking must still see stale
-        // callbacks; only the screen-scoped visible recorder suppresses them.
+        
+        
         runCatching { alwaysMirror.emit(scoped) }
         if (level == DiagnosticLevel.OFF) return
         if (level == DiagnosticLevel.BASIC && scoped.severity == DiagnosticSeverity.DEBUG) return
@@ -177,7 +177,7 @@ class BoundedDiagnosticRecorder(
         runCatching { mirror.emit(scoped) }
     }
 
-    /** Restore already-redacted persisted events without mirroring them back to disk. */
+     
     fun restore(restored: List<DiagnosticEvent>) = lock.withLock {
         restored.takeLast(maxEvents).forEach { event ->
             val safe = event.copy(attributes = DiagnosticRedactor.redact(event.attributes))
@@ -211,12 +211,12 @@ class BoundedDiagnosticRecorder(
         traceOrigins[traceId.trim().takeIf(String::isNotBlank)]
     }
 
-    /**
-     * Starts a new screen generation while retaining only explicitly selected causal traces.
-     * Retained events are re-stamped as handoff evidence for the destination screen; unrelated
-     * previous-screen events are discarded and counted. Trace origin is moved to the new generation
-     * so a late callback from the handed-off navigation can still complete on the destination screen.
-     */
+    
+
+
+
+
+
     fun rotateScreen(
         retainTraceIds: Set<String> = emptySet(),
         handoffAttributes: Map<String, String> = emptyMap(),
@@ -269,7 +269,7 @@ class BoundedDiagnosticRecorder(
         selected
     }
 
-    /** Legacy strict rotation: carry nothing. */
+     
     fun retainActiveOperationTraces(): Set<String> = rotateScreen(emptySet())
 
     fun clear(sourceId: String? = null) = lock.withLock {
@@ -454,11 +454,11 @@ class BoundedDiagnosticEvidenceRecorder(
 
     fun snapshot(): List<DiagnosticEvidence> = lock.withLock { items.toList() }
 
-    /**
-     * Screen rotation retains only evidence belonging to the causal traces explicitly handed off.
-     * Unlike eviction counters, rotation discard counters describe the latest screen boundary and are
-     * never silently reset by the boundary itself.
-     */
+    
+
+
+
+
     fun retainTraces(
         traceIds: Set<String>,
         targetGeneration: Long? = null,
@@ -512,10 +512,10 @@ class BoundedDiagnosticEvidenceRecorder(
     }
 }
 
-/**
- * Evidence companion for [BoundedDiagnosticRecorder]'s immutable trace ownership. Evidence from a
- * trace that originated on an older screen is dropped instead of being attached to the new screen.
- */
+
+
+
+
 class ScreenScopedDiagnosticEvidenceSink(
     private val scope: BoundedDiagnosticRecorder,
     private val delegate: BoundedDiagnosticEvidenceRecorder,
@@ -564,7 +564,7 @@ object DiagnosticRedactor {
         return cookieLike.replace(keySafe) { match -> "${match.groupValues[1]}=<redacted>" }.take(maxChars)
     }
 
-    /** Keep the DOM/script/style structure intact while stripping common credential-bearing values. */
+     
     fun redactHtmlPreservingStructure(raw: String, maxChars: Int = 8 * 1024 * 1024): String =
         htmlSensitiveAttribute.replace(redactLongText(raw, maxChars)) { match ->
             "${match.groupValues[1]}${match.groupValues[2]}<redacted>${match.groupValues[2]}"
@@ -576,11 +576,11 @@ object DiagnosticRedactor {
         .joinToString("") { "%02x".format(Locale.ROOT, it) }
 }
 
-/**
- * Bounded exception detail suitable for a user-shareable diagnostic bundle. Keeping stack frames
- * is essential for host-side Android/Kotlin failures, but the output must remain small and pass
- * through the same credential redaction as every other diagnostic attribute.
- */
+
+
+
+
+
 object DiagnosticThrowableFormatter {
     fun attributes(
         error: Throwable,
@@ -637,7 +637,7 @@ data class DiagnosticArtifactMetadata(
     val declaredSizeBytes: Long? = null,
 )
 
-/** Safe identity and format hints for correlating every probe of one user-selected file. */
+ 
 object DiagnosticArtifactInspector {
     fun inspect(bytes: ByteArray, metadata: DiagnosticArtifactMetadata): Map<String, String> = buildMap {
         put("fileName", safeDisplayName(metadata.displayName))

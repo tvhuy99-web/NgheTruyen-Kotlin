@@ -2,10 +2,10 @@ package vn.nghetruyen.app.playback
 
 import kotlin.math.ceil
 
-/**
- * Pure policy used by the playback service to keep TTS recovery bounded.
- * Every speech chunk gets its own budget so a broken engine can never loop forever.
- */
+
+
+
+
 data class SpeechRecoveryState(
     val sonicFallbackUsed: Boolean = false,
     val engineRetryUsed: Boolean = false,
@@ -40,7 +40,7 @@ object PlaybackRecoveryPolicy {
     }
 }
 
-/** Timeout values are deterministic and bounded for source-level tests. */
+ 
 object PlaybackWatchdogPolicy {
     const val INIT_TIMEOUT_MILLIS = 12_000L
     const val MIN_SPEECH_TIMEOUT_MILLIS = 15_000L
@@ -50,7 +50,7 @@ object PlaybackWatchdogPolicy {
 
     fun speechTimeoutMillis(textLength: Int, rate: Float, usesSonic: Boolean): Long {
         val safeRate = rate.coerceIn(0.5f, 2f)
-        // Vietnamese speech is usually well below this rate. Deliberately generous.
+        
         val estimatedSeconds = ceil(textLength.coerceAtLeast(1) / (12.0 * safeRate)).toLong()
         val processingHeadroom = if (usesSonic) 20_000L else 8_000L
         return (estimatedSeconds * 1_000L + processingHeadroom)
@@ -65,12 +65,12 @@ enum class SpeechCompletionObservation {
     STALE,
 }
 
-/**
- * Recovers a speech completion when an Android TTS engine or MediaPlayer finishes output without
- * delivering its final callback. This mirrors the XPK runtime: once output has started, two
- * consecutive quiet observations count as completion, while a separate hard deadline still
- * routes genuinely stuck output through the bounded recovery policy.
- */
+
+
+
+
+
+
 class SpeechCompletionMonitor(
     private val quietConfirmations: Int = PlaybackWatchdogPolicy.QUIET_COMPLETION_CONFIRMATIONS,
 ) {
@@ -159,7 +159,7 @@ object NextChapterAdvancePolicy {
         )
 }
 
-/** Rejects late callbacks from an engine instance that has already been replaced. */
+ 
 class TtsGenerationGuard {
     private var generation: Long = 0L
 
@@ -173,9 +173,9 @@ class TtsGenerationGuard {
     fun current(): Long = generation
 }
 
-/**
- * Ensures a completion callback is consumed once for the exact chapter/chunk that started it.
- */
+
+
+
 class PlaybackCompletionGuard {
     private var activeToken: String? = null
     private var consumed = false

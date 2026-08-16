@@ -1,10 +1,10 @@
 package vn.nghetruyen.source.vbook
 
-/**
- * Lightweight lexical masking for corpus feature detection only; it never transforms code that is
- * executed. Keeping character positions/newlines stable makes evidence deterministic while avoiding
- * host-API false positives inside comments and generated HTML/JavaScript string payloads.
- */
+
+
+
+
+
 internal object VBookJavaScriptLexicalMask {
     fun executable(source: String): String = mask(source, hideStrings = true)
     fun withoutComments(source: String): String = mask(source, hideStrings = false)

@@ -8,7 +8,7 @@ import vn.nghetruyen.app.audio.ReferenceSonicRuntime
 import vn.nghetruyen.app.core.model.VoiceRoleDraft
 import vn.nghetruyen.app.data.local.StoryTtsProfileEntity
 
-/** Draft used by the XPK-compatible TTS editor. */
+ 
 data class ReferenceTtsDraft(
     val enginePackage: String? = null,
     val voiceName: String? = null,
@@ -17,9 +17,9 @@ data class ReferenceTtsDraft(
     val sonicAccurate: Boolean = false,
     val speed: Float = 1f,
     val pitch: Float = 1f,
-    /** Android/system TTS volume. */
+     
     val volume: Float = 1f,
-    /** Sonic gain controlled by the same visible volume slider when Sonic is selected. */
+     
     val sonicVolume: Float = 1f,
 )
 
@@ -124,7 +124,7 @@ object ReferenceTtsPersistence {
                     enginePackage = normalized.enginePackage,
                     voiceName = normalized.voiceName,
                     languageTag = normalized.languageTag,
-                    // Android TTS remains neutral while the visible controls feed Sonic.
+                    
                     rate = if (sonic) 1f else normalized.speed,
                     pitch = if (sonic) 1f else normalized.pitch,
                     volume = activeVolume,
@@ -215,8 +215,8 @@ object ReferenceTtsPersistence {
             val profile = app.container.database.storyTtsProfileDao().get(storyId)
             if (profile != null) {
                 if (sonic) {
-                    // Migrate older reference profiles that stored Sonic speed/pitch in
-                    // Android rate/pitch, then keep Android TTS neutral.
+                    
+                    
                     val speed = prefs.getFloat(speedKey(storyId), profile.rate).coerceIn(0.25f, 3f)
                     val pitch = prefs.getFloat(pitchKey(storyId), profile.pitch).coerceIn(0.5f, 2f)
                     val sonicVolume = prefs.getFloat(sonicVolumeKey(storyId), profile.volume).coerceIn(0f, 2f)

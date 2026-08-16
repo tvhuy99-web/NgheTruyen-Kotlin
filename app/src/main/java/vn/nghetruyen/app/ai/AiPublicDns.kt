@@ -4,7 +4,7 @@ import okhttp3.Dns
 import java.net.InetAddress
 import java.net.UnknownHostException
 
-/** Revalidates every address used by OkHttp so a custom AI endpoint cannot DNS-rebind into a private network. */
+ 
 object AiPublicDns : Dns {
     override fun lookup(hostname: String): List<InetAddress> {
         val addresses = Dns.SYSTEM.lookup(hostname)

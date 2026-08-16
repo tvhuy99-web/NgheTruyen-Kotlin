@@ -49,7 +49,7 @@ data class ChapterContent(
     val paragraphs: List<String>,
     val nextChapterUrl: String? = null,
     val previousChapterUrl: String? = null,
-    /** Catalog continuation used when this is the last chapter on the loaded TOC page. */
+     
     val nextChapterPageUrl: String? = null,
     val nextChapterPageStartIndex: Int? = null,
 )
@@ -80,7 +80,7 @@ data class TtsVoiceOption(
     val enginePackage: String? = null,
 )
 
-/** Editable per-character TTS profile shared by Compose, playback preview and persistence. */
+ 
 data class VoiceRoleDraft(
     val roleName: String,
     val originalRoleId: String? = null,

@@ -6,7 +6,7 @@ import vn.nghetruyen.app.ai.vietphrase.VietPhraseOptions
 import vn.nghetruyen.app.ai.vietphrase.VietPhraseRule
 import vn.nghetruyen.app.data.local.VietPhraseEntity
 
-/** Compatibility facade for the original flat VietPhrase table. */
+ 
 object VietPhraseProcessor {
     fun apply(text: String, rules: List<VietPhraseEntity>): String {
         if (text.isBlank()) return text

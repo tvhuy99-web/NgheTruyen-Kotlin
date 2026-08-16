@@ -14,14 +14,14 @@ import vn.nghetruyen.source.api.SourceTranslationBroker
 import vn.nghetruyen.source.api.SourceTranslationRequest
 import vn.nghetruyen.source.api.SourceTranslationResponse
 
-/**
- * Offline implementation for vBook `Qt.translate` base modes.
- *
- * `vp` uses the user's enabled VietPhrase dictionaries and `hv` uses only the Hán-Việt
- * (ChinesePhienAmWords) layer. Advanced vBook extras such as NER and traditional-to-simplified
- * conversion are deliberately not fabricated here; candidate validation marks those subfeatures
- * explicitly unsupported until a reference-compatible backend exists.
- */
+
+
+
+
+
+
+
+
 class AndroidVBookQuickTranslationBroker(
     private val libraryRepository: LibraryRepository,
 ) : SourceTranslationBroker {
@@ -97,11 +97,11 @@ class AndroidVBookQuickTranslationBroker(
     }
 }
 
-/**
- * Narrow integration bridge for the legacy SourcePlatformManager constructor.
- * It is installed once by AppContainer and can later be removed when the manager takes the
- * dedicated quickTranslation broker directly.
- */
+
+
+
+
+
 object AndroidVBookQuickTranslationRegistry : SourceTranslationBroker {
     @Volatile private var delegate: SourceTranslationBroker = SourceTranslationBroker.DENY_ALL
 

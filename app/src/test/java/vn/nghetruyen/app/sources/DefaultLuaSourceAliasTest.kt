@@ -64,8 +64,8 @@ class DefaultLuaSourceAliasTest {
             sourcePackSources = listOf(native.withStableDefaultLuaId()),
         )
 
-        // AppViewModel refreshSourcePlatformState() supplies raw activeStorySources(). The registry
-        // must normalize that boundary again instead of allowing the Kotlin adapter to win back.
+        
+        
         registry.refreshSourcePacks(listOf(native))
 
         val selected = requireNotNull(registry.get("sangtacviet"))

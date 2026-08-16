@@ -10,7 +10,7 @@ import java.io.IOException
 import java.io.RandomAccessFile
 import kotlin.math.min
 
-/** One loopable PCM16 music layer positioned on the narration timeline. */
+ 
 data class SceneMixLayer(
     val sourceWav: File,
     val startFrame: Long,
@@ -19,10 +19,10 @@ data class SceneMixLayer(
     val fadeFrames: Int = 0,
 )
 
-/**
- * Streaming narration/music mixer. Music must already be decoded to PCM16 WAV
- * with the same sample rate and channel count as narration.
- */
+
+
+
+
 object Pcm16SceneMixer {
     private const val BLOCK_FRAMES = 2_048
     private const val MAX_LAYER_BYTES = 64L * 1024 * 1024

@@ -1,6 +1,6 @@
 package vn.nghetruyen.source.vbook
 
-/** Shared host-side interpretation of the current vBook Browser URL-pattern contract. */
+ 
 internal object VBookBrowserUrlMatcher {
     fun matches(url: String, pattern: String): Boolean {
         if (pattern.isEmpty()) return false

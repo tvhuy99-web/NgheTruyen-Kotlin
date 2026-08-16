@@ -20,9 +20,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def run_script(name: str) -> None:
-    # Write child output to a real file instead of a pipe. Kotlin launcher
-    # grandchildren can otherwise keep inherited pipes open after the compiler
-    # has already exited, making the aggregate release gate appear frozen.
+    
+    
+    
     print(f"RUN_GATE {name}", flush=True)
     with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as log:
         try:

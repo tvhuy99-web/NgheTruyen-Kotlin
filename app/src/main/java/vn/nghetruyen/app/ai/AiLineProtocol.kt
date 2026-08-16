@@ -127,8 +127,8 @@ object AiLineProtocol {
         }
         if (validIds.isNotEmpty() && assignmentMap.isEmpty()) error("Không có ID hợp lệ nào trong phản hồi AI")
 
-        // Mirror VoiceCast:applyAssignments() exactly: groupVoice learns only from a valid explicit
-        // non-narrator AI assignment. A narrator/invalid row does not block a later valid group voice.
+        
+        
         val groupVoice = linkedMapOf<String, String>()
         validIds.forEach { id ->
             val group = options.dialogueGroupByUnitId[id]?.trim().orEmpty()
@@ -180,7 +180,7 @@ object AiLineProtocol {
         return XpkSceneMusicParity.validateScenes(rows, options.validUnitIds, options.validTrackIds)
     }
 
-    /** Legacy parser kept only for the deprecated OnlineAiServices narration interfaces. */
+     
     @Deprecated("Use parseXpkNarration; paragraph ROLE/ASSIGN protocol is not used by XPK narration runtime")
     fun parseVoiceCast(raw: String): VoiceCastPlan {
         val roles = LinkedHashMap<String, VoiceRole>()

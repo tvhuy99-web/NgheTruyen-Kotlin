@@ -16,7 +16,7 @@ import vn.nghetruyen.source.api.SourcePlatformResult
 import vn.nghetruyen.source.api.SourceRuntimeMode
 import java.io.ByteArrayOutputStream
 
-/** Android Bitmap/Canvas implementation for the documented vBook Graphics surface. */
+ 
 class AndroidSourceGraphicsBroker : SourceGraphicsBroker {
     override fun render(manifest: SourceManifest, request: SourceGraphicsRequest): SourcePlatformResult<String> = runCatching {
         require(request.sourceId == manifest.id) { "SOURCE_GRAPHICS_SOURCE_ID_MISMATCH" }

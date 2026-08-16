@@ -43,7 +43,7 @@ def insert_before_final_brace(path: str, addition: str, sentinel: str) -> None:
     write(path, text[:index] + addition + text[index:])
 
 
-# 1) Common accessibility semantics: ordinary buttons should not announce "not selected".
+
 replace_once(
     "app/src/main/java/vn/nghetruyen/app/ui/components/Common.kt",
     """            .semantics {
@@ -62,8 +62,8 @@ replace_once(
 """,
 )
 
-# 2) Explore: match the reference chrome. Keep one large SEARCH button on screen,
-# move query/scope/sort controls into a dialog, then source selector + categories + list.
+
+
 explore = "app/src/main/java/vn/nghetruyen/app/ui/screens/ExploreScreen.kt"
 replace_once(
     explore,
@@ -216,8 +216,8 @@ insert_before_final_brace(
     "title = { Text(\"TÌM KIẾM\") }",
 )
 
-# 3) Personal: reference app exposes a two-item landing list instead of dumping
-# every setting on the first screen. Keep all existing settings behind these entries.
+
+
 personal = "app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt"
 replace_once(
     personal,
@@ -298,8 +298,8 @@ replace_once(
 """,
 )
 
-# 4) Story detail: the reference TÙY CHỌN opens a compact dialog. Advanced voice/AI
-# configuration stays available but only after an explicit second-level action.
+
+
 story = "app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt"
 replace_once(
     story,
@@ -432,8 +432,8 @@ replace_once(
 """,
 )
 
-# 5) Reader: reduce persistent top chrome, put AI actions after playback controls like
-# the reference tool, use the reference pause wording, and avoid false unselected states.
+
+
 reader = "app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt"
 replace_once(
     reader,
@@ -470,7 +470,7 @@ replace_once(
 replace_once(reader, '                        state.playback.isPlaying -> "DỪNG"\n', '                        state.playback.isPlaying -> "TẠM DỪNG"\n')
 replace_once(reader, "                                    this.selected = active\n", "                                    if (active) this.selected = true\n")
 
-# Remove the AI bar from above playback controls.
+
 remove_range(
     reader,
     """            Row(modifier = Modifier.fillMaxWidth()) {
@@ -482,7 +482,7 @@ remove_range(
                 ReaderButton("TRƯỚC", onPreviousChapter, Modifier.weight(1.2f),
 """,
 )
-# Insert AI bar after the five playback controls.
+
 replace_once(
     reader,
     """                ReaderButton("SAU", onNextChapter, Modifier.weight(1.2f), minHeight = 64.dp, accessibilityLabel = "Chương sau")

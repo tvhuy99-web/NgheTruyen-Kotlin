@@ -1,6 +1,6 @@
 package vn.nghetruyen.source.vbook
 
-/** JavaScript compatibility shim for the current vBook WebSocket ABI and current host bridges. */
+ 
 object VBookWebSocketPrelude {
     fun build(): String {
         return """

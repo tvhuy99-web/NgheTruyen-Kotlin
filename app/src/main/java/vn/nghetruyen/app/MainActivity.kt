@@ -313,7 +313,7 @@ class MainActivity : ComponentActivity() {
                 is AppResult.Success -> {
                     val preview = inspection.value.preview
                     if (!inspection.value.isLegacyXpk || preview == null) {
-                        // Current Kotlin backups keep the existing behavior and get no additional prompt.
+                        
                         viewModel.restoreBackup(uri)
                     } else {
                         AlertDialog.Builder(this@MainActivity)
@@ -346,8 +346,8 @@ class MainActivity : ComponentActivity() {
                         errorCode = if (complete) null else "PARTIAL_MIGRATION",
                         components = selected.map { it.name },
                     )
-                    // Restore is launched from the existing Personal surface. Re-selecting the same
-                    // root tab keeps the UI unchanged while forcing source/runtime state to refresh.
+                    
+                    
                     viewModel.setRootTab(viewModel.state.value.rootTab)
                     viewModel.refreshSourceSessions()
                     viewModel.readerActionMessage(message)

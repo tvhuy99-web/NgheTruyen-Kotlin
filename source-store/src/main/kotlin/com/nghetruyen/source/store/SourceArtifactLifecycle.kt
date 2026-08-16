@@ -17,10 +17,10 @@ data class SourceArtifactTransition(
     val failure: SourceFailure? = null,
 )
 
-/**
- * Pure lifecycle state machine. Persistence layers must commit each returned transition atomically.
- * A bad candidate never mutates the currently active artifact.
- */
+
+
+
+
 object SourceArtifactLifecycle {
     fun candidate(
         artifactId: String,
@@ -135,14 +135,14 @@ object SourceArtifactLifecycle {
         .joinToString("") { "%02x".format(it.toInt() and 0xff) }
 }
 
-/** Original artifact bytes are immutable and independently addressable from activation metadata. */
+ 
 interface SourceArtifactArchive {
     fun stage(descriptor: SourceArtifactDescriptor, originalBytes: ByteArray)
     fun contains(artifactId: String): Boolean
     fun sha256(artifactId: String): String?
 }
 
-/** Store implementations must serialize this operation by artifact identity. */
+ 
 interface SourceArtifactRegistry {
     fun active(identity: SourceArtifactIdentity): SourceArtifactDescriptor?
     fun previousKnownGood(identity: SourceArtifactIdentity): SourceArtifactDescriptor?

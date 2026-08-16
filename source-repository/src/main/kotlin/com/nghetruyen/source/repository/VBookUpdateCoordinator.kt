@@ -25,7 +25,7 @@ enum class VBookUpdateDisposition {
 data class VBookUpdatePayload(
     val artifactId: String,
     val identity: SourceArtifactIdentity,
-    /** Optional repository-advertised version. Exact package metadata remains authoritative. */
+     
     val version: String?,
     val originalPackageBytes: ByteArray,
     val trust: SourceTrustState,
@@ -39,10 +39,10 @@ data class VBookUpdateResult(
     val active: SourceArtifactDescriptor?,
 )
 
-/**
- * Validates the exact immutable bytes that are staged and later activated. A caller cannot validate
- * one source tree and archive another package. Pointer changes remain atomic at the registry layer.
- */
+
+
+
+
 class VBookUpdateCoordinator(
     private val validator: VBookCandidateValidator,
     private val registry: SourceArtifactRegistry,

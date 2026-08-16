@@ -10,7 +10,7 @@ import java.io.IOException
 import java.io.OutputStream
 import kotlin.math.roundToInt
 
-/** Converts PCM/IEEE-float WAV files emitted by TTS engines to canonical PCM16 WAV. */
+ 
 object Pcm16WaveConverter {
     private const val BUFFER_BYTES = 64 * 1024
 

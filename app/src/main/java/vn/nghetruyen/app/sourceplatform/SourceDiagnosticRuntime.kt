@@ -45,16 +45,16 @@ data class DiagnosticActiveOperation(
     val screenGeneration: Long?,
 )
 
-/**
- * Three-mode diagnostic runtime:
- *  - off: no session event/evidence recording; the last 100 install/import failures remain durable;
- *  - basic: full-fidelity diagnostics for exactly the current screen/context. Screen rotation is a
- *    hard provenance boundary: previous-screen events/evidence are never copied into the new one;
- *  - advanced: continuous full-fidelity diagnostics persisted until the user explicitly clears it.
- *
- * The string values basic/advanced are intentionally retained to migrate existing preferences and
- * avoid breaking callers. Their user-facing meaning is now "theo màn hình" and "nối liền".
- */
+
+
+
+
+
+
+
+
+
+
 class SourceDiagnosticRuntime(private val context: Context) {
     private val prefs = context.getSharedPreferences("source_diagnostics", Context.MODE_PRIVATE)
     private val activityTracker = DiagnosticActivityTracker()
@@ -84,7 +84,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
     @Volatile private var activeScreenKey: String = ""
     @Volatile private var activeScreenSessionId: String = ""
 
-    /** Detailed capture is enabled for both user-visible debugging modes. */
+     
     val advanced: Boolean get() = mode != MODE_OFF
     val crashSafe: Boolean get() = mode == MODE_CONTINUOUS
 
@@ -103,7 +103,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
         val previous = mode
         if (normalized == previous) return normalized
 
-        // If a continuous session is being stopped, retain one final boundary event in that session.
+        
         if (previous == MODE_CONTINUOUS) {
             mark(
                 name = "DIAGNOSTICS_MODE_CHANGED",
@@ -119,8 +119,8 @@ class SourceDiagnosticRuntime(private val context: Context) {
 
         when (normalized) {
             MODE_CONTINUOUS -> {
-                // Carry the current screen session into the append-only history without duplicating
-                // events that were already persisted during an earlier continuous session.
+                
+                
                 continuousStore.seedMissing(currentEvents)
                 clearCurrentSession()
                 activeScreenSessionId = UUID.randomUUID().toString()
@@ -156,12 +156,12 @@ class SourceDiagnosticRuntime(private val context: Context) {
         return normalized
     }
 
-    /**
-     * Called by app navigation. In screen mode this creates a strict generation boundary. The
-     * visible event/evidence buffers are cleared; trace/operation origin bindings remain inside the
-     * recorder only so callbacks from the old generation can be recognized, mirrored to lifecycle
-     * tracking, and suppressed from the new screen. Dialogs do not call this method.
-     */
+    
+
+
+
+
+
     fun onScreenChanged(screenKey: String, handoffTraceIds: Set<String> = emptySet()): Boolean {
         val next = screenKey.trim().take(500).ifBlank { "unknown" }
         if (next == activeScreenKey) return false
@@ -262,14 +262,14 @@ class SourceDiagnosticRuntime(private val context: Context) {
 
     fun persistentCriticalCount(): Int = criticalStore.eventCount
 
-    /**
-     * Durable install/import history is visible as a fallback only while session diagnostics are off.
-     * Screen/continuous modes must never mix old persisted failures into their live timeline.
-     */
+    
+
+
+
     fun persistentCriticalSnapshot(): List<DiagnosticEvent> =
         if (mode == MODE_OFF) criticalStore.snapshot() else emptyList()
 
-    /** User-requested clear: this is the only action that deletes continuous history. */
+     
     fun clearBlackBox() {
         clearCurrentSession()
         continuousStore.clear()

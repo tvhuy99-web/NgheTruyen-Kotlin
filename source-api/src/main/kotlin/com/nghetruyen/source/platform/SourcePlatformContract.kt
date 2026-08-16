@@ -1,12 +1,12 @@
 package com.nghetruyen.source.platform
 
-/**
- * Cross-ecosystem contract shared by Native, vBook and Legado runtimes.
- *
- * This layer deliberately does not model ecosystem-specific actions or script APIs.
- * Those contracts live inside their compatibility engines and are normalized only
- * after execution.
- */
+
+
+
+
+
+
+
 enum class SourceEcosystem {
     NATIVE,
     VBOOK,
@@ -36,7 +36,7 @@ data class SourceArtifactIdentity(
         require(remoteIdentity.isNotBlank()) { "remoteIdentity must not be blank" }
     }
 
-    /** Stable input for hashing in the store layer. */
+     
     fun canonicalKey(): String = buildString {
         append(ecosystem.name.lowercase())
         append('\n')

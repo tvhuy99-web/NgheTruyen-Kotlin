@@ -19,7 +19,7 @@ data class VBookPackage(
     val iconBytes: ByteArray?,
     val scripts: Map<String, ByteArray>,
     val otherFiles: Set<String>,
-    /** Lua/XPK-compatible non-script resources retained exactly as packaged. */
+     
     val resources: Map<String, ByteArray> = emptyMap(),
 ) {
     fun pluginJson(): String = strictUtf8(pluginJsonBytes, "plugin.json")
@@ -34,10 +34,10 @@ fun interface VBookScriptPayloadDecoder {
     fun decode(manifest: VBookExtensionManifest, path: String, payload: ByteArray): String
 
     companion object {
-        /**
-         * Current official build tooling strips metadata.encrypt before packaging/testing, so the flag
-         * is not used to guess a binary decoder. Runtime acceptance is decided from the actual bytes.
-         */
+        
+
+
+
         val PLAIN_UTF8 = VBookScriptPayloadDecoder { _, path, payload -> strictUtf8(payload, path) }
     }
 }
@@ -101,10 +101,10 @@ object VBookPackageReader {
         return VBookPackage(plugin, icon, scripts, other, resources)
     }
 
-    /**
-     * Lua/XPK accepts common GitHub-style archives wrapped in one or more top-level directories.
-     * Normalize the manifest and the final `src/...` suffix without ever extracting to disk.
-     */
+    
+
+
+
     private fun logicalPackagePath(archivePath: String): String {
         val parts = archivePath.split('/')
         if (parts.last().equals("plugin.json", ignoreCase = true)) return "plugin.json"

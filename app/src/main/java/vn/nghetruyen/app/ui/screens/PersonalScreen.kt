@@ -1079,8 +1079,8 @@ private fun InstalledSourcesSection(
     var logPackId by remember { mutableStateOf<String?>(null) }
     var installedQuery by remember { mutableStateOf("") }
 
-    // Kept in the signature because the runtime still supports them, but the primary action
-    // surface intentionally follows the Lua menu and therefore does not expose these here.
+    
+    
     @Suppress("UNUSED_VARIABLE")
     val retainedRuntimeActions = listOf(onRollback, onLogin)
 

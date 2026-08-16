@@ -42,13 +42,13 @@ data class VBookRepositorySnapshot(
         items.firstOrNull { it.repositoryId == repositoryId && it.remoteIdentity == remoteIdentity }
 }
 
-/**
- * Runtime counterpart of the offline corpus acquisition script.
- *
- * No author/domain is hard-coded. Repository ID is derived from canonical catalog URL, while an
- * item remote identity is derived from catalog URL + package URL/path. Website source changes do
- * not create a new installed source identity.
- */
+
+
+
+
+
+
+
 class VBookRepositoryAggregator(
     private val fetcher: VBookRepositoryFetcher,
 ) {
@@ -84,7 +84,7 @@ class VBookRepositoryAggregator(
             repositories += row
             catalog.items.forEach { item ->
                 val aggregated = VBookAggregatedItem(repositoryId, normalizedDescriptor, item)
-                // Keep first occurrence for a stable snapshot; record duplicate identity as evidence.
+                
                 val previous = items.putIfAbsent(aggregated.installIdentity, aggregated)
                 if (previous != null && previous.item.packageUrl != item.packageUrl) {
                     errors += VBookRepositoryError(

@@ -25,10 +25,10 @@ data class VBookConfigSnapshot(
     val values: VBookConfigValues,
 )
 
-/**
- * Config is keyed by stable repository/package identity, not artifact/version.
- * Package update and rollback therefore preserve user choices.
- */
+
+
+
+
 class VBookConfigService(
     private val configStore: VBookConfigStore,
     private val secretStore: VBookConfigStore,
@@ -111,7 +111,7 @@ class VBookConfigService(
                         }
                         else -> raw
                     }
-                    VBookConfigMode.SELECT -> raw // vBook option values may be scalar or serialized multi-select data.
+                    VBookConfigMode.SELECT -> raw 
                     VBookConfigMode.UNKNOWN -> raw
                 }
             }

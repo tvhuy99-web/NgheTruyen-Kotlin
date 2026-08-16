@@ -24,7 +24,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import vn.nghetruyen.app.sourceplatform.SourcePackUiInfo
 
-/** Compact native editor for vBook descriptor/legacy config. Secret values never enter UI state. */
+ 
 @Composable
 internal fun SourcePackConfigDialog(
     pack: SourcePackUiInfo,

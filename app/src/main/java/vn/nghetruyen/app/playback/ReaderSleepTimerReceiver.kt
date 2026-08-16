@@ -8,7 +8,7 @@ import android.content.Intent
 import android.os.Build
 import androidx.core.content.ContextCompat
 
-/** Persists the sleep deadline outside the service process and re-arms it after reboot/update. */
+ 
 object ReaderSleepTimerStore {
     private const val PREFS = "reader_sleep_timer"
     private const val KEY_DEADLINE = "deadline_millis"

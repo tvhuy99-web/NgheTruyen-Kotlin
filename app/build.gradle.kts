@@ -34,8 +34,8 @@ android {
         applicationId = "vn.nghetruyen.app"
         minSdk = 26
         targetSdk = 36
-        // Legacy release-gate tokens: versionCode = 28, versionName = "2.8.0-ai-narration-priority2-complete"
-        // Versioning policy: VERSIONING.md (MAJOR.MINOR.PATCH).
+        
+        
         versionCode = 36
         versionName = "3.0.2"
         buildConfigField("String", "DIAGNOSTIC_BUILD_ID", "\"$diagnosticBuildId\"")
@@ -196,8 +196,8 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
-    // Local JVM tests exercise narration parsers that use org.json. Android's android.jar exposes
-    // non-functional stubs here, so use the real JVM implementation for unit tests.
+    
+    
     testImplementation("org.json:json:20251224")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.room:room-testing:2.8.4")

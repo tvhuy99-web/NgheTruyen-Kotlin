@@ -1,12 +1,12 @@
 package vn.nghetruyen.app.sourceplatform
 
-/**
- * Short-lived exact-byte handoff for a direct vBook plugin.zip URL.
- *
- * Classification already had to download the package to prove it is a valid vBook ZIP. Keeping
- * those exact bytes until prepare avoids a second request that could return a different package.
- * Entries are intentionally tiny in count, time-bounded, copied on both sides, and consumed once.
- */
+
+
+
+
+
+
+
 internal class VBookDirectPackageByteCache(
     private val maxEntries: Int = 2,
     private val ttlMillis: Long = 15 * 60 * 1000L,
@@ -39,7 +39,7 @@ internal class VBookDirectPackageByteCache(
         }
     }
 
-    /** Returns and removes the matching entry so one classification can feed only one prepare. */
+     
     @Synchronized
     fun take(installIdentity: String, packageUrl: String): Hit? {
         purgeExpiredLocked()

@@ -14,7 +14,7 @@ import java.io.ByteArrayInputStream
 import java.security.MessageDigest
 import java.util.zip.GZIPInputStream
 
-/** Exact supplied default-source bytes, with the latest uploaded Sáng Tác Việt Lua, gzip-compressed. */
+ 
 class XpkDefaultSourceCompatibilityTest {
     @Test
     fun allSevenDefaultXpkSourcesImportWithoutRewriting() {

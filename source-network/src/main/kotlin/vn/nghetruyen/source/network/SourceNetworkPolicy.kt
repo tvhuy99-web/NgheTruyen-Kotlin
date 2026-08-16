@@ -127,13 +127,13 @@ object PublicAddressPolicy {
         val second = raw[1].toInt() and 0xff
         if (raw.all { it == 0.toByte() }) return false
         if (raw.dropLast(1).all { it == 0.toByte() } && raw.last() == 1.toByte()) return false
-        if (first and 0xfe == 0xfc) return false // fc00::/7 unique-local
-        if (first == 0xfe && second and 0xc0 == 0x80) return false // fe80::/10 link-local
-        if (first == 0xff) return false // multicast
+        if (first and 0xfe == 0xfc) return false 
+        if (first == 0xfe && second and 0xc0 == 0x80) return false 
+        if (first == 0xff) return false 
         if (raw.take(10).all { it == 0.toByte() } && raw[10] == 0xff.toByte() && raw[11] == 0xff.toByte()) {
             return isPublicV4(raw.copyOfRange(12, 16))
         }
-        // Documentation prefix 2001:db8::/32.
+        
         if (first == 0x20 && second == 0x01 && (raw[2].toInt() and 0xff) == 0x0d && (raw[3].toInt() and 0xff) == 0xb8) return false
         return true
     }

@@ -7,13 +7,13 @@ import vn.nghetruyen.source.api.SourcePlatformResult
 import vn.nghetruyen.source.runtime.SourceResourceProvider
 import vn.nghetruyen.source.vbook.VBookActionRuntime
 
-/**
- * Inserts Chromium-only native-host parity shims into the generated vBook dispatcher.
- *
- * The shared dispatcher intentionally stays byte-identical to the Rhino path. The patch is inserted
- * immediately after its strict-mode directive, before that dispatcher captures Engine/Html host
- * functions. Source package resources are otherwise untouched.
- */
+
+
+
+
+
+
+
 class ChromiumVBookDispatcherParityRuntime(
     private val delegate: VBookActionRuntime,
 ) : VBookActionRuntime {

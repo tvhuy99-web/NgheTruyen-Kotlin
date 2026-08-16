@@ -37,16 +37,16 @@ data class VBookChapterBody(
     val nextUrl: String?,
 )
 
-/** Pure vBook-result normalization. No Android/Compose/Room dependency is allowed here. */
+ 
 object VBookStoryNormalizer {
     fun stories(data: JsonValue, fallbackHost: String = ""): List<VBookStoryRecord> =
         sequenceOfItems(data).mapNotNull { story(it, fallbackHost) }
 
-    /**
-     * Current explore.js returns section objects whose `items` contain story cards. Keep this
-     * separate from [stories] so arbitrary nested arrays from detail/chapter payloads are never
-     * mistaken for top-level story results.
-     */
+    
+
+
+
+
     fun exploreStories(data: JsonValue, fallbackHost: String = ""): List<VBookStoryRecord> {
         val candidates = when (data) {
             is JsonValue.Arr -> data.values.flatMap { value ->

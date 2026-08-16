@@ -14,7 +14,7 @@ import vn.nghetruyen.app.ai.XpkVoiceCastPrompt
 import vn.nghetruyen.app.ai.XpkVoiceCastSplitter
 import vn.nghetruyen.app.data.local.VoiceRoleEntity
 
-/** Golden chain: XPK splitter -> prompt ids -> AI JSON repair -> persisted JSON -> playback runtime. */
+ 
 class XpkEndToEndParityTest {
     private val narrator = role("narrator-row", "Người kể chuyện", narrator = true)
     private val male = role("voice-male", "Nam")

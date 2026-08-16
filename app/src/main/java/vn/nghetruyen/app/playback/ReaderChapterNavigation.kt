@@ -2,10 +2,10 @@ package vn.nghetruyen.app.playback
 
 import vn.nghetruyen.app.core.model.ChapterSummary
 
-/**
- * Resolves chapter movement by catalog position rather than assuming that a
- * source's chapter index is identical to the current in-memory list offset.
- */
+
+
+
+
 object ReaderChapterNavigation {
     fun sequenceNumber(chapter: ChapterSummary): Long? = chapterNumber(chapter)
 

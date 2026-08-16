@@ -6,7 +6,7 @@ import java.security.Signature
 import java.security.spec.X509EncodedKeySpec
 import java.util.Base64
 
-/** Shared detached-signature verifier for SourcePack archives and signed repository indexes. */
+ 
 object SourceDetachedSignatureVerifier {
     fun verify(
         trustKeys: Collection<SourceTrustKey>,

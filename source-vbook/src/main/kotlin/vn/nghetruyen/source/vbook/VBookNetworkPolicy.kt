@@ -4,13 +4,13 @@ import vn.nghetruyen.source.api.SourceManifest
 import vn.nghetruyen.source.api.SourceNetworkCapability
 import vn.nghetruyen.source.runtime.SourceResourceProvider
 
-/**
- * Builds the effective vBook network envelope.
- *
- * vBook runs in one full-authority in-app mode. Network access is therefore not inferred from static
- * script literals and is not narrowed to plugin metadata origins. Every installed extension receives
- * the complete public HTTP/HTTPS surface; lower layers keep the OS/app boundary intact.
- */
+
+
+
+
+
+
+
 object VBookNetworkPolicy {
     private val allMethods = setOf("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE")
 
@@ -38,10 +38,10 @@ object VBookNetworkPolicy {
         return base.copy(capabilities = base.capabilities.copy(network = network))
     }
 
-    /**
-     * Retained for package-analysis diagnostics and compatibility reports. It no longer decides
-     * whether an installed extension is allowed to use HTTP because there is only one authority mode.
-     */
+    
+
+
+
     fun requiresLegacyCleartext(
         plugin: VBookExtensionManifest,
         resources: SourceResourceProvider,

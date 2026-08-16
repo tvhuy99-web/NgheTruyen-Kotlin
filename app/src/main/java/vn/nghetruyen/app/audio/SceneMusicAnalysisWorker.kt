@@ -13,11 +13,11 @@ import vn.nghetruyen.app.NgheTruyenApplication
 import java.io.File
 import java.util.UUID
 
-/**
- * Measures a scene track once, then stores the XPK-style fixed normalization gain.
- * If loudness and peak measurements are already available, a new target LUFS only
- * recalculates gain and does not decode the file again.
- */
+
+
+
+
+
 class SceneMusicAnalysisWorker(
     appContext: Context,
     params: WorkerParameters,

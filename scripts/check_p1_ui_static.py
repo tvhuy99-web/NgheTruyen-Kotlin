@@ -15,11 +15,11 @@ def require(path: str, *tokens: str) -> None:
 
 
 def main() -> None:
-    # ReaderScreen and StoryDetailScreen are now production Android/Compose surfaces.
-    # The old gate tried to compile them against a tiny hand-written fake Android/Compose
-    # API, which no longer represents their real dependency graph. Keep this gate focused
-    # on P1 wiring; m0_gate.sh performs the authoritative Gradle test/lint/assemble build
-    # with the real Android SDK immediately after the static gates.
+    
+    
+    
+    
+    
     require(
         "app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt",
         "fun ReaderScreen(",

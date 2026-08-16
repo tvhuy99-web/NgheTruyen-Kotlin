@@ -27,14 +27,14 @@ import androidx.compose.ui.unit.dp
 import vn.nghetruyen.app.sourceplatform.DiagnosticHumanFormatter
 import vn.nghetruyen.app.ui.MainUiState
 
-/**
- * Lua-style global diagnostic entry point.
- *
- * The normal UI deliberately shows one readable timeline only. Structured events, traces, browser
- * evidence, runtime state and continuous history stay behind XUẤT TỆP so the screen does not turn
- * into a telemetry dashboard. XUẤT TỆP is intentionally the only export label here; the old
- * separate black-box/diagnostic export labels belong to the retired multi-panel UI.
- */
+
+
+
+
+
+
+
+
 @Composable
 fun ReferenceDiagnosticsChrome(
     state: MainUiState,

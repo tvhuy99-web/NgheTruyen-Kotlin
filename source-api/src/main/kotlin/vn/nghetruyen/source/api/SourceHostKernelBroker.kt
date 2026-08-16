@@ -4,12 +4,12 @@ import java.lang.ref.WeakReference
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
 
-/**
- * Runtime-neutral execution boundary for NgheTruyen host commands.
- *
- * Implementations live in the app/host layer. Extension runtimes only see serializable commands
- * defined by [SourceHostKernelContract], never Android Context, Activity, Service or JVM reflection.
- */
+
+
+
+
+
+
 fun interface SourceHostKernelBroker {
     fun execute(
         sourceId: String,
@@ -29,23 +29,23 @@ fun interface SourceHostKernelBroker {
             )
         }
 
-        /**
-         * Compatibility name retained for existing broker construction. The returned object is a
-         * lifecycle-stable bus that behaves exactly like FAIL_CLOSED until the NgheTruyen host
-         * installs a dispatcher. Existing runtimes therefore do not need to be reconstructed.
-         */
+        
+
+
+
+
         val UNAVAILABLE: SourceHostKernelBroker
             get() = SourceHostKernelBus
     }
 }
 
-/**
- * Process-stable indirection owned by the host.
- *
- * Source runtimes may be constructed before an Activity/ViewModel exists. They keep this broker
- * reference for their lifetime while the Android host is free to attach a new dispatcher whenever
- * a UI session appears. This avoids rebuilding runtimes and avoids storing Android objects here.
- */
+
+
+
+
+
+
+
 object SourceHostKernelBus : SourceHostKernelBroker {
     private val delegate = AtomicReference(SourceHostKernelBroker.FAIL_CLOSED)
 
@@ -73,10 +73,10 @@ fun interface SourceHostCommandHandler {
     ): SourcePlatformResult<JsonValue>
 }
 
-/**
- * Small deterministic router used by the NgheTruyen host to bind commands to app-owned handlers.
- * Registering handlers is host wiring, not extension permission negotiation.
- */
+
+
+
+
 class SourceHostKernelDispatcher(
     handlers: Map<Pair<String, String>, SourceHostCommandHandler> = emptyMap(),
 ) : SourceHostKernelBroker {
@@ -106,7 +106,7 @@ class SourceHostKernelDispatcher(
     }
 }
 
-/** Host-to-extension event delivery abstraction. Runtimes may implement this as an event queue. */
+ 
 fun interface SourceHostEventSink {
     fun emit(
         sourceId: String,
@@ -119,14 +119,14 @@ fun interface SourceHostEventSink {
     }
 }
 
-/**
- * Process-stable host-to-extension event router and bounded fallback inbox.
- *
- * A live runtime may register a weak sink and receive events immediately. If there is no live sink,
- * the event is kept in a small per-source FIFO until the extension polls it through the host command
- * boundary. This lets short-lived Rhino scopes receive lifecycle events without keeping a JS scope,
- * Activity or runtime alive between actions.
- */
+
+
+
+
+
+
+
+
 object SourceHostEventBus : SourceHostEventSink {
     private val sinks = ConcurrentHashMap<String, WeakReference<SourceHostEventSink>>()
     private val pending = ConcurrentHashMap<String, ArrayDeque<SourceHostEvent>>()

@@ -61,19 +61,19 @@ import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
-/**
- * Chromium-backed execution engine for canonical vBook compatibility actions.
- *
- * A fresh headless WebView is created and driven on Android's main thread for every action, while
- * synchronous host work is dispatched to a dedicated HandlerThread. Extension code cannot navigate
- * the action WebView and no Java object is installed with addJavascriptInterface. Synchronous vBook
- * host APIs cross one random-token prompt channel as bounded JSON, then re-enter the same
- * SourceCapabilityBrokers used by Rhino without blocking the main thread.
- *
- * This engine deliberately handles only the compatibility dispatch action. Other SourcePack action
- * shapes report VBOOK_RUNTIME_UNAVAILABLE before any script executes so the selector may use Rhino
- * without replaying side effects.
- */
+
+
+
+
+
+
+
+
+
+
+
+
+
 class AndroidChromiumVBookRuntime(
     context: Context,
     private val brokers: SourceCapabilityBrokers,

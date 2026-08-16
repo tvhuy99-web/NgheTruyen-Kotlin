@@ -368,8 +368,8 @@ class ChapterDownloadWorker(
         total: Int,
     ) {
         if (!isStopped) return
-        // State is resolved in the NonCancellable catch block so a user pause
-        // cannot be overwritten by an eager CANCELLED write here.
+        
+        
         throw CancellationException("Worker đã dừng: $jobId/$storyId/$sourceId/$completed/$total")
     }
 

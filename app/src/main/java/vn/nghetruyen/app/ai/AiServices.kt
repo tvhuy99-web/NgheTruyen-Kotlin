@@ -31,10 +31,10 @@ data class VoiceRole(
     val expression: String = "NEUTRAL",
 )
 
-/**
- * Canonical XPK narration assignment. [unitId] and [voiceId] are authoritative; paragraph/character
- * fields remain serialized compatibility metadata for older stored data only.
- */
+
+
+
+
 data class ParagraphVoiceAssignment(
     val paragraphIndex: Int = -1,
     val character: String = "",
@@ -52,7 +52,7 @@ data class VoiceCastPlan(
     val warnings: List<String> = emptyList(),
 )
 
-/** Inclusive XPK scene interval. Unit ids are authoritative; paragraph indexes are legacy metadata. */
+ 
 data class SceneMusicCue(
     val startParagraph: Int,
     val trackId: String,
@@ -71,7 +71,7 @@ data class SceneMusicTrackOption(
 )
 
 data class NarrationPlanContext(
-    /** Serialized [PREVIOUS_UNIT ...] tail. It is context only and never a target timeline. */
+     
     val previousChapterEnding: String = "",
     val activeTrackId: String? = null,
     val activeTrackTitle: String? = null,
@@ -104,13 +104,13 @@ interface VietPhraseImprovementEngine {
     suspend fun improveVietPhrase(request: VietPhraseImprovementRequest): AppResult<List<VietPhraseReplacementSuggestion>>
 }
 
-/** Legacy paragraph-era surface. Production narration is XpkNarrationAiServices only. */
+ 
 @Deprecated("Use XpkNarrationAiServices; paragraph voice-cast protocol is retired from production wiring")
 interface VoiceCastEngine {
     suspend fun planVoiceCast(storyId: String, chapterId: String, rawText: String): AppResult<VoiceCastPlan>
 }
 
-/** Legacy paragraph-era surface. Production scene planning is XpkNarrationAiServices only. */
+ 
 @Deprecated("Use XpkNarrationAiServices; paragraph scene-cue protocol is retired from production wiring")
 interface SceneMusicPlanner {
     suspend fun planMusic(
@@ -121,7 +121,7 @@ interface SceneMusicPlanner {
     ): AppResult<List<SceneMusicCue>>
 }
 
-/** Legacy interface retained for binary/source compatibility. Production uses the concrete XPK service. */
+ 
 @Deprecated("Use XpkNarrationAiServices; legacy narration planner is retired from production wiring")
 interface NarrationPlanner {
     suspend fun planNarration(request: NarrationPlanRequest): AppResult<NarrationPlan>

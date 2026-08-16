@@ -4,10 +4,10 @@ import vn.nghetruyen.app.core.common.AppResult
 import vn.nghetruyen.app.data.local.AppDatabase
 import vn.nghetruyen.app.data.settings.SettingsRepository
 
-/**
- * Compatibility request policy. The reference tool does not expose or enforce
- * device-local daily AI quotas, character quotas, usage counters, retry knobs or backoff knobs.
- */
+
+
+
+
 class AiRequestGovernor(
     @Suppress("UNUSED_PARAMETER") private val database: AppDatabase,
     @Suppress("UNUSED_PARAMETER") private val settingsRepository: SettingsRepository,

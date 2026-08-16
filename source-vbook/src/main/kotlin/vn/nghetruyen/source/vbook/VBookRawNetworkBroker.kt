@@ -12,14 +12,14 @@ import java.nio.charset.Charset
 import java.util.Base64
 import java.util.LinkedHashMap
 
-/**
- * vBook-only network decorator used to bridge the mature text-oriented JS host to the raw-byte
- * contract without weakening or modifying the generic network broker.
- *
- * Internal control headers are removed before any upstream request. The initial response body is
- * a small JSON metadata envelope consumed by [VBookFetchSafePrelude]; response representations are
- * then served lazily from the captured raw bytes without replaying the upstream request.
- */
+
+
+
+
+
+
+
+
 class VBookRawNetworkBroker(
     private val delegate: SourceNetworkBroker,
     private val maxCachedResponses: Int = 32,

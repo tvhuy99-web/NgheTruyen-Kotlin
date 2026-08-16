@@ -209,7 +209,7 @@ class SourcePlatformManager(
         bootstrapBuiltinPack()
     }
 
-    /** Legacy/native SourcePack sources only. vBook active artifacts live in VBookSourcePlatform. */
+     
     fun activeStorySources(): List<StorySource> = store.list()
         .filter { it.enabled && it.active != null }
         .mapNotNull { installed -> store.readActivePack(installed.sourceId) }
@@ -306,7 +306,7 @@ class SourcePlatformManager(
         failureSeverity = DiagnosticSeverity.ERROR,
     )
 
-    /** A schema mismatch is expected while the unified facade tries the vBook repository schema. */
+     
     internal fun probeRepository(url: String): Result<SourceRepositoryUiInfo> = refreshRepositoryOperation(
         url = url,
         failureSeverity = DiagnosticSeverity.INFO,
@@ -370,11 +370,11 @@ class SourcePlatformManager(
         },
     )
 
-    /**
-     * One authoritative manual-file import transaction. All format probes share one trace and one
-     * safe file fingerprint, so a report can reconstruct the exact attempt without retaining a raw
-     * content URI or file contents.
-     */
+    
+
+
+
+
     fun prepareManualImport(
         input: InputStream,
         metadata: SourceImportFileMetadata = SourceImportFileMetadata(),
@@ -518,11 +518,11 @@ class SourcePlatformManager(
         return preparePack(pack)
     }
 
-    /**
-     * Preview a raw vBook ZIP without converting it to SourcePack. The existing UI preview model is
-     * reused only as presentation; the pending install retains the exact ZIP bytes and stable vBook
-     * identity, and confirmation is committed by VBookSourcePlatform.
-     */
+    
+
+
+
+
     fun prepareVBookImport(input: InputStream): Result<SourceInstallPreview> = runExtensionOperation("vbook_prepare_import", "vbook-import") {
         prepareVBookImportInternal(input)
     }
@@ -626,8 +626,8 @@ class SourcePlatformManager(
             operationId = "$traceId:confirm_install",
             operationKind = "EXTENSION_INSTALL_COMMIT",
             extraAttributes = context?.attributes.orEmpty(),
-            // A correlated manual import emits one durable parent failure below. Keep this child
-            // stage in live/continuous logs without counting the same failed attempt twice.
+            
+            
             failureSeverity = if (context != null) DiagnosticSeverity.INFO else DiagnosticSeverity.ERROR,
         )
         if (context != null) {
@@ -855,8 +855,8 @@ class SourcePlatformManager(
     }
 
     private fun bootstrapBuiltinPack() {
-        // The old signed demo pack was a development fixture, not a user-facing source. Remove a
-        // persisted copy during upgrade and never bootstrap it again.
+        
+        
         store.remove(OBSOLETE_DEMO_SOURCE_ID)
         BUILTIN_LUA_SOURCES.forEach(::bootstrapLuaBuiltin)
     }
@@ -1217,8 +1217,8 @@ class SourcePlatformManager(
         severity: DiagnosticSeverity = DiagnosticSeverity.ERROR,
     ) {
         val message = error.message ?: error.javaClass.simpleName
-        // Action labels such as GENRE/SEARCH/DETAIL are context, not error codes. Extension error
-        // codes consistently contain an underscore, so keep the causal chain free of those labels.
+        
+        
         val codes = extensionErrorCodes(error)
         diagnostics.emit(
             DiagnosticEvent(

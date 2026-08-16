@@ -12,7 +12,7 @@ data class JsSyntaxValidation(
     val column: Int? = null,
 )
 
-/** Parses/compiles JavaScript without evaluating it or exposing JVM classes. */
+ 
 object JsSyntaxValidator {
     fun validate(
         source: String,
@@ -30,7 +30,7 @@ object JsSyntaxValidator {
         return runCatching {
             val cx = factory.enterContext()
             try {
-                // compileString performs parsing/code generation only; no top-level statement is run.
+                
                 cx.compileString(source, sourceName, 1, null)
                 JsSyntaxValidation(true)
             } finally {

@@ -19,7 +19,7 @@ import vn.nghetruyen.app.data.repository.LibraryRepository
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 
-/** SAF import/export with an explicit preview/commit boundary. */
+ 
 class VietPhraseTransferManager(
     private val contentResolver: ContentResolver,
     private val repository: LibraryRepository,

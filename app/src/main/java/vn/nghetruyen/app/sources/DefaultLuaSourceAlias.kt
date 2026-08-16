@@ -9,12 +9,12 @@ import vn.nghetruyen.app.core.model.StoryCommentPage
 import vn.nghetruyen.app.core.model.StoryDetail
 import vn.nghetruyen.app.core.model.StorySummary
 
-/**
- * Keep the stable app-facing ids used by the Kotlin-era database/UI while the implementation
- * underneath is the exact Lua/XPK source. Native API2 ids are package identities, not user-data
- * identities, so exposing them directly would strand stories/history/following saved under the
- * short ids and would also let the older Kotlin adapter keep winning SourceRegistry selection.
- */
+
+
+
+
+
+
 internal fun StorySource.withStableDefaultLuaId(): StorySource {
     val stableId = DEFAULT_LUA_STABLE_IDS[descriptor.id] ?: return this
     if (descriptor.id == stableId) return this
@@ -27,8 +27,8 @@ private class StableDefaultLuaSourceAlias(
 ) : StorySource {
     override val descriptor: SourceDescriptor = delegate.descriptor.copy(id = stableId)
 
-    // Exact bundled Lua/XPK implementations are the production implementation for these stable ids.
-    // This must outrank the legacy Kotlin adapters (priority 100) without changing third-party packs.
+    
+    
     override val selectionPriority: Int = 250
 
     override suspend fun search(query: String, page: Int): AppResult<List<StorySummary>> =

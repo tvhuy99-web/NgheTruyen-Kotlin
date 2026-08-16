@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!--
-      Extension-first network policy.
+    
 
-      NgheTruyen sources are user-installed automation modules. vBook and Native Source packages
-      must be able to reach the same HTTP/HTTPS endpoints that their Lua/WebView counterparts can.
-      The extension runtime still owns the app boundary (no raw Android/file/content bridge), while
-      network origin containment is handled by the source/browser brokers rather than Android's
-      process-wide cleartext switch.
-    -->
+
+
+
+
+
+
+
     <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />

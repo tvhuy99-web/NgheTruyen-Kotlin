@@ -5,12 +5,12 @@ import vn.nghetruyen.app.ai.XpkSceneMusicParity
 import vn.nghetruyen.app.ai.XpkVoiceCastSplitter
 import java.security.MessageDigest
 
-/**
- * Runtime bridge between the canonical XPK UNIT/DIALOGUE timeline and Android playback.
- *
- * Reader paragraphs remain a UI/progress concern. TTS, AI voice assignments and scene-music
- * boundaries use the stable XPK unit ids created from the same title/body pair used by AI planning.
- */
+
+
+
+
+
+
 object XpkPlaybackRuntime {
     const val TIMELINE_FINGERPRINT_VERSION = 2
 
@@ -28,10 +28,10 @@ object XpkPlaybackRuntime {
     @Volatile
     private var canonicalScenePlanActive = false
 
-    /**
-     * XPK receives the chapter body as newline-delimited text. Keep embedded line boundaries and only
-     * trim the individual non-empty lines; do not collapse their internal whitespace.
-     */
+    
+
+
+
     fun canonicalLines(paragraphs: List<String>): List<String> = paragraphs
         .asSequence()
         .flatMap { value ->
@@ -60,7 +60,7 @@ object XpkPlaybackRuntime {
         }
     }
 
-    /** Stable digest of every AI/runtime-relevant field in timeline order. */
+     
     fun timelineFingerprint(chunks: List<PlaybackSpeechChunk>): String {
         val digest = MessageDigest.getInstance("SHA-256")
         chunks.forEach { chunk ->
@@ -82,17 +82,17 @@ object XpkPlaybackRuntime {
     fun timelineFingerprint(title: String, paragraphs: List<String>): String =
         timelineFingerprint(buildSpeechTimeline(title, paragraphs))
 
-    /** Reset per-chapter runtime state before loading a new playback timeline. */
+     
     fun resetCanonicalPlans() {
         canonicalVoicePlanActive = false
         canonicalScenePlanActive = false
     }
 
-    /**
-     * The XPK apply stage owns prosody whenever a canonical voice plan is active. This guard is
-     * intentionally scoped to the exact speech text currently being played so voice-preview UI keeps
-     * its local expression behavior.
-     */
+    
+
+
+
+
     fun shouldBypassLocalExpression(text: String): Boolean =
         canonicalVoicePlanActive && PlaybackQueueStore.state.value.currentSpeechText == text
 
@@ -122,8 +122,8 @@ object XpkPlaybackRuntime {
             )
         }
 
-        // XPK applyAssignments() makes the first valid character voice in a dialogue group authoritative
-        // for every subsequent fragment in that same long dialogue turn. Keep each fragment's prosody.
+        
+        
         val chunks = PlaybackQueueStore.state.value.speechChunks
         val groupVoice = linkedMapOf<String, String>()
         chunks.forEach { chunk ->
@@ -144,10 +144,10 @@ object XpkPlaybackRuntime {
         return result
     }
 
-    /**
-     * Expands validated inclusive scene intervals to an exact unit-id -> track-id map.
-     * Invalid, gapped or overlapping persisted scene data is rejected as a whole.
-     */
+    
+
+
+
     fun parseSceneTimeline(
         transformedText: String,
         validUnitIds: List<String>,
@@ -193,7 +193,7 @@ object XpkPlaybackRuntime {
         return (paragraph - 1).coerceAtLeast(0)
     }
 
-    /** Returns true only for current-version canonical transforms with a verified timeline digest. */
+     
     private fun requireCurrentTimeline(root: JSONObject): Boolean {
         val expected = root.optString("timeline_fingerprint").trim()
         if (expected.isBlank()) return false

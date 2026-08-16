@@ -10,7 +10,7 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.IOException
 
-/** Encodes canonical PCM16 WAV to AAC-LC in an MPEG-4/M4A container using platform codecs. */
+ 
 object M4aAacEncoder {
     private const val MIME = MediaFormat.MIMETYPE_AUDIO_AAC
     private const val TIMEOUT_US = 10_000L

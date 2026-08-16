@@ -5,10 +5,10 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.security.MessageDigest
 
-/**
- * Bounded file cache for synthesized speech. Entries are content-addressed, checksummed,
- * atomically committed and evicted by least-recently-used timestamp.
- */
+
+
+
+
 class TtsAudioCache(
     private val directory: File,
     maxBytes: Long,
@@ -70,7 +70,7 @@ class TtsAudioCache(
         return Entry(audio, audio.length())
     }
 
-    /** Commits [source] without consuming it. */
+     
     @Synchronized
     fun put(key: Key, source: File): Entry {
         require(source.isFile && source.length() > 0L) { "Tệp TTS cache rỗng hoặc không tồn tại." }
@@ -110,7 +110,7 @@ class TtsAudioCache(
             deleteId(id)
             total -= length
         }
-        // Remove abandoned temporary and checksum files.
+        
         directory.listFiles().orEmpty().forEach { file ->
             val isKnownAudio = file.extension == AUDIO_EXTENSION
             val isKnownChecksum = file.extension == CHECKSUM_EXTENSION && audioFile(file.nameWithoutExtension).exists()

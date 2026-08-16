@@ -122,7 +122,7 @@ DỮ LIỆU ĐỐI CHIẾU:
 data class AiOnlineSettings(
     val provider: AiProvider = AiProvider.GEMINI,
     val enabled: Boolean = false,
-    // Kept only for old backups. The reference settings use the enabled switch as the explicit opt-in.
+    
     val consentGranted: Boolean = false,
     val endpoint: String = "https://openrouter.ai/api/v1/chat/completions",
     val model: String = "gemini-3.6-flash",
@@ -133,7 +133,7 @@ data class AiOnlineSettings(
     val improvePrompt: String = DEFAULT_AI_IMPROVE_PROMPT,
     val timeoutMillis: Int = 120_000,
     val temperature: Float = 0.2f,
-    // Legacy field remains readable for old backups. It is mirrored from translationPrompt on save.
+    
     val translationInstruction: String = DEFAULT_AI_TRANSLATE_PROMPT,
     val dailyRequestLimit: Int = 30,
     val dailyInputCharsLimit: Int = 500_000,
@@ -521,7 +521,7 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.aiDefaultMode] = mode
             prefs[Keys.aiTranslatePrompt] = translatePrompt
             prefs[Keys.aiImprovePrompt] = improvePrompt
-            // Keep the legacy key synchronized because older story AI paths still read it.
+            
             prefs[Keys.aiTranslationInstruction] = translatePrompt.take(16_000)
             prefs[Keys.aiTimeoutMillis] = value.timeoutMillis.coerceAtLeast(10_000)
             prefs[Keys.aiTemperature] = value.temperature.coerceIn(0f, 2f)

@@ -1,10 +1,10 @@
 package vn.nghetruyen.source.vbook
 
-/**
- * Replaces the transitional fetch wrapper with a ClassShutter-safe implementation.
- * Response metadata arrives as JSON text from [VBookRawNetworkBroker], so no Java Map/array crosses
- * into the extension scope.
- */
+
+
+
+
+
 object VBookFetchSafePrelude {
     fun build(): String = """
         function __vbookSafeCopyObject(source) {

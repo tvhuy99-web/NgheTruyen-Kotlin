@@ -5,13 +5,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import vn.nghetruyen.app.core.model.ChapterContent
 
-/**
- * One canonical XPK UNIT/DIALOGUE passed to TTS.
- *
- * [paragraphIndex] only links the unit back to reader progress. Voice casting and scene music use
- * [unitId] so multiple narration/dialogue units inside one reader paragraph remain independently
- * addressable.
- */
+
+
+
+
+
+
+
 data class PlaybackSpeechChunk(
     val paragraphIndex: Int,
     val text: String,
@@ -64,7 +64,7 @@ data class PlaybackSnapshot(
     val narrationProgress: Float = 0f,
     val narrationMessage: String? = null,
 ) {
-    /** Full paragraph shown by the reader and referenced by persisted progress. */
+     
     val currentParagraph: String?
         get() = paragraphs.getOrNull(paragraphIndex)
 
@@ -72,7 +72,7 @@ data class PlaybackSnapshot(
         get() = speechChunks.getOrNull(speechChunkIndex)
             ?.takeIf { it.paragraphIndex == paragraphIndex }
 
-    /** Canonical XPK UNIT/DIALOGUE text passed to Android TTS/Sonic. */
+     
     val currentSpeechText: String?
         get() = currentSpeechChunk?.text ?: currentParagraph
 
@@ -121,7 +121,7 @@ object PlaybackQueueStore {
         preparationMessage: String? = null,
     ) {
         XpkPlaybackRuntime.resetCanonicalPlans()
-        // Match VoiceCast:buildUnits(): one non-empty original line is one hidden parser paragraph.
+        
         val normalized = XpkPlaybackRuntime.canonicalLines(paragraphs)
         val chunks = XpkPlaybackRuntime.buildSpeechTimeline(chapterTitle, normalized)
         val startParagraph = if (normalized.isEmpty()) 0 else startIndex.coerceIn(0, normalized.lastIndex)
@@ -207,7 +207,7 @@ object PlaybackQueueStore {
         mutable.value = mutable.value.copy(isPlaying = value)
     }
 
-    /** Moves by a reader paragraph and resets speech to its first XPK unit. */
+     
     fun moveTo(index: Int): Boolean {
         val current = mutable.value
         if (current.paragraphs.isEmpty()) return false
@@ -221,7 +221,7 @@ object PlaybackQueueStore {
 
     fun moveBy(delta: Int): Boolean = moveTo(mutable.value.paragraphIndex + delta)
 
-    /** Restores the exact deterministic XPK unit index when it still belongs to the same paragraph. */
+     
     fun restoreSpeechPosition(paragraphIndex: Int, speechChunkIndex: Int) {
         val current = mutable.value
         if (current.paragraphs.isEmpty()) return
@@ -234,10 +234,10 @@ object PlaybackQueueStore {
         mutable.value = current.copy(paragraphIndex = paragraph, speechChunkIndex = requested)
     }
 
-    /**
-     * Advances to the next XPK UNIT/DIALOGUE inside the current reader paragraph. Returns false at
-     * the paragraph boundary so existing reader progress/navigation remains stable.
-     */
+    
+
+
+
     fun advanceSpeechChunk(): Boolean {
         val current = mutable.value
         val nextIndex = current.speechChunkIndex + 1
@@ -309,7 +309,7 @@ object NextChapterNormalizer {
     )
 }
 
-/** Normalizes chapter text once for the reader, cache and playback queue. */
+ 
 object ReaderDocumentNormalizer {
     fun normalize(content: ChapterContent): ChapterContent {
         val paragraphs = ReaderTextChunker.normalizeParagraphs(content.paragraphs)
@@ -318,13 +318,13 @@ object ReaderDocumentNormalizer {
 }
 
 object ReaderTextChunker {
-    // Legacy helper retained for non-XPK callers/tests. XPK playback units are <= 1200 UTF-8 bytes.
+    
     const val SAFE_TTS_CHARS = 3_000
 
-    /** Produces the same non-empty line scaffold that XPK VoiceCast uses internally. */
+     
     fun normalizeParagraphs(paragraphs: List<String>): List<String> = XpkPlaybackRuntime.canonicalLines(paragraphs)
 
-    /** Compatibility alias retained for callers that only need reader text. */
+     
     fun normalize(paragraphs: List<String>): List<String> = normalizeParagraphs(paragraphs)
 
     fun chunkParagraphs(paragraphs: List<String>): List<PlaybackSpeechChunk> = buildList {

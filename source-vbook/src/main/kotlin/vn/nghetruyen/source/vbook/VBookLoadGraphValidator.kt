@@ -18,7 +18,7 @@ data class VBookLoadIssue(
     val target: String? = null,
 )
 
-/** Static validation for the documented current-engine load('file.js') contract. */
+ 
 object VBookLoadGraphValidator {
     fun validate(scripts: Map<String, String>, profile: VBookContractProfile): List<VBookLoadIssue> {
         if (profile != VBookContractProfile.CURRENT_JS) return emptyList()
@@ -51,7 +51,7 @@ object VBookLoadGraphValidator {
         return issues.distinct()
     }
 
-    /** null means a load(...) call whose first argument is not a string literal. */
+     
     private fun loadCalls(path: String, source: String): List<String?> {
         val root = Parser().parse(source, path, 1)
         val calls = mutableListOf<String?>()

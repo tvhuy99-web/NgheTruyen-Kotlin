@@ -27,14 +27,14 @@ class SourceRegistry(
         it.descriptor.health == SourceHealth.READY || it.descriptor.health == SourceHealth.DEGRADED
     }
 
-    /**
-     * Compatibility refresh used by the legacy SourcePack manager.
-     *
-     * Older UI code only passes SourcePack candidates here. Preserve already registered vBook
-     * sources so that opening/refreshing the legacy source-management screen cannot silently make
-     * an ACTIVE vBook artifact disappear until process restart. The AppContainer full refresh may
-     * still replace a vBook candidate by passing the same stable id with a newer implementation.
-     */
+    
+
+
+
+
+
+
+
     @Synchronized
     fun refreshSourcePacks(sourcePackSources: List<StorySource>) {
         val normalizedSources = normalizeExternalSources(sourcePackSources)
@@ -46,7 +46,7 @@ class SourceRegistry(
         byId = merge(normalizedSources + preservedVBook)
     }
 
-    /** Full external-runtime refresh. Callers supply every active external ecosystem. */
+     
     @Synchronized
     fun replaceExternalSources(externalSources: List<StorySource>) {
         byId = merge(externalSources)
@@ -57,9 +57,9 @@ class SourceRegistry(
         val builtInsById = legacySources.associateBy { it.descriptor.id }
         val normalizedSources = normalizeExternalSources(sourcePackSources)
 
-        // Normalize bundled Lua/vBook package identities at the registry boundary. Some callers
-        // refresh with raw activeStorySources(), so doing this only in AppContainer allows a later
-        // UI refresh to reintroduce the legacy Kotlin adapter for the same stable source id.
+        
+        
+        
         legacySources.forEach { selected[it.descriptor.id] = it }
         normalizedSources.distinctBy { it.descriptor.id }.forEach { rawCandidate ->
             val candidate = if (rawCandidate is BuiltInSourcePackBridge) {
@@ -105,13 +105,13 @@ private fun StorySource.withExecutionAndDiagnostics(diagnostics: SourceDiagnosti
     return withVBookExecutionBoundary().withDiagnostics(diagnostics)
 }
 
-/**
- * vBook compatibility scripts expose synchronous Http/fetch helpers to JavaScript. Their host
- * implementation is intentionally blocking, so the complete source call must leave the Android
- * main thread before script execution begins. Keeping the boundary here protects every UI caller
- * while preserving the vBook JavaScript contract and lets browser/host brokers do their own
- * thread-hops internally when they need Android's main looper.
- */
+
+
+
+
+
+
+
 private fun StorySource.withVBookExecutionBoundary(): StorySource = when {
     descriptor.implementationKind != SourceImplementationKind.VBOOK -> this
     this is IoBoundVBookStorySource -> this

@@ -56,7 +56,7 @@ data class VBookCorpusCompatibilityMatrix(
             certifications.values.none { it.state == VBookFeatureCertificationState.DIVERGED }
 }
 
-/** Code coverage only. IMPLEMENTED is deliberately distinct from reference-certified parity. */
+ 
 object VBookEngineFeatureMatrix {
     private val implemented = setOf(
         VBookFeature.CONTRACT_LEGACY,

@@ -6,7 +6,7 @@ import vn.nghetruyen.source.api.JsonValue
 import vn.nghetruyen.source.vbook.VBookConfigStore
 import java.security.MessageDigest
 
-/** Portable, non-sensitive config keyed by stable vBook repository/package identity. */
+ 
 class AndroidVBookConfigStore(context: Context) : VBookConfigStore {
     private val preferences = context.applicationContext.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
 

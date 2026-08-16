@@ -12,17 +12,17 @@ import java.security.MessageDigest
 import java.util.Locale
 import java.util.ArrayDeque
 
-/**
- * Decoder for legacy Quick Translator dictionaries.
- *
- * Supported containers:
- *  - text DIC: 4-byte count followed by N UTF-8 key lines and N value lines;
- *  - binary DIC using Java modified UTF, .NET 7-bit UTF-8, or U32 BE/LE UTF-8;
- *  - paired or grouped binary layouts;
- *  - compiled Double-Array-Trie DAT used by legacy Quick Translator bundles.
- *
- * The decoder is deliberately bounded and never executes data from the imported file.
- */
+
+
+
+
+
+
+
+
+
+
+
 object VietPhraseBinaryDictionaryCodec {
     enum class Format {
         DIC_LINES,
@@ -164,7 +164,7 @@ object VietPhraseBinaryDictionaryCodec {
         return buildRules(kind, keys, values, format)
     }
 
-    /** Returns null when the byte layout is not a compiled DAT dictionary. */
+     
     private fun decodeDat(bytes: ByteArray, header: Header, kind: VietPhraseDictionaryKind): DecodeResult? {
         if (header.byteOrder != ByteOrder.BIG_ENDIAN) return null
         val nodeCount = header.count

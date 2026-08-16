@@ -18,7 +18,7 @@ class VBookPreparedCatalogInstall internal constructor(
     internal val bytes: ByteArray = packageBytes.copyOf()
 }
 
-/** One transaction boundary for repository-driven vBook install/update/rollback. */
+ 
 class VBookCatalogInstallService(
     private val repositories: VBookRepositoryClient,
     private val platform: VBookSourcePlatform,
@@ -27,7 +27,7 @@ class VBookCatalogInstallService(
     fun snapshot(indexUrl: String = VBookRepositoryClient.OFFICIAL_INDEX, strict: Boolean = false): VBookRepositorySnapshot =
         repositories.snapshot(indexUrl, strict)
 
-    /** Download once and bind the user-visible preview to these exact immutable bytes. */
+     
     fun prepare(item: VBookAggregatedItem): VBookPreparedCatalogInstall {
         val bytes = repositories.downloadPackage(item)
         val packageManifest = VBookManifestParser.parse(VBookPackageReader.read(bytes).pluginJson())
@@ -52,7 +52,7 @@ class VBookCatalogInstallService(
 
     fun preview(item: VBookAggregatedItem): VBookInstallPreview = prepare(item).preview
 
-    /** Confirm exactly what [prepare] inspected; no second network download occurs. */
+     
     fun installPrepared(
         prepared: VBookPreparedCatalogInstall,
         trust: SourceTrustState = SourceTrustState.REPOSITORY_TRUSTED,
@@ -71,7 +71,7 @@ class VBookCatalogInstallService(
         return result
     }
 
-    /** Convenience one-shot path; still validates and activates one download only. */
+     
     fun installOrUpdate(
         item: VBookAggregatedItem,
         trust: SourceTrustState = SourceTrustState.REPOSITORY_TRUSTED,

@@ -4,7 +4,7 @@ import java.util.ArrayDeque
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.abs
 
-/** XPK-compatible scene-music catalog, continuity, prompt and scene-boundary rules. */
+ 
 object XpkSceneMusicParity {
     const val MAX_TRACKS = 500
     const val MAX_DESCRIPTION_CHARS = 300

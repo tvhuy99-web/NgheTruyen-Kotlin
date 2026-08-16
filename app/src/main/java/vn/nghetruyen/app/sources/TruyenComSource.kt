@@ -13,10 +13,10 @@ import vn.nghetruyen.app.core.model.StorySummary
 import java.security.MessageDigest
 import java.text.Normalizer
 
-/**
- * Kotlin port of the Truyện Com API-v2 source bundled in the original XPK.
- * It remains DEGRADED until the selectors have passed live device tests.
- */
+
+
+
+
 class TruyenComSource(
     private val documentClient: HtmlDocumentClient = HttpHtmlClient(),
 ) : StorySource {

@@ -4,11 +4,11 @@ import vn.nghetruyen.app.core.model.StoryComment
 import vn.nghetruyen.app.core.model.StoryCommentPage
 import java.util.LinkedHashMap
 
-/**
- * Small process-local cache for comments. It deliberately stores public page
- * data only, never cookies or credentials. Entries expire and the map is LRU
- * bounded so a noisy source cannot grow memory without limit.
- */
+
+
+
+
+
 class StoryCommentCache(
     private val ttlMillis: Long = 5 * 60_000L,
     private val maxEntries: Int = 32,

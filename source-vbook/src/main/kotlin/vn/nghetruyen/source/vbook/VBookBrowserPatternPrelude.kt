@@ -1,6 +1,6 @@
 package vn.nghetruyen.source.vbook
 
-/** Current-browser compatibility patches installed after the base browser shim. */
+ 
 object VBookBrowserPatternPrelude {
     fun build(): String = """
         __vbookBrowserMatch = function(url, pattern) {

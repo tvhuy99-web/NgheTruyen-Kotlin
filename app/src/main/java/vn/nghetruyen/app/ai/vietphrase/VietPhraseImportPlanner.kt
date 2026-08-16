@@ -2,7 +2,7 @@ package vn.nghetruyen.app.ai.vietphrase
 
 import java.util.Locale
 
-/** Immutable import preview. Callers persist [Plan.after] only after all checks and user approval pass. */
+ 
 object VietPhraseImportPlanner {
     data class Plan(
         val beforeSnapshot: VietPhraseAudit.Snapshot,

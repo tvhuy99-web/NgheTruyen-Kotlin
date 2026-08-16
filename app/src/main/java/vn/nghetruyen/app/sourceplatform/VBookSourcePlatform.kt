@@ -72,10 +72,10 @@ data class VBookInstalledSourceInfo(
 
 data class VBookLoginInfo(val sourceId: String, val loginUrl: String, val allowedHosts: Set<String>)
 
-/**
- * Persistent vBook subsystem. It deliberately does not install vBook packages into SourcePackStore.
- * Original package bytes and repository identity remain authoritative across updates and rollback.
- */
+
+
+
+
 class VBookSourcePlatform(
     context: Context,
     sourceSessionStore: SourceSessionStore,
@@ -221,7 +221,7 @@ class VBookSourcePlatform(
         return coordinator.rollback(current.identity, clockMs())
     }
 
-    /** Removes install/config/runtime state pointers while retaining immutable artifact bytes for audit. */
+     
     fun uninstallBySourceId(sourceId: String): Boolean {
         val current = installedBySourceId(sourceId)
         when (val cleared = brokers.storage.clear(sourceId)) {
@@ -246,7 +246,7 @@ class VBookSourcePlatform(
         }.getOrNull()
     }
 
-    /** All active vBook provider sessions, including non-StorySource content types. */
+     
     fun activeProviderSessions(contentType: VBookContentType? = null): List<VBookProviderSession> =
         activeArtifacts().mapNotNull { artifact ->
             val bytes = store.originalBytes(artifact.artifactId) ?: return@mapNotNull null
@@ -329,7 +329,7 @@ class VBookSourcePlatform(
         return configService.reset(current.identity.canonicalKey(), manifest)
     }
 
-    /** Revalidates the exact archived ZIP without touching the active pointer or contacting a site. */
+     
     fun validateBySourceId(sourceId: String): VBookCandidateValidation {
         val current = installedBySourceId(sourceId)
         val bytes = store.originalBytes(current.artifactId) ?: error("VBOOK_INSTALLED_ARTIFACT_BYTES_MISSING")

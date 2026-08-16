@@ -9,15 +9,15 @@ import java.net.InetAddress
 import java.net.URI
 import java.util.Locale
 
-/**
- * Pure URL/DNS policy used by the Android WebView broker.
- *
- * DNS preflight is deliberately separate from cached callback evaluation. WebView invokes
- * shouldOverrideUrlLoading on the UI thread, where a blocking resolver can fail with
- * NetworkOnMainThreadException or stall the application. Initial navigations and deferred
- * redirects call [preflightInitial] or [preflightRedirect] from a worker thread, then cache the
- * approved public host for later WebView callbacks.
- */
+
+
+
+
+
+
+
+
+
 internal class BrowserNavigationPolicy(
     private val resolver: (String) -> List<InetAddress>,
 ) {
@@ -63,7 +63,7 @@ internal class BrowserNavigationPolicy(
     fun preflightRedirect(manifest: SourceManifest, rawUrl: String): Decision =
         preflight(manifest, rawUrl, initial = false)
 
-    /** Evaluates URL/origin rules without performing DNS. Safe for the WebView UI callback. */
+     
     fun evaluateRedirect(
         manifest: SourceManifest,
         rawUrl: String,
@@ -92,7 +92,7 @@ internal class BrowserNavigationPolicy(
         }
     }
 
-    /** Canonical network identity; fragments are intentionally excluded because they never leave the client. */
+     
     fun transportIdentity(rawUrl: String): String? = runCatching {
         val transportUrl = stripFragment(rawUrl)
         val uri = URI(transportUrl)

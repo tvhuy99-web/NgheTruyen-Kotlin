@@ -40,12 +40,12 @@ import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
-/**
- * Story adapter for an immutable active vBook artifact.
- *
- * It never translates an extension into NgheTruyen rules. plugin.json/src stay authoritative and
- * are executed through [VBookCompatibilityRuntime]. Only the returned data is normalized.
- */
+
+
+
+
+
+
 class VBookStorySource(
     private val artifact: SourceArtifactDescriptor,
     packageBytes: ByteArray,

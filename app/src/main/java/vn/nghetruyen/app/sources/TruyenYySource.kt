@@ -11,13 +11,13 @@ import vn.nghetruyen.app.core.model.StorySummary
 import java.security.MessageDigest
 import kotlin.math.ceil
 
-/**
- * Kotlin port of the TruyenYY source bundled in the original XPK.
- *
- * TruyenYY is read through Jina Reader's bounded Markdown response because the
- * direct site is JavaScript-heavy and changes frequently. The adapter is kept
- * DEGRADED until live Android regression tests confirm current selectors.
- */
+
+
+
+
+
+
+
 class TruyenYySource(
     private val textClient: TextDocumentClient = HttpTextClient(),
 ) : StorySource {

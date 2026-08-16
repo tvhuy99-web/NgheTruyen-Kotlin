@@ -24,7 +24,7 @@ import java.util.Locale
 import java.util.UUID
 import java.util.zip.ZipInputStream
 
-/** Final compatibility layer: preserves every legacy download payload and converts safe chapter text. */
+ 
 class LegacyXpkEverythingRestoreCoordinator(
     context: Context,
     private val completeCoordinator: LegacyXpkCompleteRestoreCoordinator,
@@ -199,10 +199,10 @@ class LegacyXpkEverythingRestoreCoordinator(
         return DownloadRestore(converted, files.size, unconverted.coerceAtLeast(0))
     }
 
-    /**
-     * Legacy download files contain raw source responses. Convert only shapes with a strong signal:
-     * explicit JSON content/body/text, a known chapter-content HTML container, or actual plain text.
-     */
+    
+
+
+
     private fun decodeChapterPayload(file: File): String? {
         if (file.length() !in 1..MAX_CONVERTIBLE_DOWNLOAD_BYTES) return null
         val bytes = file.readBytes()

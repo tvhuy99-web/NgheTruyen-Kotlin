@@ -4,12 +4,12 @@ import java.security.MessageDigest
 import java.util.LinkedHashMap
 import java.util.Locale
 
-/**
- * Deterministic, non-cascading VietPhrase engine.
- *
- * Base dictionaries and LuatNhan are matched against the original input. AIReplace is intentionally
- * applied once to the translated output, matching the legacy XPK pipeline without allowing loops.
- */
+
+
+
+
+
+
 class VietPhraseEngine(
     rules: List<VietPhraseRule>,
     private val maxCacheEntries: Int = 32,
@@ -94,8 +94,8 @@ class VietPhraseEngine(
         .sortedWith(RULE_ORDER)
     private val baseLiteralTrie = buildTrie(baseLiteralRules)
 
-    // ChinesePhienAmWords is the legacy Hán-Việt fallback, not a peer dictionary layer.
-    // It is only consulted when no normal phrase/rule matched the current source span.
+    
+    
     private val fallbackHanVietRules = normalizedRules
         .filter { it.kind == VietPhraseDictionaryKind.PHIEN_AM && it.matchMode == VietPhraseMatchMode.LITERAL }
         .sortedWith(RULE_ORDER)

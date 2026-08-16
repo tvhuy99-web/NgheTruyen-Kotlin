@@ -31,7 +31,7 @@ import java.net.URI
 import java.security.MessageDigest
 import java.util.UUID
 
-/** Repository/catalog/direct-package transport with Lua-style automatic HTTPS input recognition. */
+ 
 class VBookRepositoryClient(
     network: OkHttpSourceNetworkBroker? = null,
     private val cache: VBookRepositoryCacheStore? = null,
@@ -65,11 +65,11 @@ class VBookRepositoryClient(
     }
     private val directPackageBytes = VBookDirectPackageByteCache()
 
-    /**
-     * Fetch the root URL once, then classify those exact bytes as repository index, direct catalog,
-     * or direct plugin.zip. Child catalogs still use the normal cached fetcher. This avoids the old
-     * probe-then-download race where a direct package URL could be requested twice before preview.
-     */
+    
+
+
+
+
     fun snapshot(indexUrl: String = OFFICIAL_INDEX, strict: Boolean = false): VBookRepositorySnapshot =
         withTrace("repository") { traceId ->
             emit(traceId, "VBOOK_REPOSITORY_INPUT_STARTED", attributes = mapOf("url" to indexUrl))
@@ -86,7 +86,7 @@ class VBookRepositoryClient(
                 )
             }
 
-            // Preserve offline repository/direct-catalog behavior without issuing another root request.
+            
             val cached = cache?.read(canonical, VBookRepositoryAggregator.MAX_CATALOG_BYTES)
             if (cached != null) {
                 emit(traceId, "VBOOK_REPOSITORY_CACHE_FALLBACK", DiagnosticSeverity.WARN, mapOf(

@@ -26,7 +26,7 @@ story = "app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt"
 reader = "app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt"
 app = "app/src/main/java/vn/nghetruyen/app/ui/NgheTruyenApp.kt"
 
-# Persist chapter sort preference like the reference tool.
+
 replace_once(
     settings,
     "    val readerMode: ReaderMode = ReaderMode.TEXT,\n    val readerDisplay: ReaderDisplaySettings = ReaderDisplaySettings(),\n",

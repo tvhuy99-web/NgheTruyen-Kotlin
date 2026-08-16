@@ -10,10 +10,10 @@ import vn.nghetruyen.source.api.SourceWebSocketRequest
 import vn.nghetruyen.source.api.SourceWebSocketResponse
 import java.util.Base64
 
-/**
- * Bridges rich broker frames through the legacy string-only VBookJsRuntime WebSocket queue.
- * Internal markers never leave the sandbox boundary and are decoded by [VBookWebSocketPrelude].
- */
+
+
+
+
 class VBookWebSocketBroker(
     private val delegate: SourceWebSocketBroker,
 ) : SourceWebSocketBroker {

@@ -36,17 +36,17 @@ import java.security.MessageDigest
 import java.util.Locale
 import java.util.zip.ZipInputStream
 
-/**
- * Compatibility reader for backups produced by the legacy XPK/Lua application.
- *
- * This importer is deliberately isolated from [BackupTransferManager]: current Kotlin backups keep
- * their normal restore path. Legacy archives are only read after explicit confirmation. The old
- * SQLite files are opened read-only and records are mapped into current Room entities; they are
- * never copied over the application's Room database.
- *
- * Executable legacy extensions, login/session state, API keys and opaque download payloads are not
- * executed or restored. Unknown archive entries are rejected before any database write.
- */
+
+
+
+
+
+
+
+
+
+
+
 class LegacyXpkBackupImporter(
     context: Context,
     private val database: AppDatabase,
@@ -129,7 +129,7 @@ class LegacyXpkBackupImporter(
             val manifest = scan.manifest
                 ?: return@withContext AppResult.Success(Inspection(isLegacyXpk = false))
 
-            // Native Kotlin backups continue through BackupTransferManager unchanged.
+            
             if (manifest.optString("format") == CURRENT_FORMAT_NAME) {
                 return@withContext AppResult.Success(Inspection(isLegacyXpk = false))
             }
@@ -357,7 +357,7 @@ class LegacyXpkBackupImporter(
                     summary = importFollowing(legacy, summary)
                 }
                 if (BackupComponent.READING in requested) {
-                    // These are link targets. Ensure their metadata exists even when only READING is selected.
+                    
                     if (BackupComponent.LIBRARY !in requested) {
                         summary = importStories(legacy, summary)
                         summary = importChapters(legacy, summary)
@@ -861,7 +861,7 @@ class LegacyXpkBackupImporter(
                 aiOnline = ai,
             ),
         )
-        // Deliberately ignore ai_gemini_key / ai_proxy_key. Credentials stay device-local.
+        
     }
 
     private fun validateSqlite(file: File) {
@@ -900,7 +900,7 @@ class LegacyXpkBackupImporter(
         .replace("truyen_cv", "truyencv")
         .ifBlank { "legacy" }
 
-    /** Matches the stable URL IDs used by the Kotlin source adapters where possible. */
+     
     private fun stableStoryId(url: String): String = stableUrlId("story", url)
 
     private fun stableChapterId(url: String): String = stableUrlId("chapter", url)

@@ -1,6 +1,6 @@
 package vn.nghetruyen.app.ai.vietphrase
 
-/** Deterministic profiler used by diagnostics and release gates. */
+ 
 object VietPhraseProfiler {
     data class Sample(
         val label: String,

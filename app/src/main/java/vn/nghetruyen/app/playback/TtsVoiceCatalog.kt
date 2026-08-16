@@ -15,8 +15,15 @@ import java.util.Locale
 class TtsVoiceCatalog(context: Context) {
     private val appContext = context.applicationContext
 
+    @Volatile
+    private var skipNextVoiceLoad = false
+
     suspend fun loadEngines(): AppResult<List<TtsEngineOption>> {
-        if (StartupWorkGate.isBeforeFirstFrame()) return AppResult.Success(emptyList())
+        if (StartupWorkGate.isBeforeFirstFrame()) {
+            skipNextVoiceLoad = true
+            return AppResult.Success(emptyList())
+        }
+        skipNextVoiceLoad = false
         return withEngine(null) { engine ->
             val defaultPackage = engine.defaultEngine
             engine.engines.orEmpty()
@@ -33,6 +40,10 @@ class TtsVoiceCatalog(context: Context) {
     }
 
     suspend fun load(enginePackage: String? = null): AppResult<List<TtsVoiceOption>> {
+        if (skipNextVoiceLoad) {
+            skipNextVoiceLoad = false
+            return AppResult.Success(emptyList())
+        }
         if (StartupWorkGate.isBeforeFirstFrame()) return AppResult.Success(emptyList())
         return withEngine(enginePackage) { engine ->
             engine.voices.orEmpty()

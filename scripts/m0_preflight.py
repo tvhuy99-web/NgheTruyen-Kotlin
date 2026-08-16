@@ -27,7 +27,7 @@ def run(*args: str) -> tuple[int, str]:
         p = subprocess.run(args, cwd=ROOT, text=True, stdout=subprocess.PIPE,
                            stderr=subprocess.STDOUT, timeout=20, check=False)
         return p.returncode, p.stdout.strip()
-    except Exception as exc:  
+    except Exception as exc:
         return 99, f"{type(exc).__name__}: {exc}"
 
 

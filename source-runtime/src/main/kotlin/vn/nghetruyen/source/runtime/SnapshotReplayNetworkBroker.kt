@@ -14,7 +14,7 @@ import vn.nghetruyen.source.api.SourceRedirectHop
 import java.util.Base64
 import java.util.Locale
 
- 
+
 class SnapshotReplayNetworkBroker private constructor(
     private val responses: MutableList<ReplayResponse>,
     private val clockMs: () -> Long = System::currentTimeMillis,

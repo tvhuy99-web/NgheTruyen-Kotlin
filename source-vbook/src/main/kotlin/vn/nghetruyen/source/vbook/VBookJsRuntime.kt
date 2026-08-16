@@ -618,8 +618,8 @@ class VBookJsRuntime(
                 diagnostics.emit(event(manifest, request, parsed.name, parsed.severity, attributes = parsed.attributes))
                 true
             }.apply {
-                
-                
+
+
                 parentScope = scope
                 prototype = ScriptableObject.getFunctionPrototype(scope)
             }
@@ -862,8 +862,8 @@ class VBookJsRuntime(
         }
 
     private fun hostFunction(block: (Array<out Any>) -> Any?): BaseFunction = object : BaseFunction() {
-        
-        
+
+
         override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable?, args: Array<out Any>): Any? = block(args)
     }
 
@@ -875,9 +875,9 @@ class VBookJsRuntime(
     ): Array<Any> {
         fun js(value: JsonValue?): Any = jsonToJs(cx, scope, value ?: JsonValue.Null)
         val page = if (manifest.runtime.mode == SourceRuntimeMode.NATIVE_LUA_COMPAT) {
-            
-            
-            
+
+
+
             request.input.string("pageToken").orEmpty()
         } else {
             (max(0, (request.input.int("page") ?: 1) - 1) * 30).toString()

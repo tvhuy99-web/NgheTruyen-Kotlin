@@ -129,7 +129,7 @@ class LegacyXpkBackupImporter(
             val manifest = scan.manifest
                 ?: return@withContext AppResult.Success(Inspection(isLegacyXpk = false))
 
-            
+
             if (manifest.optString("format") == CURRENT_FORMAT_NAME) {
                 return@withContext AppResult.Success(Inspection(isLegacyXpk = false))
             }
@@ -357,7 +357,7 @@ class LegacyXpkBackupImporter(
                     summary = importFollowing(legacy, summary)
                 }
                 if (BackupComponent.READING in requested) {
-                    
+
                     if (BackupComponent.LIBRARY !in requested) {
                         summary = importStories(legacy, summary)
                         summary = importChapters(legacy, summary)
@@ -861,7 +861,7 @@ class LegacyXpkBackupImporter(
                 aiOnline = ai,
             ),
         )
-        
+
     }
 
     private fun validateSqlite(file: File) {
@@ -900,7 +900,7 @@ class LegacyXpkBackupImporter(
         .replace("truyen_cv", "truyencv")
         .ifBlank { "legacy" }
 
-     
+
     private fun stableStoryId(url: String): String = stableUrlId("story", url)
 
     private fun stableChapterId(url: String): String = stableUrlId("chapter", url)

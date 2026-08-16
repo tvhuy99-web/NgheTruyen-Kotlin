@@ -92,12 +92,12 @@ class FileSourceArtifactStore(private val root: Path) : SourceArtifactRegistry, 
         state(identity).getProperty("previous")?.takeIf(String::isNotBlank)?.let(::descriptor)
             ?.takeIf { it.identity == identity && it.state == SourceArtifactState.PREVIOUS_KNOWN_GOOD }
 
-     
+
     @Synchronized
     fun activeArtifacts(ecosystem: SourceEcosystem? = null): List<SourceArtifactDescriptor> =
         installedArtifacts(ecosystem).filter { it.state == SourceArtifactState.ACTIVE }
 
-     
+
     @Synchronized
     fun installedArtifacts(ecosystem: SourceEcosystem? = null): List<SourceArtifactDescriptor> {
         if (!Files.isDirectory(identities)) return emptyList()
@@ -155,7 +155,7 @@ class FileSourceArtifactStore(private val root: Path) : SourceArtifactRegistry, 
         atomicWrite(identityPath(transition.identity), encode(next), replace = true)
     }
 
-     
+
     @Synchronized
     fun uninstall(identity: SourceArtifactIdentity): Boolean = Files.deleteIfExists(identityPath(identity))
 

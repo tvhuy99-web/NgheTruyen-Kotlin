@@ -91,9 +91,9 @@ class TruyenCvSource(
         val baseUrl = normalizeStoryBase(url)
         val document = documentClient.getDocument(baseUrl, ALLOWED_HOSTS)
         val storyId = TruyenCvParser.parseStoryDetail(document, baseUrl).story.id
-        
-        
-        
+
+
+
         TruyenCvParser.parseChapterPage(document, storyId, 0, baseUrl).chapters.lastOrNull()
     }
 

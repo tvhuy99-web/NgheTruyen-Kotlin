@@ -1121,7 +1121,7 @@ interface ChapterDownloadFailureDao {
         ChapterDownloadFailureEntity::class,
     ],
     version = 23,
-    
+
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -1314,11 +1314,11 @@ abstract class AppDatabase : RoomDatabase() {
 
         val MIGRATION_6_7 = object : Migration(6, 7) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                
-                
-                
-                
-                
+
+
+
+
+
                 createDownloadJobsTable(db)
                 normalizeFollowingDefaults(db)
                 normalizeStoryTtsProfileDefaults(db)
@@ -1747,8 +1747,8 @@ abstract class AppDatabase : RoomDatabase() {
 
         val MIGRATION_20_21 = object : Migration(20, 21) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                
-                
+
+
                 db.execSQL(
                     "UPDATE chapters SET downloadedAt = NULL " +
                         "WHERE storyId IN (SELECT id FROM stories WHERE sourceId <> 'offline')",

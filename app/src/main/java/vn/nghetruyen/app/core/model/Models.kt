@@ -49,7 +49,7 @@ data class ChapterContent(
     val paragraphs: List<String>,
     val nextChapterUrl: String? = null,
     val previousChapterUrl: String? = null,
-     
+
     val nextChapterPageUrl: String? = null,
     val nextChapterPageStartIndex: Int? = null,
 )
@@ -80,7 +80,7 @@ data class TtsVoiceOption(
     val enginePackage: String? = null,
 )
 
- 
+
 data class VoiceRoleDraft(
     val roleName: String,
     val originalRoleId: String? = null,

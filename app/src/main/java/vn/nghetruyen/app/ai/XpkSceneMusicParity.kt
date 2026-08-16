@@ -4,7 +4,7 @@ import java.util.ArrayDeque
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.abs
 
- 
+
 object XpkSceneMusicParity {
     const val MAX_TRACKS = 500
     const val MAX_DESCRIPTION_CHARS = 300

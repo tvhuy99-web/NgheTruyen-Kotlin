@@ -39,9 +39,9 @@ def main() -> None:
         print("M1_READER_CORE_STATIC_OK; EXECUTABLE_CHECK_SKIPPED: Kotlin CLI unavailable")
         return
 
-    
-    
-    
+
+
+
     xpk_runtime_stub = r'''
 package vn.nghetruyen.app.playback
 

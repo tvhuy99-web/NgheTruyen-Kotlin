@@ -39,7 +39,7 @@ internal class VBookDirectPackageByteCache(
         }
     }
 
-     
+
     @Synchronized
     fun take(installIdentity: String, packageUrl: String): Hit? {
         purgeExpiredLocked()

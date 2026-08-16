@@ -3,7 +3,7 @@ package vn.nghetruyen.app.downloads
 import android.content.Context
 import android.os.StatFs
 
- 
+
 object DownloadStorageGuard {
     data class Estimate(
         val chapterCount: Int,

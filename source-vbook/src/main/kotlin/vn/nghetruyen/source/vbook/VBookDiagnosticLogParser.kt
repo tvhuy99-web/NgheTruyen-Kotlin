@@ -12,7 +12,7 @@ internal data class ParsedVBookDiagnosticLog(
     val attributes: Map<String, String>,
 )
 
- 
+
 internal object VBookDiagnosticLogParser {
     fun parse(
         rawArguments: List<String>,

@@ -1,6 +1,6 @@
 package vn.nghetruyen.source.vbook
 
- 
+
 object VBookQuickTranslatorPrelude {
     fun build(): String = """
         var __vbookNativeQtTranslate = Qt.translate;

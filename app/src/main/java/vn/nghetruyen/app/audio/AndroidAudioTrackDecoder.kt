@@ -15,7 +15,7 @@ import java.nio.ByteOrder
 import kotlin.math.floor
 import kotlin.math.roundToLong
 
- 
+
 object AndroidAudioTrackDecoder {
     private const val TIMEOUT_US = 10_000L
     private const val MAX_DECODED_PCM_BYTES = 64L * 1024L * 1024L
@@ -153,7 +153,7 @@ object AndroidAudioTrackDecoder {
     }
 }
 
- 
+
 object Pcm16Resampler {
     fun convertRaw(
         raw: File,

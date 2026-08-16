@@ -164,7 +164,7 @@ object VietPhraseBinaryDictionaryCodec {
         return buildRules(kind, keys, values, format)
     }
 
-     
+
     private fun decodeDat(bytes: ByteArray, header: Header, kind: VietPhraseDictionaryKind): DecodeResult? {
         if (header.byteOrder != ByteOrder.BIG_ENDIAN) return null
         val nodeCount = header.count

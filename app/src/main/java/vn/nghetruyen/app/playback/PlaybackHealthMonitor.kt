@@ -2,7 +2,7 @@ package vn.nghetruyen.app.playback
 
 import java.util.ArrayDeque
 
- 
+
 class PlaybackHealthMonitor(private val capacity: Int = 128) {
     data class Event(val atMillis: Long, val type: String, val detail: String)
 

@@ -194,9 +194,9 @@ object VBookCorpusAnalyzer {
             }
             fun hitLiteralArgument(feature: VBookFeature, regex: Regex) {
                 regex.findAll(code).firstOrNull { match ->
-                    
-                    
-                    
+
+
+
                     executableCode.getOrNull(match.range.first) == '.'
                 }?.let { match -> add(feature, path, match.value.take(160)) }
             }

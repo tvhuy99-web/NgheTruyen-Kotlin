@@ -20,9 +20,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def run_script(name: str) -> None:
-    
-    
-    
+
+
+
     print(f"RUN_GATE {name}", flush=True)
     with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as log:
         try:

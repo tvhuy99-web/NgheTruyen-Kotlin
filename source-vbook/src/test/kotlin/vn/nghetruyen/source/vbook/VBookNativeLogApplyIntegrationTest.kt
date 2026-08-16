@@ -19,7 +19,7 @@ import vn.nghetruyen.source.runtime.SourceResourceProvider
 
 class VBookNativeLogApplyIntegrationTest {
     @Test
-    
+
     fun nativeAdapterApplyStyleLogEmitsTransformMicroCheckpoints() {
         val events = mutableListOf<DiagnosticEvent>()
         val runtime = VBookJsRuntime(diagnostics = DiagnosticSink { events += it })

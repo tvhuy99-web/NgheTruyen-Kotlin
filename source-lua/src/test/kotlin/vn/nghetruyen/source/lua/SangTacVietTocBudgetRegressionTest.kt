@@ -24,9 +24,9 @@ class SangTacVietTocBudgetRegressionTest {
             .use { compressed -> GZIPInputStream(compressed).use { it.readBytes() } }
         val (pack, _) = NativeLuaArchiveImporter.import(ByteArrayInputStream(sourceBytes))
 
-        
-        
-        
+
+
+
         assertEquals(64 * 1024 * 1024, pack.manifest.runtime.memoryBudgetBytes)
         val oldInstalledManifest = pack.manifest.copy(
             runtime = pack.manifest.runtime.copy(memoryBudgetBytes = 32 * 1024 * 1024),
@@ -90,8 +90,8 @@ class SangTacVietTocBudgetRegressionTest {
         )
         val response = (result as SourcePlatformResult.Success).value
         val encoded = JsonCodec.stringify(response.value)
-        
-        
+
+
         assertTrue("expected first chapter in normalized output", encoded.contains("Chương 1"))
         assertTrue("expected last chapter on page 1", encoded.contains("Chương 100"))
         assertTrue("page 1 must not eagerly materialize chapter 101", !encoded.contains("Chương 101"))

@@ -3,7 +3,7 @@ package vn.nghetruyen.app.audio
 import java.io.ByteArrayOutputStream
 import java.io.OutputStream
 
- 
+
 object Id3v23Writer {
     data class Chapter(
         val title: String,
@@ -54,7 +54,7 @@ object Id3v23Writer {
         val payload = ByteArrayOutputStream()
         payload.write("toc".toByteArray(Charsets.ISO_8859_1))
         payload.write(0)
-        payload.write(0x03) 
+        payload.write(0x03)
         payload.write(count.coerceAtMost(255))
         repeat(count.coerceAtMost(255)) { index ->
             payload.write("ch${index.toString().padStart(5, '0')}".toByteArray(Charsets.ISO_8859_1))

@@ -1,6 +1,6 @@
 package vn.nghetruyen.source.vbook
 
- 
+
 object VBookWebSocketPrelude {
     fun build(): String {
         return """

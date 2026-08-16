@@ -14,7 +14,7 @@ import java.security.MessageDigest
 import java.util.Locale
 import java.util.zip.ZipInputStream
 
- 
+
 object NativeLuaArchiveImporter {
     private const val MAX_INPUT_BYTES = 24 * 1024 * 1024
     private const val MAX_ENTRY_BYTES = 4 * 1024 * 1024
@@ -33,10 +33,10 @@ object NativeLuaArchiveImporter {
         val source = archive.files.getValue(archive.entryPath)
         require(source.size <= MAX_ROOT_LUA_BYTES) { "NATIVE_LUA_SOURCE_TOO_LARGE" }
 
-        
-        
-        
-        
+
+
+
+
         val sourceText = source.toString(Charsets.UTF_8)
         if (looksLikeEmbeddedVBookWrapper(sourceText)) {
             return importEmbeddedVBookWrapper(sourceText, original, archive.entryPath)
@@ -45,7 +45,7 @@ object NativeLuaArchiveImporter {
         val imported = NativeLuaSourceImporter.import(source, archive.files, archive.entryPath)
         val authorityManifest = SourceFullAuthorityPolicy.apply(imported.manifest)
         val authorityEntries = LinkedHashMap(imported.entries).apply {
-            
+
             put("source.json", SourceManifestWriter.write(authorityManifest))
         }
         return verifiedPack(
@@ -106,7 +106,7 @@ object NativeLuaArchiveImporter {
         val authorityManifest = SourceFullAuthorityPolicy.apply(imported.manifest)
         val authorityEntries = LinkedHashMap(imported.entries).apply {
             put("source.json", SourceManifestWriter.write(authorityManifest))
-            
+
             put("legacy/source.lua", sourceText.toByteArray(Charsets.UTF_8))
         }
         val warnings = imported.warnings + listOf(

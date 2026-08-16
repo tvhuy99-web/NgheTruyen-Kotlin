@@ -4,7 +4,7 @@ import vn.nghetruyen.app.core.model.VoiceExpression
 import vn.nghetruyen.app.data.local.VoiceRoleEntity
 import java.text.Normalizer
 
- 
+
 data class ExpressiveSpeech(
     val text: String,
     val expression: VoiceExpression,
@@ -17,8 +17,8 @@ data class ExpressiveSpeech(
 
 object VoiceExpressionProcessor {
     fun resolve(text: String, role: VoiceRoleEntity?): ExpressiveSpeech {
-        
-        
+
+
         if (XpkPlaybackRuntime.shouldBypassLocalExpression(text)) {
             return ExpressiveSpeech(
                 text = text,

@@ -52,7 +52,7 @@ data class VoiceCastPlan(
     val warnings: List<String> = emptyList(),
 )
 
- 
+
 data class SceneMusicCue(
     val startParagraph: Int,
     val trackId: String,
@@ -71,7 +71,7 @@ data class SceneMusicTrackOption(
 )
 
 data class NarrationPlanContext(
-     
+
     val previousChapterEnding: String = "",
     val activeTrackId: String? = null,
     val activeTrackTitle: String? = null,
@@ -104,13 +104,13 @@ interface VietPhraseImprovementEngine {
     suspend fun improveVietPhrase(request: VietPhraseImprovementRequest): AppResult<List<VietPhraseReplacementSuggestion>>
 }
 
- 
+
 @Deprecated("Use XpkNarrationAiServices; paragraph voice-cast protocol is retired from production wiring")
 interface VoiceCastEngine {
     suspend fun planVoiceCast(storyId: String, chapterId: String, rawText: String): AppResult<VoiceCastPlan>
 }
 
- 
+
 @Deprecated("Use XpkNarrationAiServices; paragraph scene-cue protocol is retired from production wiring")
 interface SceneMusicPlanner {
     suspend fun planMusic(
@@ -121,7 +121,7 @@ interface SceneMusicPlanner {
     ): AppResult<List<SceneMusicCue>>
 }
 
- 
+
 @Deprecated("Use XpkNarrationAiServices; legacy narration planner is retired from production wiring")
 interface NarrationPlanner {
     suspend fun planNarration(request: NarrationPlanRequest): AppResult<NarrationPlan>

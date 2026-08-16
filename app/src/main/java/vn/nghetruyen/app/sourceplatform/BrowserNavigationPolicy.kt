@@ -63,7 +63,7 @@ internal class BrowserNavigationPolicy(
     fun preflightRedirect(manifest: SourceManifest, rawUrl: String): Decision =
         preflight(manifest, rawUrl, initial = false)
 
-     
+
     fun evaluateRedirect(
         manifest: SourceManifest,
         rawUrl: String,
@@ -92,7 +92,7 @@ internal class BrowserNavigationPolicy(
         }
     }
 
-     
+
     fun transportIdentity(rawUrl: String): String? = runCatching {
         val transportUrl = stripFragment(rawUrl)
         val uri = URI(transportUrl)

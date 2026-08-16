@@ -12,7 +12,7 @@ data class JsSyntaxValidation(
     val column: Int? = null,
 )
 
- 
+
 object JsSyntaxValidator {
     fun validate(
         source: String,
@@ -30,7 +30,7 @@ object JsSyntaxValidator {
         return runCatching {
             val cx = factory.enterContext()
             try {
-                
+
                 cx.compileString(source, sourceName, 1, null)
                 JsSyntaxValidation(true)
             } finally {

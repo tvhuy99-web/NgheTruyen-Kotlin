@@ -4,7 +4,7 @@ import com.nghetruyen.source.platform.SourceCompatibilityProfile
 import com.nghetruyen.source.platform.SourceCompatibilityState
 import com.nghetruyen.source.platform.SourceEcosystem
 
- 
+
 sealed interface CompatValue {
     object Null : CompatValue
     data class Bool(val value: Boolean) : CompatValue

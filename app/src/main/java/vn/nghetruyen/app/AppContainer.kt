@@ -115,7 +115,7 @@ class AppContainer(context: Context) {
         )
     }
 
-     
+
     fun refreshSourceRegistry() {
         sourceRegistry.replaceExternalSources(currentExternalStorySources())
     }

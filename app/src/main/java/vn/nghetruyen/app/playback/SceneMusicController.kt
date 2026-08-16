@@ -171,7 +171,7 @@ class SceneMusicController(
         null
     }
 
-     
+
     private fun startCrossfadeTransition(next: Slot, durationMillis: Int) {
         transitionJob?.cancel()
         release(pendingSequential)
@@ -212,7 +212,7 @@ class SceneMusicController(
         }
     }
 
-    
+
 
 
 

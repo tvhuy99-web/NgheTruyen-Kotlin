@@ -111,7 +111,7 @@ class VBookConfigService(
                         }
                         else -> raw
                     }
-                    VBookConfigMode.SELECT -> raw 
+                    VBookConfigMode.SELECT -> raw
                     VBookConfigMode.UNKNOWN -> raw
                 }
             }

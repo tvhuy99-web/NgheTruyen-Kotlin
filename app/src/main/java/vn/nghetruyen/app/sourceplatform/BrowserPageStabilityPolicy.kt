@@ -1,6 +1,6 @@
 package vn.nghetruyen.app.sourceplatform
 
- 
+
 internal class BrowserPageStabilityPolicy(
     private val deadlineMs: Long,
 ) {

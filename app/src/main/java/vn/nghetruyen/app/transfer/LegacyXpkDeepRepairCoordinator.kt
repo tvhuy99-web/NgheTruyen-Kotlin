@@ -624,8 +624,8 @@ class LegacyXpkDeepRepairCoordinator(
         luaDir.listFiles().orEmpty().filter(File::isFile).sortedBy(File::getName).forEach { file ->
             if (!file.extension.equals("lua", true)) return@forEach
             luaCount += 1
-            
-            
+
+
             val stem = normalizedName(file.nameWithoutExtension)
             if (activatedNames.any { it == stem || it.contains(stem) || stem.contains(it) }) return@forEach
             val result = runCatching {
@@ -669,8 +669,8 @@ class LegacyXpkDeepRepairCoordinator(
         repair: DeepRepair,
         extensions: ExtensionRepair,
     ): List<String> = buildList {
-        
-        
+
+
         base.warnings.forEach { warning ->
             val lower = warning.lowercase(Locale.ROOT)
             val staleChapter = lower.contains("importer xử lý") && lower.contains("chương") && lower.contains("room")

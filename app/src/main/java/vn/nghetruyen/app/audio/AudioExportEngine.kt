@@ -2,20 +2,20 @@ package vn.nghetruyen.app.audio
 
 import vn.nghetruyen.app.core.model.AudioExportFormat
 
- 
+
 enum class AudioExportScope {
     CURRENT_CHAPTER,
     CACHED_STORY,
     CHAPTER_RANGE,
 }
 
- 
+
 enum class AudioExportPackaging {
     SINGLE_FILE,
     ONE_FILE_PER_CHAPTER,
 }
 
- 
+
 data class AudioExportRequest(
     val scope: AudioExportScope,
     val format: AudioExportFormat,

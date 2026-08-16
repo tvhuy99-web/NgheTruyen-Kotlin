@@ -495,7 +495,7 @@ class BackupTransferManager(
 
     companion object {
         private const val FORMAT_NAME = "vn.nghetruyen.backup"
-        
+
         private const val FORMAT_VERSION = 16
         private const val DATA_ENTRY = "data.json"
         private const val MANIFEST_ENTRY = "manifest.json"
@@ -546,7 +546,7 @@ class BackupTransferManager(
         name("ttsVoiceName"); nullableValue(value.ttsVoiceName)
         name("ttsLanguageTag").value(value.ttsLanguageTag)
         name("audioInterruptionMode").value(value.audioInterruptionMode.name)
-        
+
         name("backgroundMusicEnabled").value(false)
         name("backgroundMusicVolume").value(value.backgroundMusicVolume.toDouble())
         name("backgroundMusicDuckFactor").value(value.backgroundMusicDuckFactor.toDouble())
@@ -598,7 +598,7 @@ class BackupTransferManager(
         name("aiDailyInputCharsLimit").value(value.aiOnline.dailyInputCharsLimit.toLong())
         name("aiMaxRetries").value(value.aiOnline.maxRetries.toLong())
         name("aiRetryBaseDelayMillis").value(value.aiOnline.retryBaseDelayMillis.toLong())
-        
+
         name("aiOnlineEnabled").value(false)
         name("aiConsentGranted").value(false)
         endObject()
@@ -1735,7 +1735,7 @@ class BackupTransferManager(
             }
             endObject()
             require(id.isNotBlank() && title.isNotBlank() && uri.isNotBlank()) { "Track nhạc cảnh không hợp lệ." }
-            
+
             SceneMusicTrackEntity(
                 id = id, title = title, uri = uri, tagsCsv = tags, volume = volume, enabled = false,
                 loudnessLufsEstimate = loudness, playCount = playCount, lastPlayedAt = lastPlayedAt,

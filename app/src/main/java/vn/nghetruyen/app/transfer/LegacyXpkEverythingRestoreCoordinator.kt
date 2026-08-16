@@ -24,7 +24,7 @@ import java.util.Locale
 import java.util.UUID
 import java.util.zip.ZipInputStream
 
- 
+
 class LegacyXpkEverythingRestoreCoordinator(
     context: Context,
     private val completeCoordinator: LegacyXpkCompleteRestoreCoordinator,
@@ -199,7 +199,7 @@ class LegacyXpkEverythingRestoreCoordinator(
         return DownloadRestore(converted, files.size, unconverted.coerceAtLeast(0))
     }
 
-    
+
 
 
 

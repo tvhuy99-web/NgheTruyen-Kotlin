@@ -10,7 +10,7 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
 
- 
+
 object Mp3LameEncoder {
     private const val FRAMES_PER_BLOCK = 2_304
     private const val ENCODED_BUFFER_BYTES = 16_384 + 128 * 1024

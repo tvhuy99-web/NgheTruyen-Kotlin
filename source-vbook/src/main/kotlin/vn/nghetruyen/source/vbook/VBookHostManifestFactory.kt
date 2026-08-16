@@ -35,8 +35,8 @@ object VBookHostManifestFactory {
         resources: vn.nghetruyen.source.runtime.SourceResourceProvider,
     ): SourceManifest {
         val sourceId = stableSourceId(artifactIdentity)
-        
-        
+
+
         val allowCleartext = true
         val origin = sourceOrigin(plugin.metadata.source, allowCleartext)
         val connection = VBookConfigValues.resolve(plugin).connectionSettings()
@@ -58,8 +58,8 @@ object VBookHostManifestFactory {
             adult = plugin.metadata.nsfw,
             runtime = SourceRuntimePolicy(
                 mode = SourceRuntimeMode.VBOOK_JS_COMPAT,
-                
-                
+
+
                 instructionBudget = 1_000_000,
                 memoryBudgetBytes = 64 * 1024 * 1024,
                 actionTimeoutMs = 120_000,
@@ -132,7 +132,7 @@ object VBookHostManifestFactory {
                 if (port != -1 && port != default) append(':').append(port)
             }
         }
-        
+
         return "https://vbook.invalid"
     }
 }

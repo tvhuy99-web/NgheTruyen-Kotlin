@@ -18,7 +18,7 @@ data class VBookLoadIssue(
     val target: String? = null,
 )
 
- 
+
 object VBookLoadGraphValidator {
     fun validate(scripts: Map<String, String>, profile: VBookContractProfile): List<VBookLoadIssue> {
         if (profile != VBookContractProfile.CURRENT_JS) return emptyList()
@@ -51,7 +51,7 @@ object VBookLoadGraphValidator {
         return issues.distinct()
     }
 
-     
+
     private fun loadCalls(path: String, source: String): List<String?> {
         val root = Parser().parse(source, path, 1)
         val calls = mutableListOf<String?>()

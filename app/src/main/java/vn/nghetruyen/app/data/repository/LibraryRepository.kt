@@ -134,9 +134,9 @@ class LibraryRepository(private val db: AppDatabase) {
             ReadingHistoryEntity(
                 id = id,
                 storyId = chapter.storyId,
-                
-                
-                
+
+
+
                 sourceId = storedStory?.sourceId?.takeIf(String::isNotBlank)
                     ?: sourceId,
                 storyTitle = storyTitle.ifBlank { storedStory?.title.orEmpty() }.ifBlank { "Truyện" },
@@ -243,7 +243,7 @@ class LibraryRepository(private val db: AppDatabase) {
         )
     }
 
-    
+
 
 
 
@@ -366,7 +366,7 @@ class LibraryRepository(private val db: AppDatabase) {
         )
     }
 
-     
+
     suspend fun saveReadingPosition(
         sourceId: String,
         storyTitle: String,
@@ -391,7 +391,7 @@ class LibraryRepository(private val db: AppDatabase) {
 
     suspend fun listOfflineChapters(storyId: String): List<ChapterEntity> = db.chapterDao().listForStory(storyId)
 
-    
+
 
 
 
@@ -1151,7 +1151,7 @@ class LibraryRepository(private val db: AppDatabase) {
         db.sceneMusicTrackDao().upsert(
             current.copy(
                 title = title.trim().ifBlank { current.title }.take(120),
-                
+
                 tagsCsv = tagsCsv.trim().take(300),
                 updatedAt = System.currentTimeMillis(),
             ),

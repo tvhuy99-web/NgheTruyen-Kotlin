@@ -10,7 +10,7 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.IOException
 
- 
+
 object M4aAacEncoder {
     private const val MIME = MediaFormat.MIMETYPE_AUDIO_AAC
     private const val TIMEOUT_US = 10_000L

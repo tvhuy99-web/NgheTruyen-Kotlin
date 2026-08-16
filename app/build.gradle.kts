@@ -34,8 +34,8 @@ android {
         applicationId = "vn.nghetruyen.app"
         minSdk = 26
         targetSdk = 36
-        
-        
+
+
         versionCode = 36
         versionName = "3.0.2"
         buildConfigField("String", "DIAGNOSTIC_BUILD_ID", "\"$diagnosticBuildId\"")
@@ -196,8 +196,8 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
-    
-    
+
+
     testImplementation("org.json:json:20251224")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.room:room-testing:2.8.4")

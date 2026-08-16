@@ -96,8 +96,8 @@ class UnifiedSourcePlatformManager(
                     changelog = "",
                     packageBytes = 0,
                     status = if (packageIsHttps) state else "INSECURE_PACKAGE_URL",
-                    
-                    
+
+
                     canInstall = packageIsHttps && state in setOf(
                         "NOT_INSTALLED", "UPDATE_AVAILABLE", "VERSION_UNKNOWN", "CURRENT", "REMOTE_OLDER",
                     ),
@@ -106,7 +106,7 @@ class UnifiedSourcePlatformManager(
         }
     }.distinctBy { it.repositoryId to it.sourceId }
 
-     
+
     fun refreshRepository(url: String): Result<SourceRepositoryUiInfo> {
         clearPendingCatalogInstall()
         val native = legacy.probeRepository(url)
@@ -149,7 +149,7 @@ class UnifiedSourcePlatformManager(
         return legacy.removeRepository(repositoryId)
     }
 
-     
+
     fun restorePersistedRepositories(): Int {
         clearPendingCatalogInstall()
         var restored = 0
@@ -171,7 +171,7 @@ class UnifiedSourcePlatformManager(
         return restored
     }
 
-    
+
 
 
 
@@ -213,7 +213,7 @@ class UnifiedSourcePlatformManager(
         }
     }
 
-    
+
 
 
 
@@ -365,7 +365,7 @@ class UnifiedSourcePlatformManager(
         vBook.loginInfoBySourceId(sourceId)
     }.getOrNull()
 
-     
+
     fun exportInstalledPack(sourceId: String, output: OutputStream): Result<Unit> {
         val installed = vBook.installedSources().firstOrNull { it.sourceId == sourceId }
             ?: return legacy.exportInstalledPack(sourceId, output)

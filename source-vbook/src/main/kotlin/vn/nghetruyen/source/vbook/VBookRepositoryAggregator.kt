@@ -84,7 +84,7 @@ class VBookRepositoryAggregator(
             repositories += row
             catalog.items.forEach { item ->
                 val aggregated = VBookAggregatedItem(repositoryId, normalizedDescriptor, item)
-                
+
                 val previous = items.putIfAbsent(aggregated.installIdentity, aggregated)
                 if (previous != null && previous.item.packageUrl != item.packageUrl) {
                     errors += VBookRepositoryError(

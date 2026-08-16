@@ -63,8 +63,8 @@ class ReferenceTtsPersistenceTest {
             ),
         )
 
-        
-        
+
+
         assertEquals(1f, preview.volume, 0.0001f)
         assertEquals(1.75f, preview.sonicVolume, 0.0001f)
     }

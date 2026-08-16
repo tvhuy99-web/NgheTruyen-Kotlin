@@ -70,7 +70,7 @@ class TtsAudioCache(
         return Entry(audio, audio.length())
     }
 
-     
+
     @Synchronized
     fun put(key: Key, source: File): Entry {
         require(source.isFile && source.length() > 0L) { "Tệp TTS cache rỗng hoặc không tồn tại." }
@@ -110,7 +110,7 @@ class TtsAudioCache(
             deleteId(id)
             total -= length
         }
-        
+
         directory.listFiles().orEmpty().forEach { file ->
             val isKnownAudio = file.extension == AUDIO_EXTENSION
             val isKnownChecksum = file.extension == CHECKSUM_EXTENSION && audioFile(file.nameWithoutExtension).exists()

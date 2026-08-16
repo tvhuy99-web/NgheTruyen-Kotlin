@@ -30,7 +30,7 @@ data class SourceConfigFieldUi(
     val key: String,
     val title: String,
     val subtitle: String,
-     
+
     val value: String,
     val defaultValue: String,
     val options: List<String>,
@@ -50,7 +50,7 @@ data class SourceInstallPreview(
     val fixtureCount: Int,
 )
 
- 
+
 data class SourceImportFileMetadata(
     val displayName: String = "",
     val mimeType: String = "",

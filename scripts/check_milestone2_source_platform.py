@@ -149,7 +149,7 @@ def signed_repository(path: Path) -> str:
     }
     canonical_bytes = json.dumps(canonical, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     signature = key.sign(canonical_bytes, ec.ECDSA(hashes.SHA256()))
-    
+
     shuffled_package = {key: package[key] for key in reversed(list(package))}
     raw = {
         "signature": base64.b64encode(signature).decode("ascii"),

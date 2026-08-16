@@ -8,7 +8,7 @@ import android.content.Intent
 import android.os.Build
 import androidx.core.content.ContextCompat
 
- 
+
 object ReaderSleepTimerStore {
     private const val PREFS = "reader_sleep_timer"
     private const val KEY_DEADLINE = "deadline_millis"

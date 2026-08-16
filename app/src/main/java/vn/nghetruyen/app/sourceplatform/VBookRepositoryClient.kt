@@ -31,7 +31,7 @@ import java.net.URI
 import java.security.MessageDigest
 import java.util.UUID
 
- 
+
 class VBookRepositoryClient(
     network: OkHttpSourceNetworkBroker? = null,
     private val cache: VBookRepositoryCacheStore? = null,
@@ -65,7 +65,7 @@ class VBookRepositoryClient(
     }
     private val directPackageBytes = VBookDirectPackageByteCache()
 
-    
+
 
 
 
@@ -86,7 +86,7 @@ class VBookRepositoryClient(
                 )
             }
 
-            
+
             val cached = cache?.read(canonical, VBookRepositoryAggregator.MAX_CATALOG_BYTES)
             if (cached != null) {
                 emit(traceId, "VBOOK_REPOSITORY_CACHE_FALLBACK", DiagnosticSeverity.WARN, mapOf(

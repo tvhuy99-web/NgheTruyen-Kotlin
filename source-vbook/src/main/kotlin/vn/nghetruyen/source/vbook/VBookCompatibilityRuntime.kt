@@ -14,7 +14,7 @@ import vn.nghetruyen.source.api.SourcePlatformResult
 import vn.nghetruyen.source.diagnostics.DiagnosticSink
 import vn.nghetruyen.source.runtime.SourceResourceProvider
 
- 
+
 class VBookCompatibilityRuntime(
     private val runtime: VBookActionRuntime = RhinoVBookActionRuntime(),
 ) {

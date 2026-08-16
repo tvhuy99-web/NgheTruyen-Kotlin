@@ -130,7 +130,7 @@ class BoundedDiagnosticRecorder(
         emitScoped(event, explicitOriginGeneration = null)
     }
 
-    
+
 
 
 
@@ -157,8 +157,8 @@ class BoundedDiagnosticRecorder(
             retainInTimeline = inferredOrigin == currentGeneration
         }
 
-        
-        
+
+
         runCatching { alwaysMirror.emit(scoped) }
         if (level == DiagnosticLevel.OFF) return
         if (level == DiagnosticLevel.BASIC && scoped.severity == DiagnosticSeverity.DEBUG) return
@@ -177,7 +177,7 @@ class BoundedDiagnosticRecorder(
         runCatching { mirror.emit(scoped) }
     }
 
-     
+
     fun restore(restored: List<DiagnosticEvent>) = lock.withLock {
         restored.takeLast(maxEvents).forEach { event ->
             val safe = event.copy(attributes = DiagnosticRedactor.redact(event.attributes))
@@ -211,7 +211,7 @@ class BoundedDiagnosticRecorder(
         traceOrigins[traceId.trim().takeIf(String::isNotBlank)]
     }
 
-    
+
 
 
 
@@ -269,7 +269,7 @@ class BoundedDiagnosticRecorder(
         selected
     }
 
-     
+
     fun retainActiveOperationTraces(): Set<String> = rotateScreen(emptySet())
 
     fun clear(sourceId: String? = null) = lock.withLock {
@@ -454,7 +454,7 @@ class BoundedDiagnosticEvidenceRecorder(
 
     fun snapshot(): List<DiagnosticEvidence> = lock.withLock { items.toList() }
 
-    
+
 
 
 
@@ -564,7 +564,7 @@ object DiagnosticRedactor {
         return cookieLike.replace(keySafe) { match -> "${match.groupValues[1]}=<redacted>" }.take(maxChars)
     }
 
-     
+
     fun redactHtmlPreservingStructure(raw: String, maxChars: Int = 8 * 1024 * 1024): String =
         htmlSensitiveAttribute.replace(redactLongText(raw, maxChars)) { match ->
             "${match.groupValues[1]}${match.groupValues[2]}<redacted>${match.groupValues[2]}"
@@ -637,7 +637,7 @@ data class DiagnosticArtifactMetadata(
     val declaredSizeBytes: Long? = null,
 )
 
- 
+
 object DiagnosticArtifactInspector {
     fun inspect(bytes: ByteArray, metadata: DiagnosticArtifactMetadata): Map<String, String> = buildMap {
         put("fileName", safeDisplayName(metadata.displayName))

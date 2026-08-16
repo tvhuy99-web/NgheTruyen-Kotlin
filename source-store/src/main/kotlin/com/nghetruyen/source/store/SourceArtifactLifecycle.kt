@@ -135,14 +135,14 @@ object SourceArtifactLifecycle {
         .joinToString("") { "%02x".format(it.toInt() and 0xff) }
 }
 
- 
+
 interface SourceArtifactArchive {
     fun stage(descriptor: SourceArtifactDescriptor, originalBytes: ByteArray)
     fun contains(artifactId: String): Boolean
     fun sha256(artifactId: String): String?
 }
 
- 
+
 interface SourceArtifactRegistry {
     fun active(identity: SourceArtifactIdentity): SourceArtifactDescriptor?
     fun previousKnownGood(identity: SourceArtifactIdentity): SourceArtifactDescriptor?

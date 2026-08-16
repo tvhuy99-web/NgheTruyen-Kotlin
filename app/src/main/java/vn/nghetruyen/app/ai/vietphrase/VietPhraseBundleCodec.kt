@@ -6,7 +6,7 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
- 
+
 object VietPhraseBundleCodec {
     data class Bundle(
         val rules: List<VietPhraseRule>,
@@ -54,7 +54,7 @@ object VietPhraseBundleCodec {
                     if (!safeName.equals("manifest.properties", ignoreCase = true)) warnings += "Bỏ qua tệp không nhận diện: $safeName"
                     continue
                 }
-                if (archiveLoaded) continue 
+                if (archiveLoaded) continue
                 val lower = safeName.lowercase()
                 if (lower.endsWith(".dic") || lower.endsWith(".dat")) {
                     val decoded = VietPhraseBinaryDictionaryCodec.decode(content, safeName, kind)

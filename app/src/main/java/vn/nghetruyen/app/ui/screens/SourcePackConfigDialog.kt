@@ -24,7 +24,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import vn.nghetruyen.app.sourceplatform.SourcePackUiInfo
 
- 
+
 @Composable
 internal fun SourcePackConfigDialog(
     pack: SourcePackUiInfo,

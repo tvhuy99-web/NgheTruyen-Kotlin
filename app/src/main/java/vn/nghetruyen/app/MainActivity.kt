@@ -313,7 +313,7 @@ class MainActivity : ComponentActivity() {
                 is AppResult.Success -> {
                     val preview = inspection.value.preview
                     if (!inspection.value.isLegacyXpk || preview == null) {
-                        
+
                         viewModel.restoreBackup(uri)
                     } else {
                         AlertDialog.Builder(this@MainActivity)
@@ -346,8 +346,8 @@ class MainActivity : ComponentActivity() {
                         errorCode = if (complete) null else "PARTIAL_MIGRATION",
                         components = selected.map { it.name },
                     )
-                    
-                    
+
+
                     viewModel.setRootTab(viewModel.state.value.rootTab)
                     viewModel.refreshSourceSessions()
                     viewModel.readerActionMessage(message)

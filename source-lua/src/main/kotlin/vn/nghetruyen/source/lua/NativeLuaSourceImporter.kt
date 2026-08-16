@@ -51,20 +51,20 @@ object NativeLuaSourceImporter {
         )
         val packageValue = sourceSandbox.evaluate(sourceText, "@native/$entryPath")
         require(packageValue.istable()) { "NATIVE_LUA_PACKAGE_TABLE_REQUIRED" }
-        
+
         val packageTable = sanitizePackage(packageValue).checktable()
         require(packageTable.get("api_version").optint(0) == 2 || packageTable.get("native_source_api").optint(0) == 2) {
             "NATIVE_LUA_API_VERSION_UNSUPPORTED"
         }
 
-        
-        
-        
+
+
+
         val sourceTable = packageTable.get("source").checktable()
         promoteFullInternalAuthority(sourceTable)
 
-        
-        
+
+
         val validationSandbox = LuaSandbox(
             modules = mapOf(NATIVE_API_MODULE to nativeApi),
             instructionBudget = 500_000,
@@ -212,7 +212,7 @@ object NativeLuaSourceImporter {
         source.set("permissions", permissions)
     }
 
-    
+
 
 
 
@@ -308,7 +308,7 @@ object NativeLuaSourceImporter {
             value.isboolean() -> LuaValue.valueOf(value.toboolean())
             value.isnumber() -> LuaValue.valueOf(value.todouble())
             value.isstring() -> LuaValue.valueOf(value.tojstring())
-            value.isfunction() -> value 
+            value.isfunction() -> value
             value.istable() -> {
                 require(seen.put(value, true) == null) { "NATIVE_LUA_PACKAGE_CYCLIC" }
                 try {
@@ -341,7 +341,7 @@ object NativeLuaSourceImporter {
         else -> emptyList()
     }
 
-     
+
     private fun staticCategoryNames(source: LuaTable): List<String> {
         val items = source.get("actions").takeIf(LuaValue::istable)
             ?.get("categories")?.takeIf(LuaValue::istable)

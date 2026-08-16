@@ -14,7 +14,7 @@ import vn.nghetruyen.app.data.settings.SettingsRepository
 import vn.nghetruyen.app.playback.XpkPlaybackRuntime
 import java.util.UUID
 
- 
+
 class NarrationPlanCoordinator(
     private val library: LibraryRepository,
     private val settings: SettingsRepository,
@@ -177,7 +177,7 @@ class NarrationPlanCoordinator(
         }
     }
 
-     
+
     private suspend fun persistVoicePlan(content: ChapterContent, plan: VoiceCastPlan) {
         val appSettings = settings.snapshot()
         val canonicalAssignments = plan.assignments
@@ -337,7 +337,7 @@ class NarrationPlanCoordinator(
 
     private fun chapterBody(content: ChapterContent): String = canonicalParagraphs(content).joinToString("\n")
 
-    
+
     private fun musicSourceHash(content: ChapterContent, tracks: List<SceneMusicTrackEntity>): String =
         ChapterAiWorkflow.sha256(content.paragraphs + tracks.flatMap { listOf(it.id, it.tagsCsv, it.title) })
 

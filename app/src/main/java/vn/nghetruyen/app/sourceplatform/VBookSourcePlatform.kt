@@ -221,7 +221,7 @@ class VBookSourcePlatform(
         return coordinator.rollback(current.identity, clockMs())
     }
 
-     
+
     fun uninstallBySourceId(sourceId: String): Boolean {
         val current = installedBySourceId(sourceId)
         when (val cleared = brokers.storage.clear(sourceId)) {
@@ -246,7 +246,7 @@ class VBookSourcePlatform(
         }.getOrNull()
     }
 
-     
+
     fun activeProviderSessions(contentType: VBookContentType? = null): List<VBookProviderSession> =
         activeArtifacts().mapNotNull { artifact ->
             val bytes = store.originalBytes(artifact.artifactId) ?: return@mapNotNull null
@@ -329,7 +329,7 @@ class VBookSourcePlatform(
         return configService.reset(current.identity.canonicalKey(), manifest)
     }
 
-     
+
     fun validateBySourceId(sourceId: String): VBookCandidateValidation {
         val current = installedBySourceId(sourceId)
         val bytes = store.originalBytes(current.artifactId) ?: error("VBOOK_INSTALLED_ARTIFACT_BYTES_MISSING")

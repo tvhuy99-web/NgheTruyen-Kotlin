@@ -4,7 +4,7 @@ import vn.nghetruyen.source.api.JsonCodec
 import vn.nghetruyen.source.api.JsonValue
 import vn.nghetruyen.source.api.SourceManifest
 
- 
+
 enum class VBookContractProfile {
     LEGACY_JS,
     CURRENT_JS,
@@ -303,9 +303,9 @@ object VBookContractDetector {
         }
 
         val profile = when {
-            
-            
-            
+
+
+
             current == 0 && legacy == 0 -> VBookContractProfile.CURRENT_JS
             current >= legacy + 2 -> VBookContractProfile.CURRENT_JS
             legacy >= current + 2 -> VBookContractProfile.LEGACY_JS
@@ -324,8 +324,8 @@ object VBookRequiredScripts {
         }
         val required = when (manifest.metadata.type) {
             VBookContentType.NOVEL, VBookContentType.CHINESE_NOVEL -> setOf("search", "detail", "toc", "chap")
-            
-            
+
+
             VBookContentType.COMIC -> setOf("search", "detail", "toc")
             VBookContentType.VIDEO, VBookContentType.AUDIO -> setOf("search", "detail", "toc", "track")
             VBookContentType.TTS -> setOf("voice", "tts")

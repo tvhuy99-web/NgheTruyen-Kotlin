@@ -1966,8 +1966,8 @@ class ReaderPlaybackService : Service() {
                     }
                     val warning = result?.warnings?.firstOrNull()?.takeIf(String::isNotBlank)
                         ?: attempt.exceptionOrNull()?.message
-                    
-                    
+
+
                     if (PlaybackQueueStore.state.value.chapterId == parentChapterId) {
                         PlaybackQueueStore.setNarrationAutomation(
                             stage = if (failed) NarrationAutomationStage.FAILED else NarrationAutomationStage.NEXT_READY,

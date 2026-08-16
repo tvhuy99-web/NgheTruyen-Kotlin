@@ -7,7 +7,7 @@ import java.util.Base64
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 
- 
+
 object VietPhrasePersistenceArchiveCodec {
     data class DictionaryState(
         val id: String,
@@ -97,7 +97,7 @@ object VietPhrasePersistenceArchiveCodec {
         return Archive(rules, states)
     }
 
-     
+
     fun decodeCompatible(bytes: ByteArray): Archive = runCatching { decode(bytes) }.getOrElse {
         Archive(VietPhraseArchiveCodec.decode(bytes).rules, emptyList(), legacyRuleOnly = true)
     }

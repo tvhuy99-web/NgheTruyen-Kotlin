@@ -23,7 +23,7 @@ data class VBookTtsAudio(
 data class VBookTranslateLanguage(
     val id: String,
     val name: String,
-     
+
     val type: String?,
 )
 
@@ -92,7 +92,7 @@ class VBookProviderSession(
         }
     }
 
-     
+
     fun mediaSources(episodeUrl: String, traceId: String = ""): SourcePlatformResult<List<VBookMediaSourceOption>> {
         if (contentType !in setOf(VBookContentType.VIDEO, VBookContentType.AUDIO)) {
             return invalid("VBOOK_MEDIA_CONTENT_TYPE_REQUIRED", traceId)

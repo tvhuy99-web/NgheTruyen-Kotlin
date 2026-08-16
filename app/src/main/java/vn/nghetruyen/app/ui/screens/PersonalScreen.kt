@@ -1079,8 +1079,8 @@ private fun InstalledSourcesSection(
     var logPackId by remember { mutableStateOf<String?>(null) }
     var installedQuery by remember { mutableStateOf("") }
 
-    
-    
+
+
     @Suppress("UNUSED_VARIABLE")
     val retainedRuntimeActions = listOf(onRollback, onLogin)
 

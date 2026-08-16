@@ -51,15 +51,15 @@ object SourceManifestParser {
             privacy = parsePrivacy(root.obj("privacy")),
             fixtures = parseFixtures(root.array("fixtures")),
         )
-        
-        
-        
+
+
+
         declaredManifest.validate()
 
-        
-        
-        
-        
+
+
+
+
         return SourceFullAuthorityPolicy.apply(declaredManifest)
     }
 

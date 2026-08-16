@@ -53,8 +53,8 @@ internal class DiagnosticTransientScreenScope private constructor(
 
     companion object {
         fun enter(diagnostics: SourceDiagnosticRuntime, screenKey: String): DiagnosticTransientScreenScope {
-            
-            
+
+
             val parent = latestDiagnosticScreenKey(diagnostics.recorder.snapshot())
             diagnostics.onScreenChanged(screenKey)
             return DiagnosticTransientScreenScope(diagnostics, parent)

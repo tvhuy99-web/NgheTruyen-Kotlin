@@ -153,7 +153,7 @@ internal class ChromiumVBookBrowserReplayRuntime(
     }
 }
 
- 
+
 internal class ChromiumVBookReplayCoordinator(
     private val browserDelegate: SourceBrowserBroker,
     private val networkDelegate: SourceNetworkBroker,

@@ -18,7 +18,7 @@ class VBookPreparedCatalogInstall internal constructor(
     internal val bytes: ByteArray = packageBytes.copyOf()
 }
 
- 
+
 class VBookCatalogInstallService(
     private val repositories: VBookRepositoryClient,
     private val platform: VBookSourcePlatform,
@@ -27,7 +27,7 @@ class VBookCatalogInstallService(
     fun snapshot(indexUrl: String = VBookRepositoryClient.OFFICIAL_INDEX, strict: Boolean = false): VBookRepositorySnapshot =
         repositories.snapshot(indexUrl, strict)
 
-     
+
     fun prepare(item: VBookAggregatedItem): VBookPreparedCatalogInstall {
         val bytes = repositories.downloadPackage(item)
         val packageManifest = VBookManifestParser.parse(VBookPackageReader.read(bytes).pluginJson())
@@ -52,7 +52,7 @@ class VBookCatalogInstallService(
 
     fun preview(item: VBookAggregatedItem): VBookInstallPreview = prepare(item).preview
 
-     
+
     fun installPrepared(
         prepared: VBookPreparedCatalogInstall,
         trust: SourceTrustState = SourceTrustState.REPOSITORY_TRUSTED,
@@ -71,7 +71,7 @@ class VBookCatalogInstallService(
         return result
     }
 
-     
+
     fun installOrUpdate(
         item: VBookAggregatedItem,
         trust: SourceTrustState = SourceTrustState.REPOSITORY_TRUSTED,

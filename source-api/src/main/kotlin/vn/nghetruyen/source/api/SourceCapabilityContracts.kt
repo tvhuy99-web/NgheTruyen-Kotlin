@@ -161,7 +161,7 @@ data class SourceWebSocketRequest(
 
 data class SourceWebSocketFrame(
     val type: String,
-     
+
     val data: String,
 ) {
     init {
@@ -174,7 +174,7 @@ data class SourceWebSocketResponse(
     val closeCode: Int?,
     val closeReason: String?,
     val traceId: String,
-     
+
     val frames: List<SourceWebSocketFrame> = emptyList(),
 )
 
@@ -202,7 +202,7 @@ data class SourceTranslationRequest(
     val instruction: String = "",
     val maxOutputBytes: Int = 2 * 1024 * 1024,
     val traceId: String = UUID.randomUUID().toString(),
-     
+
     val options: Map<String, String> = emptyMap(),
 )
 
@@ -219,7 +219,7 @@ data class SourceTranslationResponse(
     val segments: List<String> = emptyList(),
     val provider: String? = null,
     val traceId: String,
-     
+
     val segmentMetadata: List<SourceTranslationSegment> = emptyList(),
 )
 
@@ -308,13 +308,13 @@ data class SourceCapabilityBrokers(
     val websocket: SourceWebSocketBroker = SourceWebSocketBroker.DENY_ALL,
     val nativeHooks: SourceNativeHookBroker = SourceNativeHookBroker.DENY_ALL,
     val graphics: SourceGraphicsBroker = SourceGraphicsBroker.DENY_ALL,
-     
+
     val translation: SourceTranslationBroker = SourceTranslationBroker.DENY_ALL,
     val cookies: SourceCookiePartition = SourceCookiePartition.NONE,
-     
+
     val quickTranslation: SourceTranslationBroker = SourceTranslationBroker.DENY_ALL,
-     
+
     val hostKernel: SourceHostKernelBroker = SourceHostKernelBroker.UNAVAILABLE,
-     
+
     val hostEvents: SourceHostEventSink = SourceHostEventSink.NONE,
 )

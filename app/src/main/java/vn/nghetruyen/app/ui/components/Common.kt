@@ -77,8 +77,8 @@ fun ReferenceActionButton(
     normalContentColor: Color = Color.White,
     roleValue: Role = Role.Button,
 ) {
-    
-    
+
+
     val isHiddenSettingsHomeAction =
         text in HiddenSettingsHomeActions &&
             minHeight == 50.dp &&

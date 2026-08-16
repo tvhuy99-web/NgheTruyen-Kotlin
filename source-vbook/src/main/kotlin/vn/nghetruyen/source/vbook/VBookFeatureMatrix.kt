@@ -56,7 +56,7 @@ data class VBookCorpusCompatibilityMatrix(
             certifications.values.none { it.state == VBookFeatureCertificationState.DIVERGED }
 }
 
- 
+
 object VBookEngineFeatureMatrix {
     private val implemented = setOf(
         VBookFeature.CONTRACT_LEGACY,

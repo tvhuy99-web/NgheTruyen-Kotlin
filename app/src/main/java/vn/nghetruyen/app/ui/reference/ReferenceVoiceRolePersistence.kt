@@ -6,16 +6,16 @@ import vn.nghetruyen.app.core.model.VoiceRoleDraft
 import vn.nghetruyen.app.data.local.VoiceRoleEntity
 import java.util.UUID
 
- 
+
 object ReferenceVoiceRolePersistence {
     suspend fun save(context: Context, storyId: String, draft: VoiceRoleDraft): String {
         val app = context.applicationContext as NgheTruyenApplication
         val id = draft.originalRoleId ?: UUID.randomUUID().toString()
         val narrator = draft.isNarrator
         val method = if (draft.processingMethod == "sonic") "sonic" else "system"
-        
-        
-        
+
+
+
         val activeVolume = if (method == "sonic") {
             draft.sonicVolume.coerceIn(0f, 2f)
         } else {

@@ -3,7 +3,7 @@ package vn.nghetruyen.app.ai
 import vn.nghetruyen.app.data.local.VietPhraseEntity
 import java.util.Locale
 
- 
+
 object VietPhraseFileCodec {
     data class Record(
         val source: String,

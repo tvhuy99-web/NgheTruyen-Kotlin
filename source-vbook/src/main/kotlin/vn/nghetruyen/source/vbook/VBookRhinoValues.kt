@@ -5,7 +5,7 @@ import org.mozilla.javascript.Scriptable
 import org.mozilla.javascript.ScriptableObject
 import org.mozilla.javascript.Undefined
 
- 
+
 internal object VBookRhinoValues {
     fun array(context: Context, scope: Scriptable, values: Iterable<Any?>): Scriptable {
         val safe = values.map { value ->

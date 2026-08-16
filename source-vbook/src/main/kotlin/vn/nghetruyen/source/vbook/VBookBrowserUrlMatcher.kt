@@ -1,6 +1,6 @@
 package vn.nghetruyen.source.vbook
 
- 
+
 internal object VBookBrowserUrlMatcher {
     fun matches(url: String, pattern: String): Boolean {
         if (pattern.isEmpty()) return false

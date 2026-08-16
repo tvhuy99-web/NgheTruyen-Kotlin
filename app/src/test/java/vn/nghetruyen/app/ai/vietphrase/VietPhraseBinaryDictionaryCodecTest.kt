@@ -28,7 +28,7 @@ class VietPhraseBinaryDictionaryCodecTest {
     @Test
     fun decodesCompiledDat() {
         val nodeCount = 22_828
-        val childIndex = 22_827 
+        val childIndex = 22_827
         val base = IntArray(nodeCount)
         val check = IntArray(nodeCount)
         base[0] = 1

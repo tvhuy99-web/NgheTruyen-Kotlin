@@ -43,9 +43,9 @@ data class SourceNetworkCapability(
     val maxRequestBytes: Int = 0,
     val requestsPerMinute: Int = 60,
     val maxConcurrent: Int = 2,
-     
+
     val publicInternet: Boolean = false,
-     
+
     val allowCleartext: Boolean = false,
 )
 

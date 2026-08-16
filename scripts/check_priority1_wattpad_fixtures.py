@@ -176,7 +176,7 @@ process.stdout.write(typeof raw==='string'?raw:JSON.stringify(raw));
 '''
     passed = 0
     with tempfile.TemporaryDirectory(prefix="wattpad-fixtures-") as temp:
-        
+
         runner = Path(temp) / "runner.cjs"
         runner.write_text(node_program, encoding="utf-8")
         for fixture in manifest["fixtures"]:

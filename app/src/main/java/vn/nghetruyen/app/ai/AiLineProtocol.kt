@@ -127,8 +127,8 @@ object AiLineProtocol {
         }
         if (validIds.isNotEmpty() && assignmentMap.isEmpty()) error("Không có ID hợp lệ nào trong phản hồi AI")
 
-        
-        
+
+
         val groupVoice = linkedMapOf<String, String>()
         validIds.forEach { id ->
             val group = options.dialogueGroupByUnitId[id]?.trim().orEmpty()
@@ -180,7 +180,7 @@ object AiLineProtocol {
         return XpkSceneMusicParity.validateScenes(rows, options.validUnitIds, options.validTrackIds)
     }
 
-     
+
     @Deprecated("Use parseXpkNarration; paragraph ROLE/ASSIGN protocol is not used by XPK narration runtime")
     fun parseVoiceCast(raw: String): VoiceCastPlan {
         val roles = LinkedHashMap<String, VoiceRole>()

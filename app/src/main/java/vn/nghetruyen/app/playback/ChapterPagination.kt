@@ -11,7 +11,7 @@ data class PersistedChapterPageCursor(
     val nextChapterUrl: String? = null,
 )
 
- 
+
 object ChapterPageCursorCodec {
     private const val PREFIX = "nghetruyen:toc-page:v1:"
 
@@ -59,7 +59,7 @@ data class ChapterCatalogMergeResult(
     val repeatedCursor: Boolean,
 )
 
- 
+
 object ChapterCatalogMerger {
     fun merge(
         existing: List<ChapterSummary>,

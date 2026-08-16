@@ -1,6 +1,6 @@
 package vn.nghetruyen.source.vbook
 
- 
+
 object VBookBrowserPatternPrelude {
     fun build(): String = """
         __vbookBrowserMatch = function(url, pattern) {

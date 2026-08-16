@@ -19,7 +19,7 @@ data class VBookPackage(
     val iconBytes: ByteArray?,
     val scripts: Map<String, ByteArray>,
     val otherFiles: Set<String>,
-     
+
     val resources: Map<String, ByteArray> = emptyMap(),
 ) {
     fun pluginJson(): String = strictUtf8(pluginJsonBytes, "plugin.json")
@@ -34,7 +34,7 @@ fun interface VBookScriptPayloadDecoder {
     fun decode(manifest: VBookExtensionManifest, path: String, payload: ByteArray): String
 
     companion object {
-        
+
 
 
 
@@ -101,7 +101,7 @@ object VBookPackageReader {
         return VBookPackage(plugin, icon, scripts, other, resources)
     }
 
-    
+
 
 
 

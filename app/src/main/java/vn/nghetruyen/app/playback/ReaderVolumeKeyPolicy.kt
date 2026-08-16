@@ -1,6 +1,6 @@
 package vn.nghetruyen.app.playback
 
- 
+
 object ReaderVolumeKeyPolicy {
     enum class Key { VOLUME_UP, VOLUME_DOWN, OTHER }
 

@@ -27,7 +27,7 @@ class SourceRegistry(
         it.descriptor.health == SourceHealth.READY || it.descriptor.health == SourceHealth.DEGRADED
     }
 
-    
+
 
 
 
@@ -46,7 +46,7 @@ class SourceRegistry(
         byId = merge(normalizedSources + preservedVBook)
     }
 
-     
+
     @Synchronized
     fun replaceExternalSources(externalSources: List<StorySource>) {
         byId = merge(externalSources)
@@ -57,9 +57,9 @@ class SourceRegistry(
         val builtInsById = legacySources.associateBy { it.descriptor.id }
         val normalizedSources = normalizeExternalSources(sourcePackSources)
 
-        
-        
-        
+
+
+
         legacySources.forEach { selected[it.descriptor.id] = it }
         normalizedSources.distinctBy { it.descriptor.id }.forEach { rawCandidate ->
             val candidate = if (rawCandidate is BuiltInSourcePackBridge) {

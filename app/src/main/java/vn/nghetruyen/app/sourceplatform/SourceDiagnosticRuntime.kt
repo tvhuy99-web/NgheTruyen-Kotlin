@@ -84,7 +84,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
     @Volatile private var activeScreenKey: String = ""
     @Volatile private var activeScreenSessionId: String = ""
 
-     
+
     val advanced: Boolean get() = mode != MODE_OFF
     val crashSafe: Boolean get() = mode == MODE_CONTINUOUS
 
@@ -103,7 +103,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
         val previous = mode
         if (normalized == previous) return normalized
 
-        
+
         if (previous == MODE_CONTINUOUS) {
             mark(
                 name = "DIAGNOSTICS_MODE_CHANGED",
@@ -119,8 +119,8 @@ class SourceDiagnosticRuntime(private val context: Context) {
 
         when (normalized) {
             MODE_CONTINUOUS -> {
-                
-                
+
+
                 continuousStore.seedMissing(currentEvents)
                 clearCurrentSession()
                 activeScreenSessionId = UUID.randomUUID().toString()
@@ -156,7 +156,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
         return normalized
     }
 
-    
+
 
 
 
@@ -262,14 +262,14 @@ class SourceDiagnosticRuntime(private val context: Context) {
 
     fun persistentCriticalCount(): Int = criticalStore.eventCount
 
-    
+
 
 
 
     fun persistentCriticalSnapshot(): List<DiagnosticEvent> =
         if (mode == MODE_OFF) criticalStore.snapshot() else emptyList()
 
-     
+
     fun clearBlackBox() {
         clearCurrentSession()
         continuousStore.clear()

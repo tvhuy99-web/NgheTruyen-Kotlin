@@ -6,7 +6,7 @@ import java.security.Signature
 import java.security.spec.X509EncodedKeySpec
 import java.util.Base64
 
- 
+
 object SourceDetachedSignatureVerifier {
     fun verify(
         trustKeys: Collection<SourceTrustKey>,

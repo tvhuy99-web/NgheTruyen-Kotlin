@@ -16,7 +16,7 @@ import vn.nghetruyen.app.downloads.DownloadStorageGuard
 import vn.nghetruyen.app.downloads.StoryDownloadPlanner
 import java.util.concurrent.atomic.AtomicReference
 
- 
+
 object DownloadedLibraryCallbacks {
     private val selectedChapter = AtomicReference<ChapterEntity?>(null)
 
@@ -28,7 +28,7 @@ object DownloadedLibraryCallbacks {
         viewModel.updateDownloadedStoryFromLibrary(story)
     }
 
-     
+
     suspend fun chapters(app: NgheTruyenApplication, story: StoryEntity): List<ChapterEntity> =
         app.container.libraryRepository.listReadableOfflineChapters(
             storyId = story.id,
@@ -36,7 +36,7 @@ object DownloadedLibraryCallbacks {
         )
             .sortedWith(compareBy<ChapterEntity> { it.chapterIndex }.thenBy { it.title })
 
-     
+
     fun selectChapter(chapter: ChapterEntity) {
         selectedChapter.set(chapter)
     }
@@ -45,12 +45,12 @@ object DownloadedLibraryCallbacks {
         selectedChapter.getAndSet(null)?.takeIf { it.storyId == storyId }
 }
 
- 
+
 fun AppViewModel.openDownloadedStoryFromLibrary(entity: StoryEntity) {
     val chapter = DownloadedLibraryCallbacks.consumeSelectedChapter(entity.id)
-    
-    
-    
+
+
+
     openOfflineStory(entity)
     if (chapter == null) return
     viewModelScope.launch {

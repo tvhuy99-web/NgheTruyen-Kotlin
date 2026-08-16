@@ -28,7 +28,7 @@ object XpkPlaybackRuntime {
     @Volatile
     private var canonicalScenePlanActive = false
 
-    
+
 
 
 
@@ -60,7 +60,7 @@ object XpkPlaybackRuntime {
         }
     }
 
-     
+
     fun timelineFingerprint(chunks: List<PlaybackSpeechChunk>): String {
         val digest = MessageDigest.getInstance("SHA-256")
         chunks.forEach { chunk ->
@@ -82,13 +82,13 @@ object XpkPlaybackRuntime {
     fun timelineFingerprint(title: String, paragraphs: List<String>): String =
         timelineFingerprint(buildSpeechTimeline(title, paragraphs))
 
-     
+
     fun resetCanonicalPlans() {
         canonicalVoicePlanActive = false
         canonicalScenePlanActive = false
     }
 
-    
+
 
 
 
@@ -122,8 +122,8 @@ object XpkPlaybackRuntime {
             )
         }
 
-        
-        
+
+
         val chunks = PlaybackQueueStore.state.value.speechChunks
         val groupVoice = linkedMapOf<String, String>()
         chunks.forEach { chunk ->
@@ -144,7 +144,7 @@ object XpkPlaybackRuntime {
         return result
     }
 
-    
+
 
 
 
@@ -193,7 +193,7 @@ object XpkPlaybackRuntime {
         return (paragraph - 1).coerceAtLeast(0)
     }
 
-     
+
     private fun requireCurrentTimeline(root: JSONObject): Boolean {
         val expected = root.optString("timeline_fingerprint").trim()
         if (expected.isBlank()) return false

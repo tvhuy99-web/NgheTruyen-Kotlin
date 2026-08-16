@@ -368,8 +368,8 @@ class ChapterDownloadWorker(
         total: Int,
     ) {
         if (!isStopped) return
-        
-        
+
+
         throw CancellationException("Worker đã dừng: $jobId/$storyId/$sourceId/$completed/$total")
     }
 

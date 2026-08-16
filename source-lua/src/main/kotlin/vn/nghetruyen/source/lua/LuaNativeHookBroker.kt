@@ -54,10 +54,10 @@ class LuaNativeHookBroker : SourceNativeHookBroker {
         val encoded = JsonCodec.stringify(sandbox.luaToJson(output))
         require(encoded.toByteArray(Charsets.UTF_8).size <= request.maxOutputBytes) { "NATIVE_LUA_HOOK_OUTPUT_TOO_LARGE" }
 
-        
-        
-        
-        
+
+
+
+
         val wireOutput = if (manifest.runtime.mode == SourceRuntimeMode.NATIVE_LUA_COMPAT) {
             JsonCodec.stringify(JsonValue.Str(encoded))
         } else {

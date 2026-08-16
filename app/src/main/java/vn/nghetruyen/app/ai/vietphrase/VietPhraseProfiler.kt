@@ -1,6 +1,6 @@
 package vn.nghetruyen.app.ai.vietphrase
 
- 
+
 object VietPhraseProfiler {
     data class Sample(
         val label: String,

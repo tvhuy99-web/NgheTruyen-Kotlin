@@ -10,7 +10,7 @@ import java.io.IOException
 import java.io.OutputStream
 import java.io.RandomAccessFile
 
- 
+
 data class WaveSegment(
     val file: File,
     val formatPayload: ByteArray,
@@ -40,7 +40,7 @@ object WaveFileAssembler {
         require(file.isFile && file.length() >= 44L) { "Tệp âm thanh WAV không hợp lệ." }
         RandomAccessFile(file, "r").use { input ->
             if (input.readAscii(4) != "RIFF") throw IOException("Tệp âm thanh không phải RIFF.")
-            input.readUInt32Le() 
+            input.readUInt32Le()
             if (input.readAscii(4) != "WAVE") throw IOException("Tệp RIFF không phải WAVE.")
 
             var formatPayload: ByteArray? = null

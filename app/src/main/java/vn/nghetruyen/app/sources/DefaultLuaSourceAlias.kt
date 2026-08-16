@@ -27,8 +27,8 @@ private class StableDefaultLuaSourceAlias(
 ) : StorySource {
     override val descriptor: SourceDescriptor = delegate.descriptor.copy(id = stableId)
 
-    
-    
+
+
     override val selectionPriority: Int = 250
 
     override suspend fun search(query: String, page: Int): AppResult<List<StorySummary>> =

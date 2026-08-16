@@ -3,7 +3,7 @@ package vn.nghetruyen.app.playback
 import vn.nghetruyen.app.data.local.VoiceRoleEntity
 import java.text.Normalizer
 
- 
+
 data class ResolvedVoiceRole(
     val role: VoiceRoleEntity?,
     val spokenText: String,

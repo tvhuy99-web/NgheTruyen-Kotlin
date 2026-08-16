@@ -10,7 +10,7 @@ import org.mozilla.javascript.Scriptable
 import org.mozilla.javascript.ScriptableObject
 import org.mozilla.javascript.Undefined
 
- 
+
 sealed interface JsValue {
     object Null : JsValue
     object UndefinedValue : JsValue
@@ -22,7 +22,7 @@ sealed interface JsValue {
 }
 
 data class JsSandboxPolicy(
-    
+
 
 
 
@@ -33,13 +33,13 @@ data class JsSandboxPolicy(
     val maxInstructions: Long = 500_000,
     val wallClockTimeoutMs: Long = 2_000,
     val instructionObserverThreshold: Int = 1_000,
-     
+
     val maxHeapGrowthBytes: Long? = null,
     val maxResultUnits: Int = 1_000_000,
     val maxCollectionItems: Int = 20_000,
     val maxValueDepth: Int = 64,
     val languageVersion: Int = Context.VERSION_ES6,
-     
+
     val hardInstructionMultiplier: Int = 16,
 ) {
     val hardInstructionLimit: Long
@@ -104,7 +104,7 @@ class JsSandboxException(
     cause: Throwable? = null,
 ) : RuntimeException(message, cause)
 
- 
+
 fun interface JsSandboxExtension {
     fun install(context: Context, scope: ScriptableObject)
 }

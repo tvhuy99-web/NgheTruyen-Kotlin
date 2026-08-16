@@ -1163,7 +1163,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-     
+
     fun prepareRepositorySourceInstall(repositoryId: String, sourceId: String) {
         if (state.value.sourceInstallBusy || state.value.sourceRepositoryRefreshing) return
         viewModelScope.launch {
@@ -1195,7 +1195,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-     
+
     fun installRepositorySource(repositoryId: String, sourceId: String) {
         if (state.value.sourceInstallBusy || state.value.sourceRepositoryRefreshing) return
         val requested = state.value.sourceRepositoryPackages.firstOrNull {
@@ -2054,9 +2054,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val combined = (existing + incoming).distinctBy { story ->
             story.url.ifBlank { "${story.sourceId}:${story.id}" }
         }
-        
-        
-        
+
+
+
         if (mode != ExploreMode.SEARCH && sortMode == SearchSortMode.RELEVANCE) return combined
         return StorySearch.merge(
             results = combined,
@@ -3560,7 +3560,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    
+
 
 
 

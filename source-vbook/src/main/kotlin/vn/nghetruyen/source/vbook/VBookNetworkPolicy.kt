@@ -38,7 +38,7 @@ object VBookNetworkPolicy {
         return base.copy(capabilities = base.capabilities.copy(network = network))
     }
 
-    
+
 
 
 

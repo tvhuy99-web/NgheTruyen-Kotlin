@@ -40,7 +40,7 @@ object PlaybackRecoveryPolicy {
     }
 }
 
- 
+
 object PlaybackWatchdogPolicy {
     const val INIT_TIMEOUT_MILLIS = 12_000L
     const val MIN_SPEECH_TIMEOUT_MILLIS = 15_000L
@@ -50,7 +50,7 @@ object PlaybackWatchdogPolicy {
 
     fun speechTimeoutMillis(textLength: Int, rate: Float, usesSonic: Boolean): Long {
         val safeRate = rate.coerceIn(0.5f, 2f)
-        
+
         val estimatedSeconds = ceil(textLength.coerceAtLeast(1) / (12.0 * safeRate)).toLong()
         val processingHeadroom = if (usesSonic) 20_000L else 8_000L
         return (estimatedSeconds * 1_000L + processingHeadroom)
@@ -159,7 +159,7 @@ object NextChapterAdvancePolicy {
         )
 }
 
- 
+
 class TtsGenerationGuard {
     private var generation: Long = 0L
 

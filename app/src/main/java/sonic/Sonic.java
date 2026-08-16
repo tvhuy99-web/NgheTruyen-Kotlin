@@ -12,14 +12,14 @@ public class Sonic {
 
     private static final int SONIC_MIN_PITCH = 65;
     private static final int SONIC_MAX_PITCH = 400;
-                                                               
+
     private static final int SONIC_AMDF_FREQ = 4000;
-                                                                         
+
     private static final int SINC_FILTER_POINTS = 12;
     private static final int SINC_TABLE_SIZE = 601;
 
-                                                                            
-                                                                     
+
+
     private static final short sincTable[] = {
         0, 0, 0, 0, 0, 0, 0, -1, -1, -2, -2, -3, -4, -6, -7, -9, -10, -12, -14,
         -17, -19, -21, -24, -26, -29, -32, -34, -37, -40, -42, -44, -47, -48, -50,
@@ -100,7 +100,7 @@ public class Sonic {
     private int minDiff;
     private int maxDiff;
 
-    
+
     private short[] resize(
         short[] oldArray,
         int newLength)
@@ -113,7 +113,7 @@ public class Sonic {
         return newArray;
     }
 
-    
+
     private void move(
         short dest[],
         int destPos,
@@ -124,20 +124,20 @@ public class Sonic {
         System.arraycopy(source, sourcePos*numChannels, dest, destPos*numChannels, numSamples*numChannels);
     }
 
-    
+
     private void scaleSamples(
         short samples[],
         int position,
         int numSamples,
         float volume)
     {
-        
+
         int fixedPointVolume = (int)(volume*4096.0f);
         int start = position*numChannels;
         int stop = start + numSamples*numChannels;
 
         for(int xSample = start; xSample < stop; xSample++) {
-            
+
             int value = (samples[xSample]*fixedPointVolume) >> 12;
             if(value > 32767) {
                 value = 32767;
@@ -148,39 +148,39 @@ public class Sonic {
         }
     }
 
-    
+
     public float getSpeed()
     {
         return speed;
     }
 
-    
+
     public void setSpeed(
         float speed)
     {
         this.speed = speed;
     }
 
-    
+
     public float getPitch()
     {
         return pitch;
     }
 
-    
+
     public void setPitch(
         float pitch)
     {
         this.pitch = pitch;
     }
 
-    
+
     public float getRate()
     {
         return rate;
     }
 
-    
+
     public void setRate(
         float rate)
     {
@@ -189,46 +189,46 @@ public class Sonic {
         this.newRatePosition = 0;
     }
 
-    
+
     public boolean getChordPitch()
     {
         return useChordPitch;
     }
 
-    
+
     public void setChordPitch(
         boolean useChordPitch)
     {
         this.useChordPitch = useChordPitch;
     }
 
-    
+
     public int getQuality()
     {
         return quality;
     }
 
-    
+
     public void setQuality(
         int quality)
     {
         this.quality = quality;
     }
 
-    
+
     public float getVolume()
     {
         return volume;
     }
 
-    
+
     public void setVolume(
         float volume)
     {
         this.volume = volume;
     }
 
-    
+
     private void allocateStreamBuffers(
         int sampleRate,
         int numChannels)
@@ -250,7 +250,7 @@ public class Sonic {
         prevPeriod = 0;
     }
 
-    
+
     public Sonic(
         int sampleRate,
         int numChannels)
@@ -266,33 +266,33 @@ public class Sonic {
         quality = 0;
     }
 
-    
+
     public int getSampleRate()
     {
         return sampleRate;
     }
 
-    
+
     public void setSampleRate(
         int sampleRate)
     {
         allocateStreamBuffers(sampleRate, numChannels);
     }
 
-    
+
     public int getNumChannels()
     {
         return numChannels;
     }
 
-    
+
     public void setNumChannels(
         int numChannels)
     {
         allocateStreamBuffers(sampleRate, numChannels);
     }
 
-    
+
     private void enlargeOutputBufferIfNeeded(
         int numSamples)
     {
@@ -302,7 +302,7 @@ public class Sonic {
         }
     }
 
-    
+
     private void enlargeInputBufferIfNeeded(
         int numSamples)
     {
@@ -312,7 +312,7 @@ public class Sonic {
         }
     }
 
-    
+
     private void addFloatSamplesToInputBuffer(
         float samples[],
         int numSamples)
@@ -328,7 +328,7 @@ public class Sonic {
         numInputSamples += numSamples;
     }
 
-    
+
     private void addShortSamplesToInputBuffer(
         short samples[],
         int numSamples)
@@ -341,7 +341,7 @@ public class Sonic {
         numInputSamples += numSamples;
     }
 
-    
+
     private void addUnsignedByteSamplesToInputBuffer(
         byte samples[],
         int numSamples)
@@ -351,13 +351,13 @@ public class Sonic {
         enlargeInputBufferIfNeeded(numSamples);
         int xBuffer = numInputSamples*numChannels;
         for(int xSample = 0; xSample < numSamples*numChannels; xSample++) {
-                sample = (short)((samples[xSample] & 0xff) - 128); 
+                sample = (short)((samples[xSample] & 0xff) - 128);
             inputBuffer[xBuffer++] = (short) (sample << 8);
         }
         numInputSamples += numSamples;
     }
 
-    
+
     private void addBytesToInputBuffer(
         byte inBuffer[],
         int numBytes)
@@ -374,7 +374,7 @@ public class Sonic {
         numInputSamples += numSamples;
     }
 
-    
+
     private void removeInputSamples(
         int position)
     {
@@ -384,7 +384,7 @@ public class Sonic {
         numInputSamples = remainingSamples;
     }
 
-    
+
     private void copyToOutput(
         short samples[],
         int position,
@@ -395,7 +395,7 @@ public class Sonic {
         numOutputSamples += numSamples;
     }
 
-    
+
     private int copyInputToOutput(
         int position)
     {
@@ -409,8 +409,8 @@ public class Sonic {
         return numSamples;
     }
 
-    
-    
+
+
     public int readFloatFromStream(
         float samples[],
         int maxSamples)
@@ -433,8 +433,8 @@ public class Sonic {
         return numSamples;
     }
 
-    
-    
+
+
     public int readShortFromStream(
         short samples[],
         int maxSamples)
@@ -455,8 +455,8 @@ public class Sonic {
         return numSamples;
     }
 
-    
-    
+
+
     public int readUnsignedByteFromStream(
         byte samples[],
         int maxSamples)
@@ -479,8 +479,8 @@ public class Sonic {
         return numSamples;
     }
 
-    
-    
+
+
     public int readBytesFromStream(
         byte outBuffer[],
         int maxBytes)
@@ -506,9 +506,9 @@ public class Sonic {
         return 2*numSamples*numChannels;
     }
 
-    
-    
-    
+
+
+
     public void flushStream()
     {
         int remainingSamples = numInputSamples;
@@ -516,32 +516,32 @@ public class Sonic {
         float r = rate*pitch;
         int expectedOutputSamples = numOutputSamples + (int)((remainingSamples/s + numPitchSamples)/r + 0.5f);
 
-        
+
         enlargeInputBufferIfNeeded(remainingSamples + 2*maxRequired);
         for(int xSample = 0; xSample < 2*maxRequired*numChannels; xSample++) {
             inputBuffer[remainingSamples*numChannels + xSample] = 0;
         }
         numInputSamples += 2*maxRequired;
         writeShortToStream(null, 0);
-        
+
         if(numOutputSamples > expectedOutputSamples) {
             numOutputSamples = expectedOutputSamples;
         }
-        
+
         numInputSamples = 0;
         remainingInputToCopy = 0;
         numPitchSamples = 0;
     }
 
-    
+
     public int samplesAvailable()
     {
         return numOutputSamples;
     }
 
-    
-    
-    
+
+
+
     private void downSampleInput(
         short samples[],
         int position,
@@ -562,8 +562,8 @@ public class Sonic {
         }
     }
 
-    
-    
+
+
     private int findPitchPeriodInRange(
         short samples[],
         int position,
@@ -581,7 +581,7 @@ public class Sonic {
                 short pVal = samples[position + period + i];
                 diff += sVal >= pVal? sVal - pVal : pVal - sVal;
             }
-            
+
 
 
             if(diff*bestPeriod < minDiff*period) {
@@ -599,8 +599,8 @@ public class Sonic {
         return bestPeriod;
     }
 
-    
-    
+
+
     private boolean prevPeriodBetter(
         int minDiff,
         int maxDiff,
@@ -611,11 +611,11 @@ public class Sonic {
         }
         if(preferNewPeriod) {
             if(maxDiff > minDiff*3) {
-                
+
                 return false;
             }
             if(minDiff*2 <= prevMinDiff*3) {
-                
+
                 return false;
             }
         } else {
@@ -626,10 +626,10 @@ public class Sonic {
         return true;
     }
 
-    
-    
-    
-    
+
+
+
+
     private int findPitchPeriod(
         short samples[],
         int position,
@@ -675,8 +675,8 @@ public class Sonic {
         return retPeriod;
     }
 
-    
-    
+
+
     private void overlapAdd(
         int numSamples,
         int numChannels,
@@ -700,8 +700,8 @@ public class Sonic {
         }
     }
 
-    
-    
+
+
     private void overlapAddWithSeparation(
         int numSamples,
         int numChannels,
@@ -734,7 +734,7 @@ public class Sonic {
         }
     }
 
-    
+
     private void moveNewSamplesToPitchBuffer(
         int originalNumOutputSamples)
     {
@@ -749,7 +749,7 @@ public class Sonic {
         numPitchSamples += numSamples;
     }
 
-    
+
     private void removePitchSamples(
         int numSamples)
     {
@@ -760,8 +760,8 @@ public class Sonic {
         numPitchSamples -= numSamples;
     }
 
-    
-    
+
+
     private void adjustPitch(
         int originalNumOutputSamples)
     {
@@ -790,7 +790,7 @@ public class Sonic {
         removePitchSamples(position);
     }
 
-    
+
     private int findSincCoefficient(int i, int ratio, int width) {
         int lobePoints = (SINC_TABLE_SIZE-1)/SINC_FILTER_POINTS;
         int left = i*lobePoints + (ratio*lobePoints)/width;
@@ -802,19 +802,19 @@ public class Sonic {
         return ((leftVal*(width - position) + rightVal*position) << 1)/width;
     }
 
-    
+
     private int getSign(int value) {
         return value >= 0? 1 : -1;
     }
 
-    
+
     private short interpolate(
         short in[],
-        int inPos,  
+        int inPos,
         int oldSampleRate,
         int newSampleRate)
     {
-        
+
         int i;
         int total = 0;
         int position = newRatePosition*oldSampleRate;
@@ -828,16 +828,16 @@ public class Sonic {
 
         for (i = 0; i < SINC_FILTER_POINTS; i++) {
             weight = findSincCoefficient(i, ratio, width);
-             
+
             value = in[inPos + i*numChannels]*weight;
             oldSign = getSign(total);
             total += value;
             if (oldSign != getSign(total) && getSign(value) == oldSign) {
-                 
+
                 overflowCount += oldSign;
             }
         }
-         
+
         if (overflowCount > 0) {
             return Short.MAX_VALUE;
         } else if (overflowCount < 0) {
@@ -846,7 +846,7 @@ public class Sonic {
         return (short)(total >> 16);
     }
 
-    
+
     private void adjustRate(
         float rate,
         int originalNumOutputSamples)
@@ -856,7 +856,7 @@ public class Sonic {
         int position;
         int N = SINC_FILTER_POINTS;
 
-        
+
         while(newSampleRate > (1 << 14) || oldSampleRate > (1 << 14)) {
             newSampleRate >>= 1;
             oldSampleRate >>= 1;
@@ -865,7 +865,7 @@ public class Sonic {
             return;
         }
         moveNewSamplesToPitchBuffer(originalNumOutputSamples);
-        
+
         for(position = 0; position < numPitchSamples - N; position++) {
             while((oldRatePosition + 1)*newSampleRate > newRatePosition*oldSampleRate) {
                 enlargeOutputBufferIfNeeded(1);
@@ -890,7 +890,7 @@ public class Sonic {
     }
 
 
-    
+
     private int skipPitchPeriod(
         short samples[],
         int position,
@@ -912,7 +912,7 @@ public class Sonic {
         return newSamples;
     }
 
-    
+
     private int insertPitchPeriod(
         short samples[],
         int position,
@@ -935,8 +935,8 @@ public class Sonic {
         return newSamples;
     }
 
-    
-    
+
+
     private void changeSpeed(
         float speed)
     {
@@ -964,7 +964,7 @@ public class Sonic {
         removeInputSamples(position);
     }
 
-    
+
     private void processStreamInput()
     {
         int originalNumOutputSamples = numOutputSamples;
@@ -988,13 +988,13 @@ public class Sonic {
             adjustRate(r, originalNumOutputSamples);
         }
         if(volume != 1.0f) {
-            
+
             scaleSamples(outputBuffer, originalNumOutputSamples, numOutputSamples - originalNumOutputSamples,
                 volume);
         }
     }
 
-    
+
     public void writeFloatToStream(
         float samples[],
         int numSamples)
@@ -1003,7 +1003,7 @@ public class Sonic {
         processStreamInput();
     }
 
-    
+
     public void writeShortToStream(
         short samples[],
         int numSamples)
@@ -1012,8 +1012,8 @@ public class Sonic {
         processStreamInput();
     }
 
-    
-    
+
+
     public void writeUnsignedByteToStream(
         byte samples[],
         int numSamples)
@@ -1022,7 +1022,7 @@ public class Sonic {
         processStreamInput();
     }
 
-    
+
     public void writeBytesToStream(
         byte inBuffer[],
         int numBytes)
@@ -1031,7 +1031,7 @@ public class Sonic {
         processStreamInput();
     }
 
-    
+
     public static int changeFloatSpeed(
         float samples[],
         int numSamples,
@@ -1057,7 +1057,7 @@ public class Sonic {
         return numSamples;
     }
 
-     
+
     public int sonicChangeShortSpeed(
         short samples[],
         int numSamples,

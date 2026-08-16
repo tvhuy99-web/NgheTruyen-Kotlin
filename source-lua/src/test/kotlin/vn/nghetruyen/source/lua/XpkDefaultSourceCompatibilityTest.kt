@@ -14,7 +14,7 @@ import java.io.ByteArrayInputStream
 import java.security.MessageDigest
 import java.util.zip.GZIPInputStream
 
- 
+
 class XpkDefaultSourceCompatibilityTest {
     @Test
     fun allSevenDefaultXpkSourcesImportWithoutRewriting() {

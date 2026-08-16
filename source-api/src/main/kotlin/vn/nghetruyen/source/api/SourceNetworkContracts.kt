@@ -3,7 +3,7 @@ package vn.nghetruyen.source.api
 import java.nio.charset.Charset
 import java.util.UUID
 
- 
+
 enum class SourceNetworkResponseMode { TEXT, JSON, BASE64, BYTES }
 
 data class SourceNetworkRequest(
@@ -48,9 +48,9 @@ data class SourceNetworkResponse(
     val cipherSuite: String? = null,
     val timing: SourceNetworkTiming,
     val traceId: String,
-     
+
     val statusText: String = "",
-     
+
     val requestUrl: String? = null,
     val requestHeaders: Map<String, List<String>> = emptyMap(),
     val fromReplay: Boolean = false,
@@ -59,7 +59,7 @@ data class SourceNetworkResponse(
         body.toString(charsetName?.let { runCatching { Charset.forName(it) }.getOrNull() } ?: defaultCharset)
 }
 
- 
+
 fun interface SourceNetworkBroker {
     fun execute(manifest: SourceManifest, request: SourceNetworkRequest): SourcePlatformResult<SourceNetworkResponse>
 
@@ -76,20 +76,20 @@ fun interface SourceNetworkBroker {
     }
 }
 
- 
+
 interface SourceCookiePartition {
-     
+
     fun readCookieHeader(sourceId: String): String?
     fun mergeSetCookieHeaders(sourceId: String, setCookieHeaders: List<String>)
 
-     
+
     fun readCookieHeader(sourceId: String, requestUrl: String): String? = readCookieHeader(sourceId)
 
-     
+
     fun mergeSetCookieHeaders(sourceId: String, responseUrl: String, setCookieHeaders: List<String>) =
         mergeSetCookieHeaders(sourceId, setCookieHeaders)
 
-     
+
     fun exportSetCookieHeaders(sourceId: String, requestUrl: String): List<String> =
         readCookieHeader(sourceId, requestUrl)?.split("; ")?.filter(String::isNotBlank).orEmpty()
 

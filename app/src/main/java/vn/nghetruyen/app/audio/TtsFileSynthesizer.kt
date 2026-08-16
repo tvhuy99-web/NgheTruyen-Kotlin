@@ -21,7 +21,7 @@ data class TtsSynthesisVoice(
     val pitch: Float,
 )
 
- 
+
 class TtsFileSynthesizer(
     context: Context,
     enginePackage: String? = null,

@@ -209,7 +209,7 @@ class SourcePlatformManager(
         bootstrapBuiltinPack()
     }
 
-     
+
     fun activeStorySources(): List<StorySource> = store.list()
         .filter { it.enabled && it.active != null }
         .mapNotNull { installed -> store.readActivePack(installed.sourceId) }
@@ -306,7 +306,7 @@ class SourcePlatformManager(
         failureSeverity = DiagnosticSeverity.ERROR,
     )
 
-     
+
     internal fun probeRepository(url: String): Result<SourceRepositoryUiInfo> = refreshRepositoryOperation(
         url = url,
         failureSeverity = DiagnosticSeverity.INFO,
@@ -370,7 +370,7 @@ class SourcePlatformManager(
         },
     )
 
-    
+
 
 
 
@@ -518,7 +518,7 @@ class SourcePlatformManager(
         return preparePack(pack)
     }
 
-    
+
 
 
 
@@ -626,8 +626,8 @@ class SourcePlatformManager(
             operationId = "$traceId:confirm_install",
             operationKind = "EXTENSION_INSTALL_COMMIT",
             extraAttributes = context?.attributes.orEmpty(),
-            
-            
+
+
             failureSeverity = if (context != null) DiagnosticSeverity.INFO else DiagnosticSeverity.ERROR,
         )
         if (context != null) {
@@ -855,8 +855,8 @@ class SourcePlatformManager(
     }
 
     private fun bootstrapBuiltinPack() {
-        
-        
+
+
         store.remove(OBSOLETE_DEMO_SOURCE_ID)
         BUILTIN_LUA_SOURCES.forEach(::bootstrapLuaBuiltin)
     }
@@ -1217,8 +1217,8 @@ class SourcePlatformManager(
         severity: DiagnosticSeverity = DiagnosticSeverity.ERROR,
     ) {
         val message = error.message ?: error.javaClass.simpleName
-        
-        
+
+
         val codes = extensionErrorCodes(error)
         diagnostics.emit(
             DiagnosticEvent(

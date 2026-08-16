@@ -173,7 +173,7 @@ class MediaButtonGestureInterpreter(
         }
 }
 
- 
+
 class MediaButtonEventDeduplicator(
     private val retentionMillis: Long = 1_500L,
 ) {

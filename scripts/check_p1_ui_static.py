@@ -15,11 +15,11 @@ def require(path: str, *tokens: str) -> None:
 
 
 def main() -> None:
-    
-    
-    
-    
-    
+
+
+
+
+
     require(
         "app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt",
         "fun ReaderScreen(",

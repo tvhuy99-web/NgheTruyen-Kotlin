@@ -25,7 +25,7 @@ enum class VBookUpdateDisposition {
 data class VBookUpdatePayload(
     val artifactId: String,
     val identity: SourceArtifactIdentity,
-     
+
     val version: String?,
     val originalPackageBytes: ByteArray,
     val trust: SourceTrustState,

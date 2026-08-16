@@ -514,7 +514,7 @@ object XpkVoiceCastSplitter {
             val supersededBySpeech = speech != null && speech.first > narration.second
             if (closeEnough && !supersededBySpeech) return true
         }
-        
+
         @Suppress("UNUSED_VARIABLE") val reservedAfterText = afterText
         return false
     }

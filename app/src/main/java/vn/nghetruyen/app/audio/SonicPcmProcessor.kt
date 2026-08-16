@@ -46,8 +46,8 @@ object SonicPcmProcessor {
 
         val normalizedSpeed = speed.coerceIn(0.25f, 3f)
         val normalizedPitch = pitch.coerceIn(0.5f, 2f)
-        
-        
+
+
         val normalizedGain = gain.coerceIn(0f, 2f)
         if (
             abs(normalizedSpeed - 1f) < 0.005f &&

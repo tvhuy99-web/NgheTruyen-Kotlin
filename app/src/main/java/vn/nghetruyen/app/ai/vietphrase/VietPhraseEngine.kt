@@ -94,8 +94,8 @@ class VietPhraseEngine(
         .sortedWith(RULE_ORDER)
     private val baseLiteralTrie = buildTrie(baseLiteralRules)
 
-    
-    
+
+
     private val fallbackHanVietRules = normalizedRules
         .filter { it.kind == VietPhraseDictionaryKind.PHIEN_AM && it.matchMode == VietPhraseMatchMode.LITERAL }
         .sortedWith(RULE_ORDER)

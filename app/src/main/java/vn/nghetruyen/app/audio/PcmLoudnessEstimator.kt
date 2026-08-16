@@ -134,7 +134,7 @@ object PcmLoudnessEstimator {
         )
     }
 
-     
+
     fun estimateLufs(wavFile: File): Float = analyze(wavFile).loudnessLufs
 
     fun calculateNormalization(
@@ -163,7 +163,7 @@ object PcmLoudnessEstimator {
     fun gainDbToLinear(gainDb: Float): Float =
         10.0.pow(gainDb.coerceIn(MIN_GAIN_DB, MAX_GAIN_DB) / 20.0).toFloat()
 
-     
+
     fun normalizationGain(measuredLufs: Float, targetLufs: Float): Float =
         gainDbToLinear(calculateNormalization(measuredLufs, null, targetLufs).gainDb)
 

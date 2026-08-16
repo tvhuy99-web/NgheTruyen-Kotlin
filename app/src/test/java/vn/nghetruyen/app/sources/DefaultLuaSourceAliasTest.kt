@@ -64,8 +64,8 @@ class DefaultLuaSourceAliasTest {
             sourcePackSources = listOf(native.withStableDefaultLuaId()),
         )
 
-        
-        
+
+
         registry.refreshSourcePacks(listOf(native))
 
         val selected = requireNotNull(registry.get("sangtacviet"))

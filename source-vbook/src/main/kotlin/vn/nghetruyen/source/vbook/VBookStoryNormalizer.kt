@@ -37,12 +37,12 @@ data class VBookChapterBody(
     val nextUrl: String?,
 )
 
- 
+
 object VBookStoryNormalizer {
     fun stories(data: JsonValue, fallbackHost: String = ""): List<VBookStoryRecord> =
         sequenceOfItems(data).mapNotNull { story(it, fallbackHost) }
 
-    
+
 
 
 

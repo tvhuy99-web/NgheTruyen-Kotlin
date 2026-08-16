@@ -36,7 +36,7 @@ data class SourceArtifactIdentity(
         require(remoteIdentity.isNotBlank()) { "remoteIdentity must not be blank" }
     }
 
-     
+
     fun canonicalKey(): String = buildString {
         append(ecosystem.name.lowercase())
         append('\n')

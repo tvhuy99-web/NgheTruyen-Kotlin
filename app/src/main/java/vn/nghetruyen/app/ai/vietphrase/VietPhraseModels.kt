@@ -1,6 +1,6 @@
 package vn.nghetruyen.app.ai.vietphrase
 
- 
+
 enum class VietPhraseDictionaryKind(val fileName: String, val basePriority: Int) {
     LUAT_NHAN("LuatNhan.txt", 50),
     PRONOUNS("Pronouns.txt", 45),

@@ -29,7 +29,7 @@ fun interface SourceHostKernelBroker {
             )
         }
 
-        
+
 
 
 
@@ -106,7 +106,7 @@ class SourceHostKernelDispatcher(
     }
 }
 
- 
+
 fun interface SourceHostEventSink {
     fun emit(
         sourceId: String,

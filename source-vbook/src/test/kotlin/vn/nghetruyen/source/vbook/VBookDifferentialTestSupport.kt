@@ -10,7 +10,7 @@ import com.nghetruyen.source.platform.SourceEcosystem
 import vn.nghetruyen.source.api.JsonCodec
 import vn.nghetruyen.source.api.JsonValue
 
- 
+
 data class VBookOfficialTestCapture(
     val caseId: String,
     val artifactId: String,

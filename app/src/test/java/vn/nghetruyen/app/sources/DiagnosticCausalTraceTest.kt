@@ -9,7 +9,7 @@ import org.junit.Test
 class DiagnosticCausalTraceTest {
     @Test
     fun causalTraceSurvivesDispatcherChange() = runBlocking {
-        
+
         val observed = withContext(DiagnosticCausalTrace("story-open:test")) {
             withContext(Dispatchers.IO) { currentDiagnosticCausalTraceId() }
         }

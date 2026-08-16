@@ -2,7 +2,7 @@ package vn.nghetruyen.source.vbook
 
 import vn.nghetruyen.source.runtime.SourceResourceProvider
 
- 
+
 class VBookPackageResourceProvider(
     private val pkg: VBookPackage,
 ) : SourceResourceProvider {

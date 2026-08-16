@@ -8,7 +8,7 @@ import vn.nghetruyen.source.api.SourceTranslationBroker
 import vn.nghetruyen.source.api.SourceTranslationRequest
 import vn.nghetruyen.source.api.SourceTranslationResponse
 
- 
+
 class VBookTranslationBrokerRouter(
     private val generic: SourceTranslationBroker,
     private val quick: SourceTranslationBroker,

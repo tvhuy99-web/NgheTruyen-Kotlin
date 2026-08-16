@@ -81,7 +81,7 @@ class SourcePackStore(
                 stage.mkdirs()
                 try {
                     writePack(stage, pack)
-                    
+
                     val staged = loadVersion(stage)
                     require(staged.manifest.id == pack.manifest.id && staged.manifest.version == pack.manifest.version) {
                         "SOURCE_STAGE_VERIFY_FAILED"

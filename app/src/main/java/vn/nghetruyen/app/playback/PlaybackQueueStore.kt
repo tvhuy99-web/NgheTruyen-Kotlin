@@ -64,7 +64,7 @@ data class PlaybackSnapshot(
     val narrationProgress: Float = 0f,
     val narrationMessage: String? = null,
 ) {
-     
+
     val currentParagraph: String?
         get() = paragraphs.getOrNull(paragraphIndex)
 
@@ -72,7 +72,7 @@ data class PlaybackSnapshot(
         get() = speechChunks.getOrNull(speechChunkIndex)
             ?.takeIf { it.paragraphIndex == paragraphIndex }
 
-     
+
     val currentSpeechText: String?
         get() = currentSpeechChunk?.text ?: currentParagraph
 
@@ -121,7 +121,7 @@ object PlaybackQueueStore {
         preparationMessage: String? = null,
     ) {
         XpkPlaybackRuntime.resetCanonicalPlans()
-        
+
         val normalized = XpkPlaybackRuntime.canonicalLines(paragraphs)
         val chunks = XpkPlaybackRuntime.buildSpeechTimeline(chapterTitle, normalized)
         val startParagraph = if (normalized.isEmpty()) 0 else startIndex.coerceIn(0, normalized.lastIndex)
@@ -207,7 +207,7 @@ object PlaybackQueueStore {
         mutable.value = mutable.value.copy(isPlaying = value)
     }
 
-     
+
     fun moveTo(index: Int): Boolean {
         val current = mutable.value
         if (current.paragraphs.isEmpty()) return false
@@ -221,7 +221,7 @@ object PlaybackQueueStore {
 
     fun moveBy(delta: Int): Boolean = moveTo(mutable.value.paragraphIndex + delta)
 
-     
+
     fun restoreSpeechPosition(paragraphIndex: Int, speechChunkIndex: Int) {
         val current = mutable.value
         if (current.paragraphs.isEmpty()) return
@@ -234,7 +234,7 @@ object PlaybackQueueStore {
         mutable.value = current.copy(paragraphIndex = paragraph, speechChunkIndex = requested)
     }
 
-    
+
 
 
 
@@ -309,7 +309,7 @@ object NextChapterNormalizer {
     )
 }
 
- 
+
 object ReaderDocumentNormalizer {
     fun normalize(content: ChapterContent): ChapterContent {
         val paragraphs = ReaderTextChunker.normalizeParagraphs(content.paragraphs)
@@ -318,13 +318,13 @@ object ReaderDocumentNormalizer {
 }
 
 object ReaderTextChunker {
-    
+
     const val SAFE_TTS_CHARS = 3_000
 
-     
+
     fun normalizeParagraphs(paragraphs: List<String>): List<String> = XpkPlaybackRuntime.canonicalLines(paragraphs)
 
-     
+
     fun normalize(paragraphs: List<String>): List<String> = normalizeParagraphs(paragraphs)
 
     fun chunkParagraphs(paragraphs: List<String>): List<PlaybackSpeechChunk> = buildList {

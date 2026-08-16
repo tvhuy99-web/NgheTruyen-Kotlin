@@ -22,6 +22,23 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              if text.count(old) != 1:
+                  raise SystemExit(f'{path}: expected one match, found {text.count(old)} for {old[:90]!r}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          def ensure_import_re(path: str, anchor: str) -> None:
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              if 'import re\n' not in text:
+                  if text.count(anchor) != 1:
+                      raise SystemExit(f'{path}: import anchor count={text.count(anchor)}')
+                  text = text.replace(anchor, 'import re\n' + anchor, 1)
+                  p.write_text(text, encoding='utf-8')
+
+          # 2.8 AI gate: version is a minimum capability baseline, not a permanent release identity.
           ai = Path('scripts/check_ai_gemini_story_vietphrase.py')
           text = ai.read_text(encoding='utf-8')
           helper = '''def verify_version_floor() -> None:\n    build = text("app/build.gradle.kts")\n    code_match = re.search(r"\\bversionCode\\s*=\\s*(\\d+)", build)\n    name_match = re.search(r'\\bversionName\\s*=\\s*"([^"]+)"', build)\n    if code_match is None or name_match is None:\n        raise AssertionError("app/build.gradle.kts: cannot parse versionCode/versionName")\n    parts = name_match.group(1).split("-", 1)[0].split(".")\n    if len(parts) != 3 or any(not part.isdigit() for part in parts):\n        raise AssertionError(f"app/build.gradle.kts: invalid semantic version: {name_match.group(1)}")\n    if int(code_match.group(1)) < 28 or tuple(map(int, parts)) < (2, 8, 0):\n        raise AssertionError("app/build.gradle.kts: AI narration baseline requires versionCode >= 28 and versionName >= 2.8.0")\n\n\n'''
@@ -32,56 +49,129 @@ jobs:
               raise SystemExit(f'AI exact-version block count={text.count(old)}')
           ai.write_text(text.replace(old, '    verify_version_floor()\n', 1), encoding='utf-8')
 
-          p2 = Path('scripts/check_priority2_complete.py')
-          text = p2.read_text(encoding='utf-8')
-          if 'import re\n' not in text:
-              text = text.replace('from pathlib import Path\n', 'from pathlib import Path\nimport re\n', 1)
-          old = '''\n\nrequire('app/build.gradle.kts', 'versionCode = 28', 'versionName = "2.8.0-ai-narration-priority2-complete"')\n'''
-          new = '''\n\ndef verify_version_floor() -> None:\n    build = read('app/build.gradle.kts')\n    code_match = re.search(r'\\bversionCode\\s*=\\s*(\\d+)', build)\n    name_match = re.search(r'\\bversionName\\s*=\\s*"([^"]+)"', build)\n    if code_match is None or name_match is None:\n        raise AssertionError('app/build.gradle.kts: cannot parse versionCode/versionName')\n    parts = name_match.group(1).split('-', 1)[0].split('.')\n    if len(parts) != 3 or any(not part.isdigit() for part in parts):\n        raise AssertionError(f'app/build.gradle.kts: invalid semantic version: {name_match.group(1)}')\n    if int(code_match.group(1)) < 28 or tuple(map(int, parts)) < (2, 8, 0):\n        raise AssertionError('app/build.gradle.kts: Priority 2 baseline requires versionCode >= 28 and versionName >= 2.8.0')\n\n\nverify_version_floor()\n'''
-          if text.count(old) != 1:
-              raise SystemExit(f'Priority2 exact-version line count={text.count(old)}')
-          p2.write_text(text.replace(old, new, 1), encoding='utf-8')
+          # Priority 2 exact release marker -> minimum 2.8 capability floor.
+          ensure_import_re('scripts/check_priority2_complete.py', 'from pathlib import Path\n')
+          replace_once(
+              'scripts/check_priority2_complete.py',
+              '''\n\nrequire('app/build.gradle.kts', 'versionCode = 28', 'versionName = "2.8.0-ai-narration-priority2-complete"')\n''',
+              '''\n\ndef verify_version_floor() -> None:\n    build = read('app/build.gradle.kts')\n    code_match = re.search(r'\\bversionCode\\s*=\\s*(\\d+)', build)\n    name_match = re.search(r'\\bversionName\\s*=\\s*"([^"]+)"', build)\n    assert code_match is not None and name_match is not None, 'cannot parse app version'\n    parts = name_match.group(1).split('-', 1)[0].split('.')\n    assert len(parts) == 3 and all(part.isdigit() for part in parts), f'invalid app version: {name_match.group(1)}'\n    assert int(code_match.group(1)) >= 28 and tuple(map(int, parts)) >= (2, 8, 0), 'Priority 2 requires app version >= 2.8.0 / code 28'\n\n\nverify_version_floor()\n''',
+          )
 
-          p1 = Path('scripts/check_priority1_complete.py')
-          text = p1.read_text(encoding='utf-8')
-          old = '''    build = (ROOT / "app/build.gradle.kts").read_text(encoding="utf-8")\n    assert 'versionName = "2.8.0-ai-narration-priority2-complete"' in build\n    assert "versionCode = 28" in build\n'''
-          new = '''    build = (ROOT / "app/build.gradle.kts").read_text(encoding="utf-8")\n    code_match = re.search(r"\\bversionCode\\s*=\\s*(\\d+)", build)\n    name_match = re.search(r'\\bversionName\\s*=\\s*"([^"]+)"', build)\n    assert code_match is not None and name_match is not None, "Không đọc được versionCode/versionName"\n    parts = name_match.group(1).split("-", 1)[0].split(".")\n    assert len(parts) == 3 and all(part.isdigit() for part in parts), f"Version không hợp lệ: {name_match.group(1)}"\n    assert int(code_match.group(1)) >= 28 and tuple(map(int, parts)) >= (2, 8, 0), (\n        f"Priority 1 baseline cần versionCode >= 28 và versionName >= 2.8.0; "\n        f"found versionCode={code_match.group(1)}, versionName={name_match.group(1)}"\n    )\n'''
-          if text.count(old) != 1:
-              raise SystemExit(f'Priority1 exact-version block count={text.count(old)}')
-          p1.write_text(text.replace(old, new, 1), encoding='utf-8')
+          # Priority 1 complete gate.
+          replace_once(
+              'scripts/check_priority1_complete.py',
+              '''    build = (ROOT / "app/build.gradle.kts").read_text(encoding="utf-8")\n    assert 'versionName = "2.8.0-ai-narration-priority2-complete"' in build\n    assert "versionCode = 28" in build\n''',
+              '''    build = (ROOT / "app/build.gradle.kts").read_text(encoding="utf-8")\n    code_match = re.search(r"\\bversionCode\\s*=\\s*(\\d+)", build)\n    name_match = re.search(r'\\bversionName\\s*=\\s*"([^"]+)"', build)\n    assert code_match is not None and name_match is not None, "Không đọc được versionCode/versionName"\n    parts = name_match.group(1).split("-", 1)[0].split(".")\n    assert len(parts) == 3 and all(part.isdigit() for part in parts), f"Version không hợp lệ: {name_match.group(1)}"\n    assert int(code_match.group(1)) >= 28 and tuple(map(int, parts)) >= (2, 8, 0), "Priority 1 cần app >= 2.8.0 / code 28"\n''',
+          )
 
-          v250 = Path('scripts/check_v250_tool_parity.py')
-          text = v250.read_text(encoding='utf-8')
-          if 'import re\n' not in text:
-              text = text.replace('import shutil, subprocess, tempfile\n', 'import re\nimport shutil, subprocess, tempfile\n', 1)
-          old = '''    require('app/build.gradle.kts','versionCode = 28','versionName = "2.8.0-ai-narration-priority2-complete"')\n'''
-          new = '''    build=(ROOT/'app/build.gradle.kts').read_text(encoding='utf-8')\n    code_match=re.search(r'\\bversionCode\\s*=\\s*(\\d+)',build)\n    name_match=re.search(r'\\bversionName\\s*=\\s*"([^"]+)"',build)\n    assert code_match is not None and name_match is not None, 'cannot parse app version'\n    parts=name_match.group(1).split('-',1)[0].split('.')\n    assert len(parts)==3 and all(part.isdigit() for part in parts), f'invalid app version: {name_match.group(1)}'\n    assert int(code_match.group(1))>=28 and tuple(map(int,parts))>=(2,8,0), 'v2.5 parity baseline requires app version >= 2.8.0 / code 28'\n'''
-          if text.count(old) != 1:
-              raise SystemExit(f'v250 exact-version line count={text.count(old)}')
-          v250.write_text(text.replace(old, new, 1), encoding='utf-8')
+          # v2.5 tool parity gate.
+          ensure_import_re('scripts/check_v250_tool_parity.py', 'import shutil, subprocess, tempfile\n')
+          replace_once(
+              'scripts/check_v250_tool_parity.py',
+              '''    require('app/build.gradle.kts','versionCode = 28','versionName = "2.8.0-ai-narration-priority2-complete"')\n''',
+              '''    build=(ROOT/'app/build.gradle.kts').read_text(encoding='utf-8')\n    code_match=re.search(r'\\bversionCode\\s*=\\s*(\\d+)',build)\n    name_match=re.search(r'\\bversionName\\s*=\\s*"([^"]+)"',build)\n    assert code_match is not None and name_match is not None, 'cannot parse app version'\n    parts=name_match.group(1).split('-',1)[0].split('.')\n    assert len(parts)==3 and all(part.isdigit() for part in parts), f'invalid app version: {name_match.group(1)}'\n    assert int(code_match.group(1))>=28 and tuple(map(int,parts))>=(2,8,0), 'v2.5 parity requires app >= 2.8.0 / code 28'\n''',
+          )
 
-          validator = Path('scripts/validate_release.py')
-          text = validator.read_text(encoding='utf-8')
-          old = '''        "CÀI .NTSOURCE / VBOOK / LUA API 2",\n        "THÊM / LÀM MỚI REPOSITORY",\n        "Self-test:",\n        "ROLLBACK PHIÊN BẢN NGUỒN",\n'''
-          new = '''        "CÀI .NTSOURCE / VBOOK / LUA API 2",\n        "THÊM / LÀM MỚI REPOSITORY",\n        "Self-test:",\n        "onRollback = onRollbackSourcePack",\n        "onLogin = onOpenSourceLogin",\n        "val retainedRuntimeActions = listOf(onRollback, onLogin)",\n'''
-          if text.count(old) != 1:
-              raise SystemExit(f'legacy rollback UI assertion count={text.count(old)}')
-          validator.write_text(text.replace(old, new, 1), encoding='utf-8')
+          # Milestone 1 foundation.
+          replace_once(
+              'scripts/check_milestone1_foundation.py',
+              '''    build = require(\n        "app/build.gradle.kts",\n        "compileSdk = 36",\n        "versionCode = 28",\n        'versionName = "2.8.0-ai-narration-priority2-complete"',\n        "abortOnError = true",\n''',
+              '''    build = require(\n        "app/build.gradle.kts",\n        "compileSdk = 36",\n        "abortOnError = true",\n''',
+          )
+          p = Path('scripts/check_milestone1_foundation.py')
+          text = p.read_text(encoding='utf-8')
+          marker = '''    if "compileSdkMinor" in build:\n'''
+          addition = '''    code_match = re.search(r"\\bversionCode\\s*=\\s*(\\d+)", build)\n    name_match = re.search(r'\\bversionName\\s*=\\s*"([^"]+)"', build)\n    assert code_match is not None and name_match is not None, "Không đọc được app version"\n    parts = name_match.group(1).split("-", 1)[0].split(".")\n    assert len(parts) == 3 and all(part.isdigit() for part in parts)\n    assert int(code_match.group(1)) >= 28 and tuple(map(int, parts)) >= (2, 8, 0), "M1 cần app >= 2.8.0 / code 28"\n'''
+          if text.count(marker) != 1:
+              raise SystemExit('M1 version insertion marker missing')
+          p.write_text(text.replace(marker, addition + marker, 1), encoding='utf-8')
+
+          # Milestone 2 complete.
+          ensure_import_re('scripts/check_milestone2_complete.py', 'import json\n')
+          replace_once(
+              'scripts/check_milestone2_complete.py',
+              '''    assert 'versionName = "2.8.0-ai-narration-priority2-complete"' in build\n''',
+              '''    code_match = re.search(r"\\bversionCode\\s*=\\s*(\\d+)", build)\n    name_match = re.search(r'\\bversionName\\s*=\\s*"([^"]+)"', build)\n    assert code_match is not None and name_match is not None, "cannot parse app version"\n    parts = name_match.group(1).split("-", 1)[0].split(".")\n    assert len(parts) == 3 and all(part.isdigit() for part in parts)\n    assert int(code_match.group(1)) >= 28 and tuple(map(int, parts)) >= (2, 8, 0), "M2 requires app >= 2.8.0 / code 28"\n''',
+          )
+
+          # Milestone 4 foundation.
+          ensure_import_re('scripts/check_milestone4_foundation.py', 'import shutil\n')
+          replace_once(
+              'scripts/check_milestone4_foundation.py',
+              '''    build = require(\n        "app/build.gradle.kts", "versionCode = 28", 'versionName = "2.8.0-ai-narration-priority2-complete"',\n    )\n    assert "compileSdk = 36" in build\n''',
+              '''    build = require("app/build.gradle.kts", "compileSdk = 36")\n    code_match = re.search(r"\\bversionCode\\s*=\\s*(\\d+)", build)\n    name_match = re.search(r'\\bversionName\\s*=\\s*"([^"]+)"', build)\n    assert code_match is not None and name_match is not None, "cannot parse app version"\n    parts = name_match.group(1).split("-", 1)[0].split(".")\n    assert len(parts) == 3 and all(part.isdigit() for part in parts)\n    assert int(code_match.group(1)) >= 28 and tuple(map(int, parts)) >= (2, 8, 0), "M4 requires app >= 2.8.0 / code 28"\n''',
+          )
+
+          # Milestone 5 foundation.
+          ensure_import_re('scripts/check_milestone5_foundation.py', 'import shutil\n')
+          replace_once(
+              'scripts/check_milestone5_foundation.py',
+              '''    require("app/build.gradle.kts", "versionCode = 28", 'versionName = "2.8.0-ai-narration-priority2-complete"', 'implementation("co.ntbl:lame:1.0.0")', "verifyReleaseSigning")\n''',
+              '''    build = (ROOT / "app/build.gradle.kts").read_text(encoding="utf-8")\n    for token in ('implementation("co.ntbl:lame:1.0.0")', "verifyReleaseSigning"):\n        assert token in build, f"app/build.gradle.kts missing: {token}"\n    code_match = re.search(r"\\bversionCode\\s*=\\s*(\\d+)", build)\n    name_match = re.search(r'\\bversionName\\s*=\\s*"([^"]+)"', build)\n    assert code_match is not None and name_match is not None, "cannot parse app version"\n    parts = name_match.group(1).split("-", 1)[0].split(".")\n    assert len(parts) == 3 and all(part.isdigit() for part in parts)\n    assert int(code_match.group(1)) >= 28 and tuple(map(int, parts)) >= (2, 8, 0), "M5 requires app >= 2.8.0 / code 28"\n''',
+          )
+
+          # Playback roadmap milestone 5.
+          ensure_import_re('scripts/check_roadmap_milestone5_playback_complete.py', 'import sqlite3\n')
+          replace_once(
+              'scripts/check_roadmap_milestone5_playback_complete.py',
+              '''    require(\n        "app/build.gradle.kts",\n        "versionCode = 28", 'versionName = "2.8.0-ai-narration-priority2-complete"',\n    )\n''',
+              '''    build = (ROOT / "app/build.gradle.kts").read_text(encoding="utf-8")\n    code_match = re.search(r"\\bversionCode\\s*=\\s*(\\d+)", build)\n    name_match = re.search(r'\\bversionName\\s*=\\s*"([^"]+)"', build)\n    assert code_match is not None and name_match is not None, "cannot parse app version"\n    parts = name_match.group(1).split("-", 1)[0].split(".")\n    assert len(parts) == 3 and all(part.isdigit() for part in parts)\n    assert int(code_match.group(1)) >= 28 and tuple(map(int, parts)) >= (2, 8, 0), "M5 playback requires app >= 2.8.0 / code 28"\n''',
+          )
+
+          # Aggregate release validator: retain runtime actions without forcing obsolete buttons.
+          replace_once(
+              'scripts/validate_release.py',
+              '''        "CÀI .NTSOURCE / VBOOK / LUA API 2",\n        "THÊM / LÀM MỚI REPOSITORY",\n        "Self-test:",\n        "ROLLBACK PHIÊN BẢN NGUỒN",\n''',
+              '''        "CÀI .NTSOURCE / VBOOK / LUA API 2",\n        "THÊM / LÀM MỚI REPOSITORY",\n        "Self-test:",\n        "onRollback = onRollbackSourcePack",\n        "onLogin = onOpenSourceLogin",\n        "val retainedRuntimeActions = listOf(onRollback, onLogin)",\n''',
+          )
+          replace_once(
+              'scripts/validate_release.py',
+              '''        "observeStorageUsage",\n        "clearTransientCache",\n        "observeOfflineStorage",\n        "LENGTH(CAST(c.content AS BLOB))",\n''',
+              '''        "observeStorageSnapshot",\n        "clearTransientCache",\n        "ChapterStorageSnapshot",\n        "LENGTH(CAST(c.content AS BLOB))",\n''',
+          )
+          p = Path('scripts/validate_release.py')
+          text = p.read_text(encoding='utf-8')
+          marker = '''    require_text(\n        "app/src/main/java/vn/nghetruyen/app/following/FollowingUpdateScheduler.kt",\n'''
+          storage_check = '''    require_text(\n        "app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt",\n        "observeChapterStorageSnapshot",\n        "OfflineStoryStorage(",\n        "StorageUsage(",\n        "downloadedChapterIds",\n    )\n'''
+          if text.count(marker) != 1:
+              raise SystemExit('validator storage insertion marker missing')
+          text = text.replace(marker, storage_check + marker, 1)
+          p.write_text(text, encoding='utf-8')
+          replace_once(
+              'scripts/validate_release.py',
+              '''    require_text(\n        "app/build.gradle.kts",\n        'versionName = "2.8.0-ai-narration-priority2-complete"',\n        "versionCode = 28",\n        "compileSdk = 36",\n''',
+              '''    require_text(\n        "app/build.gradle.kts",\n        "compileSdk = 36",\n''',
+          )
+          p = Path('scripts/validate_release.py')
+          text = p.read_text(encoding='utf-8')
+          marker = '''    require_text(\n        "gradle/wrapper/gradle-wrapper.properties",\n'''
+          version_check = '''    build_gradle = (ROOT / "app/build.gradle.kts").read_text(encoding="utf-8")\n    code_match = re.search(r"\\bversionCode\\s*=\\s*(\\d+)", build_gradle)\n    name_match = re.search(r'\\bversionName\\s*=\\s*"([^"]+)"', build_gradle)\n    assert code_match is not None and name_match is not None, "Không đọc được app version"\n    version_parts = name_match.group(1).split("-", 1)[0].split(".")\n    assert len(version_parts) == 3 and all(part.isdigit() for part in version_parts)\n    assert int(code_match.group(1)) >= 28 and tuple(map(int, version_parts)) >= (2, 8, 0), "Release gate cần app >= 2.8.0 / code 28"\n'''
+          if text.count(marker) != 1:
+              raise SystemExit('validator version insertion marker missing')
+          p.write_text(text.replace(marker, version_check + marker, 1), encoding='utf-8')
 
           Path('.github/workflows/repair-ai-version-gate.yml').unlink()
           PY
-      - name: Scan remaining historical version assertions
-        shell: bash
-        run: |
-          grep -R -nE 'versionCode = (2[0-9]|3[0-5])|versionName = "2\.' scripts || true
-      - name: Validate aggregate release gates
+      - name: Verify no stale exact release assertions remain
         shell: bash
         run: |
           git diff --check
+          if grep -R -nE 'versionCode = (2[0-9]|3[0-5])|versionName = "2\.' scripts; then
+            echo 'Stale exact-version assertion remains' >&2
+            exit 1
+          fi
+      - name: Validate aggregate release gates
+        shell: bash
+        run: |
           python3 scripts/check_ai_gemini_story_vietphrase.py
           python3 scripts/check_priority2_complete.py
           python3 scripts/check_priority1_complete.py
           python3 scripts/check_v250_tool_parity.py
+          python3 scripts/check_milestone1_foundation.py
+          python3 scripts/check_milestone2_complete.py
+          python3 scripts/check_milestone4_foundation.py
+          python3 scripts/check_milestone5_foundation.py
+          python3 scripts/check_roadmap_milestone5_playback_complete.py
           python3 scripts/validate_release.py
       - name: Commit repair
         shell: bash

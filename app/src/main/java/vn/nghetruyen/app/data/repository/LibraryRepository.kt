@@ -15,6 +15,7 @@ import vn.nghetruyen.app.data.local.AiUsageDailyEntity
 import vn.nghetruyen.app.data.local.AudioExportJobEntity
 import vn.nghetruyen.app.data.local.BookmarkEntity
 import vn.nghetruyen.app.data.local.ChapterEntity
+import vn.nghetruyen.app.data.local.ChapterStorageSnapshot
 import vn.nghetruyen.app.data.local.ChapterNoteEntity
 import vn.nghetruyen.app.data.local.ChapterDownloadFailureEntity
 import vn.nghetruyen.app.data.local.ChapterTransformEntity
@@ -46,6 +47,7 @@ import vn.nghetruyen.app.data.local.StoryTtsProfileEntity
 import vn.nghetruyen.app.data.local.StoryAiProfileEntity
 import vn.nghetruyen.app.data.local.VoiceRoleEntity
 import vn.nghetruyen.app.data.local.ReadingProgressEntity
+import vn.nghetruyen.app.data.local.ReadingProgressWithChapterTitle
 import vn.nghetruyen.app.data.local.ReadingHistoryEntity
 import vn.nghetruyen.app.data.local.StoryEntity
 import java.util.Locale
@@ -60,6 +62,8 @@ data class CacheTrimResult(
 class LibraryRepository(private val db: AppDatabase) {
     fun observeReading(): Flow<List<StoryEntity>> = db.storyDao().observeReading()
     fun observeReadingProgress(): Flow<List<ReadingProgressEntity>> = db.progressDao().observeAll()
+    fun observeReadingProgressWithChapterTitle(): Flow<List<ReadingProgressWithChapterTitle>> =
+        db.progressDao().observeAllWithChapterTitle()
     fun observeReadingHistory(): Flow<List<ReadingHistoryEntity>> = db.readingHistoryDao().observeRecent()
     fun observeOffline(): Flow<List<StoryEntity>> = db.storyDao().observeOffline()
     fun observeBookmarks(): Flow<List<BookmarkEntity>> = db.bookmarkDao().observeAll()
@@ -70,6 +74,7 @@ class LibraryRepository(private val db: AppDatabase) {
     fun observeOfflineStorage(): Flow<List<OfflineStoryStorage>> = db.chapterDao().observeOfflineStorage()
     fun observeDownloadedChapterIds(): Flow<List<String>> = db.chapterDao().observeDownloadedIds()
     fun observeStorageUsage(): Flow<StorageUsage> = db.chapterDao().observeStorageUsage()
+    fun observeChapterStorageSnapshot(): Flow<List<ChapterStorageSnapshot>> = db.chapterDao().observeStorageSnapshot()
     fun observePronunciations(): Flow<List<PronunciationEntity>> = db.pronunciationDao().observeAll()
     fun observeVietPhraseRules(): Flow<List<VietPhraseEntity>> = db.vietPhraseDao().observeAll()
     fun observeVietPhraseSnapshots(): Flow<List<VietPhraseSnapshotEntity>> = db.vietPhraseSnapshotDao().observeAll()

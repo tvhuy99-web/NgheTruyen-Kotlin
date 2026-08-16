@@ -4,6 +4,9 @@ import android.content.Context
 import android.os.Build
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import vn.nghetruyen.app.BuildConfig
 import vn.nghetruyen.source.diagnostics.BoundedDiagnosticEvidenceRecorder
 import vn.nghetruyen.source.diagnostics.BoundedDiagnosticRecorder
@@ -59,27 +62,47 @@ class SourceDiagnosticRuntime(private val context: Context) {
     private val prefs = context.getSharedPreferences("source_diagnostics", Context.MODE_PRIVATE)
     private val activityTracker = DiagnosticActivityTracker()
     private val criticalStore = CriticalDiagnosticStore(context)
-    private val continuousStore = ContinuousDiagnosticStore(context)
+    private val continuousStoreDelegate = lazy { ContinuousDiagnosticStore(context) }
+    private val continuousStore by continuousStoreDelegate
+    private val changeVersion = MutableStateFlow(0L)
+    val changes: StateFlow<Long> = changeVersion.asStateFlow()
+
+    @Volatile var mode: String = MODE_OFF
+        private set
+
+    private fun signalChanged() {
+        changeVersion.value = if (changeVersion.value == Long.MAX_VALUE) 1L else changeVersion.value + 1L
+    }
+
+    private val criticalMirror = DiagnosticSink { event ->
+        criticalStore.emit(event)
+        if (PersistentCriticalDiagnosticPolicy.shouldPersist(event)) signalChanged()
+    }
     private val mirror = DiagnosticSink { event ->
         activityTracker.emit(event)
-        continuousStore.emit(event)
+        if (mode == MODE_CONTINUOUS) continuousStore.emit(event)
+        signalChanged()
+    }
+    private val evidenceMirror = object : DiagnosticEvidenceSink {
+        override val enabled: Boolean get() = mode == MODE_CONTINUOUS
+        override fun capture(evidence: DiagnosticEvidence) {
+            if (mode == MODE_CONTINUOUS) continuousStore.capture(evidence)
+            signalChanged()
+        }
     }
 
     val recorder = BoundedDiagnosticRecorder(
         maxEvents = MAX_IN_MEMORY_EVENTS,
         level = DiagnosticLevel.OFF,
         mirror = mirror,
-        alwaysMirror = criticalStore,
+        alwaysMirror = criticalMirror,
     )
     val evidence = BoundedDiagnosticEvidenceRecorder(
         maxBytes = 64L * 1024L * 1024L,
         maxItems = 2_048,
         maxItemBytes = 16 * 1024 * 1024,
-        mirror = continuousStore,
+        mirror = evidenceMirror,
     )
-
-    @Volatile var mode: String = MODE_OFF
-        private set
 
     @Volatile private var activeScreenKey: String = ""
     @Volatile private var activeScreenSessionId: String = ""
@@ -151,6 +174,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
                 activeScreenKey = ""
                 activeScreenSessionId = ""
                 applyMode(MODE_OFF)
+                signalChanged()
             }
         }
         return normalized
@@ -275,6 +299,7 @@ class SourceDiagnosticRuntime(private val context: Context) {
         continuousStore.clear()
         criticalStore.clear()
         if (mode == MODE_CONTINUOUS) continuousStore.enabled = true
+        signalChanged()
     }
 
     fun exportBundle(
@@ -380,7 +405,11 @@ class SourceDiagnosticRuntime(private val context: Context) {
             else -> DiagnosticLevel.OFF
         }
         evidence.enabled = value == MODE_SCREEN || value == MODE_CONTINUOUS
-        continuousStore.enabled = value == MODE_CONTINUOUS
+        if (value == MODE_CONTINUOUS) {
+            continuousStore.enabled = true
+        } else if (continuousStoreDelegate.isInitialized()) {
+            continuousStore.enabled = false
+        }
         if (value == MODE_OFF) activityTracker.clear()
     }
 

@@ -422,8 +422,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     scheduledFollowingUpdates = settings.followingUpdatesEnabled
                     container.followingUpdateScheduler.setEnabled(settings.followingUpdatesEnabled)
                 }
-                if (appliedCacheLimitMiB != settings.readerCacheLimitMiB) {
-                    appliedCacheLimitMiB = settings.readerCacheLimitMiB
+                val previousCacheLimitMiB = appliedCacheLimitMiB
+                appliedCacheLimitMiB = settings.readerCacheLimitMiB
+                if (previousCacheLimitMiB != null && previousCacheLimitMiB != settings.readerCacheLimitMiB) {
                     trimReaderCache(settings.readerCacheLimitMiB, announce = false)
                 }
                 if (sourceChanged) search("")
@@ -433,7 +434,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun observeDiagnostics() {
         viewModelScope.launch {
-            while (true) {
+            container.sourceDiagnostics.changes.collect {
                 val events = visibleDiagnosticEvents()
                 mutableState.update { current ->
                     current.copy(
@@ -445,7 +446,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         sourceTraces = container.sourcePlatformManager.diagnosticTraces(100),
                     )
                 }
-                delay(if (container.sourceDiagnostics.mode == "off") 2_000 else 750)
             }
         }
     }
@@ -457,18 +457,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         viewModelScope.launch {
-            container.libraryRepository.observeReadingProgress().collect { items ->
-                val chapterTitles = mutableMapOf<String, String>()
-                for (progress in items) {
-                    chapterTitles[progress.storyId] = container.libraryRepository
-                        .getChapter(progress.chapterId)
-                        ?.title
-                        .orEmpty()
+            container.libraryRepository.observeReadingProgressWithChapterTitle().collect { items ->
+                val progressByStory = items.associate { item ->
+                    item.storyId to ReadingProgressEntity(
+                        storyId = item.storyId,
+                        chapterId = item.chapterId,
+                        paragraphIndex = item.paragraphIndex,
+                        totalParagraphs = item.totalParagraphs,
+                        updatedAt = item.updatedAt,
+                    )
                 }
                 mutableState.update {
                     it.copy(
-                        readingProgress = items.associateBy(ReadingProgressEntity::storyId),
-                        readingChapterTitles = chapterTitles,
+                        readingProgress = progressByStory,
+                        readingChapterTitles = items.associate { item -> item.storyId to item.chapterTitle },
                     )
                 }
             }
@@ -509,18 +511,30 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         viewModelScope.launch {
-            container.libraryRepository.observeOfflineStorage().collect { items ->
-                mutableState.update { it.copy(offlineStorage = items.associateBy(OfflineStoryStorage::storyId)) }
-            }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeDownloadedChapterIds().collect { ids ->
-                mutableState.update { it.copy(downloadedChapterIds = ids.toSet()) }
-            }
-        }
-        viewModelScope.launch {
-            container.libraryRepository.observeStorageUsage().collect { usage ->
-                mutableState.update { it.copy(storageUsage = usage) }
+            container.libraryRepository.observeChapterStorageSnapshot().collect { rows ->
+                val downloaded = rows.filter { it.downloadedAt != null }
+                val cached = rows.filter { it.downloadedAt == null }
+                val offlineStorage = downloaded
+                    .groupBy { it.storyId }
+                    .mapValues { (storyId, chapters) ->
+                        OfflineStoryStorage(
+                            storyId = storyId,
+                            chapterCount = chapters.size,
+                            bytes = chapters.sumOf { it.bytes },
+                        )
+                    }
+                mutableState.update {
+                    it.copy(
+                        offlineStorage = offlineStorage,
+                        downloadedChapterIds = downloaded.mapTo(linkedSetOf()) { row -> row.chapterId },
+                        storageUsage = StorageUsage(
+                            downloadedChapters = downloaded.size,
+                            downloadedBytes = downloaded.sumOf { it.bytes },
+                            cachedChapters = cached.size,
+                            cachedBytes = cached.sumOf { it.bytes },
+                        ),
+                    )
+                }
             }
         }
         viewModelScope.launch {

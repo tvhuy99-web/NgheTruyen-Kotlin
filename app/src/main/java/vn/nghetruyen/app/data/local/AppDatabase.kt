@@ -56,6 +56,22 @@ data class ReadingProgressEntity(
     val updatedAt: Long,
 )
 
+data class ReadingProgressWithChapterTitle(
+    val storyId: String,
+    val chapterId: String,
+    val paragraphIndex: Int,
+    val totalParagraphs: Int,
+    val updatedAt: Long,
+    val chapterTitle: String,
+)
+
+data class ChapterStorageSnapshot(
+    val chapterId: String,
+    val storyId: String,
+    val downloadedAt: Long?,
+    val bytes: Long,
+)
+
 @Entity(
     tableName = "reading_history",
     indices = [
@@ -561,6 +577,14 @@ interface ChapterDao {
     fun observeStorageUsage(): Flow<StorageUsage>
 
     @Query("""
+        SELECT c.id AS chapterId, c.storyId AS storyId, c.downloadedAt AS downloadedAt,
+               COALESCE(LENGTH(CAST(c.content AS BLOB)), 0) AS bytes
+        FROM chapters c
+        WHERE c.content IS NOT NULL AND TRIM(c.content) != ''
+    """)
+    fun observeStorageSnapshot(): Flow<List<ChapterStorageSnapshot>>
+
+    @Query("""
         SELECT c.id AS chapterId,
                COALESCE(LENGTH(CAST(c.content AS BLOB)), 0) AS bytes,
                COALESCE(c.downloadedAt, 0) AS cachedAt
@@ -588,6 +612,15 @@ interface ProgressDao {
 
     @Query("SELECT * FROM reading_progress ORDER BY updatedAt DESC")
     fun observeAll(): Flow<List<ReadingProgressEntity>>
+
+    @Query("""
+        SELECT p.storyId AS storyId, p.chapterId AS chapterId, p.paragraphIndex AS paragraphIndex,
+               p.totalParagraphs AS totalParagraphs, p.updatedAt AS updatedAt, COALESCE(c.title, '') AS chapterTitle
+        FROM reading_progress p
+        LEFT JOIN chapters c ON c.id = p.chapterId
+        ORDER BY p.updatedAt DESC
+    """)
+    fun observeAllWithChapterTitle(): Flow<List<ReadingProgressWithChapterTitle>>
 
     @Query("SELECT * FROM reading_progress ORDER BY updatedAt DESC")
     suspend fun listAll(): List<ReadingProgressEntity>

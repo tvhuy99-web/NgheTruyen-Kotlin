@@ -9,6 +9,8 @@ import vn.nghetruyen.app.sourceplatform.ChromiumVBookBrowserReplayRuntime
 import vn.nghetruyen.app.sourceplatform.ChromiumVBookDispatcherParityRuntime
 import vn.nghetruyen.app.sourceplatform.ChromiumVBookReplayCoordinator
 import vn.nghetruyen.app.sourceplatform.DiagnosticScreenRestoreLifecycleCallbacks
+import vn.nghetruyen.app.sourceplatform.ProcessExitDiagnostics
+import vn.nghetruyen.app.sourceplatform.SourceBrowserSafetyGuard
 import vn.nghetruyen.app.sourceplatform.SourceBrowserViewportHost
 import vn.nghetruyen.app.sourceplatform.SourceWebViewCookieReader
 import vn.nghetruyen.app.sourceplatform.replayAwareChromiumDiagnostics
@@ -28,6 +30,7 @@ class NgheTruyenApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        ProcessExitDiagnostics.install(this) { container.sourceDiagnostics }
         registerActivityLifecycleCallbacks(DiagnosticScreenRestoreLifecycleCallbacks())
         SourceBrowserViewportHost.initialize(this)
         ChapterPaginationDiagnostics.install { name, isError, attributes ->
@@ -50,8 +53,9 @@ class NgheTruyenApplication : Application() {
                 }
             } else synchronized(chromiumRuntimeLock) {
                 chromiumRuntimes[brokers.storage] ?: run {
+                    val guardedBrowser = SourceBrowserSafetyGuard(brokers.browser, diagnostics)
                     val replay = ChromiumVBookReplayCoordinator(
-                        browserDelegate = brokers.browser,
+                        browserDelegate = guardedBrowser,
                         networkDelegate = brokers.network,
                     )
                     val chromium = AndroidChromiumVBookRuntime(
@@ -61,7 +65,7 @@ class NgheTruyenApplication : Application() {
                             network = replay.networkBroker,
                         ),
                         diagnostics = replayAwareChromiumDiagnostics(diagnostics),
-                        webViewCookieReader = brokers.browser as? SourceWebViewCookieReader,
+                        webViewCookieReader = guardedBrowser,
                     )
                     ChromiumVBookDispatcherParityRuntime(
                         ChromiumVBookBrowserReplayRuntime(

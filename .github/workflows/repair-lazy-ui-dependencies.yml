@@ -146,7 +146,7 @@ jobs:
           grep -F 'viewModel.ensureRoomObserversForUi(' app/src/main/java/vn/nghetruyen/app/ui/ReferenceNgheTruyenApp.kt
           grep -F 'mutablePersonalPage.value = page' app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt
           grep -F 'ensureRoomObserversForPersonalPage(page)' app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt
-          test "$(grep -c 'ensureGlobalVoiceProfiles()' app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt)" -ge 2
+          test "$(grep -c 'ensureGlobalVoiceProfiles()' app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt)" -eq 1
           grep -F 'val reachedFirstFrame = firstFrameLatch.await' app/src/main/java/vn/nghetruyen/app/startup/StartupWorkGate.kt
           grep -F 'settings_automation' app/src/test/java/vn/nghetruyen/app/ui/RoomObserverDemandTest.kt
           grep -F 'settings_music' app/src/test/java/vn/nghetruyen/app/ui/RoomObserverDemandTest.kt

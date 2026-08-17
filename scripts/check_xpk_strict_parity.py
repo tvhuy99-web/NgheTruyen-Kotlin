@@ -341,23 +341,35 @@ require(
     "app/src/main/java/vn/nghetruyen/app/audio/Pcm16SceneMixer.kt",
     "val looping: Boolean = true",
     "if (!layer.looping && local >= totalFrames)",
+    "sourceCache.getOrPut(cacheKey)",
+    "activeSamples.removeAll",
+    "activeDucks.removeAll",
 )
 
 require(
     "app/src/main/java/vn/nghetruyen/app/ui/components/AudioDirectionLayerSwitches.kt",
-    "ActivityResultContracts.OpenMultipleDocuments()",
-    'Text("THÊM NHIỀU TỆP")',
     "AudioAssetKind.MUSIC",
     "AudioAssetKind.AMBIENCE",
     "AudioAssetKind.SFX",
+    "UnifiedAudioAssetManagerDialog(",
+)
+require(
+    "app/src/main/java/vn/nghetruyen/app/ui/components/UnifiedAudioAssetManagerDialog.kt",
+    "ActivityResultContracts.OpenMultipleDocuments()",
+    'Text("THÊM TỆP")',
+    'UnifiedAssetActionButton("NGHE THỬ")',
+    'UnifiedAssetActionButton("CHUẨN HÓA")',
+    'UnifiedAssetActionButton("SỬA TÊN / MÔ TẢ")',
 )
 
 require(
     "app/src/main/java/vn/nghetruyen/app/playback/SceneMusicController.kt",
-    "startXpkSequentialTransition(next, XPK_SCENE_SWITCH_MILLIS)",
-    "XPK_SCENE_SWITCH_MILLIS = 2_200",
-    "val fadeOutMillis = if (old == null) 0 else duration / 2",
-    "val fadeInMillis = if (old == null) duration else duration - fadeOutMillis",
+    "private val pendingPlayers = linkedSetOf<MediaPlayer>()",
+    "private var transitionGeneration = 0L",
+    "if (releasedController || generation != transitionGeneration)",
+    "startCrossfadeTransition(next, duration)",
+    "XPK_DEFAULT_CROSSFADE_MILLIS = 2_200",
+    "baseVolume * duckMultiplier * sfxDuckMultiplier * slot.fadeMultiplier",
 )
 
 require(

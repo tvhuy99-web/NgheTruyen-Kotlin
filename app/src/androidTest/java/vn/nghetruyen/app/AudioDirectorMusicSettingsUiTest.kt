@@ -1,7 +1,9 @@
 package vn.nghetruyen.app
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodes
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -18,6 +20,7 @@ class AudioDirectorMusicSettingsUiTest {
 
     @Test
     fun personalMusicSettingsKeepManualMusicAndDoNotDuplicateAiAudioControls() {
+        waitForComposeRoot()
         returnToRoot()
         composeRule.onNodeWithText("CÁ NHÂN", useUnmergedTree = true).performClick()
         composeRule.onNodeWithText("Cài đặt", useUnmergedTree = true).performClick()
@@ -27,8 +30,7 @@ class AudioDirectorMusicSettingsUiTest {
             .performClick()
 
         composeRule.waitUntil(timeoutMillis = 5_000) {
-            composeRule.onAllNodesWithText("Nhạc nền cục bộ", useUnmergedTree = true)
-                .fetchSemanticsNodes().isNotEmpty()
+            hasText("Nhạc nền cục bộ")
         }
 
         composeRule.onNodeWithText("Nhạc nền cục bộ", useUnmergedTree = true).assertIsDisplayed()
@@ -38,26 +40,34 @@ class AudioDirectorMusicSettingsUiTest {
         assertTextDoesNotExist("Hiệu ứng âm thanh AI")
     }
 
+    private fun waitForComposeRoot() {
+        composeRule.waitUntil(timeoutMillis = 15_000) {
+            runCatching {
+                composeRule.onAllNodes(isRoot(), useUnmergedTree = true)
+                    .fetchSemanticsNodes().isNotEmpty()
+            }.getOrDefault(false)
+        }
+    }
+
     private fun returnToRoot() {
         repeat(6) {
-            if (composeRule.onAllNodesWithText("CÁ NHÂN", useUnmergedTree = true)
-                    .fetchSemanticsNodes().isNotEmpty()
-            ) return
+            if (hasText("CÁ NHÂN")) return
             composeRule.runOnUiThread {
                 composeRule.activity.onBackPressedDispatcher.onBackPressed()
             }
             composeRule.waitForIdle()
         }
-        check(
-            composeRule.onAllNodesWithText("CÁ NHÂN", useUnmergedTree = true)
-                .fetchSemanticsNodes().isNotEmpty(),
-        ) { "Could not return to the root navigation before opening Personal settings." }
+        check(hasText("CÁ NHÂN")) {
+            "Could not return to the root navigation before opening Personal settings."
+        }
     }
 
+    private fun hasText(text: String): Boolean = runCatching {
+        composeRule.onAllNodesWithText(text, useUnmergedTree = true)
+            .fetchSemanticsNodes().isNotEmpty()
+    }.getOrDefault(false)
+
     private fun assertTextDoesNotExist(text: String) {
-        check(
-            composeRule.onAllNodesWithText(text, useUnmergedTree = true)
-                .fetchSemanticsNodes().isEmpty(),
-        ) { "Unexpected duplicate audio control: $text" }
+        check(!hasText(text)) { "Unexpected duplicate audio control: $text" }
     }
 }

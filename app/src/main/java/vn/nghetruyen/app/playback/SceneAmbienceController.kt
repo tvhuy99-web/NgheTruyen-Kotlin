@@ -42,7 +42,9 @@ class SceneAmbienceController(context: Context) {
         var fade: Float,
     )
 
-    private data class Layer(
+    // Identity semantics are intentional: Layer contains mutable playback state and is also kept in
+    // fadingLayers. A data-class hash would change while fade/current/jobs mutate and corrupt Set removal.
+    private class Layer(
         var anchorAsset: AudioDirectionAsset,
         var variants: List<AudioDirectionAsset>,
         var masterVolume: Float,
@@ -60,6 +62,7 @@ class SceneAmbienceController(context: Context) {
     @Volatile private var activeIdsSnapshot: List<String> = emptyList()
     @Volatile private var pausedSnapshot: Boolean = false
     @Volatile private var sfxDuckMultiplier: Float = 1f
+    private var reconcileJob: Job? = null
     private var sfxDuckJob: Job? = null
 
     fun play(
@@ -81,7 +84,8 @@ class SceneAmbienceController(context: Context) {
         val safeOverlapMax = overlapMaxMillis.coerceIn(safeOverlapMin, 4_000)
         pausedSnapshot = false
         val generation = commandGeneration.incrementAndGet()
-        scope.launch {
+        reconcileJob?.cancel()
+        reconcileJob = scope.launch {
             if (generation != commandGeneration.get() || pausedSnapshot) return@launch
             reconcile(
                 requested = requested,
@@ -109,6 +113,8 @@ class SceneAmbienceController(context: Context) {
     fun pause() {
         pausedSnapshot = true
         commandGeneration.incrementAndGet()
+        reconcileJob?.cancel()
+        reconcileJob = null
         scope.launch {
             layers.values.forEach { layer ->
                 layer.loopJob?.cancel()
@@ -139,6 +145,8 @@ class SceneAmbienceController(context: Context) {
 
     fun stop() {
         commandGeneration.incrementAndGet()
+        reconcileJob?.cancel()
+        reconcileJob = null
         pausedSnapshot = false
         activeIdsSnapshot = emptyList()
         sfxDuckJob?.cancel()

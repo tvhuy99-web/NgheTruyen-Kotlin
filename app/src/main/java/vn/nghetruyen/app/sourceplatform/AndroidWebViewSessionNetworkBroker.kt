@@ -232,8 +232,9 @@ internal class AndroidWebViewSessionNetworkBroker(
         request.headers.forEach { (name, value) ->
             if (!isBrowserForbiddenHeader(name)) publicHeaders[name] = value
         }
-        if (!request.contentType.isNullOrBlank() && publicHeaders.keys.none { it.equals("Content-Type", true) }) {
-            publicHeaders["Content-Type"] = request.contentType
+        val contentType = request.contentType
+        if (!contentType.isNullOrBlank() && publicHeaders.keys.none { it.equals("Content-Type", true) }) {
+            publicHeaders["Content-Type"] = contentType
         }
         val headersJson = JSONObject(publicHeaders as Map<*, *>).toString()
         val bodyBase64 = Base64.getEncoder().encodeToString(request.body)

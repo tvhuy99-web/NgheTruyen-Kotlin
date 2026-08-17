@@ -28,7 +28,7 @@ class XpkSceneMusicParityTest {
     }
 
     @Test
-    fun promptContainsIncomingContinuityAndStableSceneRules() {
+    fun promptContainsIncomingContinuityStableSceneRulesAndSilenceOption() {
         val block = XpkSceneMusicParity.promptBlock(
             title = "Chương 9",
             firstUnitId = "P0001-U01",
@@ -50,6 +50,8 @@ class XpkSceneMusicParityTest {
         assertTrue(block.instructions.contains("Đổi tại đúng UNIT đầu tiên"))
         assertTrue(block.instructions.contains("Ổn định quan trọng hơn phản ứng theo từng câu"))
         assertTrue(block.instructions.contains("track-a | A | Sắc thái: tĩnh"))
+        assertTrue(block.instructions.contains("NONE | IM LẶNG"))
+        assertTrue(block.instructions.contains("Im lặng hoàn toàn hợp lệ"))
         assertFalse(block.instructions.contains("Tối đa 12"))
         assertFalse(block.instructions.contains("cách nhau ít nhất 3"))
     }
@@ -100,6 +102,21 @@ class XpkSceneMusicParityTest {
         assertEquals("P0003-U01", scenes[0].endUnitId)
         assertEquals("a", scenes[0].trackId)
         assertEquals("b", scenes[1].trackId)
+    }
+
+    @Test
+    fun validatorAllowsIntentionalSilentScene() {
+        val units = listOf("P0001-U01", "P0002-U01", "P0003-U01", "P0004-U01")
+        val scenes = XpkSceneMusicParity.validateScenes(
+            rows = listOf(
+                XpkSceneMusicParity.RawScene(units[0], units[1], "a"),
+                XpkSceneMusicParity.RawScene(units[2], units[3], XpkSceneMusicParity.SILENCE_TRACK_ID),
+            ),
+            validUnitIds = units,
+            validTrackIds = listOf("a"),
+        )
+        assertEquals(2, scenes.size)
+        assertEquals(XpkSceneMusicParity.SILENCE_TRACK_ID, scenes.last().trackId)
     }
 
     @Test
@@ -165,15 +182,15 @@ class XpkSceneMusicParityTest {
     }
 
     @Test
-    fun fallbackPrefersValidIncomingOtherwiseFirstCatalogTrack() {
+    fun fallbackKeepsValidIncomingOtherwiseUsesSilence() {
         val units = listOf("P0001-U01", "P0002-U01")
         val incoming = XpkSceneMusicParity.fallbackScene(units, listOf("a", "b"), "b").single()
         assertEquals("b", incoming.trackId)
         assertEquals("P0001-U01", incoming.startUnitId)
         assertEquals("P0002-U01", incoming.endUnitId)
 
-        val first = XpkSceneMusicParity.fallbackScene(units, listOf("a", "b"), "missing").single()
-        assertEquals("a", first.trackId)
+        val silent = XpkSceneMusicParity.fallbackScene(units, listOf("a", "b"), "missing").single()
+        assertEquals(XpkSceneMusicParity.SILENCE_TRACK_ID, silent.trackId)
     }
 
     private fun assertFails(block: () -> Unit) {

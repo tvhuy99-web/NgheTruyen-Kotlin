@@ -65,7 +65,9 @@ class NgheTruyenApplication : Application() {
             }
         }
         ReferenceVietPhraseRuntime.load(this)
-        val audioPreferences = AudioDirectionPreferences(this)
+
+        // Hydrate the process-wide snapshot before any narration planning can inspect ambience/SFX.
+        val audioPreferences = AudioDirectionPreferences.shared(this)
         audioDirectionRuntime = AudioDirectionRuntime(
             context = this,
             libraryRepository = container.libraryRepository,

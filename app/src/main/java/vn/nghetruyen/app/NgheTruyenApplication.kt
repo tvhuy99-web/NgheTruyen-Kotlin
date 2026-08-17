@@ -4,6 +4,7 @@ import android.app.Application
 import android.webkit.WebView
 import vn.nghetruyen.app.ai.vietphrase.ReferenceVietPhraseRuntime
 import vn.nghetruyen.app.sourceplatform.AndroidChromiumVBookRuntime
+import vn.nghetruyen.app.sourceplatform.AndroidWebViewSessionNetworkBroker
 import vn.nghetruyen.app.sourceplatform.ChromiumVBookBrowserReplayRuntime
 import vn.nghetruyen.app.sourceplatform.ChromiumVBookDispatcherParityRuntime
 import vn.nghetruyen.app.sourceplatform.ChromiumVBookReplayCoordinator
@@ -16,6 +17,7 @@ import vn.nghetruyen.source.api.SourcePlatformFailure
 import vn.nghetruyen.source.api.SourcePlatformResult
 import vn.nghetruyen.source.vbook.VBookActionRuntime
 import vn.nghetruyen.source.vbook.VBookActionRuntimeRegistry
+import vn.nghetruyen.source.vbook.VBookRawNetworkBroker
 import java.util.IdentityHashMap
 
 class NgheTruyenApplication : Application() {
@@ -38,9 +40,16 @@ class NgheTruyenApplication : Application() {
                 }
             } else synchronized(chromiumRuntimeLock) {
                 chromiumRuntimes[brokers.storage] ?: run {
+                    val browserSessionNetwork = VBookRawNetworkBroker(
+                        AndroidWebViewSessionNetworkBroker(
+                            context = this,
+                            cookiePartition = brokers.cookies,
+                        ),
+                    )
                     val replay = ChromiumVBookReplayCoordinator(
                         browserDelegate = brokers.browser,
                         networkDelegate = brokers.network,
+                        browserNetworkDelegate = browserSessionNetwork,
                     )
                     val chromium = AndroidChromiumVBookRuntime(
                         context = this,

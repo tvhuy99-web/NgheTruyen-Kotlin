@@ -20,7 +20,7 @@ class AudioDirectorMusicSettingsUiTest {
 
     @Test
     fun personalMusicSettingsKeepManualMusicAndDoNotDuplicateAiAudioControls() {
-        waitForActivityContent()
+        waitForComposeRoot()
         returnToRoot()
         composeRule.onNodeWithText("CÁ NHÂN", useUnmergedTree = true).performClick()
         composeRule.onNodeWithText("Cài đặt", useUnmergedTree = true).performClick()
@@ -40,7 +40,7 @@ class AudioDirectorMusicSettingsUiTest {
         assertTextDoesNotExist("Hiệu ứng âm thanh AI")
     }
 
-    private fun waitForActivityContent() {
+    private fun waitForComposeRoot() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         var ready = false
         repeat(150) {

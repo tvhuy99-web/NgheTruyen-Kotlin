@@ -1,8 +1,10 @@
 package vn.nghetruyen.app.playback
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
+import vn.nghetruyen.app.ai.XpkSceneMusicParity
 import vn.nghetruyen.app.core.model.SceneMusicPlaybackMode
 import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
 
@@ -24,6 +26,22 @@ class SceneMusicSelectorTest {
             seed = "chapter-1",
         )
         assertEquals("battle", selected?.id)
+    }
+
+    @Test
+    fun intentionalSilenceReturnsControllerSentinelInsteadOfMissingTrack() {
+        val selected = SceneMusicSelector.select(
+            tracks = tracks,
+            requestedTrackId = XpkSceneMusicParity.SILENCE_TRACK_ID,
+            mood = "",
+            mode = SceneMusicPlaybackMode.SEQUENTIAL,
+            recentTrackIds = emptyList(),
+            seed = "chapter-1",
+        )
+        assertNotNull(selected)
+        assertEquals(XpkSceneMusicParity.SILENCE_TRACK_ID, selected?.id)
+        assertEquals(0f, selected?.volume)
+        assertEquals(true, selected?.enabled)
     }
 
     @Test

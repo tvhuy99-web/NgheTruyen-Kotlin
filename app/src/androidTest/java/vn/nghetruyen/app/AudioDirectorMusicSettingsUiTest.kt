@@ -3,8 +3,8 @@ package vn.nghetruyen.app
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
-import androidx.compose.ui.test.onAllNodes
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNode
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -43,8 +43,8 @@ class AudioDirectorMusicSettingsUiTest {
     private fun waitForComposeRoot() {
         composeRule.waitUntil(timeoutMillis = 15_000) {
             runCatching {
-                composeRule.onAllNodes(isRoot(), useUnmergedTree = true)
-                    .fetchSemanticsNodes().isNotEmpty()
+                composeRule.onNode(isRoot(), useUnmergedTree = true).fetchSemanticsNode()
+                true
             }.getOrDefault(false)
         }
     }

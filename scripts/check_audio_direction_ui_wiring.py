@@ -75,17 +75,27 @@ required_switch_tokens = (
     'title = "Nhạc cảnh AI"',
     'title = "Âm thanh môi trường AI"',
     'title = "Hiệu ứng âm thanh AI"',
-    'title = "Mức chuẩn hóa"',
     'title = "Attack"',
     'title = "Release"',
-    'label = "CHUẨN HÓA TOÀN BỘ KHO NHẠC"',
+    'label = "CHUẨN HÓA TOÀN BỘ ÂM THANH"',
+    'title = { Text("CHUẨN HÓA TOÀN BỘ ÂM THANH") }',
+    'title = "Nhạc nền ($musicCount tệp)"',
+    'title = "Âm thanh môi trường ($ambienceCount tệp)"',
+    'title = "Hiệu ứng âm thanh ($sfxCount tệp)"',
     'label = "QUẢN LÝ NHẠC ($musicTrackCount)"',
     'label = "QUẢN LÝ ÂM THANH MÔI TRƯỜNG',
     'label = "QUẢN LÝ HIỆU ỨNG ÂM THANH',
     "UnifiedAudioAssetManagerDialog(",
+    "normalizationTargetLufs = target",
 )
 for token in required_switch_tokens:
     assert token in component, f"missing audio switch/manager routing token: {token}"
+
+for obsolete in (
+    'title = "Mức chuẩn hóa"',
+    'label = "CHUẨN HÓA TOÀN BỘ KHO NHẠC"',
+):
+    assert obsolete not in component, f"obsolete single-target normalization UI remains: {obsolete}"
 
 music_manager = component.find('label = "QUẢN LÝ NHẠC ($musicTrackCount)"')
 ambience_manager = component.find('label = "QUẢN LÝ ÂM THANH MÔI TRƯỜNG')
@@ -95,11 +105,15 @@ assert 0 <= music_manager < ambience_manager < sfx_manager, "three audio manager
 required_manager_tokens = (
     "ActivityResultContracts.OpenMultipleDocuments()",
     'Text("THÊM TỆP")',
-    'Text("MÔ TẢ HÀNG LOẠT")',
+    'Text("DÁN MÔ TẢ")',
+    'Text("SAO CHÉP TÊN")',
+    'Text("SAO CHÉP MÔ TẢ")',
+    'draft.joinToString("\\n") { it.title }',
+    '"${track.title} || ${assetDescription(kind, track.tagsCsv)}"',
     'Text("XÓA TẤT CẢ")',
     'Text("LƯU DANH SÁCH")',
     'Text("HỦY")',
-    'Text("DỪNG NGHE")',
+    'Text("DỪNG NGHE THỬ")',
     'UnifiedAssetActionButton("NGHE THỬ")',
     'UnifiedAssetActionButton("CHUẨN HÓA")',
     'UnifiedAssetActionButton("SỬA TÊN / MÔ TẢ")',
@@ -110,6 +124,7 @@ required_manager_tokens = (
     'UnifiedAssetActionButton("DI CHUYỂN LÊN")',
     'UnifiedAssetActionButton("DI CHUYỂN XUỐNG")',
     'UnifiedAssetActionButton("XÓA KHỎI DANH SÁCH")',
+    'title = { Text("DÁN MÔ TẢ HÀNG LOẠT") }',
     'label = { Text("Tên") }',
     'label = { Text("Mô tả") }',
     "tagsWithDescription(kind, description)",
@@ -124,7 +139,14 @@ list_text_start = manager.find('Column(Modifier.heightIn(max = 620.dp).verticalS
 list_footer_start = manager.find('confirmButton = {', list_text_start)
 assert 0 <= list_text_start < list_footer_start, "unified audio list/body-footer structure missing"
 scrolling_list = manager[list_text_start:list_footer_start]
-for action in ('Text("THÊM TỆP")', 'Text("MÔ TẢ HÀNG LOẠT")', 'Text("XÓA TẤT CẢ")', 'Text("LƯU DANH SÁCH")'):
+for action in (
+    'Text("THÊM TỆP")',
+    'Text("DÁN MÔ TẢ")',
+    'Text("SAO CHÉP TÊN")',
+    'Text("SAO CHÉP MÔ TẢ")',
+    'Text("XÓA TẤT CẢ")',
+    'Text("LƯU DANH SÁCH")',
+):
     assert action not in scrolling_list, f"audio manager action must stay outside scrollable list: {action}"
 
 for removed in (

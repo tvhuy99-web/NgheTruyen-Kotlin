@@ -127,7 +127,7 @@ def main() -> None:
         "ChromiumVBookReplayCoordinator(",
         "brokers = brokers.copy(",
         "browser = replay.browserBroker",
-        "network = replay.networkBroker",
+        "network = VBookRawNetworkBroker(replay.networkBroker)",
         "replayAwareChromiumDiagnostics(diagnostics)",
         "ChromiumVBookBrowserReplayRuntime(",
         "ChromiumVBookDispatcherParityRuntime(",

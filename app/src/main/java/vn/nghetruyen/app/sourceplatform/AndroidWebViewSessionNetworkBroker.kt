@@ -141,9 +141,8 @@ internal class AndroidWebViewSessionNetworkBroker(
             if (!ready.await(remaining(deadline), TimeUnit.MILLISECONDS)) error("SOURCE_BROWSER_NETWORK_BOOTSTRAP_TIMEOUT")
 
             val token = "nghe_fetch_${request.traceId.replace(Regex("[^A-Za-z0-9_]"), "_").take(64)}_${UUID.randomUUID().toString().replace("-", "")}"
-            val fetchScript = buildFetchScript(token, transportUrl, method, request)
-            val metadataRaw = evaluate(webView, fetchScript, remaining(deadline))
-            val metadata = JSONObject(metadataRaw)
+            evaluate(webView, buildFetchScript(token, transportUrl, method, request), remaining(deadline))
+            val metadata = awaitFetchMetadata(webView, token, deadline)
             if (!metadata.optBoolean("ok")) {
                 error("SOURCE_BROWSER_NETWORK_FETCH_FAILED:${metadata.optString("error").take(500)}")
             }
@@ -244,11 +243,12 @@ internal class AndroidWebViewSessionNetworkBroker(
             (()=>{
               window.__ngheVBookNetworkFetch=window.__ngheVBookNetworkFetch||Object.create(null);
               const token=${jsString(token)};
+              window.__ngheVBookNetworkFetch[token]={done:false,ok:false,error:'',bodyBase64:''};
               const headers=$headersJson;
               const options={method:${jsString(method)},headers:headers,credentials:'include',redirect:'follow',cache:'no-store'};
               ${if (referrer.isNotBlank()) "options.referrer=${jsString(referrer)};" else ""}
               ${if (hasBody) "const raw=atob(${jsString(bodyBase64)});const bytes=new Uint8Array(raw.length);for(let i=0;i<raw.length;i++)bytes[i]=raw.charCodeAt(i)&255;options.body=bytes;" else ""}
-              return fetch(${jsString(url)},options).then(async response=>{
+              fetch(${jsString(url)},options).then(async response=>{
                 const bytes=new Uint8Array(await response.arrayBuffer());
                 let binary='';
                 const step=32768;
@@ -256,14 +256,49 @@ internal class AndroidWebViewSessionNetworkBroker(
                 const bodyBase64=btoa(binary);
                 const responseHeaders={};
                 response.headers.forEach((value,name)=>{responseHeaders[name]=value;});
-                window.__ngheVBookNetworkFetch[token]={bodyBase64:bodyBase64};
-                return JSON.stringify({ok:true,status:response.status,statusText:response.statusText||'',url:response.url||${jsString(url)},headers:responseHeaders,bodyChars:bodyBase64.length});
+                window.__ngheVBookNetworkFetch[token]={done:true,ok:true,error:'',status:response.status,statusText:response.statusText||'',url:response.url||${jsString(url)},headers:responseHeaders,bodyBase64:bodyBase64};
               }).catch(error=>{
-                window.__ngheVBookNetworkFetch[token]={bodyBase64:''};
-                return JSON.stringify({ok:false,error:String(error&&(error.message||error)||'unknown'),bodyChars:0});
+                window.__ngheVBookNetworkFetch[token]={done:true,ok:false,error:String(error&&(error.message||error)||'unknown'),status:0,statusText:'',url:${jsString(url)},headers:{},bodyBase64:''};
               });
+              return token;
             })()
         """.trimIndent()
+    }
+
+    private fun awaitFetchMetadata(webView: WebView, token: String, deadline: Long): JSONObject {
+        var polls = 0
+        while (true) {
+            val remaining = remaining(deadline)
+            if (remaining <= 1L && clockMs() >= deadline) error("SOURCE_BROWSER_NETWORK_TIMEOUT")
+            polls += 1
+            val raw = evaluate(
+                webView,
+                """
+                    (()=>{
+                      const state=(window.__ngheVBookNetworkFetch||{})[${jsString(token)}];
+                      if(!state)return '';
+                      return JSON.stringify({
+                        done:state.done===true,
+                        ok:state.ok===true,
+                        error:String(state.error||''),
+                        status:Number(state.status||0),
+                        statusText:String(state.statusText||''),
+                        url:String(state.url||''),
+                        headers:state.headers||{},
+                        bodyChars:String(state.bodyBase64||'').length
+                      });
+                    })()
+                """.trimIndent(),
+                minOf(5_000L, remaining),
+            )
+            if (raw.isNotBlank()) {
+                val parsed = runCatching { JSONObject(raw) }.getOrNull()
+                if (parsed?.optBoolean("done") == true) return parsed
+            }
+            val waitMs = minOf(50L, (deadline - clockMs()).coerceAtLeast(1L))
+            if (clockMs() >= deadline) error("SOURCE_BROWSER_NETWORK_TIMEOUT")
+            Thread.sleep(waitMs)
+        }
     }
 
     private fun importPartitionCookies(manifest: SourceManifest, url: String, manager: CookieManager) {

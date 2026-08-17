@@ -77,19 +77,21 @@ fun wav(file:File, sample:Int, frames:Int=200) {
     o.write("data".toByteArray()); o.write(le32(data.size)); o.write(data)
   }
 }
-fun sample(file:File):Int { val s=WaveFileAssembler.inspect(file); RandomAccessFile(file,"r").use{ it.seek(s.dataOffset); val lo=it.read(); val hi=it.read(); return ((hi shl 8) or lo).toShort().toInt() } }
+fun sample(file:File, frame:Int=0):Int { val s=WaveFileAssembler.inspect(file); RandomAccessFile(file,"r").use{ it.seek(s.dataOffset + frame.toLong()*s.blockAlign); val lo=it.read(); val hi=it.read(); return ((hi shl 8) or lo).toShort().toInt() } }
 fun main(args:Array<String>) {
   val dir=File(args[0]); dir.mkdirs(); val voice=File(dir,"voice.wav"); val music=File(dir,"music.wav"); val sfx=File(dir,"sfx.wav"); val mixed=File(dir,"mixed.wav")
-  wav(voice,1000); wav(music,2000); wav(sfx,500,20)
+  wav(voice,1000,60000); wav(music,2000,60000); wav(sfx,500,20)
   Pcm16SceneMixer.mix(
     voice,
     listOf(
-      SceneMixLayer(music,0,200,0.25f,0,looping=true),
-      SceneMixLayer(sfx,50,200,0.20f,0,looping=false),
+      SceneMixLayer(music,0,60000,0.25f,0,looping=true),
+      SceneMixLayer(sfx,50000,60000,0.20f,0,looping=false),
     ),
     mixed,
   )
-  check(sample(mixed) in 1499..1501) { sample(mixed) }
+  // Measure in the stable middle of the looping bed, away from its intentional boundary fade
+  // and before the one-shot SFX duck envelope starts.
+  check(sample(mixed,30000) in 1499..1501) { sample(mixed,30000) }
   val out=ByteArrayOutputStream(); Id3v23Writer.write(out,Id3v23Writer.Metadata("Truyện","Tác giả","Truyện",chapters=listOf(Id3v23Writer.Chapter("Chương 1",0,1000)))); val b=out.toByteArray()
   check(String(b.copyOfRange(0,3))=="ID3"); check(String(b).contains("TIT2")); check(String(b).contains("TPE1")); check(String(b).contains("CHAP")); check(String(b).contains("CTOC"))
   println("MILESTONE5_AUDIO_CORE_SMOKE_OK")

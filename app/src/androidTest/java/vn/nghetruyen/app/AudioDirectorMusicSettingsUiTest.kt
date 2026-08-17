@@ -3,10 +3,11 @@ package vn.nghetruyen.app
 import android.view.ViewGroup
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -26,20 +27,20 @@ class AudioDirectorMusicSettingsUiTest {
         waitForComposeRoot()
         openPersonalRoot()
         composeRule.onNodeWithText("CÁ NHÂN", useUnmergedTree = true).assertIsDisplayed()
-        check(waitForText("Cài đặt", 5_000)) {
+        check(waitForContentDescription("Cài đặt", 5_000)) {
             "Personal settings entry did not become visible."
         }
-        composeRule.onNodeWithText("Cài đặt", useUnmergedTree = true).performClick()
-        composeRule
-            .onNodeWithText("NHẠC NỀN & NHẠC CẢNH", useUnmergedTree = true)
-            .performScrollTo()
-            .performClick()
-
-        composeRule.waitUntil(timeoutMillis = 5_000) {
-            hasText("Nhạc nền cục bộ")
+        composeRule.onNodeWithContentDescription("Cài đặt", useUnmergedTree = true).performClick()
+        check(waitForText("CÀI ĐẶT ỨNG DỤNG", 5_000)) {
+            "Application settings dialog did not become visible."
         }
+        composeRule.onNodeWithText("CÀI ĐẶT ỨNG DỤNG", useUnmergedTree = true).assertIsDisplayed()
 
-        composeRule.onNodeWithText("Nhạc nền cục bộ", useUnmergedTree = true).assertIsDisplayed()
+        // The compact Settings home intentionally hides the legacy music page entry; the Reader
+        // owns the three AI audio controls. Guard against accidentally reintroducing duplicate
+        // Music/Ambience/SFX controls into this settings dialog.
+        assertContentDescriptionDoesNotExist("NHẠC NỀN & NHẠC CẢNH")
+        assertTextDoesNotExist("Nhạc nền cục bộ")
         assertTextDoesNotExist("ÂM THANH AI")
         assertTextDoesNotExist("Nhạc cảnh AI")
         assertTextDoesNotExist("Âm thanh môi trường AI")
@@ -78,12 +79,26 @@ class AudioDirectorMusicSettingsUiTest {
         true
     }.getOrDefault(false)
 
+    private fun waitForContentDescription(description: String, timeoutMillis: Long): Boolean = runCatching {
+        composeRule.waitUntil(timeoutMillis = timeoutMillis) { hasContentDescription(description) }
+        true
+    }.getOrDefault(false)
+
     private fun hasText(text: String): Boolean = runCatching {
         composeRule.onAllNodesWithText(text, useUnmergedTree = true)
             .fetchSemanticsNodes().isNotEmpty()
     }.getOrDefault(false)
 
+    private fun hasContentDescription(description: String): Boolean = runCatching {
+        composeRule.onAllNodesWithContentDescription(description, useUnmergedTree = true)
+            .fetchSemanticsNodes().isNotEmpty()
+    }.getOrDefault(false)
+
     private fun assertTextDoesNotExist(text: String) {
         check(!hasText(text)) { "Unexpected duplicate audio control: $text" }
+    }
+
+    private fun assertContentDescriptionDoesNotExist(description: String) {
+        check(!hasContentDescription(description)) { "Unexpected hidden settings action: $description" }
     }
 }

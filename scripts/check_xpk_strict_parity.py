@@ -40,6 +40,8 @@ def forbid_production_legacy_narration() -> None:
             violations.append(f"{rel}: aiServices.planMusic")
         if ".aiServices.planNarration(" in source:
             violations.append(f"{rel}: aiServices.planNarration")
+        if "AudioDirectionAiServices(" in source:
+            violations.append(f"{rel}: duplicate audio-direction AI transport")
     if violations:
         raise SystemExit("XPK_STRICT_PARITY legacy narration wiring:\n" + "\n".join(violations))
 
@@ -72,6 +74,10 @@ require(
     "paragraph voice-cast protocol is retired from production wiring",
     "paragraph scene-cue protocol is retired from production wiring",
     "legacy narration planner is retired from production wiring",
+    "includeAmbience: Boolean = false",
+    "includeSoundEffects: Boolean = false",
+    "ambienceScenes: List<AmbienceScene>",
+    "soundEffectCues: List<SoundEffectCue>",
 )
 
 require(
@@ -81,7 +87,11 @@ require(
     "ReferenceVoiceRoleExtras.load(appContext, role.id)",
     "profileSettingsById = profileSettingsById",
     "dialogueGroupByUnitId = bundle.units",
-    "AI_SCENE_MUSIC_REQUIRES_VOICE_CAST",
+    "XpkUnifiedNarrationPrompt.compose(",
+    "includeAmbience = request.includeAmbience",
+    "includeSoundEffects = request.includeSoundEffects",
+    "validAmbienceIds = validAmbienceIds",
+    "validSfxIds = validSfxIds",
     "StoryVoiceCastMode.GLOBAL -> libraryRepository.listVoiceRoles(GLOBAL_VOICE_PROFILE_STORY_ID)",
     "expressiveAdjustment = profile?.expressiveAdjustment ?: false",
     "val timeoutMillis = config.global.timeoutMillis.coerceAtLeast(10_000)",
@@ -90,10 +100,23 @@ require(
 )
 forbid(
     "app/src/main/java/vn/nghetruyen/app/ai/XpkNarrationAiServices.kt",
+    "AI_SCENE_MUSIC_REQUIRES_VOICE_CAST",
     "customGuidance =",
     "MAX_VOICE_PROFILES = 40",
     "maxOutputTokens",
     "MAX_OUTPUT_TOKENS",
+)
+
+require(
+    "app/src/main/java/vn/nghetruyen/app/ai/XpkUnifiedNarrationPrompt.kt",
+    '"assignments"',
+    '"music_scenes"',
+    '"ambience_scenes"',
+    '"sfx_cues"',
+    "XpkVoiceCastPrompt.unitsForScenePrompt(base.units)",
+    "Không dùng thời gian theo giây/mili-giây",
+    "AMBIENCE_CATALOG",
+    "SFX_CATALOG",
 )
 
 require(
@@ -112,6 +135,9 @@ require(
     "dialogueGroupByUnitId: Map<String, String>",
     "explicitCharacterVoiceById",
     "groupVoice[group] = explicitVoice",
+    "validAmbienceIds: Set<String>",
+    "validSfxIds: Set<String>",
+    "XpkAmbienceSfxDirector.parseAndValidate(",
     '@Deprecated("Use parseXpkNarration; paragraph ROLE/ASSIGN protocol is not used by XPK narration runtime")',
     '@Deprecated("Use parseXpkNarration; paragraph CUE protocol is not used by XPK narration runtime")',
 )
@@ -163,7 +189,11 @@ require(
     'put("timeline_fingerprint_version", XpkPlaybackRuntime.TIMELINE_FINGERPRINT_VERSION)',
     "isCurrentTimelineTransform(previousTransform.transformedText, MUSIC_TRANSFORM_ENGINE, previous)",
     "XpkPlaybackRuntime.canonicalLines(content.paragraphs)",
-    "Nhạc theo cảnh AI chỉ được lập cùng phân vai TTS.",
+    "planningMutex.withLock",
+    "includeAmbience = effectiveAmbience",
+    "includeSoundEffects = effectiveSfx",
+    "persistAudioDirectionPlan(",
+    "suspend fun loadAudioDirectionPlan(content: ChapterContent)",
     "suspend fun voicePlanAssignmentCount(content: ChapterContent): Int",
     "suspend fun shouldAutoVoiceCast(storyId: String): Boolean",
     "val profile = library.getStoryAiProfile(storyId) ?: return false",
@@ -172,9 +202,14 @@ require(
     "suspend fun expressiveAdjustmentEnabled(storyId: String): Boolean",
     "suspend fun effectiveVoiceRoles(storyId: String): List<VoiceRoleEntity>",
 )
-forbid(
-    "app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt",
-    "includeVoiceCast = false",
+
+require(
+    "app/src/main/java/vn/nghetruyen/app/playback/AudioDirectionRuntime.kt",
+    "private val narrationPlanCoordinator: NarrationPlanCoordinator",
+    "narrationPlanCoordinator.ensureActivePlans",
+    "narrationPlanCoordinator.loadAudioDirectionPlan",
+    "minimumSfxGapMillis",
+    "maxConcurrentSfx",
 )
 
 require(
@@ -286,6 +321,12 @@ require(
     "app/src/main/java/vn/nghetruyen/app/audio/AudioExportWorker.kt",
     "container.narrationPlanCoordinator.effectiveVoiceRoles(job.storyId)",
     "container.narrationPlanCoordinator.expressiveAdjustmentEnabled(job.storyId)",
+    "XpkPlaybackRuntime.buildSpeechTimeline",
+    "unitId: String",
+    "loadAudioDirectionPlan(content)",
+    "AudioAssetKind.AMBIENCE",
+    "AudioAssetKind.SFX",
+    "looping = false",
     "PcmLoudnessEstimator.gainDbToLinear(track.normalizationGainDb)",
     "settings.backgroundMusicDuckFactor.coerceIn(0.05f, 1f)",
     "volume = gain.coerceIn(0f, 1f)",
@@ -297,11 +338,38 @@ forbid(
 )
 
 require(
+    "app/src/main/java/vn/nghetruyen/app/audio/Pcm16SceneMixer.kt",
+    "val looping: Boolean = true",
+    "if (!layer.looping && local >= totalFrames)",
+    "sourceCache.getOrPut(cacheKey)",
+    "activeSamples.removeAll",
+    "activeDucks.removeAll",
+)
+
+require(
+    "app/src/main/java/vn/nghetruyen/app/ui/components/AudioDirectionLayerSwitches.kt",
+    "AudioAssetKind.MUSIC",
+    "AudioAssetKind.AMBIENCE",
+    "AudioAssetKind.SFX",
+    "UnifiedAudioAssetManagerDialog(",
+)
+require(
+    "app/src/main/java/vn/nghetruyen/app/ui/components/UnifiedAudioAssetManagerDialog.kt",
+    "ActivityResultContracts.OpenMultipleDocuments()",
+    'Text("THÊM TỆP")',
+    'UnifiedAssetActionButton("NGHE THỬ")',
+    'UnifiedAssetActionButton("CHUẨN HÓA")',
+    'UnifiedAssetActionButton("SỬA TÊN / MÔ TẢ")',
+)
+
+require(
     "app/src/main/java/vn/nghetruyen/app/playback/SceneMusicController.kt",
-    "startXpkSequentialTransition(next, XPK_SCENE_SWITCH_MILLIS)",
-    "XPK_SCENE_SWITCH_MILLIS = 2_200",
-    "val fadeOutMillis = if (old == null) 0 else duration / 2",
-    "val fadeInMillis = if (old == null) duration else duration - fadeOutMillis",
+    "private val pendingPlayers = linkedSetOf<MediaPlayer>()",
+    "private var transitionGeneration = 0L",
+    "if (releasedController || generation != transitionGeneration)",
+    "startCrossfadeTransition(next, duration)",
+    "XPK_DEFAULT_CROSSFADE_MILLIS = 2_200",
+    "baseVolume * duckMultiplier * sfxDuckMultiplier * slot.fadeMultiplier",
 )
 
 require(

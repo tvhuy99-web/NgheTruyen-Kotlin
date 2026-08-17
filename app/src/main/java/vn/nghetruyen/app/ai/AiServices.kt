@@ -1,5 +1,7 @@
 package vn.nghetruyen.app.ai
 
+import vn.nghetruyen.app.audio.AmbienceScene
+import vn.nghetruyen.app.audio.SoundEffectCue
 import vn.nghetruyen.app.core.common.AppResult
 
 data class TranslationRequest(
@@ -77,7 +79,20 @@ data class NarrationPlanContext(
     val activeTrackTitle: String? = null,
     val previousMood: String = "",
     val incomingSource: String = "",
-)
+    /** Legacy single field used by the prompt transport; multiple ids are pipe-delimited internally. */
+    var incomingAmbienceId: String? = null,
+    /** Up to two ambience layers that were active at the end of the previous chapter. */
+    val incomingAmbienceIds: List<String> = emptyList(),
+) {
+    init {
+        val normalized = incomingAmbienceIds
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .distinct()
+            .take(2)
+        if (normalized.isNotEmpty()) incomingAmbienceId = normalized.joinToString("|")
+    }
+}
 
 data class NarrationPlanRequest(
     val storyId: String,
@@ -85,7 +100,11 @@ data class NarrationPlanRequest(
     val rawText: String,
     val includeVoiceCast: Boolean = true,
     val includeSceneMusic: Boolean = true,
+    val includeAmbience: Boolean = false,
+    val includeSoundEffects: Boolean = false,
     val tracks: List<SceneMusicTrackOption> = emptyList(),
+    val ambienceTracks: List<SceneMusicTrackOption> = emptyList(),
+    val soundEffectTracks: List<SceneMusicTrackOption> = emptyList(),
     val context: NarrationPlanContext = NarrationPlanContext(),
     val chapterTitle: String = "",
 )
@@ -94,6 +113,9 @@ data class NarrationPlan(
     val voiceCast: VoiceCastPlan = VoiceCastPlan(emptyList(), emptyList()),
     val musicCues: List<SceneMusicCue> = emptyList(),
     val musicSceneError: String = "",
+    val ambienceScenes: List<AmbienceScene> = emptyList(),
+    val soundEffectCues: List<SoundEffectCue> = emptyList(),
+    val audioDirectionError: String = "",
 )
 
 interface TranslationEngine {

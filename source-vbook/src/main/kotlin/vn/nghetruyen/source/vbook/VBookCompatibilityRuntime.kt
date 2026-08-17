@@ -168,6 +168,8 @@ class VBookCompatibilityRuntime(
         }))
         val connection = config.connectionSettings()
         val prelude = buildString {
+            append(VBookFetchSafePrelude.build())
+            append('\n')
             append(VBookConfigPrelude.build(profile, config))
             if (profile == VBookContractProfile.CURRENT_JS) {
                 if (isNotEmpty()) append('\n')

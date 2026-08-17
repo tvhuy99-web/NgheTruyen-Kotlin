@@ -100,7 +100,9 @@ def main() -> None:
     require(
         raw_network,
         "raw vBook network broker",
-        "responseEnvelopeJson(response, key ?: \"\")",
+        "val key = requestKey?.takeIf(String::isNotBlank) ?: return result",
+        "put(CacheKey(request.sourceId, key), response)",
+        "responseEnvelopeJson(response, key)",
         '"__ngheVBookFetch" to JsonValue.Num(1.0, "1")',
         "INTERNAL_REQUEST_KEY",
         "INTERNAL_OPERATION",
@@ -127,13 +129,13 @@ def main() -> None:
         "ChromiumVBookReplayCoordinator(",
         "brokers = brokers.copy(",
         "browser = replay.browserBroker",
-        "network = replay.networkBroker",
+        "network = VBookRawNetworkBroker(replay.networkBroker)",
         "replayAwareChromiumDiagnostics(diagnostics)",
         "ChromiumVBookBrowserReplayRuntime(",
         "ChromiumVBookDispatcherParityRuntime(",
         "IdentityHashMap<Any, VBookActionRuntime>()",
     )
-    assert "ChromiumVBookNetworkProjectionBroker" not in application, "Chromium must preserve the raw vBook metadata envelope"
+    assert "ChromiumVBookNetworkProjectionBroker" not in application, "Chromium must preserve the vBook raw-network broker contract"
     require(
         selector,
         "side-effect-safe fallback",

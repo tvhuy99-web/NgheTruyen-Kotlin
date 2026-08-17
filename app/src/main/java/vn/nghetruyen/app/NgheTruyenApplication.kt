@@ -3,6 +3,8 @@ package vn.nghetruyen.app
 import android.app.Application
 import android.webkit.WebView
 import vn.nghetruyen.app.ai.vietphrase.ReferenceVietPhraseRuntime
+import vn.nghetruyen.app.audio.AudioDirectionPreferences
+import vn.nghetruyen.app.playback.AudioDirectionRuntime
 import vn.nghetruyen.app.sourceplatform.AndroidChromiumVBookRuntime
 import vn.nghetruyen.app.sourceplatform.ChromiumVBookBrowserReplayRuntime
 import vn.nghetruyen.app.sourceplatform.ChromiumVBookDispatcherParityRuntime
@@ -16,12 +18,14 @@ import vn.nghetruyen.source.api.SourcePlatformFailure
 import vn.nghetruyen.source.api.SourcePlatformResult
 import vn.nghetruyen.source.vbook.VBookActionRuntime
 import vn.nghetruyen.source.vbook.VBookActionRuntimeRegistry
+import vn.nghetruyen.source.vbook.VBookRawNetworkBroker
 import java.util.IdentityHashMap
 
 class NgheTruyenApplication : Application() {
     val container: AppContainer by lazy { AppContainer(this) }
     private val chromiumRuntimeLock = Any()
     private val chromiumRuntimes = IdentityHashMap<Any, VBookActionRuntime>()
+    private var audioDirectionRuntime: AudioDirectionRuntime? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -46,7 +50,10 @@ class NgheTruyenApplication : Application() {
                         context = this,
                         brokers = brokers.copy(
                             browser = replay.browserBroker,
-                            network = replay.networkBroker,
+                            // Chromium executes the VBookFetchSafePrelude contract. Its first native
+                            // fetch must therefore return the raw-response metadata envelope while
+                            // subsequent text/base64/request reads reuse the captured response bytes.
+                            network = VBookRawNetworkBroker(replay.networkBroker),
                         ),
                         diagnostics = replayAwareChromiumDiagnostics(diagnostics),
                         webViewCookieReader = brokers.browser as? SourceWebViewCookieReader,
@@ -62,5 +69,14 @@ class NgheTruyenApplication : Application() {
             }
         }
         ReferenceVietPhraseRuntime.load(this)
+
+        // Hydrate the process-wide snapshot before any narration planning can inspect ambience/SFX.
+        val audioPreferences = AudioDirectionPreferences.shared(this)
+        audioDirectionRuntime = AudioDirectionRuntime(
+            context = this,
+            libraryRepository = container.libraryRepository,
+            preferences = audioPreferences,
+            narrationPlanCoordinator = container.narrationPlanCoordinator,
+        ).also(AudioDirectionRuntime::start)
     }
 }

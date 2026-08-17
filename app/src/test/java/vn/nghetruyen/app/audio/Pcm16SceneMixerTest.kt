@@ -9,31 +9,76 @@ import kotlin.io.path.createTempDirectory
 
 class Pcm16SceneMixerTest {
     @Test
-    fun mixesLoopingLayerWithoutLoadingNarrationIntoMemory() {
+    fun mixesLoopingLayerWithSmoothBoundaryFade() {
         val root = createTempDirectory("scene-mix-test-").toFile()
         try {
             val voice = File(root, "voice.wav")
             val music = File(root, "music.wav")
             val output = File(root, "mixed.wav")
-            writeConstantWave(voice, 1_000, 4_096)
+            writeConstantWave(voice, 1_000, 8_192)
             writeConstantWave(music, 2_000, 128)
 
             Pcm16SceneMixer.mix(
                 voice,
-                listOf(SceneMixLayer(music, 0, 4_096, volume = 0.25f)),
+                listOf(SceneMixLayer(music, 0, 8_192, volume = 0.25f)),
                 output,
             )
 
             val segment = WaveFileAssembler.inspect(output)
             RandomAccessFile(output, "r").use { input ->
                 input.seek(segment.dataOffset)
-                val value = ((input.read() and 0xff) or ((input.read() and 0xff) shl 8)).toShort().toInt()
-                assertEquals(1_500, value)
+                val first = readSample(input)
+                assertEquals(1_000, first)
+
+                val middleFrame = 4_096L
+                input.seek(segment.dataOffset + middleFrame * segment.blockAlign)
+                val middle = readSample(input)
+                assertEquals(1_500, middle)
             }
         } finally {
             root.deleteRecursively()
         }
     }
+
+    @Test
+    fun oneShotSfxDucksOnlyLoopingBackgroundNotNarration() {
+        val root = createTempDirectory("scene-sfx-duck-test-").toFile()
+        try {
+            val voice = File(root, "voice.wav")
+            val ambience = File(root, "ambience.wav")
+            val sfx = File(root, "sfx.wav")
+            val output = File(root, "mixed.wav")
+            val narrationFrames = 88_200
+            val sfxStart = 60_000L
+            writeConstantWave(voice, 1_000, narrationFrames)
+            writeConstantWave(ambience, 2_000, 512)
+            writeConstantWave(sfx, 0, 512)
+
+            Pcm16SceneMixer.mix(
+                voice,
+                listOf(
+                    SceneMixLayer(ambience, 0, narrationFrames.toLong(), volume = 0.25f, looping = true),
+                    SceneMixLayer(sfx, sfxStart, narrationFrames.toLong(), volume = 1f, fadeFrames = 0, looping = false),
+                ),
+                output,
+            )
+
+            val segment = WaveFileAssembler.inspect(output)
+            RandomAccessFile(output, "r").use { input ->
+                input.seek(segment.dataOffset + 40_000L * segment.blockAlign)
+                assertEquals(1_500, readSample(input))
+
+                input.seek(segment.dataOffset + sfxStart * segment.blockAlign)
+                // Voice stays at 1000; only the 500-point ambience contribution is ducked to 72%.
+                assertEquals(1_360, readSample(input))
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    private fun readSample(input: RandomAccessFile): Int =
+        ((input.read() and 0xff) or ((input.read() and 0xff) shl 8)).toShort().toInt()
 
     private fun writeConstantWave(file: File, sample: Int, frames: Int) {
         FileOutputStream(file).use { output ->

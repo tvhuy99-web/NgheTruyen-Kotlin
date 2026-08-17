@@ -30,6 +30,7 @@ import vn.nghetruyen.source.api.SourceStorageRequest
 import vn.nghetruyen.source.runtime.SourceResourceProvider
 import vn.nghetruyen.source.vbook.VBookCompatibilityRuntime
 import vn.nghetruyen.source.vbook.VBookContractProfile
+import vn.nghetruyen.source.vbook.VBookRawNetworkBroker
 import vn.nghetruyen.source.vbook.VBookScriptRole
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
@@ -250,7 +251,10 @@ class AndroidChromiumVBookRuntimeTest {
         val cookieReadUrl = AtomicReference<String>()
         val chromium = AndroidChromiumVBookRuntime(
             context = context,
-            brokers = SourceCapabilityBrokers(network = network, cookies = cookiePartition),
+            brokers = SourceCapabilityBrokers(
+                network = VBookRawNetworkBroker(network),
+                cookies = cookiePartition,
+            ),
             webViewCookieReader = SourceWebViewCookieReader { _, url ->
                 cookieReadUrl.set(url)
                 "_csrfToken=test-token; fu=1257514207"

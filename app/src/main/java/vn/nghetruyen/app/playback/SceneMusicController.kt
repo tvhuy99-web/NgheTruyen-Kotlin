@@ -12,9 +12,34 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 /**
- * Owns MediaPlayer instances for background music. Canonical XPK scene plans use the reference
- * tool's sequential fade-out/fade-in transition; ordinary playlists retain the Kotlin crossfade.
+ * Process-local bridge from the application-level AudioDirectionRuntime to the active reader music
+ * controller. There is only one ReaderPlaybackService at a time; attaching a new listener replaces
+ * a stale service listener and release detaches by identity.
+ */
+object SceneMusicSfxDuckBus {
+    @Volatile private var listener: ((Float, Long) -> Unit)? = null
+
+    fun attach(value: (Float, Long) -> Unit) {
+        listener = value
+    }
+
+    fun detach(value: (Float, Long) -> Unit) {
+        if (listener === value) listener = null
+    }
+
+    fun duck(factor: Float, holdMillis: Long) {
+        listener?.invoke(factor, holdMillis)
+    }
+}
+
+/**
+ * Owns MediaPlayer instances for background music. Scene changes use a real overlapping crossfade;
+ * the current track stays audible while the requested track fades in, then the old player is released.
+ * TTS ducking and brief SFX-priority ducking are independent multipliers so one cannot cancel the other.
  * All public calls are expected on the main thread.
+ *
+ * Async prepare requests are generation guarded. A slow, stale request can therefore never replace a
+ * newer track or start playing after pause/stop/release.
  */
 class SceneMusicController(
     private val context: Context,
@@ -31,14 +56,26 @@ class SceneMusicController(
 
     private var active: Slot? = null
     private var outgoing: Slot? = null
-    private var pendingSequential: Slot? = null
     private var transitionJob: Job? = null
     private var duckJob: Job? = null
+    private var sfxDuckJob: Job? = null
+    private val pendingPlayers = linkedSetOf<MediaPlayer>()
+    private var transitionGeneration = 0L
+    private var paused = false
+    private var releasedController = false
     private var speaking = false
     private var duckFactor = 0.63095734f
     private var duckMultiplier = 1f
+    private var sfxDuckMultiplier = 1f
     private var duckAttackMillis = 1850
     private var duckReleaseMillis = 2050
+    private val sfxDuckListener: (Float, Long) -> Unit = { factor, holdMillis ->
+        duckForImportantSfx(factor, holdMillis)
+    }
+
+    init {
+        SceneMusicSfxDuckBus.attach(sfxDuckListener)
+    }
 
     val activeTrackId: String?
         get() = active?.trackId
@@ -57,6 +94,15 @@ class SceneMusicController(
         looping: Boolean = true,
         onCompletion: (() -> Unit)? = null,
     ) {
+        if (releasedController) return
+        if (trackId == SceneMusicSelector.SILENCE_TRACK_ID) {
+            this.duckFactor = duckFactor.coerceIn(0.05f, 1f)
+            stop(clearTrack = true)
+            return
+        }
+        val generation = ++transitionGeneration
+        releasePendingPlayers()
+
         val normalizedVolume = volume.coerceIn(0f, 1f)
         this.duckFactor = duckFactor.coerceIn(0.05f, 1f)
         if (speaking && duckJob?.isActive != true) duckMultiplier = this.duckFactor
@@ -66,28 +112,40 @@ class SceneMusicController(
             applyLevel(current)
             return
         }
+
         val nextPlayer = createPlayer(trackId, uri, looping, onCompletion) ?: return
+        pendingPlayers += nextPlayer
         nextPlayer.setOnPreparedListener { prepared ->
-            val next = Slot(trackId, uri, prepared, normalizedVolume)
-            if (XpkPlaybackRuntime.isCanonicalScenePlanActive()) {
-                startXpkSequentialTransition(next, XPK_SCENE_SWITCH_MILLIS)
-            } else {
-                startCrossfadeTransition(next, crossfadeMillis.coerceIn(0, 8_000))
+            pendingPlayers.remove(prepared)
+            if (releasedController || generation != transitionGeneration) {
+                releasePlayer(prepared)
+                return@setOnPreparedListener
             }
+            val next = Slot(trackId, uri, prepared, normalizedVolume)
+            val requested = crossfadeMillis.coerceIn(0, 8_000)
+            val duration = if (XpkPlaybackRuntime.isCanonicalScenePlanActive() && requested == 0) {
+                XPK_DEFAULT_CROSSFADE_MILLIS
+            } else requested
+            if (paused) installPausedTransition(next) else startCrossfadeTransition(next, duration)
         }
         runCatching { nextPlayer.prepareAsync() }.onFailure {
-            nextPlayer.release()
-            onError("Không chuẩn bị được nhạc nền đã chọn.")
-            onCompletion?.invoke()
+            pendingPlayers.remove(nextPlayer)
+            releasePlayer(nextPlayer)
+            if (generation == transitionGeneration && !releasedController) {
+                onError("Không chuẩn bị được nhạc nền đã chọn.")
+                onCompletion?.invoke()
+            }
         }
     }
 
     fun keepCurrent(duckFactor: Float) {
+        if (releasedController) return
         this.duckFactor = duckFactor.coerceIn(0.05f, 1f)
         animateDuck(if (speaking) this.duckFactor else 1f, if (speaking) duckAttackMillis else duckReleaseMillis)
     }
 
     fun setSpeaking(value: Boolean) {
+        if (releasedController) return
         speaking = value
         animateDuck(
             target = if (value) duckFactor else 1f,
@@ -96,12 +154,15 @@ class SceneMusicController(
     }
 
     fun pause() {
+        if (releasedController) return
+        paused = true
         active?.player?.runCatching { if (isPlaying) pause() }
         outgoing?.player?.runCatching { if (isPlaying) pause() }
-        pendingSequential?.player?.runCatching { if (isPlaying) pause() }
     }
 
     fun resume() {
+        if (releasedController) return
+        paused = false
         val slot = active ?: return
         runCatching {
             applyLevel(slot)
@@ -112,24 +173,49 @@ class SceneMusicController(
     }
 
     fun stop(clearTrack: Boolean = true) {
+        ++transitionGeneration
+        releasePendingPlayers()
         transitionJob?.cancel()
         transitionJob = null
         duckJob?.cancel()
         duckJob = null
+        sfxDuckJob?.cancel()
+        sfxDuckJob = null
+        sfxDuckMultiplier = 1f
         release(outgoing)
         outgoing = null
-        release(pendingSequential)
-        pendingSequential = null
         if (clearTrack) {
             release(active)
             active = null
+            paused = false
             duckMultiplier = if (speaking) duckFactor else 1f
         } else {
-            pause()
+            paused = true
+            active?.let { slot ->
+                slot.fadeMultiplier = 1f
+                applyLevel(slot)
+                runCatching { if (slot.player.isPlaying) slot.player.pause() }
+            }
         }
     }
 
-    fun release() = stop(clearTrack = true)
+    fun release() {
+        if (releasedController) return
+        releasedController = true
+        SceneMusicSfxDuckBus.detach(sfxDuckListener)
+        stop(clearTrack = true)
+    }
+
+    private fun duckForImportantSfx(factor: Float, holdMillis: Long) {
+        if (releasedController) return
+        val target = factor.coerceIn(0.45f, 1f)
+        sfxDuckJob?.cancel()
+        sfxDuckJob = scope.launch(Dispatchers.Main.immediate) {
+            animateSfxDuck(target, SFX_DUCK_ATTACK_MS)
+            delay(holdMillis.coerceIn(120L, 3_000L))
+            animateSfxDuck(1f, SFX_DUCK_RELEASE_MS)
+        }
+    }
 
     private fun createPlayer(
         trackId: String,
@@ -148,21 +234,25 @@ class SceneMusicController(
             isLooping = looping
             setVolume(0f, 0f)
             setOnCompletionListener { completed ->
+                pendingPlayers.remove(completed)
                 val current = active
                 if (current?.player === completed) {
                     active = null
-                    runCatching { completed.release() }
+                    releasePlayer(completed)
                     onCompletion?.invoke()
                 }
             }
             setOnErrorListener { failed, _, _ ->
+                val wasPending = pendingPlayers.remove(failed)
                 val wasActive = active?.player === failed
-                val wasPending = pendingSequential?.player === failed
+                val wasOutgoing = outgoing?.player === failed
                 if (wasActive) active = null
-                if (wasPending) pendingSequential = null
-                runCatching { failed.release() }
-                onError("Không phát được nhạc nền '$trackId'.")
-                if (wasActive) onCompletion?.invoke()
+                if (wasOutgoing) outgoing = null
+                releasePlayer(failed)
+                if (!releasedController && (wasPending || wasActive || wasOutgoing)) {
+                    onError("Không phát được nhạc nền '$trackId'.")
+                }
+                if (wasActive && !releasedController) onCompletion?.invoke()
                 true
             }
         }
@@ -171,11 +261,19 @@ class SceneMusicController(
         null
     }
 
-    /** Ordinary Kotlin playlist transition: old and new overlap. */
+    private fun installPausedTransition(next: Slot) {
+        transitionJob?.cancel()
+        transitionJob = null
+        release(outgoing)
+        outgoing = null
+        release(active)
+        next.fadeMultiplier = 1f
+        active = next
+        applyLevel(next)
+    }
+
     private fun startCrossfadeTransition(next: Slot, durationMillis: Int) {
         transitionJob?.cancel()
-        release(pendingSequential)
-        pendingSequential = null
         outgoing?.let(::release)
         outgoing = active
         active = next
@@ -212,68 +310,6 @@ class SceneMusicController(
         }
     }
 
-    /**
-     * XPK switchBackgroundMusicTrackForScene(track, 2200): when a player exists, fade the current
-     * player to zero for the first half, release it, then start the requested track at zero and fade
-     * it in for the second half. When no player exists, XPK fades the new track in over all 2200 ms.
-     * There is deliberately no overlap between two tracks.
-     */
-    private fun startXpkSequentialTransition(next: Slot, durationMillis: Int) {
-        transitionJob?.cancel()
-        release(pendingSequential)
-        pendingSequential = next
-        outgoing?.let(::release)
-        outgoing = null
-        val old = active
-        val duration = durationMillis.coerceIn(1_200, 4_000)
-        val fadeOutMillis = if (old == null) 0 else duration / 2
-        val fadeInMillis = if (old == null) duration else duration - fadeOutMillis
-
-        transitionJob = scope.launch(Dispatchers.Main.immediate) {
-            if (old != null) {
-                outgoing = old
-                animateSlotFade(old, old.fadeMultiplier, 0f, fadeOutMillis)
-                if (active === old) active = null
-                if (outgoing === old) outgoing = null
-                release(old)
-            }
-
-            if (pendingSequential !== next) {
-                release(next)
-                return@launch
-            }
-            pendingSequential = null
-            next.fadeMultiplier = 0f
-            active = next
-            val started = runCatching { next.player.start() }.isSuccess
-            if (!started) {
-                if (active === next) active = null
-                release(next)
-                onError("Không khởi động được nhạc nền đã chọn.")
-                return@launch
-            }
-            applyLevel(next)
-            animateSlotFade(next, 0f, 1f, fadeInMillis)
-            next.fadeMultiplier = 1f
-            applyLevel(next)
-        }
-    }
-
-    private suspend fun animateSlotFade(slot: Slot, from: Float, to: Float, durationMillis: Int) {
-        if (durationMillis <= 0) {
-            slot.fadeMultiplier = to
-            applyLevel(slot)
-            return
-        }
-        val steps = (durationMillis / 40f).roundToInt().coerceIn(4, 100)
-        repeat(steps + 1) { index ->
-            val fraction = index.toFloat() / steps.toFloat()
-            slot.fadeMultiplier = from + (to - from) * fraction
-            applyLevel(slot)
-            if (index < steps) delay(durationMillis.toLong() / steps)
-        }
-    }
-
     private fun animateDuck(target: Float, durationMillis: Int) {
         duckJob?.cancel()
         val safeTarget = target.coerceIn(0.05f, 1f)
@@ -299,22 +335,54 @@ class SceneMusicController(
         }
     }
 
+    private suspend fun animateSfxDuck(target: Float, durationMillis: Int) {
+        val start = sfxDuckMultiplier
+        if (durationMillis <= 0) {
+            sfxDuckMultiplier = target
+            active?.let(::applyLevel)
+            outgoing?.let(::applyLevel)
+            return
+        }
+        val steps = (durationMillis / 30f).roundToInt().coerceIn(3, 30)
+        repeat(steps + 1) { index ->
+            val fraction = index.toFloat() / steps.toFloat()
+            sfxDuckMultiplier = start + (target - start) * fraction
+            active?.let(::applyLevel)
+            outgoing?.let(::applyLevel)
+            if (index < steps) delay((durationMillis.toLong() / steps).coerceAtLeast(1L))
+        }
+    }
+
     private fun applyLevel(slot: Slot) = setSlotLevel(slot, desiredLevel(slot))
 
     private fun desiredLevel(slot: Slot): Float =
-        (slot.baseVolume * duckMultiplier * slot.fadeMultiplier).coerceIn(0f, 1f)
+        (slot.baseVolume * duckMultiplier * sfxDuckMultiplier * slot.fadeMultiplier).coerceIn(0f, 1f)
 
     private fun setSlotLevel(slot: Slot, level: Float) {
         runCatching { slot.player.setVolume(level, level) }
     }
 
+    private fun releasePendingPlayers() {
+        if (pendingPlayers.isEmpty()) return
+        val stale = pendingPlayers.toList()
+        pendingPlayers.clear()
+        stale.forEach(::releasePlayer)
+    }
+
     private fun release(slot: Slot?) {
         slot ?: return
-        runCatching { slot.player.stop() }
-        runCatching { slot.player.release() }
+        releasePlayer(slot.player)
+    }
+
+    private fun releasePlayer(player: MediaPlayer) {
+        pendingPlayers.remove(player)
+        runCatching { player.stop() }
+        runCatching { player.release() }
     }
 
     companion object {
-        private const val XPK_SCENE_SWITCH_MILLIS = 2_200
+        private const val XPK_DEFAULT_CROSSFADE_MILLIS = 2_200
+        private const val SFX_DUCK_ATTACK_MS = 120
+        private const val SFX_DUCK_RELEASE_MS = 360
     }
 }

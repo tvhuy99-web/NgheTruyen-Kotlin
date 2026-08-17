@@ -16,9 +16,11 @@ import java.util.LinkedHashMap
  * vBook-only network decorator used to bridge the mature text-oriented JS host to the raw-byte
  * contract without weakening or modifying the generic network broker.
  *
- * Internal control headers are removed before any upstream request. The initial response body is
- * a small JSON metadata envelope consumed by [VBookFetchSafePrelude]; response representations are
- * then served lazily from the captured raw bytes without replaying the upstream request.
+ * Internal control headers are removed before any upstream request. Requests that provide an
+ * internal response key opt into the raw-response cache contract: the initial response body is a
+ * small JSON metadata envelope consumed by [VBookFetchSafePrelude], and response representations are
+ * then served lazily from the captured raw bytes without replaying the upstream request. Callers that
+ * do not provide a response key keep the ordinary SourceNetworkBroker response contract unchanged.
  */
 class VBookRawNetworkBroker(
     private val delegate: SourceNetworkBroker,
@@ -98,9 +100,9 @@ class VBookRawNetworkBroker(
         val result = delegate.execute(manifest, delegatedRequest)
         if (result !is SourcePlatformResult.Success) return result
         val response = result.value
-        val key = requestKey?.takeIf(String::isNotBlank)
-        if (key != null) put(CacheKey(request.sourceId, key), response)
-        val envelope = responseEnvelopeJson(response, key ?: "")
+        val key = requestKey?.takeIf(String::isNotBlank) ?: return result
+        put(CacheKey(request.sourceId, key), response)
+        val envelope = responseEnvelopeJson(response, key)
         return SourcePlatformResult.Success(response.copy(
             body = envelope.toByteArray(Charsets.UTF_8),
             charsetName = Charsets.UTF_8.name(),

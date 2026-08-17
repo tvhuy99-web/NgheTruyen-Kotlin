@@ -5,6 +5,7 @@ from pathlib import Path
 
 reader = Path("app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt").read_text()
 component = Path("app/src/main/java/vn/nghetruyen/app/ui/components/AudioDirectionLayerSwitches.kt").read_text()
+audio_manager = Path("app/src/main/java/vn/nghetruyen/app/ui/components/UnifiedAudioAssetManagerDialog.kt").read_text()
 vm = Path("app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt").read_text()
 library = Path("app/src/main/java/vn/nghetruyen/app/ui/screens/LibraryScreen.kt").read_text()
 settings = Path("app/src/main/java/vn/nghetruyen/app/data/settings/SettingsRepository.kt").read_text()
@@ -32,12 +33,18 @@ for marker in [
     'label = "QUẢN LÝ NHẠC ($musicTrackCount)"',
     'label = "QUẢN LÝ ÂM THANH MÔI TRƯỜNG',
     'label = "QUẢN LÝ HIỆU ỨNG ÂM THANH',
+    "UnifiedAudioAssetManagerDialog(",
+]:
+    if marker not in component:
+        raise SystemExit("REFERENCE_WORKFLOW audio routing marker missing: " + marker)
+
+for marker in [
     'label = { Text("Mô tả") }',
-    'Text("CHUẨN HÓA")',
+    'UnifiedAssetActionButton("CHUẨN HÓA")',
     'Text("LƯU")',
     'Text("XÓA")',
 ]:
-    if marker not in component:
+    if marker not in audio_manager:
         raise SystemExit("REFERENCE_WORKFLOW audio manager marker missing: " + marker)
 
 manager_positions = [

@@ -57,18 +57,26 @@ class AudioDirectorMusicSettingsUiTest {
     }
 
     private fun returnToRoot() {
-        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        composeRule.waitForIdle()
+        if (waitForText("CÁ NHÂN", 5_000)) return
+
         repeat(6) {
-            if (hasText("CÁ NHÂN")) return
             composeRule.runOnUiThread {
                 composeRule.activity.onBackPressedDispatcher.onBackPressed()
             }
-            instrumentation.waitForIdleSync()
+            composeRule.waitForIdle()
+            if (waitForText("CÁ NHÂN", 2_000)) return
         }
+
         check(hasText("CÁ NHÂN")) {
             "Could not return to the root navigation before opening Personal settings."
         }
     }
+
+    private fun waitForText(text: String, timeoutMillis: Long): Boolean = runCatching {
+        composeRule.waitUntil(timeoutMillis = timeoutMillis) { hasText(text) }
+        true
+    }.getOrDefault(false)
 
     private fun hasText(text: String): Boolean = runCatching {
         composeRule.onAllNodesWithText(text, useUnmergedTree = true)

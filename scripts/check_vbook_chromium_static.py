@@ -61,7 +61,7 @@ def main() -> None:
         "networkCache",
         "resolvePendingBrowser",
         "networkReplayHits",
-        "MAX_BROWSER_REPLAYS",
+        "MAX_REPLAYS",
         "replayAwareChromiumDiagnostics",
         "CHROMIUM_BROWSER_REPLAY_YIELDED",
     )

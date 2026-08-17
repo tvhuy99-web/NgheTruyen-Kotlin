@@ -137,6 +137,12 @@ internal class ChromiumVBookBrowserReplayRuntime(
                     }
                 }
             }
+            @Suppress("UNREACHABLE_CODE")
+            SourcePlatformResult.Failure(SourcePlatformFailure(
+                SourceErrorCode.INTERNAL_ERROR,
+                "CHROMIUM_BROWSER_REPLAY_UNREACHABLE",
+                effectiveTraceId,
+            ))
         } finally {
             replay.close(effectiveTraceId)
         }

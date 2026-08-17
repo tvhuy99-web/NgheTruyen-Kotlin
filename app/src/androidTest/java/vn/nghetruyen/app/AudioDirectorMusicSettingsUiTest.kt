@@ -1,6 +1,6 @@
 package vn.nghetruyen.app
 
-import android.view.View
+import android.view.ViewGroup
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -46,7 +46,7 @@ class AudioDirectorMusicSettingsUiTest {
         repeat(150) {
             instrumentation.waitForIdleSync()
             composeRule.runOnUiThread {
-                val content = composeRule.activity.findViewById<View>(android.R.id.content)
+                val content = composeRule.activity.findViewById<ViewGroup>(android.R.id.content)
                 ready = composeRule.activity.window.decorView.isAttachedToWindow &&
                     content != null && content.childCount > 0
             }

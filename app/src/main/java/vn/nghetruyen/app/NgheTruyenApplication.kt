@@ -18,6 +18,7 @@ import vn.nghetruyen.source.api.SourcePlatformFailure
 import vn.nghetruyen.source.api.SourcePlatformResult
 import vn.nghetruyen.source.vbook.VBookActionRuntime
 import vn.nghetruyen.source.vbook.VBookActionRuntimeRegistry
+import vn.nghetruyen.source.vbook.VBookRawNetworkBroker
 import java.util.IdentityHashMap
 
 class NgheTruyenApplication : Application() {
@@ -49,7 +50,10 @@ class NgheTruyenApplication : Application() {
                         context = this,
                         brokers = brokers.copy(
                             browser = replay.browserBroker,
-                            network = replay.networkBroker,
+                            // Chromium executes the VBookFetchSafePrelude contract. Its first native
+                            // fetch must therefore return the raw-response metadata envelope while
+                            // subsequent text/base64/request reads reuse the captured response bytes.
+                            network = VBookRawNetworkBroker(replay.networkBroker),
                         ),
                         diagnostics = replayAwareChromiumDiagnostics(diagnostics),
                         webViewCookieReader = brokers.browser as? SourceWebViewCookieReader,

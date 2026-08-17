@@ -10,7 +10,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
-import vn.nghetruyen.app.ai.XpkSceneMusicParity
 
 /**
  * Process-local bridge from the application-level AudioDirectionRuntime to the active reader music
@@ -96,7 +95,7 @@ class SceneMusicController(
         onCompletion: (() -> Unit)? = null,
     ) {
         if (releasedController) return
-        if (trackId == XpkSceneMusicParity.SILENCE_TRACK_ID) {
+        if (trackId == SceneMusicSelector.SILENCE_TRACK_ID) {
             this.duckFactor = duckFactor.coerceIn(0.05f, 1f)
             stop(clearTrack = true)
             return

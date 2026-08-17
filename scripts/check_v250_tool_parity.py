@@ -41,7 +41,7 @@ def main():
             'source-platform-v2','scene-music-restored')
     require('app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidSourceTranslationBroker.kt',
             'SOURCE_TRANSLATION_DISCLOSURE_REQUIRED','TranslationRequest','configured-ai')
-    require('app/build.gradle.kts','versionCode = 28','versionName = "2.8.0-ai-narration-priority2-complete"')
+    require('app/build.gradle.kts','versionCode = 36','versionName = "3.0.2"')
     if not K:
         print('V250_STATIC_COMPILE_SKIPPED')
         print('V250_TOOL_PARITY_OK'); return

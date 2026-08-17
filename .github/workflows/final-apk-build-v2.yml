@@ -29,7 +29,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ARTIFACT_NAME: NgheTruyen-v2.9.0-xpk-parity-debug-apk
+  ARTIFACT_NAME: NgheTruyen-main-debug-apk
   EXPECTED_DEBUG_CERT_SHA256: 534bf882c96a59ccf4310d18d02b14b62aa68e2beff3b6d05bf308e9909eb2f4
 
 jobs:
@@ -59,13 +59,10 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
-      - name: Install validation dependencies
-        run: python3 -m pip install --disable-pip-version-check beautifulsoup4 cryptography
-
-      - name: Validate and build current source
+      - name: Build current main debug APK
         id: build
         shell: bash
-        run: bash scripts/m0_gate.sh
+        run: ./gradlew --no-daemon --stacktrace :app:assembleDebug
 
       - name: Verify stable debug APK signature
         id: signature

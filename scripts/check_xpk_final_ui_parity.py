@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Guard the final XPK-aligned Reader, TTS, music-library, and voice-cast UI details."""
+"""Guard the final XPK-aligned Reader, TTS, audio-library, and voice-cast UI details."""
 
 from pathlib import Path
 
@@ -38,11 +38,22 @@ for removed in [
     if removed in reader:
         raise SystemExit("XPK_FINAL_UI obsolete explanatory music prose/control remains: " + removed)
 
+# Audio Director owns normalization. One algorithm is shared, but MUSIC / AMBIENCE / SFX keep
+# independent user-selected LUFS targets and normalize-all routes every asset through its kind target.
 for marker in [
-    'title = "Mức chuẩn hóa"',
     'title = "Attack"',
     'title = "Release"',
-    'label = "CHUẨN HÓA TOÀN BỘ KHO NHẠC"',
+    'label = "CHUẨN HÓA TOÀN BỘ ÂM THANH"',
+    'title = { Text("CHUẨN HÓA TOÀN BỘ ÂM THANH") }',
+    'title = "Nhạc nền ($musicCount tệp)"',
+    'title = "Âm thanh môi trường ($ambienceCount tệp)"',
+    'title = "Hiệu ứng âm thanh ($sfxCount tệp)"',
+    "settingsRepository.setSceneMusicTargetLufs(musicTarget)",
+    "preferences.setAmbienceNormalizationTargetLufs(ambienceTarget)",
+    "preferences.setSoundEffectsNormalizationTargetLufs(sfxTarget)",
+    "AudioAssetKind.MUSIC -> musicTarget",
+    "AudioAssetKind.AMBIENCE -> ambienceTarget",
+    "AudioAssetKind.SFX -> sfxTarget",
     'label = "QUẢN LÝ NHẠC ($musicTrackCount)"',
     'label = "QUẢN LÝ ÂM THANH MÔI TRƯỜNG',
     'label = "QUẢN LÝ HIỆU ỨNG ÂM THANH',
@@ -52,13 +63,19 @@ for marker in [
         raise SystemExit("XPK_FINAL_UI audio routing marker missing: " + marker)
 
 for marker in [
+    "ActivityResultContracts.OpenMultipleDocuments()",
     'label = { Text("Tên") }',
     'label = { Text("Mô tả") }',
     'Text("THÊM TỆP")',
+    'Text("DÁN MÔ TẢ")',
+    'Text("SAO CHÉP TÊN")',
+    'Text("SAO CHÉP MÔ TẢ")',
+    'draft.joinToString("\\n") { it.title }',
+    '"${track.title} || ${assetDescription(kind, track.tagsCsv)}"',
     'UnifiedAssetActionButton("NGHE THỬ")',
     'UnifiedAssetActionButton("CHUẨN HÓA")',
     'UnifiedAssetActionButton("SỬA TÊN / MÔ TẢ")',
-    'Text("DỪNG NGHE")',
+    'Text("DỪNG NGHE THỬ")',
     'Text("LƯU")',
     'Text("XÓA")',
     'Text("ĐÓNG")',

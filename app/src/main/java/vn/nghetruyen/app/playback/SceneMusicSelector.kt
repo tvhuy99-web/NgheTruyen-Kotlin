@@ -1,6 +1,5 @@
 package vn.nghetruyen.app.playback
 
-import vn.nghetruyen.app.ai.XpkSceneMusicParity
 import vn.nghetruyen.app.core.model.SceneMusicPlaybackMode
 import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
 
@@ -18,6 +17,8 @@ import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
  * milestone 5 removes the paragraph-era API.
  */
 object SceneMusicSelector {
+    const val SILENCE_TRACK_ID = "NONE"
+
     @Suppress("UNUSED_PARAMETER")
     fun select(
         tracks: Collection<SceneMusicTrackEntity>,
@@ -29,9 +30,9 @@ object SceneMusicSelector {
     ): SceneMusicTrackEntity? {
         val target = requestedTrackId.orEmpty().trim()
         if (target.isBlank()) return null
-        if (target == XpkSceneMusicParity.SILENCE_TRACK_ID) {
+        if (target == SILENCE_TRACK_ID) {
             return tracks.firstOrNull()?.copy(
-                id = XpkSceneMusicParity.SILENCE_TRACK_ID,
+                id = SILENCE_TRACK_ID,
                 volume = 0f,
                 enabled = true,
             )

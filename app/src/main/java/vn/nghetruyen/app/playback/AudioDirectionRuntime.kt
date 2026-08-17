@@ -25,6 +25,10 @@ import vn.nghetruyen.app.data.repository.LibraryRepository
  * Playback consumer for the unified XPK chapter plan. This class never calls an AI provider itself:
  * when a plan is absent/stale it asks [NarrationPlanCoordinator] to prepare the whole active chapter
  * once, then consumes the persisted AMBIENCE/SFX portion on the canonical UNIT timeline.
+ *
+ * A start/stop session owns all collector and preference-listener coroutines. Cheap playback emissions
+ * (for example every TTS paragraph) reuse the already validated chapter plan and only revalidate assets
+ * periodically, avoiding repeated DB reads and chapter hashing on the hot playback path.
  */
 class AudioDirectionRuntime(
     context: Context,
@@ -32,11 +36,12 @@ class AudioDirectionRuntime(
     private val preferences: AudioDirectionPreferences,
     private val narrationPlanCoordinator: NarrationPlanCoordinator,
 ) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutex = Mutex()
     private val ambienceController = SceneAmbienceController(context)
     private val sfxController = SceneSfxController(context)
 
+    private var runtimeJob: Job? = null
+    @Volatile private var runtimeScope: CoroutineScope? = null
     private var collectorJob: Job? = null
     private var preparedChapterId = ""
     private var preparedSignature = ""
@@ -49,15 +54,28 @@ class AudioDirectionRuntime(
     private var lastTriggeredSfxKey = ""
     private var lastSfxAtMillis = 0L
     private val lastEffectAtMillis = linkedMapOf<String, Long>()
+    private var lastSettings: AudioDirectionPreferences.Snapshot? = null
+    private var validatedFastKey = ""
+    private var validatedFastAtMillis = 0L
+    private var cachedParagraphChapterId = ""
+    private var cachedParagraphIdentity = 0
+    private var cachedParagraphCount = -1
+    private var cachedParagraphHash = ""
 
     private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
-        scope.launch { mutex.withLock { handleSnapshot(PlaybackQueueStore.state.value, forcePreferences = true) } }
+        runtimeScope?.launch {
+            mutex.withLock { handleSnapshot(PlaybackQueueStore.state.value, forcePreferences = true) }
+        }
     }
 
     fun start() {
-        if (collectorJob != null) return
+        if (runtimeJob?.isActive == true) return
+        val job = SupervisorJob()
+        val sessionScope = CoroutineScope(job + Dispatchers.IO)
+        runtimeJob = job
+        runtimeScope = sessionScope
         preferences.addChangeListener(preferenceListener)
-        collectorJob = scope.launch {
+        collectorJob = sessionScope.launch {
             PlaybackQueueStore.state.collect { snapshot ->
                 mutex.withLock { handleSnapshot(snapshot, forcePreferences = false) }
             }
@@ -66,15 +84,26 @@ class AudioDirectionRuntime(
 
     fun stop() {
         preferences.removeChangeListener(preferenceListener)
-        collectorJob?.cancel()
+        runtimeScope = null
+        runtimeJob?.cancel()
+        runtimeJob = null
         collectorJob = null
         ambienceController.stop()
         sfxController.stopAll()
+        lastSettings = null
         clearPreparedPlan()
     }
 
     private suspend fun handleSnapshot(snapshot: PlaybackSnapshot, forcePreferences: Boolean) {
         val settings = preferences.snapshot()
+        val previousSettings = lastSettings
+        lastSettings = settings
+        val planningSwitchChanged = forcePreferences && (
+            previousSettings == null ||
+                previousSettings.ambienceEnabled != settings.ambienceEnabled ||
+                previousSettings.soundEffectsEnabled != settings.soundEffectsEnabled
+            )
+
         if (!settings.ambienceEnabled && !settings.soundEffectsEnabled) {
             ambienceController.stop()
             sfxController.stopAll()
@@ -87,15 +116,16 @@ class AudioDirectionRuntime(
             return
         }
 
-        val prepared = ensurePlan(snapshot, settings, forcePreferences)
-        if (!prepared) {
-            ambienceController.stop()
+        if (!snapshot.isPlaying) {
+            ambienceController.pause()
             sfxController.stopAll()
+            if (planningSwitchChanged) clearPreparedPlan()
             return
         }
 
-        if (!snapshot.isPlaying) {
-            ambienceController.pause()
+        val prepared = ensurePlan(snapshot, settings, planningSwitchChanged)
+        if (!prepared) {
+            ambienceController.stop()
             sfxController.stopAll()
             return
         }
@@ -111,7 +141,19 @@ class AudioDirectionRuntime(
         settings: AudioDirectionPreferences.Snapshot,
         force: Boolean,
     ): Boolean {
+        val now = System.currentTimeMillis()
+        val fastKey = buildFastKey(snapshot, settings)
+        if (!force &&
+            preparedChapterId == snapshot.chapterId &&
+            preparedSignature.isNotBlank() &&
+            validatedFastKey == fastKey &&
+            now - validatedFastAtMillis < PLAN_REVALIDATE_INTERVAL_MS
+        ) {
+            return true
+        }
+
         val rawTracks = libraryRepository.listEnabledSceneMusicTracks()
+        val rawTracksById = rawTracks.associateBy { it.id }
         val allAssets = rawTracks.map(AudioAssetClassifier::toAsset)
             .filter { it.id.isNotBlank() && it.uri.isNotBlank() }
         val activeAudioAssets = allAssets.filter { asset ->
@@ -122,27 +164,34 @@ class AudioDirectionRuntime(
         ambienceVariantsById = buildAmbienceVariants(allAssets)
 
         val validUnits = snapshot.speechChunks.map { it.unitId }.filter(String::isNotBlank)
-        val signature = ChapterAiWorkflow.sha256(
-            snapshot.paragraphs +
-                activeAudioAssets.flatMap { asset ->
-                    val row = rawTracks.firstOrNull { it.id == asset.id }
-                    listOf(asset.id, asset.title, asset.description, asset.kind.name, row?.updatedAt?.toString().orEmpty())
-                } +
-                listOf(
-                    "chapter=${snapshot.chapterId}",
-                    "ambience=${settings.ambienceEnabled}",
-                    "sfx=${settings.soundEffectsEnabled}",
-                    "timeline=${validUnits.joinToString(",")}",
-                ),
-        )
-        if (!force && preparedChapterId == snapshot.chapterId && preparedSignature == signature) return true
-        if (!force && failedSignature == signature &&
-            System.currentTimeMillis() - failedAtMillis < FAILURE_RETRY_COOLDOWN_MS
-        ) return false
+        val signatureParts = ArrayList<String>(activeAudioAssets.size * 5 + 5)
+        signatureParts += "content=${paragraphFingerprint(snapshot)}"
+        activeAudioAssets.forEach { asset ->
+            val row = rawTracksById[asset.id]
+            signatureParts += asset.id
+            signatureParts += asset.title
+            signatureParts += asset.description
+            signatureParts += asset.kind.name
+            signatureParts += row?.updatedAt?.toString().orEmpty()
+        }
+        signatureParts += "chapter=${snapshot.chapterId}"
+        signatureParts += "ambience=${settings.ambienceEnabled}"
+        signatureParts += "sfx=${settings.soundEffectsEnabled}"
+        signatureParts += "timeline=${validUnits.joinToString(",")}"
+        val signature = ChapterAiWorkflow.sha256(signatureParts)
+
+        if (!force && preparedChapterId == snapshot.chapterId && preparedSignature == signature) {
+            markFastValidation(fastKey, now)
+            return true
+        }
+        if (!force && failedSignature == signature && now - failedAtMillis < FAILURE_RETRY_COOLDOWN_MS) {
+            return false
+        }
 
         if (activeAudioAssets.isEmpty()) {
             clearFailure()
             installPlan(snapshot.chapterId, signature, validUnits, AmbienceSfxPlan())
+            markFastValidation(fastKey, now)
             return true
         }
 
@@ -170,7 +219,43 @@ class AudioDirectionRuntime(
 
         clearFailure()
         installPlan(snapshot.chapterId, signature, validUnits, plan)
+        markFastValidation(fastKey, now)
         return true
+    }
+
+    private fun buildFastKey(
+        snapshot: PlaybackSnapshot,
+        settings: AudioDirectionPreferences.Snapshot,
+    ): String = buildString(96) {
+        append(snapshot.chapterId)
+        append('|').append(System.identityHashCode(snapshot.paragraphs))
+        append(':').append(snapshot.paragraphs.size)
+        append('|').append(System.identityHashCode(snapshot.speechChunks))
+        append(':').append(snapshot.speechChunks.size)
+        append('|').append(settings.ambienceEnabled)
+        append('|').append(settings.soundEffectsEnabled)
+    }
+
+    private fun paragraphFingerprint(snapshot: PlaybackSnapshot): String {
+        val identity = System.identityHashCode(snapshot.paragraphs)
+        if (cachedParagraphChapterId == snapshot.chapterId &&
+            cachedParagraphIdentity == identity &&
+            cachedParagraphCount == snapshot.paragraphs.size &&
+            cachedParagraphHash.isNotBlank()
+        ) {
+            return cachedParagraphHash
+        }
+        return ChapterAiWorkflow.sha256(snapshot.paragraphs).also { hash ->
+            cachedParagraphChapterId = snapshot.chapterId
+            cachedParagraphIdentity = identity
+            cachedParagraphCount = snapshot.paragraphs.size
+            cachedParagraphHash = hash
+        }
+    }
+
+    private fun markFastValidation(key: String, now: Long = System.currentTimeMillis()) {
+        validatedFastKey = key
+        validatedFastAtMillis = now
     }
 
     private fun installPlan(
@@ -297,11 +382,18 @@ class AudioDirectionRuntime(
         lastTriggeredSfxKey = ""
         lastSfxAtMillis = 0L
         lastEffectAtMillis.clear()
+        validatedFastKey = ""
+        validatedFastAtMillis = 0L
+        cachedParagraphChapterId = ""
+        cachedParagraphIdentity = 0
+        cachedParagraphCount = -1
+        cachedParagraphHash = ""
     }
 
     companion object {
         const val KIND_AUDIO_DIRECTION = NarrationPlanCoordinator.KIND_AUDIO_DIRECTION
         private const val FAILURE_RETRY_COOLDOWN_MS = 60_000L
+        private const val PLAN_REVALIDATE_INTERVAL_MS = 5_000L
         private const val MAX_EFFECT_HISTORY = 64
         private const val SFX_DUCK_FACTOR = 0.72f
         private const val SFX_DUCK_HOLD_MS = 650L

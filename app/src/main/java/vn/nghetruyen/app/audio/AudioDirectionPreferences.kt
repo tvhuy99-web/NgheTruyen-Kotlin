@@ -20,6 +20,8 @@ class AudioDirectionPreferences(context: Context) {
         val soundEffectsEnabled: Boolean = false,
         val ambienceMasterVolume: Float = DEFAULT_AMBIENCE_VOLUME,
         val soundEffectsMasterVolume: Float = DEFAULT_SFX_VOLUME,
+        val ambienceNormalizationTargetLufs: Float = DEFAULT_AMBIENCE_NORMALIZATION_TARGET_LUFS,
+        val soundEffectsNormalizationTargetLufs: Float = DEFAULT_SFX_NORMALIZATION_TARGET_LUFS,
         val ambienceCrossfadeMillis: Int = DEFAULT_AMBIENCE_CROSSFADE_MS,
         val ambienceLoopOverlapMinMillis: Int = DEFAULT_AMBIENCE_LOOP_OVERLAP_MIN_MS,
         val ambienceLoopOverlapMaxMillis: Int = DEFAULT_AMBIENCE_LOOP_OVERLAP_MAX_MS,
@@ -49,6 +51,14 @@ class AudioDirectionPreferences(context: Context) {
                 .coerceIn(0f, 1f),
             soundEffectsMasterVolume = preferences.getFloat(KEY_SFX_VOLUME, DEFAULT_SFX_VOLUME)
                 .coerceIn(0f, 1f),
+            ambienceNormalizationTargetLufs = preferences.getFloat(
+                KEY_AMBIENCE_NORMALIZATION_TARGET_LUFS,
+                DEFAULT_AMBIENCE_NORMALIZATION_TARGET_LUFS,
+            ).coerceIn(PcmLoudnessEstimator.MIN_TARGET_LUFS, PcmLoudnessEstimator.MAX_TARGET_LUFS),
+            soundEffectsNormalizationTargetLufs = preferences.getFloat(
+                KEY_SFX_NORMALIZATION_TARGET_LUFS,
+                DEFAULT_SFX_NORMALIZATION_TARGET_LUFS,
+            ).coerceIn(PcmLoudnessEstimator.MIN_TARGET_LUFS, PcmLoudnessEstimator.MAX_TARGET_LUFS),
             ambienceCrossfadeMillis = preferences.getInt(KEY_AMBIENCE_CROSSFADE_MS, DEFAULT_AMBIENCE_CROSSFADE_MS)
                 .coerceIn(500, 3_000),
             ambienceLoopOverlapMinMillis = overlapMin,
@@ -81,6 +91,22 @@ class AudioDirectionPreferences(context: Context) {
 
     fun setSoundEffectsMasterVolume(value: Float) {
         preferences.edit().putFloat(KEY_SFX_VOLUME, value.coerceIn(0f, 1f)).apply()
+        snapshot()
+    }
+
+    fun setAmbienceNormalizationTargetLufs(value: Float) {
+        preferences.edit().putFloat(
+            KEY_AMBIENCE_NORMALIZATION_TARGET_LUFS,
+            value.coerceIn(PcmLoudnessEstimator.MIN_TARGET_LUFS, PcmLoudnessEstimator.MAX_TARGET_LUFS),
+        ).apply()
+        snapshot()
+    }
+
+    fun setSoundEffectsNormalizationTargetLufs(value: Float) {
+        preferences.edit().putFloat(
+            KEY_SFX_NORMALIZATION_TARGET_LUFS,
+            value.coerceIn(PcmLoudnessEstimator.MIN_TARGET_LUFS, PcmLoudnessEstimator.MAX_TARGET_LUFS),
+        ).apply()
         snapshot()
     }
 
@@ -128,6 +154,8 @@ class AudioDirectionPreferences(context: Context) {
         private const val KEY_SFX_ENABLED = "sound_effects_enabled"
         private const val KEY_AMBIENCE_VOLUME = "ambience_master_volume"
         private const val KEY_SFX_VOLUME = "sound_effects_master_volume"
+        private const val KEY_AMBIENCE_NORMALIZATION_TARGET_LUFS = "ambience_normalization_target_lufs"
+        private const val KEY_SFX_NORMALIZATION_TARGET_LUFS = "sfx_normalization_target_lufs"
         private const val KEY_AMBIENCE_CROSSFADE_MS = "ambience_crossfade_ms"
         private const val KEY_AMBIENCE_LOOP_OVERLAP_MIN_MS = "ambience_loop_overlap_min_ms"
         private const val KEY_AMBIENCE_LOOP_OVERLAP_MAX_MS = "ambience_loop_overlap_max_ms"
@@ -152,6 +180,8 @@ class AudioDirectionPreferences(context: Context) {
 
         const val DEFAULT_AMBIENCE_VOLUME = 0.24f
         const val DEFAULT_SFX_VOLUME = 0.42f
+        const val DEFAULT_AMBIENCE_NORMALIZATION_TARGET_LUFS = -27f
+        const val DEFAULT_SFX_NORMALIZATION_TARGET_LUFS = -20f
         const val DEFAULT_AMBIENCE_CROSSFADE_MS = 1_600
         const val DEFAULT_AMBIENCE_LOOP_OVERLAP_MIN_MS = 900
         const val DEFAULT_AMBIENCE_LOOP_OVERLAP_MAX_MS = 2_200

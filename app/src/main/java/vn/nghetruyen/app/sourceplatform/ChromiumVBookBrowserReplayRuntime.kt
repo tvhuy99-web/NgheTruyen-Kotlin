@@ -5,6 +5,7 @@ import vn.nghetruyen.source.api.SourceActionResponse
 import vn.nghetruyen.source.api.SourceBrowserBroker
 import vn.nghetruyen.source.api.SourceBrowserRequest
 import vn.nghetruyen.source.api.SourceBrowserResponse
+import vn.nghetruyen.source.api.SourceCookieMode
 import vn.nghetruyen.source.api.SourceErrorCode
 import vn.nghetruyen.source.api.SourceManifest
 import vn.nghetruyen.source.api.SourceNetworkBroker
@@ -19,20 +20,20 @@ import vn.nghetruyen.source.diagnostics.DiagnosticSink
 import vn.nghetruyen.source.runtime.SourceResourceProvider
 import vn.nghetruyen.source.vbook.VBookActionRuntime
 import java.security.MessageDigest
+import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 internal const val CHROMIUM_BROWSER_REPLAY_REQUIRED = "SOURCE_BROWSER_REPLAY_REQUIRED"
+internal const val CHROMIUM_BROWSER_NETWORK_REPLAY_REQUIRED = "SOURCE_BROWSER_NETWORK_REPLAY_REQUIRED"
 
 /**
- * Runs Browser host calls between Chromium evaluation passes instead of inside a pending JS prompt.
+ * Runs Browser host calls and browser-session network calls between Chromium evaluation passes.
  *
- * Android WebView keeps the action renderer's prompt rendezvous on the main thread. A production
- * Browser broker also needs that thread to drive its own WebView, so invoking Browser.* directly
- * from the prompt bridge can gate both WebViews until the action timeout. This wrapper lets the
- * Chromium pass yield at the first uncached Browser call, executes that call after the action
- * WebView has been destroyed, caches the result, and restarts the same script. Network calls that
- * happened before the yield are cached too so replay does not repeat HTTP side effects.
+ * The action WebView owns a synchronous prompt rendezvous on the main thread. Browser work also
+ * needs the main thread, so both Browser.* and browser-context fetches must yield, run after the
+ * action WebView has been destroyed, and then replay the same extension script. Earlier network
+ * calls are cached by call position so replay never repeats their upstream side effects.
  */
 internal class ChromiumVBookBrowserReplayRuntime(
     private val delegate: VBookActionRuntime,
@@ -61,6 +62,7 @@ internal class ChromiumVBookBrowserReplayRuntime(
         }
 
         var resolvedBrowserActions = 0
+        var resolvedBrowserNetworkRequests = 0
         return try {
             while (true) {
                 val remainingMs = deadlineMs - clockMs()
@@ -75,11 +77,11 @@ internal class ChromiumVBookBrowserReplayRuntime(
                         effectiveTraceId,
                     )
                 }
-                if (resolvedBrowserActions >= MAX_BROWSER_REPLAYS) {
+                if (resolvedBrowserActions + resolvedBrowserNetworkRequests >= MAX_REPLAYS) {
                     return restoreTrace(
                         SourcePlatformResult.Failure(SourcePlatformFailure(
                             SourceErrorCode.RUNTIME_BUDGET_EXCEEDED,
-                            "CHROMIUM_BROWSER_REPLAY_LIMIT:$MAX_BROWSER_REPLAYS",
+                            "CHROMIUM_BROWSER_REPLAY_LIMIT:$MAX_REPLAYS",
                             effectiveTraceId,
                         )),
                         originalTraceId,
@@ -92,36 +94,49 @@ internal class ChromiumVBookBrowserReplayRuntime(
                     request.action to action.copy(timeoutMs = remainingMs.coerceAtMost(120_000L))
                 ))
                 val result = delegate.execute(passManifest, resources, effectiveRequest)
-                if (!replay.hasPendingBrowser(effectiveTraceId)) {
-                    if (resolvedBrowserActions > 0) {
-                        diagnostics.emit(DiagnosticEvent(
-                            timestampEpochMs = clockMs(),
-                            traceId = effectiveTraceId,
-                            sourceId = manifest.id,
-                            sourceVersion = manifest.version.toString(),
-                            category = DiagnosticCategory.REPLAY,
-                            name = "CHROMIUM_BROWSER_REPLAY_COMPLETED",
-                            severity = DiagnosticSeverity.INFO,
-                            attributes = mapOf(
-                                "browserActions" to resolvedBrowserActions.toString(),
-                                "networkReplayHits" to replay.networkReplayHits(effectiveTraceId).toString(),
-                            ),
-                        ))
-                    }
-                    return restoreTrace(result, originalTraceId, effectiveTraceId)
-                }
 
-                when (val resolved = replay.resolvePendingBrowser(effectiveTraceId)) {
-                    is SourcePlatformResult.Success -> resolvedBrowserActions += 1
-                    is SourcePlatformResult.Failure -> return restoreTrace(
-                        resolved,
-                        originalTraceId,
-                        effectiveTraceId,
-                    )
+                when {
+                    replay.hasPendingBrowser(effectiveTraceId) -> {
+                        when (val resolved = replay.resolvePendingBrowser(effectiveTraceId)) {
+                            is SourcePlatformResult.Success -> resolvedBrowserActions += 1
+                            is SourcePlatformResult.Failure -> return restoreTrace(
+                                resolved,
+                                originalTraceId,
+                                effectiveTraceId,
+                            )
+                        }
+                    }
+                    replay.hasPendingBrowserNetwork(effectiveTraceId) -> {
+                        when (val resolved = replay.resolvePendingBrowserNetwork(effectiveTraceId)) {
+                            is SourcePlatformResult.Success -> resolvedBrowserNetworkRequests += 1
+                            is SourcePlatformResult.Failure -> return restoreTrace(
+                                resolved,
+                                originalTraceId,
+                                effectiveTraceId,
+                            )
+                        }
+                    }
+                    else -> {
+                        if (resolvedBrowserActions > 0 || resolvedBrowserNetworkRequests > 0) {
+                            diagnostics.emit(DiagnosticEvent(
+                                timestampEpochMs = clockMs(),
+                                traceId = effectiveTraceId,
+                                sourceId = manifest.id,
+                                sourceVersion = manifest.version.toString(),
+                                category = DiagnosticCategory.REPLAY,
+                                name = "CHROMIUM_BROWSER_REPLAY_COMPLETED",
+                                severity = DiagnosticSeverity.INFO,
+                                attributes = mapOf(
+                                    "browserActions" to resolvedBrowserActions.toString(),
+                                    "browserNetworkRequests" to resolvedBrowserNetworkRequests.toString(),
+                                    "networkReplayHits" to replay.networkReplayHits(effectiveTraceId).toString(),
+                                ),
+                            ))
+                        }
+                        return restoreTrace(result, originalTraceId, effectiveTraceId)
+                    }
                 }
             }
-            @Suppress("UNREACHABLE_CODE")
-            SourcePlatformResult.Failure(SourcePlatformFailure(SourceErrorCode.INTERNAL_ERROR, "CHROMIUM_BROWSER_REPLAY_UNREACHABLE"))
         } finally {
             replay.close(effectiveTraceId)
         }
@@ -149,7 +164,7 @@ internal class ChromiumVBookBrowserReplayRuntime(
 
     companion object {
         private const val MIN_PASS_BUDGET_MS = 500L
-        private const val MAX_BROWSER_REPLAYS = 64
+        private const val MAX_REPLAYS = 64
     }
 }
 
@@ -157,6 +172,7 @@ internal class ChromiumVBookBrowserReplayRuntime(
 internal class ChromiumVBookReplayCoordinator(
     private val browserDelegate: SourceBrowserBroker,
     private val networkDelegate: SourceNetworkBroker,
+    private val browserNetworkDelegate: SourceNetworkBroker? = null,
     private val clockMs: () -> Long = System::currentTimeMillis,
 ) {
     private val states = ConcurrentHashMap<String, ReplayState>()
@@ -180,19 +196,27 @@ internal class ChromiumVBookReplayCoordinator(
 
     fun hasPendingBrowser(traceId: String): Boolean = states[traceId]?.hasPendingBrowser() == true
 
+    fun hasPendingBrowserNetwork(traceId: String): Boolean = states[traceId]?.hasPendingBrowserNetwork() == true
+
     fun resolvePendingBrowser(traceId: String): SourcePlatformResult<Unit> =
         states[traceId]?.resolvePendingBrowser()
-            ?: SourcePlatformResult.Failure(SourcePlatformFailure(
-                SourceErrorCode.INTERNAL_ERROR,
-                "CHROMIUM_BROWSER_REPLAY_STATE_MISSING",
-                traceId,
-            ))
+            ?: missingState(traceId)
+
+    fun resolvePendingBrowserNetwork(traceId: String): SourcePlatformResult<Unit> =
+        states[traceId]?.resolvePendingBrowserNetwork()
+            ?: missingState(traceId)
 
     fun networkReplayHits(traceId: String): Int = states[traceId]?.networkReplayHits ?: 0
 
     fun close(traceId: String) {
         states.remove(traceId)
     }
+
+    private fun missingState(traceId: String) = SourcePlatformResult.Failure(SourcePlatformFailure(
+        SourceErrorCode.INTERNAL_ERROR,
+        "CHROMIUM_BROWSER_REPLAY_STATE_MISSING",
+        traceId,
+    ))
 
     private inner class ReplayState(
         private val deadlineMs: Long,
@@ -202,6 +226,9 @@ internal class ChromiumVBookReplayCoordinator(
         private var browserCursor = 0
         private var networkCursor = 0
         private var pendingBrowser: PendingBrowser? = null
+        private var pendingBrowserNetwork: PendingBrowserNetwork? = null
+        private var browserContextReady = false
+        private var browserNetworkFloor: Int? = null
         var networkReplayHits: Int = 0
             private set
 
@@ -210,17 +237,22 @@ internal class ChromiumVBookReplayCoordinator(
             browserCursor = 0
             networkCursor = 0
             pendingBrowser = null
+            pendingBrowserNetwork = null
         }
 
         @Synchronized
         fun hasPendingBrowser(): Boolean = pendingBrowser != null
 
         @Synchronized
+        fun hasPendingBrowserNetwork(): Boolean = pendingBrowserNetwork != null
+
+        @Synchronized
         fun browser(
             manifest: SourceManifest,
             request: SourceBrowserRequest,
         ): SourcePlatformResult<SourceBrowserResponse> {
-            pendingBrowser?.let { return replayRequired(request, it.index) }
+            pendingBrowser?.let { return browserReplayRequired(request, it.index) }
+            pendingBrowserNetwork?.let { return browserReplayRequired(request, it.index) }
 
             val index = browserCursor++
             val key = BrowserKey.from(request)
@@ -230,8 +262,9 @@ internal class ChromiumVBookReplayCoordinator(
                 truncateBrowserCache(index)
             }
 
+            if (browserNetworkFloor == null) browserNetworkFloor = networkCursor
             pendingBrowser = PendingBrowser(index, key, manifest, request)
-            return replayRequired(request, index)
+            return browserReplayRequired(request, index)
         }
 
         @Synchronized
@@ -240,11 +273,10 @@ internal class ChromiumVBookReplayCoordinator(
             request: SourceNetworkRequest,
         ): SourcePlatformResult<SourceNetworkResponse> {
             pendingBrowser?.let { pending ->
-                return SourcePlatformResult.Failure(SourcePlatformFailure(
-                    SourceErrorCode.NETWORK_UNAVAILABLE,
-                    "$CHROMIUM_BROWSER_REPLAY_REQUIRED:${pending.index}",
-                    request.traceId,
-                ))
+                return networkFailure(request, CHROMIUM_BROWSER_REPLAY_REQUIRED, pending.index)
+            }
+            pendingBrowserNetwork?.let { pending ->
+                return networkFailure(request, CHROMIUM_BROWSER_NETWORK_REPLAY_REQUIRED, pending.index)
             }
 
             val index = networkCursor++
@@ -256,6 +288,11 @@ internal class ChromiumVBookReplayCoordinator(
                     return cached.result.asReplay()
                 }
                 truncateNetworkCache(index)
+            }
+
+            if (shouldUseBrowserNetwork(manifest, index)) {
+                pendingBrowserNetwork = PendingBrowserNetwork(index, key, manifest, request)
+                return networkFailure(request, CHROMIUM_BROWSER_NETWORK_REPLAY_REQUIRED, index)
             }
 
             val remainingMs = deadlineMs - clockMs()
@@ -301,16 +338,67 @@ internal class ChromiumVBookReplayCoordinator(
                 )) }
             truncateBrowserCache(pending.index)
             browserCache += BrowserRecord(pending.key, result)
+            if (result is SourcePlatformResult.Success) browserContextReady = true
             pendingBrowser = null
             return SourcePlatformResult.Success(Unit)
         }
 
-        private fun replayRequired(
+        @Synchronized
+        fun resolvePendingBrowserNetwork(): SourcePlatformResult<Unit> {
+            val pending = pendingBrowserNetwork ?: return SourcePlatformResult.Success(Unit)
+            val delegate = browserNetworkDelegate ?: return SourcePlatformResult.Failure(SourcePlatformFailure(
+                SourceErrorCode.NETWORK_UNAVAILABLE,
+                "CHROMIUM_BROWSER_NETWORK_DELEGATE_MISSING",
+                pending.request.traceId,
+            ))
+            val remainingMs = deadlineMs - clockMs()
+            if (remainingMs < MIN_BROKER_BUDGET_MS) {
+                return SourcePlatformResult.Failure(SourcePlatformFailure(
+                    SourceErrorCode.NETWORK_TIMEOUT,
+                    "CHROMIUM_BROWSER_NETWORK_REPLAY_TIMEOUT",
+                    pending.request.traceId,
+                ))
+            }
+            val bounded = pending.request.copy(
+                timeoutMs = minOf(pending.request.timeoutMs, remainingMs.coerceAtMost(120_000L)),
+            )
+            val result = runCatching { delegate.execute(pending.manifest, bounded) }
+                .getOrElse { error -> SourcePlatformResult.Failure(SourcePlatformFailure(
+                    SourceErrorCode.NETWORK_IO_ERROR,
+                    error.message ?: "CHROMIUM_BROWSER_NETWORK_FAILED",
+                    pending.request.traceId,
+                    error,
+                )) }
+            truncateNetworkCache(pending.index)
+            networkCache += NetworkRecord(pending.key, result)
+            pendingBrowserNetwork = null
+            return SourcePlatformResult.Success(Unit)
+        }
+
+        private fun shouldUseBrowserNetwork(manifest: SourceManifest, index: Int): Boolean {
+            val floor = browserNetworkFloor ?: return false
+            return browserNetworkDelegate != null &&
+                browserContextReady &&
+                index >= floor &&
+                manifest.capabilities.cookies == SourceCookieMode.BROWSER_SHARED
+        }
+
+        private fun browserReplayRequired(
             request: SourceBrowserRequest,
             index: Int,
         ): SourcePlatformResult.Failure = SourcePlatformResult.Failure(SourcePlatformFailure(
             SourceErrorCode.BROWSER_UNAVAILABLE,
             "$CHROMIUM_BROWSER_REPLAY_REQUIRED:$index",
+            request.traceId,
+        ))
+
+        private fun networkFailure(
+            request: SourceNetworkRequest,
+            marker: String,
+            index: Int,
+        ): SourcePlatformResult.Failure = SourcePlatformResult.Failure(SourcePlatformFailure(
+            SourceErrorCode.NETWORK_UNAVAILABLE,
+            "$marker:$index",
             request.traceId,
         ))
 
@@ -328,6 +416,13 @@ internal class ChromiumVBookReplayCoordinator(
         val key: BrowserKey,
         val manifest: SourceManifest,
         val request: SourceBrowserRequest,
+    )
+
+    private data class PendingBrowserNetwork(
+        val index: Int,
+        val key: NetworkKey,
+        val manifest: SourceManifest,
+        val request: SourceNetworkRequest,
     )
 
     private data class BrowserRecord(
@@ -380,8 +475,10 @@ internal class ChromiumVBookReplayCoordinator(
             fun from(request: SourceNetworkRequest) = NetworkKey(
                 sourceId = request.sourceId,
                 url = request.url,
-                method = request.method,
-                headers = request.headers.toMap(),
+                method = request.method.uppercase(Locale.ROOT),
+                headers = request.headers.entries
+                    .filterNot { (name, _) -> name.equals(VBOOK_REQUEST_KEY_HEADER, ignoreCase = true) }
+                    .associate { (name, value) -> name.lowercase(Locale.ROOT) to value },
                 bodySha256 = request.body.sha256(),
                 contentType = request.contentType,
                 responseMode = request.responseMode.name,
@@ -392,15 +489,21 @@ internal class ChromiumVBookReplayCoordinator(
 
     companion object {
         private const val MIN_BROKER_BUDGET_MS = 100L
+        private const val VBOOK_REQUEST_KEY_HEADER = "X-Nghe-VBook-Request-Key"
     }
 }
 
 internal fun replayAwareChromiumDiagnostics(delegate: DiagnosticSink): DiagnosticSink = DiagnosticSink { event ->
-    val isReplayYield = event.name == "CHROMIUM_ACTION_FAILED" &&
-        event.attributes["error"].orEmpty().contains(CHROMIUM_BROWSER_REPLAY_REQUIRED)
+    val error = event.attributes["error"].orEmpty()
+    val marker = when {
+        CHROMIUM_BROWSER_NETWORK_REPLAY_REQUIRED in error -> CHROMIUM_BROWSER_NETWORK_REPLAY_REQUIRED
+        CHROMIUM_BROWSER_REPLAY_REQUIRED in error -> CHROMIUM_BROWSER_REPLAY_REQUIRED
+        else -> null
+    }
+    val isReplayYield = event.name == "CHROMIUM_ACTION_FAILED" && marker != null
     if (isReplayYield) {
-        val replayIndex = event.attributes["error"].orEmpty()
-            .substringAfter("$CHROMIUM_BROWSER_REPLAY_REQUIRED:", "")
+        val replayIndex = error
+            .substringAfter("$marker:", "")
             .substringBefore('\n')
             .trim()
         delegate.emit(event.copy(
@@ -410,7 +513,7 @@ internal fun replayAwareChromiumDiagnostics(delegate: DiagnosticSink): Diagnosti
             attributes = event.attributes
                 .filterKeys { it !in setOf("code", "error", "cause", "stack") } + mapOf(
                 "replayIndex" to replayIndex,
-                "yieldReason" to "browser-action",
+                "yieldReason" to if (marker == CHROMIUM_BROWSER_NETWORK_REPLAY_REQUIRED) "browser-network" else "browser-action",
             ),
         ))
     } else {

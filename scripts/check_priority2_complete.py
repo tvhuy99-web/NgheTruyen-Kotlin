@@ -15,7 +15,7 @@ def require(rel: str, *needles: str) -> None:
         raise AssertionError(f"{rel}: missing {missing}")
 
 
-require('app/build.gradle.kts', 'versionCode = 28', 'versionName = "2.8.0-ai-narration-priority2-complete"')
+require('app/build.gradle.kts', 'versionCode = 36', 'versionName = "3.0.2"')
 require('app/src/main/java/vn/nghetruyen/app/playback/PlaybackQueueStore.kt',
         'enum class PlaybackPreparationState', 'PREPARING', 'FAILED', 'fun setPreparation')
 require('app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt',

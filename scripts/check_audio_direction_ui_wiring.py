@@ -179,16 +179,19 @@ assert "AI Sound Director" not in debug_strings
 
 for token in (
     'onNodeWithText("CÁ NHÂN"',
-    'onNodeWithText("Cài đặt"',
-    'onNodeWithText("NHẠC NỀN & NHẠC CẢNH"',
-    'onNodeWithText("Nhạc nền cục bộ"',
+    'onNodeWithContentDescription("Cài đặt"',
+    'onNodeWithText("CÀI ĐẶT ỨNG DỤNG"',
+    'assertContentDescriptionDoesNotExist("NHẠC NỀN & NHẠC CẢNH")',
+    'assertTextDoesNotExist("Nhạc nền cục bộ")',
     'assertTextDoesNotExist("ÂM THANH AI")',
     'assertTextDoesNotExist("Nhạc cảnh AI")',
     'assertTextDoesNotExist("Âm thanh môi trường AI")',
     'assertTextDoesNotExist("Hiệu ứng âm thanh AI")',
     'private fun waitForComposeRoot()',
     'private fun hasText(text: String): Boolean',
+    'private fun hasContentDescription(description: String): Boolean',
     'check(!hasText(text))',
+    'check(!hasContentDescription(description))',
 ):
     assert token in ui_test, f"music-page regression UI test missing token: {token}"
 

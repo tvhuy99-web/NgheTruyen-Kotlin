@@ -168,6 +168,8 @@ class VBookCompatibilityRuntime(
         }))
         val connection = config.connectionSettings()
         val prelude = buildString {
+            append(VBookFetchSafePrelude.build())
+            append('\n')
             append(VBookConfigPrelude.build(profile, config))
             if (profile == VBookContractProfile.CURRENT_JS) {
                 if (isNotEmpty()) append('\n')
@@ -240,8 +242,8 @@ class VBookCompatibilityRuntime(
               out.outerHtml=function(){return __vbookCleanHtml(nativeEl.outerHtml(),state);};
               out.attr=function(name){return String(nativeEl.attr(String(name||'')));};
               out.absUrl=function(name){return String(nativeEl.absUrl(String(name||'')));};
-              out.id=function(){return String(nativeEl.id());};
-              out.tagName=function(){return String(nativeEl.tagName());};
+              out.id=function(){return String(nativeEl.id||'');};
+              out.tagName=function(){return String(nativeEl.tagName||'');};
               out.hasClass=function(name){return !!nativeEl.hasClass(String(name||''));};
               out.parent=function(){return __vbookWrapElement(nativeEl.parent(),state);};
               out.children=function(){return __vbookWrapElements(nativeEl.children(),state);};

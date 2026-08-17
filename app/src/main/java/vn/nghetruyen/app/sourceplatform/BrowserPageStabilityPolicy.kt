@@ -79,6 +79,8 @@ internal class BrowserPageStabilityPolicy(
     }
 
     companion object {
+        const val MIN_DOM_PROBE_PROGRESS = 100
+        const val READINESS_DIAGNOSTIC_INTERVAL_MS = 5_000L
         const val PROBE_INTERVAL_MS = 350L
         const val DOCUMENT_READY_FALLBACK_MS = 800L
         const val MIN_READY_AGE_MS = 1_500L
@@ -86,5 +88,7 @@ internal class BrowserPageStabilityPolicy(
         const val PROGRESS_QUIET_MS = 350L
         const val PAGE_EVENT_QUIET_MS = 350L
         const val REQUIRED_MATCHING_PROBES = 3
+
+        fun shouldProbeDom(progress: Int): Boolean = progress >= MIN_DOM_PROBE_PROGRESS
     }
 }

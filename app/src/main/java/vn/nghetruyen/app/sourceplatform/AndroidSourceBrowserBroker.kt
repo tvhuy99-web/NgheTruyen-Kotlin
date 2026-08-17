@@ -917,6 +917,7 @@ class AndroidSourceBrowserBroker(
         val deadline = startedAt + request.timeoutMs
         val policy = BrowserPageStabilityPolicy(deadline)
         var probeCount = 0
+        var lastReadinessDiagnosticAt = -1L
         var lastUrl: String? = session.logicalPageUrl
         while (true) {
             session.pendingError.get()?.let(::error)
@@ -940,8 +941,31 @@ class AndroidSourceBrowserBroker(
                 error(code)
             }
 
+            if (!BrowserPageStabilityPolicy.shouldProbeDom(session.currentProgress)) {
+                if (lastReadinessDiagnosticAt < 0L ||
+                    now - lastReadinessDiagnosticAt >= BrowserPageStabilityPolicy.READINESS_DIAGNOSTIC_INTERVAL_MS
+                ) {
+                    lastReadinessDiagnosticAt = now
+                    diagnostics.emit(event(session.manifest, request, "BROWSER_DOM_STABILITY_WAITING", DiagnosticSeverity.DEBUG, attributes = mapOf(
+                        "flow" to "browser",
+                        "stage" to "dom_stability_waiting",
+                        "progress" to session.currentProgress.toString(),
+                        "loading" to session.pageLoading.toString(),
+                        "pageFinished" to (session.lastPageFinishedAtMs > 0L).toString(),
+                        "remainingMs" to remaining.toString(),
+                    )))
+                }
+                Thread.sleep(minOf(BrowserPageStabilityPolicy.PROBE_INTERVAL_MS, remaining.coerceAtLeast(1L)))
+                continue
+            }
+
             val rawResult = runCatching {
-                evaluate(session, PAGE_STABILITY_SCRIPT, minOf(1_200L, remaining.coerceAtLeast(100L)))
+                evaluate(
+                    session,
+                    PAGE_STABILITY_SCRIPT,
+                    minOf(1_200L, remaining.coerceAtLeast(100L)),
+                    timeoutSeverity = DiagnosticSeverity.DEBUG,
+                )
             }
             if (rawResult.isFailure) {
                 val probeError = rawResult.exceptionOrNull()
@@ -1257,7 +1281,12 @@ class AndroidSourceBrowserBroker(
         error("SOURCE_BROWSER_TIMEOUT")
     }
 
-    private fun evaluate(session: Session, expression: String, timeoutMs: Long): String {
+    private fun evaluate(
+        session: Session,
+        expression: String,
+        timeoutMs: Long,
+        timeoutSeverity: DiagnosticSeverity = DiagnosticSeverity.WARN,
+    ): String {
         val startedAt = clockMs()
         val boundedTimeout = timeoutMs.coerceAtMost(120_000)
         val latch = CountDownLatch(1)
@@ -1296,7 +1325,7 @@ class AndroidSourceBrowserBroker(
         }
         if (!latch.await(boundedTimeout, TimeUnit.MILLISECONDS)) {
             timedOut.set(true)
-            diagnostics.emit(sessionEvent(session.manifest, session, "BROWSER_EVAL_TIMEOUT", DiagnosticSeverity.WARN, attributes = mapOf(
+            diagnostics.emit(sessionEvent(session.manifest, session, "BROWSER_EVAL_TIMEOUT", timeoutSeverity, attributes = mapOf(
                 "stage" to "evaluate",
                 "timeoutMs" to boundedTimeout.toString(),
                 "elapsedMs" to (clockMs() - startedAt).coerceAtLeast(0L).toString(),

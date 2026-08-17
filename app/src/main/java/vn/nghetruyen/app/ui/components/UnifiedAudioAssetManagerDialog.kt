@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -48,14 +49,15 @@ import vn.nghetruyen.app.playback.ReaderPlaybackService
 
 /**
  * Canonical asset-library dialog for MUSIC, AMBIENCE and SFX.
- * The old Reader music library is the UX reference, so all three kinds expose the same controls:
- * search, add files, bulk description, clear/save/cancel, preview, normalize, edit, copy name,
- * copy description, enable/disable, reorder and delete.
+ * The Reader music library is the UX reference, so all three kinds expose the same bulk controls:
+ * multi-file add, paste descriptions, copy all names/descriptions, clear/save/cancel, plus per-file
+ * preview, normalization, edit, copy, enable/disable, reorder and delete.
  */
 @Composable
 fun UnifiedAudioAssetManagerDialog(
     kind: AudioAssetKind,
     tracks: List<SceneMusicTrackEntity>,
+    normalizationTargetLufs: Float,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -63,6 +65,8 @@ fun UnifiedAudioAssetManagerDialog(
     val repository = application.container.libraryRepository
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
+    val normalizationTarget = normalizationTargetLufs
+        .coerceIn(PcmLoudnessEstimator.MIN_TARGET_LUFS, PcmLoudnessEstimator.MAX_TARGET_LUFS)
 
     val initialRows = remember(kind) {
         tracks.sortedWith(compareBy<SceneMusicTrackEntity> { it.orderIndex }.thenBy { it.title.lowercase() })
@@ -137,7 +141,7 @@ fun UnifiedAudioAssetManagerDialog(
                     tagsCsv = typeMarker(kind),
                 ).onSuccess { trackId ->
                     transientAddedIds = transientAddedIds + trackId
-                    SceneMusicAnalysisWorker.enqueue(context, trackId, normalizationTarget(kind))
+                    SceneMusicAnalysisWorker.enqueue(context, trackId, normalizationTarget)
                 }
             }
         }
@@ -180,26 +184,53 @@ fun UnifiedAudioAssetManagerDialog(
         confirmButton = {
             Column(Modifier.fillMaxWidth()) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    TextButton(
+                    Button(
                         onClick = { launcher.launch(arrayOf("audio/*")) },
                         enabled = draft.size < 500,
                         modifier = Modifier.weight(1f),
                     ) { Text("THÊM TỆP") }
-                    TextButton(
+                    Button(
                         onClick = { bulkText = ""; showBulkDialog = true },
+                        modifier = Modifier.weight(1f),
+                    ) { Text("DÁN MÔ TẢ") }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Button(
+                        onClick = {
+                            clipboard.setText(AnnotatedString(draft.joinToString("\n") { it.title }))
+                            notify("Đã sao chép tên của ${draft.size} tệp.")
+                        },
                         enabled = draft.isNotEmpty(),
                         modifier = Modifier.weight(1f),
-                    ) { Text("MÔ TẢ HÀNG LOẠT") }
-                    TextButton(
+                    ) { Text("SAO CHÉP TÊN") }
+                    Button(
+                        onClick = {
+                            clipboard.setText(
+                                AnnotatedString(
+                                    draft.joinToString("\n") { track ->
+                                        "${track.title} || ${assetDescription(kind, track.tagsCsv)}"
+                                    },
+                                ),
+                            )
+                            notify("Đã sao chép tên và mô tả của ${draft.size} tệp.")
+                        },
+                        enabled = draft.isNotEmpty(),
+                        modifier = Modifier.weight(1f),
+                    ) { Text("SAO CHÉP MÔ TẢ") }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Button(
+                        onClick = ::stopPreview,
+                        enabled = previewPlayer != null,
+                        modifier = Modifier.weight(1f),
+                    ) { Text("DỪNG NGHE THỬ") }
+                    Button(
                         onClick = { showClearAllConfirm = true },
                         enabled = draft.isNotEmpty(),
                         modifier = Modifier.weight(1f),
                     ) { Text("XÓA TẤT CẢ") }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (previewPlayer != null) {
-                        TextButton(onClick = ::stopPreview, modifier = Modifier.weight(1f)) { Text("DỪNG NGHE") }
-                    }
                     TextButton(
                         onClick = {
                             if (draft.size > 500) {
@@ -253,7 +284,7 @@ fun UnifiedAudioAssetManagerDialog(
                                 PcmLoudnessEstimator.calculateNormalization(
                                     track.loudnessLufsEstimate,
                                     track.peakDbfs,
-                                    normalizationTarget(kind),
+                                    normalizationTarget,
                                 ).gainDb
                             } else 0f
                             val previewLevel = (
@@ -293,8 +324,8 @@ fun UnifiedAudioAssetManagerDialog(
                             }
                         }
                         UnifiedAssetActionButton("CHUẨN HÓA") {
-                            SceneMusicAnalysisWorker.enqueue(context, track.id, normalizationTarget(kind))
-                            notify("Đã đưa ‘${track.title}’ vào hàng đợi chuẩn hóa.")
+                            SceneMusicAnalysisWorker.enqueue(context, track.id, normalizationTarget)
+                            notify("Đã đưa ‘${track.title}’ vào hàng đợi chuẩn hóa ở %.0f LUFS.".format(normalizationTarget))
                         }
                         UnifiedAssetActionButton("SỬA TÊN / MÔ TẢ") {
                             editingTrack = track
@@ -426,16 +457,19 @@ fun UnifiedAudioAssetManagerDialog(
     if (showBulkDialog) {
         AlertDialog(
             onDismissRequest = { showBulkDialog = false },
-            title = { Text("MÔ TẢ HÀNG LOẠT") },
+            title = { Text("DÁN MÔ TẢ HÀNG LOẠT") },
             text = {
-                OutlinedTextField(
-                    value = bulkText,
-                    onValueChange = { bulkText = it.take(120_000) },
-                    placeholder = { Text("Tên tệp || Mô tả    •    [XÓA] để xóa mô tả") },
-                    minLines = 12,
-                    maxLines = 18,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                Column {
+                    Text("Mỗi dòng: Tên tệp || Mô tả. Dùng [XÓA] để xóa mô tả.")
+                    OutlinedTextField(
+                        value = bulkText,
+                        onValueChange = { bulkText = it.take(120_000) },
+                        placeholder = { Text("Tên tệp || Mô tả") },
+                        minLines = 12,
+                        maxLines = 18,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             },
             confirmButton = {
                 TextButton(onClick = {
@@ -589,10 +623,4 @@ private fun tagsWithDescription(kind: AudioAssetKind, description: String): Stri
     val marker = typeMarker(kind)
     val cleanDescription = description.trim().take(300)
     return if (cleanDescription.isBlank()) marker else "$marker, $cleanDescription"
-}
-
-private fun normalizationTarget(kind: AudioAssetKind): Float = when (kind) {
-    AudioAssetKind.MUSIC -> -24f
-    AudioAssetKind.AMBIENCE -> -27f
-    AudioAssetKind.SFX -> -20f
 }

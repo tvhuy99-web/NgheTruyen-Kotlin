@@ -7,6 +7,7 @@ reader = (ROOT / "screens/ReaderScreen.kt").read_text(encoding="utf-8")
 story = (ROOT / "screens/StoryDetailScreen.kt").read_text(encoding="utf-8")
 role = (ROOT / "components/GlobalVoiceRoleEditorDialog.kt").read_text(encoding="utf-8")
 component = (ROOT / "components/AudioDirectionLayerSwitches.kt").read_text(encoding="utf-8")
+audio_manager = (ROOT / "components/UnifiedAudioAssetManagerDialog.kt").read_text(encoding="utf-8")
 
 required = {
     "PersonalScreen.kt": [
@@ -90,11 +91,17 @@ required = {
         'label = "QUẢN LÝ NHẠC ($musicTrackCount)"',
         'label = "QUẢN LÝ ÂM THANH MÔI TRƯỜNG',
         'label = "QUẢN LÝ HIỆU ỨNG ÂM THANH',
+        'label = "CHUẨN HÓA TOÀN BỘ KHO NHẠC"',
+        "UnifiedAudioAssetManagerDialog(",
+    ],
+    "UnifiedAudioAssetManagerDialog.kt": [
         'label = { Text("Tên") }',
         'label = { Text("Mô tả") }',
-        'Text("CHUẨN HÓA")',
+        'UnifiedAssetActionButton("CHUẨN HÓA")',
         'Text("LƯU")',
         'Text("XÓA")',
+        'Text("LƯU DANH SÁCH")',
+        'Text("HỦY")',
     ],
 }
 texts = {
@@ -103,6 +110,7 @@ texts = {
     "StoryDetailScreen.kt": story,
     "GlobalVoiceRoleEditorDialog.kt": role,
     "AudioDirectionLayerSwitches.kt": component,
+    "UnifiedAudioAssetManagerDialog.kt": audio_manager,
 }
 for name, tokens in required.items():
     for token in tokens:
@@ -142,7 +150,7 @@ for prose in [
     "SFX là âm one-shot",
     "Mỗi trình quản lý cho phép chọn nhiều tệp",
 ]:
-    if prose in reader or prose in component:
+    if prose in reader or prose in component or prose in audio_manager:
         raise SystemExit(f"obsolete explanatory audio prose remains: {prose}")
 
 for token in [

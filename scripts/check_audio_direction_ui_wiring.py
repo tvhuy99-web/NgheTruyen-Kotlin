@@ -120,7 +120,6 @@ required_manager_tokens = (
 for token in required_manager_tokens:
     assert token in manager, f"missing unified audio asset manager token: {token}"
 
-# The list itself scrolls; destructive/add/save actions stay in the dialog footer.
 list_text_start = manager.find('Column(Modifier.heightIn(max = 620.dp).verticalScroll(rememberScrollState()))')
 list_footer_start = manager.find('confirmButton = {', list_text_start)
 assert 0 <= list_text_start < list_footer_start, "unified audio list/body-footer structure missing"
@@ -140,7 +139,6 @@ for removed in (
 ):
     assert removed not in component + manager, f"obsolete explanatory audio prose still visible: {removed}"
 
-# Keep the legacy Reader music editor intact as the UX reference used by the unified manager.
 music_library = section(reader, "    if (showMusicLibrary) {", "    selectedMusicTrackId?.let")
 for token in (
     'Text("THÊM BÀI")',
@@ -188,7 +186,9 @@ for token in (
     'assertTextDoesNotExist("Nhạc cảnh AI")',
     'assertTextDoesNotExist("Âm thanh môi trường AI")',
     'assertTextDoesNotExist("Hiệu ứng âm thanh AI")',
-    '.fetchSemanticsNodes().isEmpty()',
+    'private fun waitForComposeRoot()',
+    'private fun hasText(text: String): Boolean',
+    'check(!hasText(text))',
 ):
     assert token in ui_test, f"music-page regression UI test missing token: {token}"
 

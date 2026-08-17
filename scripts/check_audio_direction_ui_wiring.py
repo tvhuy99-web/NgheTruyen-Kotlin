@@ -5,6 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 personal = (ROOT / "app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt").read_text(encoding="utf-8")
 reader = (ROOT / "app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt").read_text(encoding="utf-8")
 component = (ROOT / "app/src/main/java/vn/nghetruyen/app/ui/components/AudioDirectionLayerSwitches.kt").read_text(encoding="utf-8")
+manager = (ROOT / "app/src/main/java/vn/nghetruyen/app/ui/components/UnifiedAudioAssetManagerDialog.kt").read_text(encoding="utf-8")
 coordinator = (ROOT / "app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt").read_text(encoding="utf-8")
 debug_strings = (ROOT / "app/src/debug/res/values/strings.xml").read_text(encoding="utf-8")
 ui_test = (ROOT / "app/src/androidTest/java/vn/nghetruyen/app/AudioDirectorMusicSettingsUiTest.kt").read_text(encoding="utf-8")
@@ -70,7 +71,7 @@ for removed in (
 assert "music = appSettings.autoSceneMusicEnabled," in coordinator
 assert "backgroundMusicEnabled && appSettings.autoSceneMusicEnabled" not in coordinator
 
-required_component_tokens = (
+required_switch_tokens = (
     'title = "Nhạc cảnh AI"',
     'title = "Âm thanh môi trường AI"',
     'title = "Hiệu ứng âm thanh AI"',
@@ -81,26 +82,51 @@ required_component_tokens = (
     'label = "QUẢN LÝ NHẠC ($musicTrackCount)"',
     'label = "QUẢN LÝ ÂM THANH MÔI TRƯỜNG',
     'label = "QUẢN LÝ HIỆU ỨNG ÂM THANH',
-    'label = { Text("Tên") }',
-    'label = { Text("Mô tả") }',
-    'Text("THÊM NHIỀU TỆP")',
-    '"NGHE THỬ"',
-    '"NGHE LẠI"',
-    'Text("DỪNG")',
-    'Text("CHUẨN HÓA")',
-    'Text("LƯU")',
-    'Text("XÓA")',
-    'Text("ĐÓNG")',
-    "ActivityResultContracts.OpenMultipleDocuments()",
-    "tagsWithDescription(kind, description)",
+    "UnifiedAudioAssetManagerDialog(",
 )
-for token in required_component_tokens:
-    assert token in component, f"missing complete audio UI token: {token}"
+for token in required_switch_tokens:
+    assert token in component, f"missing audio switch/manager routing token: {token}"
 
 music_manager = component.find('label = "QUẢN LÝ NHẠC ($musicTrackCount)"')
 ambience_manager = component.find('label = "QUẢN LÝ ÂM THANH MÔI TRƯỜNG')
 sfx_manager = component.find('label = "QUẢN LÝ HIỆU ỨNG ÂM THANH')
 assert 0 <= music_manager < ambience_manager < sfx_manager, "three audio managers must stay together in Music/Ambience/SFX order"
+
+required_manager_tokens = (
+    "ActivityResultContracts.OpenMultipleDocuments()",
+    'Text("THÊM TỆP")',
+    'Text("MÔ TẢ HÀNG LOẠT")',
+    'Text("XÓA TẤT CẢ")',
+    'Text("LƯU DANH SÁCH")',
+    'Text("HỦY")',
+    'Text("DỪNG NGHE")',
+    'UnifiedAssetActionButton("NGHE THỬ")',
+    'UnifiedAssetActionButton("CHUẨN HÓA")',
+    'UnifiedAssetActionButton("SỬA TÊN / MÔ TẢ")',
+    'UnifiedAssetActionButton("SAO CHÉP TÊN")',
+    'UnifiedAssetActionButton("SAO CHÉP MÔ TẢ")',
+    '"TẮT TỆP NÀY"',
+    '"BẬT TỆP NÀY"',
+    'UnifiedAssetActionButton("DI CHUYỂN LÊN")',
+    'UnifiedAssetActionButton("DI CHUYỂN XUỐNG")',
+    'UnifiedAssetActionButton("XÓA KHỎI DANH SÁCH")',
+    'label = { Text("Tên") }',
+    'label = { Text("Mô tả") }',
+    "tagsWithDescription(kind, description)",
+    'Text("LƯU")',
+    'Text("XÓA")',
+    'Text("ĐÓNG")',
+)
+for token in required_manager_tokens:
+    assert token in manager, f"missing unified audio asset manager token: {token}"
+
+# The list itself scrolls; destructive/add/save actions stay in the dialog footer.
+list_text_start = manager.find('Column(Modifier.heightIn(max = 620.dp).verticalScroll(rememberScrollState()))')
+list_footer_start = manager.find('confirmButton = {', list_text_start)
+assert 0 <= list_text_start < list_footer_start, "unified audio list/body-footer structure missing"
+scrolling_list = manager[list_text_start:list_footer_start]
+for action in ('Text("THÊM TỆP")', 'Text("MÔ TẢ HÀNG LOẠT")', 'Text("XÓA TẤT CẢ")', 'Text("LƯU DANH SÁCH")'):
+    assert action not in scrolling_list, f"audio manager action must stay outside scrollable list: {action}"
 
 for removed in (
     'text = "ÂM THANH AI"',
@@ -112,16 +138,10 @@ for removed in (
     "Mỗi trình quản lý cho phép chọn nhiều tệp",
     "Mô tả cho AI",
 ):
-    assert removed not in component, f"obsolete explanatory audio prose still visible: {removed}"
+    assert removed not in component + manager, f"obsolete explanatory audio prose still visible: {removed}"
 
+# Keep the legacy Reader music editor intact as the UX reference used by the unified manager.
 music_library = section(reader, "    if (showMusicLibrary) {", "    selectedMusicTrackId?.let")
-for removed in (
-    "Ước tính khi gửi danh mục AI",
-    "Đã có mô tả",
-    'Text("DÁN MÔ TẢ")',
-    'Text("SAO CHÉP MÔ TẢ")',
-):
-    assert removed not in music_library, f"obsolete music-list explanation/control remains: {removed}"
 for token in (
     'Text("THÊM BÀI")',
     'Text("MÔ TẢ HÀNG LOẠT")',
@@ -130,13 +150,6 @@ for token in (
     'Text("HỦY")',
 ):
     assert token in music_library, f"music-list footer action missing: {token}"
-
-list_text_start = music_library.find('text = { Column(Modifier.heightIn(max = 620.dp).verticalScroll(rememberScrollState()))')
-list_footer_start = music_library.find('confirmButton = { Column(Modifier.fillMaxWidth())')
-assert 0 <= list_text_start < list_footer_start, "music list/body-footer structure missing"
-scrolling_music_list = music_library[list_text_start:list_footer_start]
-for action in ('Text("THÊM BÀI")', 'Text("MÔ TẢ HÀNG LOẠT")', 'Text("XÓA TẤT CẢ")', 'Text("LƯU DANH SÁCH")'):
-    assert action not in scrolling_music_list, f"music action must stay outside scrollable list: {action}"
 
 music_track_actions = section(reader, "    selectedMusicTrackId?.let", "    editingTrack?.let")
 for token in (

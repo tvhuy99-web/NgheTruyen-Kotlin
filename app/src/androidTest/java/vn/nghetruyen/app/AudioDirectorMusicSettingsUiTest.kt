@@ -25,6 +25,10 @@ class AudioDirectorMusicSettingsUiTest {
     fun personalMusicSettingsKeepManualMusicAndDoNotDuplicateAiAudioControls() {
         waitForComposeRoot()
         openPersonalRoot()
+        composeRule.onNodeWithText("CÁ NHÂN", useUnmergedTree = true).assertIsDisplayed()
+        check(waitForText("Cài đặt", 5_000)) {
+            "Personal settings entry did not become visible."
+        }
         composeRule.onNodeWithText("Cài đặt", useUnmergedTree = true).performClick()
         composeRule
             .onNodeWithText("NHẠC NỀN & NHẠC CẢNH", useUnmergedTree = true)

@@ -7,11 +7,14 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.lifecycle.ViewModelProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import vn.nghetruyen.app.ui.AppViewModel
+import vn.nghetruyen.app.ui.RootTab
 
 @RunWith(AndroidJUnit4::class)
 class AudioDirectorMusicSettingsUiTest {
@@ -21,8 +24,7 @@ class AudioDirectorMusicSettingsUiTest {
     @Test
     fun personalMusicSettingsKeepManualMusicAndDoNotDuplicateAiAudioControls() {
         waitForComposeRoot()
-        returnToRoot()
-        composeRule.onNodeWithText("CÁ NHÂN", useUnmergedTree = true).performClick()
+        openPersonalRoot()
         composeRule.onNodeWithText("Cài đặt", useUnmergedTree = true).performClick()
         composeRule
             .onNodeWithText("NHẠC NỀN & NHẠC CẢNH", useUnmergedTree = true)
@@ -56,20 +58,14 @@ class AudioDirectorMusicSettingsUiTest {
         check(ready) { "Activity content did not become ready before Compose assertions." }
     }
 
-    private fun returnToRoot() {
-        composeRule.waitForIdle()
-        if (waitForText("CÁ NHÂN", 5_000)) return
-
-        repeat(6) {
-            composeRule.runOnUiThread {
-                composeRule.activity.onBackPressedDispatcher.onBackPressed()
-            }
-            composeRule.waitForIdle()
-            if (waitForText("CÁ NHÂN", 2_000)) return
+    private fun openPersonalRoot() {
+        composeRule.runOnUiThread {
+            ViewModelProvider(composeRule.activity)[AppViewModel::class.java]
+                .setRootTab(RootTab.PERSONAL)
         }
-
-        check(hasText("CÁ NHÂN")) {
-            "Could not return to the root navigation before opening Personal settings."
+        composeRule.waitForIdle()
+        check(waitForText("CÁ NHÂN", 5_000)) {
+            "Personal root did not become visible before opening settings."
         }
     }
 

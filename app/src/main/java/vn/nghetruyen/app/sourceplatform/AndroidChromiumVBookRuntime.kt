@@ -534,9 +534,13 @@ class AndroidChromiumVBookRuntime(
         private fun networkFetch(payload: JsonValue.Obj): JsonValue {
             val url = ChromiumVBookNetworkCompatibility.normalizeUrl(payload.string("url").orEmpty())
             syncBrowserSharedCookies(manifest, url)
-            val headers = payload.obj("headers")?.values.orEmpty().mapNotNull { (key, value) ->
+            val requestedHeaders = payload.obj("headers")?.values.orEmpty().mapNotNull { (key, value) ->
                 (value as? JsonValue.Str)?.value?.let { key to it }
             }.toMap(LinkedHashMap())
+            val headers = ChromiumVBookNetworkCompatibility.withDefaultUserAgent(
+                headers = requestedHeaders,
+                userAgent = WebSettings.getDefaultUserAgent(appContext),
+            )
             val requestedTimeout = payload.long("timeoutMs") ?: 0L
             val timeout = when {
                 requestedTimeout > 0 -> requestedTimeout.coerceIn(100L, remainingMs())
@@ -994,5 +998,13 @@ internal object ChromiumVBookNetworkCompatibility {
         var duplicateEnd = pathStart
         while (duplicateEnd + 1 < raw.length && raw[duplicateEnd + 1] == '/') duplicateEnd += 1
         return if (duplicateEnd == pathStart) raw else raw.removeRange(pathStart + 1, duplicateEnd + 1)
+    }
+
+    fun withDefaultUserAgent(
+        headers: Map<String, String>,
+        userAgent: String,
+    ): Map<String, String> {
+        if (userAgent.isBlank() || headers.keys.any { it.equals("User-Agent", ignoreCase = true) }) return headers
+        return LinkedHashMap(headers).apply { put("User-Agent", userAgent) }
     }
 }

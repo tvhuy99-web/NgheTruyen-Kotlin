@@ -5,6 +5,30 @@ import org.junit.Test
 
 class ChromiumVBookNetworkCompatibilityTest {
     @Test
+    fun defaultsVBookFetchToBrowserUserAgent() {
+        val headers = ChromiumVBookNetworkCompatibility.withDefaultUserAgent(
+            headers = linkedMapOf("Accept" to "application/json"),
+            userAgent = "Mozilla/5.0 Android WebView",
+        )
+
+        assertEquals("Mozilla/5.0 Android WebView", headers["User-Agent"])
+        assertEquals("application/json", headers["Accept"])
+    }
+
+    @Test
+    fun explicitUserAgentWinsCaseInsensitively() {
+        val original = linkedMapOf("user-agent" to "Extension-UA", "Accept" to "*/*")
+
+        val headers = ChromiumVBookNetworkCompatibility.withDefaultUserAgent(
+            headers = original,
+            userAgent = "Mozilla/5.0 Android WebView",
+        )
+
+        assertEquals(original, headers)
+        assertEquals("Extension-UA", headers["user-agent"])
+    }
+
+    @Test
     fun collapsesOnlyDuplicateSlashesAtTheOriginBoundary() {
         assertEquals(
             "https://m.qidian.com/majax/rank/yuepiaolist?gender=male&pageNum=1",

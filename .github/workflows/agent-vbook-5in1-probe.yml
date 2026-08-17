@@ -13,20 +13,78 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
-      - name: Inspect exact 5in1 v70 package
+      - name: Install Selenium
+        run: python3 -m pip install --quiet selenium
+
+      - name: Compare Qidian browser-session user agents
         shell: bash
         run: |
-          set -euo pipefail
-          curl -fsSL -A 'Mozilla/5.0' \
-            'https://raw.githubusercontent.com/dat-bi/ext-vbook/main/extensions/5in1/plugin.zip' \
-            -o /tmp/5in1.zip
-          echo "package_sha256=$(sha256sum /tmp/5in1.zip | awk '{print $1}')"
-          echo "package_bytes=$(stat -c%s /tmp/5in1.zip)"
-          unzip -l /tmp/5in1.zip | head -80
-          for f in plugin.json src/config.js src/gen0.js src/home.js; do
-            echo
-            echo "===== $f ====="
-            unzip -p /tmp/5in1.zip "$f" | nl -ba
-          done
+          python3 - <<'PY'
+          import json, time, urllib.parse, urllib.request
+          from selenium import webdriver
+          from selenium.webdriver.chrome.options import Options
+
+          opts=Options()
+          opts.add_argument('--headless=new')
+          opts.add_argument('--no-sandbox')
+          opts.add_argument('--disable-dev-shm-usage')
+          opts.add_argument('--window-size=412,915')
+          driver=webdriver.Chrome(options=opts)
+          try:
+              driver.get('https://my.qidian.com/author/9639927/')
+              deadline=time.time()+20
+              token=''
+              while time.time()<deadline:
+                  cookies=driver.get_cookies()
+                  token=next((c.get('value','') for c in cookies if c.get('name')=='_csrfToken'),'')
+                  if token and 'qidian.com' in driver.current_url:
+                      break
+                  time.sleep(1)
+              browser_ua=driver.execute_script('return navigator.userAgent')
+              cookies=driver.get_cookies()
+              cookie_header='; '.join(f"{c['name']}={c['value']}" for c in cookies)
+              print('browser_url=',driver.current_url)
+              print('browser_ua_prefix=',browser_ua[:100])
+              print('cookie_names=',sorted(c.get('name','') for c in cookies))
+              print('csrf_present=',bool(token),'cookie_bytes=',len(cookie_header.encode()))
+              if not token:
+                  raise SystemExit('No _csrfToken obtained from headless Chrome')
+
+              endpoint='https://m.qidian.com/majax/rank/yuepiaolist?'+urllib.parse.urlencode({
+                  'gender':'male','pageNum':'1','_csrfToken':token,
+              })
+              variants=[
+                  ('browser_ua', browser_ua),
+                  ('app_default_ua','NgheTruyen-SourcePlatform/2 Android'),
+              ]
+              for label,ua in variants:
+                  req=urllib.request.Request(endpoint,headers={
+                      'User-Agent':ua,
+                      'Cookie':cookie_header,
+                      'Accept':'text/html,application/json,text/plain,*/*',
+                      'Accept-Language':'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
+                  })
+                  try:
+                      with urllib.request.urlopen(req,timeout=30) as r:
+                          body=r.read(); status=r.status; ct=r.headers.get('Content-Type','')
+                      print('\n===',label,'===')
+                      print('status=',status,'bytes=',len(body),'content-type=',ct)
+                      text=body.decode('utf-8','replace')
+                      obj=json.loads(text)
+                      print('root_type=',type(obj).__name__)
+                      if isinstance(obj,dict):
+                          print('root_keys=',sorted(obj.keys()))
+                          print('code=',repr(obj.get('code')),'msg=',repr(obj.get('msg')))
+                          data=obj.get('data')
+                          print('data_type=',type(data).__name__)
+                          if isinstance(data,dict):
+                              print('data_keys=',sorted(data.keys())[:50])
+                              print('pageNum=',repr(data.get('pageNum')),'total=',repr(data.get('total')))
+                  except Exception as e:
+                      print('\n===',label,'===')
+                      print('error=',type(e).__name__,str(e)[:300])
+          finally:
+              driver.quit()
+          PY

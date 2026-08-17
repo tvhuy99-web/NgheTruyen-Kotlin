@@ -10,8 +10,9 @@ import android.content.SharedPreferences
  * authoritative music switch. Ambience and one-shot sound effects are deliberately opt-in and
  * default to OFF on every install/restore that has never written these keys.
  *
- * [currentSnapshot] is process-local shared state so the narration coordinator and playback/export
- * runtime read exactly the same switches without creating a second settings system.
+ * The application installs one process-wide [shared] instance during Application.onCreate. This
+ * guarantees [currentSnapshot] is hydrated from disk before AI planning can read it after process
+ * recreation, instead of temporarily exposing the in-memory default OFF values.
  */
 class AudioDirectionPreferences(context: Context) {
     data class Snapshot(
@@ -136,6 +137,16 @@ class AudioDirectionPreferences(context: Context) {
 
         @Volatile
         private var latestSnapshot: Snapshot = Snapshot()
+
+        @Volatile
+        private var sharedInstance: AudioDirectionPreferences? = null
+
+        fun shared(context: Context): AudioDirectionPreferences =
+            sharedInstance ?: synchronized(this) {
+                sharedInstance ?: AudioDirectionPreferences(context.applicationContext).also {
+                    sharedInstance = it
+                }
+            }
 
         fun currentSnapshot(): Snapshot = latestSnapshot
 

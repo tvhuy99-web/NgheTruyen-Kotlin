@@ -1,14 +1,14 @@
 package vn.nghetruyen.app
 
+import android.view.View
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onNode
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -20,7 +20,7 @@ class AudioDirectorMusicSettingsUiTest {
 
     @Test
     fun personalMusicSettingsKeepManualMusicAndDoNotDuplicateAiAudioControls() {
-        waitForComposeRoot()
+        waitForActivityContent()
         returnToRoot()
         composeRule.onNodeWithText("CÁ NHÂN", useUnmergedTree = true).performClick()
         composeRule.onNodeWithText("Cài đặt", useUnmergedTree = true).performClick()
@@ -40,22 +40,30 @@ class AudioDirectorMusicSettingsUiTest {
         assertTextDoesNotExist("Hiệu ứng âm thanh AI")
     }
 
-    private fun waitForComposeRoot() {
-        composeRule.waitUntil(timeoutMillis = 15_000) {
-            runCatching {
-                composeRule.onNode(isRoot(), useUnmergedTree = true).fetchSemanticsNode()
-                true
-            }.getOrDefault(false)
+    private fun waitForActivityContent() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        var ready = false
+        repeat(150) {
+            instrumentation.waitForIdleSync()
+            composeRule.runOnUiThread {
+                val content = composeRule.activity.findViewById<View>(android.R.id.content)
+                ready = composeRule.activity.window.decorView.isAttachedToWindow &&
+                    content != null && content.childCount > 0
+            }
+            if (ready) return
+            Thread.sleep(100)
         }
+        check(ready) { "Activity content did not become ready before Compose assertions." }
     }
 
     private fun returnToRoot() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
         repeat(6) {
             if (hasText("CÁ NHÂN")) return
             composeRule.runOnUiThread {
                 composeRule.activity.onBackPressedDispatcher.onBackPressed()
             }
-            composeRule.waitForIdle()
+            instrumentation.waitForIdleSync()
         }
         check(hasText("CÁ NHÂN")) {
             "Could not return to the root navigation before opening Personal settings."

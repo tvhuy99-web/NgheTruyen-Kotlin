@@ -1,4 +1,4 @@
-name: Agent vBook 5in1 probe
+name: Agent vBook fetch parity fix
 
 on:
   push:
@@ -8,83 +8,159 @@ on:
       - .github/workflows/agent-vbook-5in1-probe.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  probe:
+  patch-and-verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 35
     steps:
-      - name: Install Selenium
-        run: python3 -m pip install --quiet selenium
+      - name: Checkout branch
+        uses: actions/checkout@v6
+        with:
+          ref: agent/fix-vbook-qidian-fetch-parity
+          fetch-depth: 0
 
-      - name: Compare Qidian browser-session user agents
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Apply vBook browser identity parity fix
         shell: bash
         run: |
           python3 - <<'PY'
-          import json, time, urllib.parse, urllib.request
-          from selenium import webdriver
-          from selenium.webdriver.chrome.options import Options
+          from pathlib import Path
 
-          opts=Options()
-          opts.add_argument('--headless=new')
-          opts.add_argument('--no-sandbox')
-          opts.add_argument('--disable-dev-shm-usage')
-          opts.add_argument('--window-size=412,915')
-          driver=webdriver.Chrome(options=opts)
-          try:
-              driver.get('https://my.qidian.com/author/9639927/')
-              deadline=time.time()+20
-              token=''
-              while time.time()<deadline:
-                  cookies=driver.get_cookies()
-                  token=next((c.get('value','') for c in cookies if c.get('name')=='_csrfToken'),'')
-                  if token and 'qidian.com' in driver.current_url:
-                      break
-                  time.sleep(1)
-              browser_ua=driver.execute_script('return navigator.userAgent')
-              cookies=driver.get_cookies()
-              cookie_header='; '.join(f"{c['name']}={c['value']}" for c in cookies)
-              print('browser_url=',driver.current_url)
-              print('browser_ua_prefix=',browser_ua[:100])
-              print('cookie_names=',sorted(c.get('name','') for c in cookies))
-              print('csrf_present=',bool(token),'cookie_bytes=',len(cookie_header.encode()))
-              if not token:
-                  raise SystemExit('No _csrfToken obtained from headless Chrome')
+          runtime_path = Path("app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidChromiumVBookRuntime.kt")
+          test_path = Path("app/src/test/java/vn/nghetruyen/app/sourceplatform/ChromiumVBookNetworkCompatibilityTest.kt")
 
-              endpoint='https://m.qidian.com/majax/rank/yuepiaolist?'+urllib.parse.urlencode({
-                  'gender':'male','pageNum':'1','_csrfToken':token,
-              })
-              variants=[
-                  ('browser_ua', browser_ua),
-                  ('app_default_ua','NgheTruyen-SourcePlatform/2 Android'),
-              ]
-              for label,ua in variants:
-                  req=urllib.request.Request(endpoint,headers={
-                      'User-Agent':ua,
-                      'Cookie':cookie_header,
-                      'Accept':'text/html,application/json,text/plain,*/*',
-                      'Accept-Language':'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
-                  })
-                  try:
-                      with urllib.request.urlopen(req,timeout=30) as r:
-                          body=r.read(); status=r.status; ct=r.headers.get('Content-Type','')
-                      print('\n===',label,'===')
-                      print('status=',status,'bytes=',len(body),'content-type=',ct)
-                      text=body.decode('utf-8','replace')
-                      obj=json.loads(text)
-                      print('root_type=',type(obj).__name__)
-                      if isinstance(obj,dict):
-                          print('root_keys=',sorted(obj.keys()))
-                          print('code=',repr(obj.get('code')),'msg=',repr(obj.get('msg')))
-                          data=obj.get('data')
-                          print('data_type=',type(data).__name__)
-                          if isinstance(data,dict):
-                              print('data_keys=',sorted(data.keys())[:50])
-                              print('pageNum=',repr(data.get('pageNum')),'total=',repr(data.get('total')))
-                  except Exception as e:
-                      print('\n===',label,'===')
-                      print('error=',type(e).__name__,str(e)[:300])
-          finally:
-              driver.quit()
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected exactly one match, found {count}")
+              return text.replace(old, new, 1)
+
+          runtime = runtime_path.read_text()
+          runtime = replace_once(
+              runtime,
+              '''            val headers = payload.obj("headers")?.values.orEmpty().mapNotNull { (key, value) ->
+              (value as? JsonValue.Str)?.value?.let { key to it }
+          }.toMap(LinkedHashMap())''',
+              '''            val requestedHeaders = payload.obj("headers")?.values.orEmpty().mapNotNull { (key, value) ->
+              (value as? JsonValue.Str)?.value?.let { key to it }
+          }.toMap(LinkedHashMap())
+          val headers = ChromiumVBookNetworkCompatibility.withDefaultUserAgent(
+              headers = requestedHeaders,
+              userAgent = WebSettings.getDefaultUserAgent(appContext),
+          )''',
+              "default vBook fetch to WebView user agent",
+          )
+          runtime = replace_once(
+              runtime,
+              '''internal object ChromiumVBookNetworkCompatibility {
+      fun normalizeUrl(raw: String): String {
+          val schemeEnd = raw.indexOf("://")
+          if (schemeEnd <= 0 || raw.substring(0, schemeEnd).lowercase(Locale.ROOT) !in setOf("http", "https")) return raw
+          val authorityStart = schemeEnd + 3
+          val pathStart = raw.indexOfAny(charArrayOf('/', '?', '#'), authorityStart)
+          if (pathStart < 0 || raw[pathStart] != '/') return raw
+          var duplicateEnd = pathStart
+          while (duplicateEnd + 1 < raw.length && raw[duplicateEnd + 1] == '/') duplicateEnd += 1
+          return if (duplicateEnd == pathStart) raw else raw.removeRange(pathStart + 1, duplicateEnd + 1)
+      }
+  }''',
+              '''internal object ChromiumVBookNetworkCompatibility {
+      fun normalizeUrl(raw: String): String {
+          val schemeEnd = raw.indexOf("://")
+          if (schemeEnd <= 0 || raw.substring(0, schemeEnd).lowercase(Locale.ROOT) !in setOf("http", "https")) return raw
+          val authorityStart = schemeEnd + 3
+          val pathStart = raw.indexOfAny(charArrayOf('/', '?', '#'), authorityStart)
+          if (pathStart < 0 || raw[pathStart] != '/') return raw
+          var duplicateEnd = pathStart
+          while (duplicateEnd + 1 < raw.length && raw[duplicateEnd + 1] == '/') duplicateEnd += 1
+          return if (duplicateEnd == pathStart) raw else raw.removeRange(pathStart + 1, duplicateEnd + 1)
+      }
+
+      fun withDefaultUserAgent(
+          headers: Map<String, String>,
+          userAgent: String,
+      ): Map<String, String> {
+          if (userAgent.isBlank() || headers.keys.any { it.equals("User-Agent", ignoreCase = true) }) return headers
+          return LinkedHashMap(headers).apply { put("User-Agent", userAgent) }
+      }
+  }''',
+              "add browser user-agent compatibility helper",
+          )
+          runtime_path.write_text(runtime)
+
+          test = test_path.read_text()
+          test = replace_once(
+              test,
+              '''class ChromiumVBookNetworkCompatibilityTest {
+      @Test''',
+              '''class ChromiumVBookNetworkCompatibilityTest {
+      @Test
+      fun defaultsVBookFetchToBrowserUserAgent() {
+          val headers = ChromiumVBookNetworkCompatibility.withDefaultUserAgent(
+              headers = linkedMapOf("Accept" to "application/json"),
+              userAgent = "Mozilla/5.0 Android WebView",
+          )
+
+          assertEquals("Mozilla/5.0 Android WebView", headers["User-Agent"])
+          assertEquals("application/json", headers["Accept"])
+      }
+
+      @Test
+      fun explicitUserAgentWinsCaseInsensitively() {
+          val original = linkedMapOf("user-agent" to "Extension-UA", "Accept" to "*/*")
+
+          val headers = ChromiumVBookNetworkCompatibility.withDefaultUserAgent(
+              headers = original,
+              userAgent = "Mozilla/5.0 Android WebView",
+          )
+
+          assertEquals(original, headers)
+          assertEquals("Extension-UA", headers["user-agent"])
+      }
+
+      @Test''',
+              "add user-agent parity regression tests",
+          )
+          test_path.write_text(test)
           PY
+
+      - name: Run focused network and replay regression tests
+        run: |
+          ./gradlew --no-daemon :app:testDebugUnitTest \
+            --tests vn.nghetruyen.app.sourceplatform.ChromiumVBookNetworkCompatibilityTest \
+            --tests vn.nghetruyen.app.sourceplatform.ChromiumVBookBrowserReplayRuntimeTest
+
+      - name: Build debug APK
+        run: ./gradlew --no-daemon :app:assembleDebug
+
+      - name: Commit verified source fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidChromiumVBookRuntime.kt \
+            app/src/test/java/vn/nghetruyen/app/sourceplatform/ChromiumVBookNetworkCompatibilityTest.kt
+          git rm .github/workflows/agent-vbook-5in1-probe.yml
+          git diff --cached --check
+          git commit -m "fix: align vBook fetch identity with browser session"
+          git push origin HEAD:agent/fix-vbook-qidian-fetch-parity

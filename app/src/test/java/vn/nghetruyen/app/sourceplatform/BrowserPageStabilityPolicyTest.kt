@@ -1,10 +1,18 @@
 package vn.nghetruyen.app.sourceplatform
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BrowserPageStabilityPolicyTest {
+    @Test
+    fun domProbeWaitsUntilRendererReachesRunnableProgress() {
+        assertFalse(BrowserPageStabilityPolicy.shouldProbeDom(10))
+        assertFalse(BrowserPageStabilityPolicy.shouldProbeDom(99))
+        assertTrue(BrowserPageStabilityPolicy.shouldProbeDom(100))
+    }
+
     @Test
     fun challengePageNeverBecomesStableAndGetsSpecificTimeout() {
         val policy = BrowserPageStabilityPolicy(deadlineMs = 5_000)

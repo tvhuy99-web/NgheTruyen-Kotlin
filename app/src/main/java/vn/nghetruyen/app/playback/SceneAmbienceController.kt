@@ -15,7 +15,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import vn.nghetruyen.app.audio.AudioDirectionAsset
 import vn.nghetruyen.app.audio.AudioDirectionLimits
-import kotlin.coroutines.resume
 import kotlin.math.pow
 import kotlin.random.Random
 
@@ -397,7 +396,7 @@ class SceneAmbienceController(context: Context) {
                 isLooping = false
             }
         }.getOrElse {
-            continuation.resume(null)
+            continuation.resumeWith(Result.success(null))
             return@suspendCancellableCoroutine
         }
 
@@ -405,18 +404,18 @@ class SceneAmbienceController(context: Context) {
         player.setOnPreparedListener { prepared ->
             prepared.setOnPreparedListener(null)
             prepared.setOnErrorListener(null)
-            if (continuation.isActive) continuation.resume(prepared) else releasePlayer(prepared)
+            if (continuation.isActive) continuation.resumeWith(Result.success(prepared)) else releasePlayer(prepared)
         }
         player.setOnErrorListener { failed, _, _ ->
             failed.setOnPreparedListener(null)
             failed.setOnErrorListener(null)
             releasePlayer(failed)
-            if (continuation.isActive) continuation.resume(null)
+            if (continuation.isActive) continuation.resumeWith(Result.success(null))
             true
         }
         runCatching { player.prepareAsync() }.onFailure {
             releasePlayer(player)
-            if (continuation.isActive) continuation.resume(null)
+            if (continuation.isActive) continuation.resumeWith(Result.success(null))
         }
     }
 

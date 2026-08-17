@@ -39,140 +39,8 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
-      - name: Patch browser stability diagnostics
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          broker_path = Path("app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidSourceBrowserBroker.kt")
-          policy_path = Path("app/src/main/java/vn/nghetruyen/app/sourceplatform/BrowserPageStabilityPolicy.kt")
-          test_path = Path("app/src/test/java/vn/nghetruyen/app/sourceplatform/BrowserPageStabilityPolicyTest.kt")
-
-          def replace_once(text: str, old: str, new: str, label: str) -> str:
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f"{label}: expected exactly one match, found {count}")
-              return text.replace(old, new, 1)
-
-          broker = broker_path.read_text()
-          broker = replace_once(
-              broker,
-              '''        var probeCount = 0
-          var lastUrl: String? = session.logicalPageUrl
-          while (true) {''',
-              '''        var probeCount = 0
-          var lastReadinessDiagnosticAt = -1L
-          var lastUrl: String? = session.logicalPageUrl
-          while (true) {''',
-              "add readiness diagnostic state",
-          )
-          broker = replace_once(
-              broker,
-              '''            val rawResult = runCatching {
-              evaluate(session, PAGE_STABILITY_SCRIPT, minOf(1_200L, remaining.coerceAtLeast(100L)))
-          }
-          if (rawResult.isFailure) {''',
-              '''            if (!BrowserPageStabilityPolicy.shouldProbeDom(session.currentProgress)) {
-              if (lastReadinessDiagnosticAt < 0L ||
-                  now - lastReadinessDiagnosticAt >= BrowserPageStabilityPolicy.READINESS_DIAGNOSTIC_INTERVAL_MS
-              ) {
-                  lastReadinessDiagnosticAt = now
-                  diagnostics.emit(event(session.manifest, request, "BROWSER_DOM_STABILITY_WAITING", DiagnosticSeverity.DEBUG, attributes = mapOf(
-                      "flow" to "browser",
-                      "stage" to "dom_stability_waiting",
-                      "progress" to session.currentProgress.toString(),
-                      "loading" to session.pageLoading.toString(),
-                      "pageFinished" to (session.lastPageFinishedAtMs > 0L).toString(),
-                      "remainingMs" to remaining.toString(),
-                  )))
-              }
-              Thread.sleep(minOf(BrowserPageStabilityPolicy.PROBE_INTERVAL_MS, remaining.coerceAtLeast(1L)))
-              continue
-          }
-
-          val rawResult = runCatching {
-              evaluate(
-                  session,
-                  PAGE_STABILITY_SCRIPT,
-                  minOf(1_200L, remaining.coerceAtLeast(100L)),
-                  timeoutSeverity = DiagnosticSeverity.DEBUG,
-              )
-          }
-          if (rawResult.isFailure) {''',
-              "gate and soften stability probe",
-          )
-          broker = replace_once(
-              broker,
-              '''    private fun evaluate(session: Session, expression: String, timeoutMs: Long): String {''',
-              '''    private fun evaluate(
-          session: Session,
-          expression: String,
-          timeoutMs: Long,
-          timeoutSeverity: DiagnosticSeverity = DiagnosticSeverity.WARN,
-      ): String {''',
-              "add evaluate timeout severity",
-          )
-          broker = replace_once(
-              broker,
-              '''            diagnostics.emit(sessionEvent(session.manifest, session, "BROWSER_EVAL_TIMEOUT", DiagnosticSeverity.WARN, attributes = mapOf(''',
-              '''            diagnostics.emit(sessionEvent(session.manifest, session, "BROWSER_EVAL_TIMEOUT", timeoutSeverity, attributes = mapOf(''',
-              "use requested timeout severity",
-          )
-          broker_path.write_text(broker)
-
-          policy = policy_path.read_text()
-          policy = replace_once(
-              policy,
-              '''    companion object {
-          const val PROBE_INTERVAL_MS = 350L''',
-              '''    companion object {
-          const val MIN_DOM_PROBE_PROGRESS = 100
-          const val READINESS_DIAGNOSTIC_INTERVAL_MS = 5_000L
-          const val PROBE_INTERVAL_MS = 350L''',
-              "add DOM probe readiness constants",
-          )
-          policy = replace_once(
-              policy,
-              '''        const val REQUIRED_MATCHING_PROBES = 3
-      }
-  }''',
-              '''        const val REQUIRED_MATCHING_PROBES = 3
-
-          fun shouldProbeDom(progress: Int): Boolean = progress >= MIN_DOM_PROBE_PROGRESS
-      }
-  }''',
-              "add DOM probe readiness predicate",
-          )
-          policy_path.write_text(policy)
-
-          test = test_path.read_text()
-          test = replace_once(
-              test,
-              '''import org.junit.Assert.assertEquals
-  import org.junit.Assert.assertTrue''',
-              '''import org.junit.Assert.assertEquals
-  import org.junit.Assert.assertFalse
-  import org.junit.Assert.assertTrue''',
-              "add assertFalse import",
-          )
-          test = replace_once(
-              test,
-              '''class BrowserPageStabilityPolicyTest {
-      @Test''',
-              '''class BrowserPageStabilityPolicyTest {
-      @Test
-      fun domProbeWaitsUntilRendererReachesRunnableProgress() {
-          assertFalse(BrowserPageStabilityPolicy.shouldProbeDom(10))
-          assertFalse(BrowserPageStabilityPolicy.shouldProbeDom(99))
-          assertTrue(BrowserPageStabilityPolicy.shouldProbeDom(100))
-      }
-
-      @Test''',
-              "add probe readiness regression test",
-          )
-          test_path.write_text(test)
-          PY
+      - name: Apply browser diagnostic fix
+        run: python3 scripts/agent_fix_browser_diagnostic_probes.py
 
       - name: Run focused regression test
         run: ./gradlew --no-daemon :app:testDebugUnitTest --tests vn.nghetruyen.app.sourceplatform.BrowserPageStabilityPolicyTest
@@ -180,15 +48,16 @@ jobs:
       - name: Build debug APK
         run: ./gradlew --no-daemon :app:assembleDebug
 
-      - name: Commit verified fix
+      - name: Commit verified source fix
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add \
-            app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidSourceBrowserBroker.kt \
-            app/src/main/java/vn/nghetruyen/app/sourceplatform/BrowserPageStabilityPolicy.kt \
-            app/src/test/java/vn/nghetruyen/app/sourceplatform/BrowserPageStabilityPolicyTest.kt
+          git add app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidSourceBrowserBroker.kt
+          git add app/src/main/java/vn/nghetruyen/app/sourceplatform/BrowserPageStabilityPolicy.kt
+          git add app/src/test/java/vn/nghetruyen/app/sourceplatform/BrowserPageStabilityPolicyTest.kt
+          git rm .github/workflows/agent-fix-browser-diagnostic-probes.yml
+          git rm scripts/agent_fix_browser_diagnostic_probes.py
           git diff --cached --check
           git commit -m "fix: stop false browser stability timeout warnings"
           git push origin HEAD:agent/fix-browser-diagnostic-probes

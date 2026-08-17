@@ -24,6 +24,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -78,6 +79,8 @@ import vn.nghetruyen.app.ai.vietphrase.VietPhraseScope
 import vn.nghetruyen.app.audio.ReferenceAudioExportRuntime
 import vn.nghetruyen.app.audio.PcmLoudnessEstimator
 import vn.nghetruyen.app.audio.SceneMusicAnalysisWorker
+import vn.nghetruyen.app.audio.AudioAssetClassifier
+import vn.nghetruyen.app.audio.AudioAssetKind
 import vn.nghetruyen.app.audio.AudioExportRequest
 import vn.nghetruyen.app.audio.AudioExportScope
 import vn.nghetruyen.app.core.common.AppResult
@@ -245,7 +248,6 @@ fun ReaderScreen(
     var ttsLoading by remember { mutableStateOf(false) }
 
     var musicEnabled by remember { mutableStateOf(state.backgroundMusicEnabled) }
-    var musicAi by remember { mutableStateOf(state.autoSceneMusicEnabled) }
     var musicMode by remember { mutableStateOf(state.sceneMusicPlaybackMode) }
     var musicTargetLufs by remember { mutableStateOf(state.sceneMusicTargetLufs.coerceIn(-36f, -18f)) }
     var musicDuckDb by remember { mutableStateOf((-20.0 * log10(state.backgroundMusicDuckFactor.coerceAtLeast(0.0630957f).toDouble())).toFloat().coerceIn(0f, 24f)) }
@@ -299,7 +301,6 @@ fun ReaderScreen(
         if (showMusicDialog) {
             val settings = app.container.settingsRepository.snapshot()
             musicEnabled = settings.backgroundMusicEnabled
-            musicAi = settings.autoSceneMusicEnabled
             musicMode = if (settings.sceneMusicPlaybackMode == SceneMusicPlaybackMode.SHUFFLE) SceneMusicPlaybackMode.SHUFFLE else SceneMusicPlaybackMode.SEQUENTIAL
             musicTargetLufs = settings.sceneMusicTargetLufs.coerceIn(-36f, -18f)
             musicDuckDb = (-20.0 * log10(settings.backgroundMusicDuckFactor.coerceAtLeast(0.0630957f).toDouble())).toFloat().coerceIn(0f, 24f)
@@ -310,8 +311,9 @@ fun ReaderScreen(
 
     LaunchedEffect(state.sceneMusicTracks, showMusicLibrary) {
         if (showMusicLibrary) {
+            val currentMusicTracks = state.sceneMusicTracks.filter { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }
             val draftIds = musicLibraryDraft.mapTo(linkedSetOf()) { it.id }
-            val added = state.sceneMusicTracks.filter { it.id !in musicLibraryBaselineIds && it.id !in draftIds }
+            val added = currentMusicTracks.filter { it.id !in musicLibraryBaselineIds && it.id !in draftIds }
             if (added.isNotEmpty()) {
                 musicLibraryDraft = (musicLibraryDraft + added)
                     .take(500)
@@ -743,17 +745,29 @@ fun ReaderScreen(
 
     if (showMusicDialog) {
         var musicModeExpanded by remember { mutableStateOf(false) }
+        val musicTracks = state.sceneMusicTracks.filter { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }
         AlertDialog(
             onDismissRequest = { showMusicDialog = false },
             title = { Text("NHẠC NỀN") },
             text = { Column(Modifier.heightIn(max = 620.dp).verticalScroll(rememberScrollState())) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Bật nhạc nền khi đọc bằng TTS", Modifier.weight(1f)); Switch(musicEnabled, { musicEnabled = it })
+                    Text("Bật nhạc nền", Modifier.weight(1f))
+                    Switch(musicEnabled, { musicEnabled = it })
                 }
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Trao toàn quyền giữ và đổi nhạc cho AI", Modifier.weight(1f)); Switch(musicAi, { musicAi = it })
-                }
-                Text("Chế độ phát khi không dùng nhạc theo cảnh", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                vn.nghetruyen.app.ui.components.AudioDirectionLayerSwitches(
+                    musicTrackCount = musicTracks.size,
+                    onManageMusic = {
+                        val rows = musicTracks.sortedWith(compareBy<SceneMusicTrackEntity> { it.orderIndex }.thenBy { it.title.lowercase() })
+                        musicLibraryDraft = rows.mapIndexed { index, row -> row.copy(orderIndex = index) }
+                        musicLibraryBaselineIds = rows.mapTo(linkedSetOf()) { it.id }
+                        musicSearch = ""
+                        showMusicLibrary = true
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                Text("Chế độ phát", fontWeight = FontWeight.SemiBold)
                 Button(onClick = { musicModeExpanded = true }, modifier = Modifier.fillMaxWidth()) {
                     Text(if (musicMode == SceneMusicPlaybackMode.SHUFFLE) "Phát ngẫu nhiên" else "Phát lần lượt")
                 }
@@ -761,65 +775,20 @@ fun ReaderScreen(
                     DropdownMenuItem(text = { Text("Phát lần lượt") }, onClick = { musicMode = SceneMusicPlaybackMode.SEQUENTIAL; musicModeExpanded = false })
                     DropdownMenuItem(text = { Text("Phát ngẫu nhiên") }, onClick = { musicMode = SceneMusicPlaybackMode.SHUFFLE; musicModeExpanded = false })
                 }
-                Text("CÂN BẰNG ÂM THANH", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp))
-                Text("Mỗi bài nhạc được đo một lần và dùng một mức gain chuẩn hóa cố định. Attack là thời gian hạ nhạc khi giọng đọc bắt đầu; Release là thời gian đưa nhạc trở lại sau khi giọng đọc dừng.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 4.dp))
-                ReaderFloatSlider("Mức chuẩn hóa", musicTargetLufs, -36f, -18f, steps = 17, shown = { "%.0f LUFS".format(it) }) { musicTargetLufs = it }
                 ReaderFloatSlider("Giảm nhạc khi giọng đọc phát", musicDuckDb, 0f, 24f, steps = 23, shown = { "%.0f dB".format(it) }) { musicDuckDb = it }
-                ReaderIntSlider("Attack", musicAttackMs, 0, 2_000, step = 10, suffix = " ms") { musicAttackMs = it }
-                ReaderIntSlider("Release", musicReleaseMs, 0, 5_000, step = 10, suffix = " ms") { musicReleaseMs = it }
-                ReaderMenuButton("CHUẨN HÓA TOÀN BỘ KHO NHẠC") {
-                    val tracks = state.sceneMusicTracks
-                    if (tracks.isEmpty()) {
-                        onMessage("Kho nhạc đang trống.")
-                    } else {
-                        musicNormalizationTarget = musicTargetLufs
-                        musicNormalizationDone = 0
-                        musicNormalizationFailed = 0
-                        musicNormalizationCancelled = 0
-                        musicNormalizationRunToken += 1
-                        val runToken = musicNormalizationRunToken
-                        val workIds = tracks.map { track ->
-                            SceneMusicAnalysisWorker.enqueue(context, track.id, musicTargetLufs)
-                        }
-                        musicNormalizationWorkIds = workIds
-                        showMusicNormalizationProgress = true
-                        scope.launch {
-                            val workManager = WorkManager.getInstance(context.applicationContext)
-                            while (showMusicNormalizationProgress && runToken == musicNormalizationRunToken) {
-                                val infos = withContext(Dispatchers.IO) {
-                                    workIds.mapNotNull { id -> runCatching { workManager.getWorkInfoById(id).get() }.getOrNull() }
-                                }
-                                musicNormalizationDone = infos.count { it.state == WorkInfo.State.SUCCEEDED }
-                                musicNormalizationFailed = infos.count { it.state == WorkInfo.State.FAILED }
-                                musicNormalizationCancelled = infos.count { it.state == WorkInfo.State.CANCELLED }
-                                if (infos.size == workIds.size && infos.all { it.state.isFinished }) break
-                                delay(300)
-                            }
-                        }
-                    }
-                }
-                Text("${state.sceneMusicTracks.size} bài • ${state.sceneMusicTracks.count { it.enabled }} đang bật", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
-                ReaderMenuButton("QUẢN LÝ DANH SÁCH NHẠC") {
-                    val rows = state.sceneMusicTracks.sortedWith(compareBy<SceneMusicTrackEntity> { it.orderIndex }.thenBy { it.title.lowercase() })
-                    musicLibraryDraft = rows.mapIndexed { index, row -> row.copy(orderIndex = index) }
-                    musicLibraryBaselineIds = rows.mapTo(linkedSetOf()) { it.id }
-                    musicSearch = ""; showMusicLibrary = true
-                }
-                Text("Tên và mô tả của các bài đang bật được gửi cho AI làm dữ liệu tham chiếu. Khi được trao quyền, AI tự quyết định giữ bài hiện tại hoặc đổi sang bài phù hợp với cảnh.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
             } },
             confirmButton = { TextButton(onClick = {
-                val activeCount = state.sceneMusicTracks.count { it.enabled }
-                if ((musicEnabled || musicAi) && activeCount == 0) onMessage("Hãy bật ít nhất một bài trong danh sách nhạc trước.")
+                val activeCount = musicTracks.count { it.enabled }
+                if (musicEnabled && activeCount == 0) onMessage("Hãy bật ít nhất một bài trong danh sách nhạc trước.")
                 else scope.launch {
                     val settings = app.container.settingsRepository
                     settings.setBackgroundMusicEnabled(musicEnabled)
-                    settings.setAutoSceneMusicEnabled(musicAi)
                     settings.setSceneMusicPlaybackMode(musicMode)
                     settings.setSceneMusicTargetLufs(musicTargetLufs)
                     settings.setBackgroundMusicDuckFactor(10.0.pow(-musicDuckDb / 20.0).toFloat())
                     settings.setBackgroundMusicAttackMillis(musicAttackMs)
                     settings.setBackgroundMusicReleaseMillis(musicReleaseMs)
-                    state.sceneMusicTracks.forEach { SceneMusicAnalysisWorker.enqueue(context, it.id, musicTargetLufs) }
+                    musicTracks.forEach { SceneMusicAnalysisWorker.enqueue(context, it.id, musicTargetLufs) }
                     ReaderPlaybackService.command(context, ReaderPlaybackService.ACTION_REFRESH)
                     onMessage("Đã lưu cài đặt nhạc nền."); showMusicDialog = false
                 }
@@ -843,11 +812,6 @@ fun ReaderScreen(
                     if (musicNormalizationFailed > 0) Text("Lỗi: $musicNormalizationFailed")
                     if (musicNormalizationCancelled > 0) Text("Đã hủy: $musicNormalizationCancelled")
                     if (running > 0) Text("Đang xử lý: $running")
-                    Text(
-                        "Các bài đã có loudness và peak chỉ được tính lại gain, không giải mã lại.",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
                 }
             },
             confirmButton = {
@@ -875,13 +839,6 @@ fun ReaderScreen(
     if (showMusicLibrary) {
         val normalizedSearch = musicSearch.trim().lowercase()
         val visibleTracks = musicLibraryDraft.filter { normalizedSearch.isBlank() || it.title.lowercase().contains(normalizedSearch) }
-        val enabledCount = musicLibraryDraft.count(SceneMusicTrackEntity::enabled)
-        val normalizedCount = musicLibraryDraft.count { it.normalizationVersion >= PcmLoudnessEstimator.VERSION && it.normalizationError.isBlank() }
-        val describedCount = musicLibraryDraft.count { it.tagsCsv.isNotBlank() }
-        val catalogChars = musicLibraryDraft.sumOf { track ->
-            if (track.enabled) track.id.length + track.title.length + track.tagsCsv.trim().length + 8 else 0
-        }
-        val estimatedCatalogTokens = ((catalogChars + 3) / 4).coerceAtLeast(0)
         fun stopPreview() {
             runCatching { musicPreviewPlayer?.stop() }
             runCatching { musicPreviewPlayer?.release() }
@@ -890,7 +847,10 @@ fun ReaderScreen(
         }
         fun cancelLibrary() {
             stopPreview()
-            val transientIds = state.sceneMusicTracks.mapTo(linkedSetOf()) { it.id } - musicLibraryBaselineIds
+            val currentMusicIds = state.sceneMusicTracks
+                .filter { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }
+                .mapTo(linkedSetOf()) { it.id }
+            val transientIds = currentMusicIds - musicLibraryBaselineIds
             scope.launch { transientIds.forEach { app.container.database.sceneMusicTrackDao().delete(it) } }
             showMusicLibrary = false
         }
@@ -898,86 +858,70 @@ fun ReaderScreen(
             onDismissRequest = ::cancelLibrary,
             title = { Text("DANH SÁCH NHẠC NỀN") },
             text = { Column(Modifier.heightIn(max = 620.dp).verticalScroll(rememberScrollState())) {
-                Text(
-                    "Kho nhạc: ${musicLibraryDraft.size} bài\n" +
-                        "Bài đang bật: $enabledCount bài\n" +
-                        "Đã chuẩn hóa: $normalizedCount bài\n" +
-                        "Đã có mô tả: $describedCount bài\n" +
-                        "Ước tính khi gửi danh mục AI: khoảng $estimatedCatalogTokens token",
-                    style = MaterialTheme.typography.bodySmall,
-                )
                 OutlinedTextField(
                     musicSearch,
                     { musicSearch = it.take(120) },
                     placeholder = { Text("Tìm theo tên bài") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    modifier = Modifier.fillMaxWidth(),
                 )
                 if (visibleTracks.isEmpty()) {
                     Text(if (musicLibraryDraft.isEmpty()) "Chưa có bài nhạc nào." else "Không có bài phù hợp với nội dung tìm kiếm.", modifier = Modifier.padding(vertical = 8.dp))
                 }
                 visibleTracks.forEach { track ->
                     val index = musicLibraryDraft.indexOfFirst { it.id == track.id }
-                    val status = if (track.enabled) "đang bật" else "đang tắt"
-                    val described = if (track.tagsCsv.isNotBlank()) "đã có mô tả" else "chưa có mô tả"
                     ReferenceActionButton(
-                        "${index + 1}. ${track.title}, $status, $described",
+                        "${index + 1}. ${track.title}",
                         { selectedMusicTrackId = track.id },
                         normalColor = ReferenceGray,
                         modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
                     )
                 }
-                Row(Modifier.fillMaxWidth()) {
-                    Button(onClick = onSelectSceneMusic, enabled = musicLibraryDraft.size < 500, modifier = Modifier.weight(1f).padding(2.dp)) { Text("THÊM BÀI") }
-                    Button(onClick = { musicBulkText = ""; showMusicBulkDialog = true }, modifier = Modifier.weight(1f).padding(2.dp)) { Text("DÁN MÔ TẢ") }
+            } },
+            confirmButton = { Column(Modifier.fillMaxWidth()) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = onSelectSceneMusic, enabled = musicLibraryDraft.size < 500, modifier = Modifier.weight(1f)) { Text("THÊM BÀI") }
+                    TextButton(onClick = { musicBulkText = ""; showMusicBulkDialog = true }, enabled = musicLibraryDraft.isNotEmpty(), modifier = Modifier.weight(1f)) { Text("MÔ TẢ HÀNG LOẠT") }
+                    TextButton(onClick = { showMusicClearAllConfirm = true }, enabled = musicLibraryDraft.isNotEmpty(), modifier = Modifier.weight(1f)) { Text("XÓA TẤT CẢ") }
                 }
-                Row(Modifier.fillMaxWidth()) {
-                    Button(onClick = {
-                        clipboard.setText(AnnotatedString(musicLibraryDraft.joinToString("\n") { it.title }))
-                        onMessage("Đã sao chép tên của ${musicLibraryDraft.size} bài.")
-                    }, enabled = musicLibraryDraft.isNotEmpty(), modifier = Modifier.weight(1f).padding(2.dp)) { Text("SAO CHÉP TÊN") }
-                    Button(onClick = {
-                        clipboard.setText(AnnotatedString(musicLibraryDraft.joinToString("\n") { "${it.title} || ${it.tagsCsv}" }))
-                        onMessage("Đã sao chép tên và mô tả của ${musicLibraryDraft.size} bài.")
-                    }, enabled = musicLibraryDraft.isNotEmpty(), modifier = Modifier.weight(1f).padding(2.dp)) { Text("SAO CHÉP MÔ TẢ") }
-                }
-                Row(Modifier.fillMaxWidth()) {
-                    Button(onClick = ::stopPreview, enabled = musicPreviewPlayer != null, modifier = Modifier.weight(1f).padding(2.dp)) { Text("DỪNG NGHE THỬ") }
-                    Button(onClick = { showMusicClearAllConfirm = true }, enabled = musicLibraryDraft.isNotEmpty(), modifier = Modifier.weight(1f).padding(2.dp)) { Text("XÓA TẤT CẢ") }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (musicPreviewPlayer != null) {
+                        TextButton(onClick = ::stopPreview, modifier = Modifier.weight(1f)) { Text("DỪNG NGHE") }
+                    }
+                    TextButton(onClick = {
+                        if (musicLibraryDraft.size > 500) {
+                            onMessage("Danh sách vượt giới hạn 500 bài.")
+                        } else {
+                            stopPreview()
+                            scope.launch {
+                                val dao = app.container.database.sceneMusicTrackDao()
+                                val existing = dao.listAll()
+                                val existingMusic = existing.filter { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }
+                                val now = System.currentTimeMillis()
+                                val normalized = musicLibraryDraft.mapIndexed { index, row -> row.copy(orderIndex = index, updatedAt = now) }
+                                val keepIds = normalized.mapTo(hashSetOf()) { it.id }
+                                existingMusic.filter { it.id !in keepIds }.forEach { dao.delete(it.id) }
+                                dao.upsertAll(normalized)
+                                onMessage("Đã lưu danh sách nhạc nền.")
+                                showMusicLibrary = false
+                            }
+                        }
+                    }, modifier = Modifier.weight(1f)) { Text("LƯU DANH SÁCH") }
+                    TextButton(onClick = ::cancelLibrary, modifier = Modifier.weight(1f)) { Text("HỦY") }
                 }
             } },
-            confirmButton = { TextButton(onClick = {
-                val invalid = musicLibraryDraft.firstOrNull { it.tagsCsv.length > 300 }
-                if (invalid != null) {
-                    onMessage("Mô tả của “${invalid.title}” vượt giới hạn 300 ký tự.")
-                } else if (musicLibraryDraft.size > 500) {
-                    onMessage("Danh sách vượt giới hạn 500 bài.")
-                } else {
-                    stopPreview()
-                    scope.launch {
-                        val dao = app.container.database.sceneMusicTrackDao()
-                        val existing = dao.listAll()
-                        val now = System.currentTimeMillis()
-                        val normalized = musicLibraryDraft.mapIndexed { index, row -> row.copy(orderIndex = index, updatedAt = now) }
-                        val keepIds = normalized.mapTo(hashSetOf()) { it.id }
-                        existing.filter { it.id !in keepIds }.forEach { dao.delete(it.id) }
-                        dao.upsertAll(normalized)
-                        onMessage("Đã lưu danh sách nhạc nền.")
-                        showMusicLibrary = false
-                    }
-                }
-            }) { Text("LƯU DANH SÁCH") } },
-            dismissButton = { TextButton(onClick = ::cancelLibrary) { Text("HỦY") } },
         )
     }
 
     selectedMusicTrackId?.let { selectedId ->
         musicLibraryDraft.firstOrNull { it.id == selectedId }?.let { track ->
             val index = musicLibraryDraft.indexOfFirst { it.id == track.id }
+            val description = musicDescription(track.tagsCsv)
             AlertDialog(
                 onDismissRequest = { selectedMusicTrackId = null },
                 title = { Text(track.title) },
-                text = { Column {
+                text = { Text("Mô tả: ${description.ifBlank { "—" }}") },
+                confirmButton = { Column(Modifier.fillMaxWidth()) {
                     ReaderMenuButton("NGHE THỬ") {
                         runCatching { musicPreviewPlayer?.stop() }
                         runCatching { musicPreviewPlayer?.release() }
@@ -1020,9 +964,12 @@ fun ReaderScreen(
                             ReaderPlaybackService.command(context, ReaderPlaybackService.ACTION_MUSIC_PREVIEW_END)
                             onMessage("Không nghe thử được bài nhạc này.")
                         }
-                        selectedMusicTrackId = null
                     }
-                    ReaderMenuButton("SỬA TÊN VÀ MÔ TẢ") { editingTrack = track; selectedMusicTrackId = null }
+                    ReaderMenuButton("CHUẨN HÓA") {
+                        SceneMusicAnalysisWorker.enqueue(context, track.id, musicTargetLufs)
+                        onMessage("Đã đưa ‘${track.title}’ vào hàng đợi chuẩn hóa.")
+                    }
+                    ReaderMenuButton("SỬA TÊN / MÔ TẢ") { editingTrack = track; selectedMusicTrackId = null }
                     ReaderMenuButton(if (track.enabled) "TẮT BÀI NÀY" else "BẬT BÀI NÀY") {
                         musicLibraryDraft = musicLibraryDraft.map { if (it.id == track.id) it.copy(enabled = !track.enabled) else it }
                         selectedMusicTrackId = null
@@ -1047,8 +994,8 @@ fun ReaderScreen(
                         selectedMusicTrackId = null
                         editingTrack = track.copy(title = "__DELETE_CONFIRM__${track.title}")
                     }
+                    TextButton(onClick = { selectedMusicTrackId = null }, modifier = Modifier.align(Alignment.End)) { Text("ĐÓNG") }
                 } },
-                confirmButton = { TextButton(onClick = { selectedMusicTrackId = null }) { Text("ĐÓNG") } },
             )
         }
     }
@@ -1071,33 +1018,20 @@ fun ReaderScreen(
             )
         } else {
             var title by remember(track.id, track.title) { mutableStateOf(track.title) }
-            var description by remember(track.id, track.tagsCsv) { mutableStateOf(track.tagsCsv) }
+            var description by remember(track.id, track.tagsCsv) { mutableStateOf(musicDescription(track.tagsCsv)) }
             AlertDialog(
                 onDismissRequest = { editingTrack = null },
-                title = { Text("SỬA THÔNG TIN AI") },
-                text = { Column {
-                    Text("Tên bài gửi cho AI")
-                    OutlinedTextField(title, { title = it.take(120) }, placeholder = { Text("Tên bài") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                    Text("Mô tả tham khảo cho AI, không bắt buộc AI làm theo", modifier = Modifier.padding(top = 8.dp))
-                    OutlinedTextField(
-                        description,
-                        { description = it.take(301) },
-                        placeholder = { Text("Tông/diễn biến: ...; Dùng: ...; Tránh: ...") },
-                        minLines = 4,
-                        maxLines = 7,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text("Tối đa 300 ký tự. Chỉ ghi thông tin thực sự giúp AI phân biệt và chọn bài.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
+                title = { Text("CHỈNH SỬA BÀI NHẠC") },
+                text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(title, { title = it.take(120) }, label = { Text("Tên") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(description, { description = it.take(300) }, label = { Text("Mô tả") }, minLines = 3, maxLines = 5, modifier = Modifier.fillMaxWidth())
                 } },
                 confirmButton = { TextButton(onClick = {
-                    if (description.length > 300) onMessage("Mô tả có ${description.length} ký tự, vượt giới hạn 300.")
-                    else {
-                        val cleanTitle = title.trim().ifBlank { track.title }
-                        musicLibraryDraft = musicLibraryDraft.map {
-                            if (it.id == track.id) it.copy(title = cleanTitle, tagsCsv = description.trim()) else it
-                        }
-                        editingTrack = null
+                    val cleanTitle = title.trim().ifBlank { track.title }
+                    musicLibraryDraft = musicLibraryDraft.map {
+                        if (it.id == track.id) it.copy(title = cleanTitle, tagsCsv = musicTagsWithDescription(description)) else it
                     }
+                    editingTrack = null
                 }) { Text("LƯU") } },
                 dismissButton = { TextButton(onClick = { editingTrack = null }) { Text("HỦY") } },
             )
@@ -1107,18 +1041,15 @@ fun ReaderScreen(
     if (showMusicBulkDialog) {
         AlertDialog(
             onDismissRequest = { showMusicBulkDialog = false },
-            title = { Text("DÁN MÔ TẢ HÀNG LOẠT") },
-            text = { Column {
-                Text("Mỗi dòng: Tên bài || Mô tả. Dùng [XÓA] để xóa mô tả.", style = MaterialTheme.typography.bodySmall)
-                OutlinedTextField(
-                    musicBulkText,
-                    { musicBulkText = it.take(120_000) },
-                    placeholder = { Text("Dán toàn bộ tên và mô tả tại đây") },
-                    minLines = 12,
-                    maxLines = 18,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            } },
+            title = { Text("MÔ TẢ HÀNG LOẠT") },
+            text = { OutlinedTextField(
+                musicBulkText,
+                { musicBulkText = it.take(120_000) },
+                placeholder = { Text("Tên bài || Mô tả    •    [XÓA] để xóa mô tả") },
+                minLines = 12,
+                maxLines = 18,
+                modifier = Modifier.fillMaxWidth(),
+            ) },
             confirmButton = { TextButton(onClick = {
                 val tracksByName = musicLibraryDraft.associateBy { it.title.trim().lowercase() }
                 val updates = linkedMapOf<String, String>()
@@ -1166,7 +1097,7 @@ fun ReaderScreen(
             confirmButton = {
                 if (musicBulkUpdates.isNotEmpty()) TextButton(onClick = {
                     musicLibraryDraft = musicLibraryDraft.map { row ->
-                        musicBulkUpdates[row.id]?.let { row.copy(tagsCsv = it) } ?: row
+                        musicBulkUpdates[row.id]?.let { row.copy(tagsCsv = musicTagsWithDescription(it)) } ?: row
                     }
                     showMusicBulkResult = false
                     showMusicBulkDialog = false
@@ -1326,6 +1257,17 @@ fun ReaderScreen(
             dismissButton = { Row { if (activeNote != null) TextButton(onClick = { onDeleteNote(activeNote.id); showNoteDialog = false }) { Text("XÓA") }; TextButton(onClick = { showNoteDialog = false }) { Text("HỦY") } } },
         )
     }
+}
+
+private fun musicDescription(tagsCsv: String): String = tagsCsv
+    .replace("type:music", "", ignoreCase = true)
+    .trim()
+    .trimStart(',', ';')
+    .trim()
+
+private fun musicTagsWithDescription(description: String): String {
+    val cleanDescription = description.trim().take(300)
+    return if (cleanDescription.isBlank()) "type:music" else "type:music, $cleanDescription"
 }
 
 private data class ReaderPalette(val background: Color, val card: Color, val text: Color, val active: Color, val search: Color)

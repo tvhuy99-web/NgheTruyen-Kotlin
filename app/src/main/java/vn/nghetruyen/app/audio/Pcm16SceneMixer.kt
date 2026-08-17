@@ -7,6 +7,8 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
+import java.nio.ByteBuffer
+import java.nio.channels.FileChannel
 import kotlin.math.min
 
 /**
@@ -24,6 +26,11 @@ data class SceneMixLayer(
 
 /**
  * Streaming narration + MUSIC + AMBIENCE + SFX mixer.
+ *
+ * Source PCM is memory-mapped once per unique WAV instead of copied into one heap ByteArray per scene.
+ * The timeline is swept block-by-block, keeping only layers and SFX duck envelopes that can intersect
+ * the current block. This keeps long audiobook exports bounded by unique assets and active scene count
+ * rather than multiplying RAM/CPU by the total number of scene cues.
  *
  * Looping layers use an internal overlap/crossfade at the source seam instead of modulo hard-looping.
  * A deterministic phase derived from source + timeline start prevents simultaneous ambience layers
@@ -46,17 +53,35 @@ object Pcm16SceneMixer {
         }
         val narration = WaveFileAssembler.inspect(narrationWav)
         requirePcm16(narration)
+
+        val sourceCache = linkedMapOf<String, PreparedSource>()
         val prepared = layers.map { layer ->
             require(layer.startFrame >= 0L && layer.endFrameExclusive > layer.startFrame) { "Khoảng lớp âm thanh không hợp lệ." }
-            val segment = WaveFileAssembler.inspect(layer.sourceWav)
-            requirePcm16(segment)
-            if (segment.sampleRate != narration.sampleRate || segment.channelCount != narration.channelCount) {
-                throw IOException("Lớp âm thanh phải cùng sample rate và số kênh với lời đọc.")
+            val cacheKey = runCatching { layer.sourceWav.canonicalPath }.getOrElse { layer.sourceWav.absolutePath }
+            val source = sourceCache.getOrPut(cacheKey) {
+                val segment = WaveFileAssembler.inspect(layer.sourceWav)
+                requirePcm16(segment)
+                if (segment.sampleRate != narration.sampleRate || segment.channelCount != narration.channelCount) {
+                    throw IOException("Lớp âm thanh phải cùng sample rate và số kênh với lời đọc.")
+                }
+                if (segment.dataLength > MAX_LAYER_BYTES) {
+                    throw IOException("Một tệp âm thanh vượt giới hạn 64 MiB PCM.")
+                }
+                PreparedSource(
+                    pcm = mapPcm(segment),
+                    blockAlign = narration.blockAlign,
+                )
             }
-            if (segment.dataLength > MAX_LAYER_BYTES) throw IOException("Một lớp âm thanh vượt giới hạn 64 MiB PCM.")
-            PreparedLayer(layer, readPcm(segment), narration.blockAlign, narration.sampleRate.toInt())
+            PreparedLayer(layer, source, narration.sampleRate.toInt())
         }
-        val oneShots = prepared.filterNot { it.layer.looping }
+
+        val sampleTimeline = prepared.sortedBy(PreparedLayer::sampleStartFrame)
+        val duckTimeline = prepared.filterNot { it.layer.looping }.sortedBy(PreparedLayer::duckStartFrame)
+        val activeSamples = ArrayList<PreparedLayer>()
+        val activeDucks = ArrayList<PreparedLayer>()
+        var nextSample = 0
+        var nextDuck = 0
+
         val tempData = File(destination.parentFile ?: narrationWav.parentFile, "${destination.name}.pcm.tmp")
         try {
             BufferedInputStream(FileInputStream(narrationWav)).use { input ->
@@ -72,13 +97,30 @@ object Pcm16SceneMixer {
                         if (read <= 0) throw EOFException("Dữ liệu lời đọc bị cắt ngắn.")
                         val aligned = read - read % bytesPerFrame
                         if (aligned <= 0) throw EOFException("Dữ liệu lời đọc kết thúc giữa một frame PCM.")
+
+                        val blockFrameCount = aligned / bytesPerFrame
+                        val blockStart = framePosition
+                        val blockEndExclusive = blockStart + blockFrameCount.toLong()
+
+                        activeSamples.removeAll { it.sampleEndFrameExclusive <= blockStart }
+                        while (nextSample < sampleTimeline.size && sampleTimeline[nextSample].sampleStartFrame < blockEndExclusive) {
+                            val layer = sampleTimeline[nextSample++]
+                            if (layer.sampleEndFrameExclusive > blockStart) activeSamples += layer
+                        }
+
+                        activeDucks.removeAll { it.duckEndFrameExclusive <= blockStart }
+                        while (nextDuck < duckTimeline.size && duckTimeline[nextDuck].duckStartFrame < blockEndExclusive) {
+                            val layer = duckTimeline[nextDuck++]
+                            if (layer.duckEndFrameExclusive > blockStart) activeDucks += layer
+                        }
+
                         var offset = 0
                         while (offset < aligned) {
-                            val backgroundDuck = oneShots.minOfOrNull { it.backgroundDuckAt(framePosition) } ?: 1f
+                            val backgroundDuck = activeDucks.minOfOrNull { it.backgroundDuckAt(framePosition) } ?: 1f
                             for (channel in 0 until narration.channelCount) {
                                 val sampleOffset = offset + channel * 2
                                 var mixed = sample16(buffer, sampleOffset).toInt()
-                                prepared.forEach { layer ->
+                                activeSamples.forEach { layer ->
                                     val externalGain = if (layer.layer.looping) backgroundDuck else 1f
                                     mixed += layer.sample(framePosition, channel, narration.channelCount, externalGain)
                                 }
@@ -98,13 +140,21 @@ object Pcm16SceneMixer {
         }
     }
 
+    private data class PreparedSource(
+        val pcm: ByteBuffer,
+        val blockAlign: Int,
+    ) {
+        val totalFrames: Int = if (blockAlign > 0) pcm.limit() / blockAlign else 0
+    }
+
     private data class PreparedLayer(
         val layer: SceneMixLayer,
-        val pcm: ByteArray,
-        val blockAlign: Int,
+        val source: PreparedSource,
         val sampleRate: Int,
     ) {
-        private val totalFrames = pcm.size / blockAlign
+        private val pcm: ByteBuffer = source.pcm
+        private val blockAlign: Int = source.blockAlign
+        private val totalFrames = source.totalFrames
         private val layerFrames = (layer.endFrameExclusive - layer.startFrame)
             .coerceAtMost(Int.MAX_VALUE.toLong())
             .toInt()
@@ -133,8 +183,13 @@ object Pcm16SceneMixer {
         private val duckAttackFrames = (sampleRate * SFX_DUCK_ATTACK_MILLIS / 1_000L).coerceAtLeast(1L)
         private val duckReleaseFrames = (sampleRate * SFX_DUCK_RELEASE_MILLIS / 1_000L).coerceAtLeast(1L)
 
+        val sampleStartFrame: Long = layer.startFrame
+        val sampleEndFrameExclusive: Long = if (layer.looping) layer.endFrameExclusive else oneShotEndFrame
+        val duckStartFrame: Long = (layer.startFrame - duckAttackFrames).coerceAtLeast(0L)
+        val duckEndFrameExclusive: Long = oneShotEndFrame + duckReleaseFrames
+
         fun sample(frame: Long, channel: Int, channels: Int, externalGain: Float = 1f): Int {
-            if (frame !in layer.startFrame until layer.endFrameExclusive || totalFrames <= 0) return 0
+            if (frame !in sampleStartFrame until sampleEndFrameExclusive || totalFrames <= 0) return 0
             val local = frame - layer.startFrame
             if (!layer.looping && local >= totalFrames) return 0
             val audibleRemaining = if (layer.looping) {
@@ -160,11 +215,10 @@ object Pcm16SceneMixer {
 
         fun backgroundDuckAt(frame: Long): Float {
             if (layer.looping || totalFrames <= 0) return 1f
-            val attackStart = (layer.startFrame - duckAttackFrames).coerceAtLeast(0L)
-            val releaseEnd = oneShotEndFrame + duckReleaseFrames
-            if (frame < attackStart || frame >= releaseEnd) return 1f
+            if (frame < duckStartFrame || frame >= duckEndFrameExclusive) return 1f
             if (frame < layer.startFrame) {
-                val fraction = (frame - attackStart).toFloat() / (layer.startFrame - attackStart).coerceAtLeast(1L).toFloat()
+                val fraction = (frame - duckStartFrame).toFloat() /
+                    (layer.startFrame - duckStartFrame).coerceAtLeast(1L).toFloat()
                 return 1f - (1f - SFX_BACKGROUND_DUCK) * fraction.coerceIn(0f, 1f)
             }
             if (frame < oneShotEndFrame) return SFX_BACKGROUND_DUCK
@@ -190,6 +244,7 @@ object Pcm16SceneMixer {
         }
 
         private fun sourceSample(sourceFrame: Int, channel: Int, channels: Int): Int {
+            if (totalFrames <= 0) return 0
             val safeFrame = sourceFrame.coerceIn(0, totalFrames - 1)
             val offset = safeFrame * blockAlign + channel.coerceAtMost(channels - 1) * 2
             return sample16(pcm, offset).toInt()
@@ -214,16 +269,10 @@ object Pcm16SceneMixer {
         }
     }
 
-    private fun readPcm(segment: WaveSegment): ByteArray = FileInputStream(segment.file).use { raw ->
-        val input = BufferedInputStream(raw)
-        skipFully(input, segment.dataOffset)
-        ByteArray(segment.dataLength.toInt()).also { data ->
-            var offset = 0
-            while (offset < data.size) {
-                val read = input.read(data, offset, data.size - offset)
-                if (read < 0) throw EOFException("Lớp âm thanh bị cắt ngắn.")
-                offset += read
-            }
+    private fun mapPcm(segment: WaveSegment): ByteBuffer {
+        if (segment.dataLength <= 0L) return ByteBuffer.allocate(0).asReadOnlyBuffer()
+        return FileInputStream(segment.file).channel.use { channel ->
+            channel.map(FileChannel.MapMode.READ_ONLY, segment.dataOffset, segment.dataLength).asReadOnlyBuffer()
         }
     }
 
@@ -260,6 +309,9 @@ object Pcm16SceneMixer {
 
     private fun sample16(bytes: ByteArray, offset: Int): Short =
         (((bytes[offset + 1].toInt() and 0xff) shl 8) or (bytes[offset].toInt() and 0xff)).toShort()
+
+    private fun sample16(bytes: ByteBuffer, offset: Int): Short =
+        (((bytes.get(offset + 1).toInt() and 0xff) shl 8) or (bytes.get(offset).toInt() and 0xff)).toShort()
 
     private fun writeSample16(bytes: ByteArray, offset: Int, value: Int) {
         bytes[offset] = value.toByte()

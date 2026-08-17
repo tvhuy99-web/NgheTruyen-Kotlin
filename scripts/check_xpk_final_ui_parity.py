@@ -6,6 +6,7 @@ from pathlib import Path
 reader = Path("app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt").read_text()
 story = Path("app/src/main/java/vn/nghetruyen/app/ui/screens/StoryReferenceAdvancedDialogs.kt").read_text()
 component = Path("app/src/main/java/vn/nghetruyen/app/ui/components/AudioDirectionLayerSwitches.kt").read_text()
+audio_manager = Path("app/src/main/java/vn/nghetruyen/app/ui/components/UnifiedAudioAssetManagerDialog.kt").read_text()
 
 required_reader = [
     "if (!ttsLoading && state.ttsEngines.isEmpty())",
@@ -45,18 +46,24 @@ for marker in [
     'label = "QUẢN LÝ NHẠC ($musicTrackCount)"',
     'label = "QUẢN LÝ ÂM THANH MÔI TRƯỜNG',
     'label = "QUẢN LÝ HIỆU ỨNG ÂM THANH',
+    "UnifiedAudioAssetManagerDialog(",
+]:
+    if marker not in component:
+        raise SystemExit("XPK_FINAL_UI audio routing marker missing: " + marker)
+
+for marker in [
     'label = { Text("Tên") }',
     'label = { Text("Mô tả") }',
-    'Text("THÊM NHIỀU TỆP")',
-    '"NGHE THỬ"',
-    '"NGHE LẠI"',
-    'Text("DỪNG")',
-    'Text("CHUẨN HÓA")',
+    'Text("THÊM TỆP")',
+    'UnifiedAssetActionButton("NGHE THỬ")',
+    'UnifiedAssetActionButton("CHUẨN HÓA")',
+    'UnifiedAssetActionButton("SỬA TÊN / MÔ TẢ")',
+    'Text("DỪNG NGHE")',
     'Text("LƯU")',
     'Text("XÓA")',
     'Text("ĐÓNG")',
 ]:
-    if marker not in component:
+    if marker not in audio_manager:
         raise SystemExit("XPK_FINAL_UI complete audio manager marker missing: " + marker)
 
 manager_positions = [
@@ -77,7 +84,7 @@ for removed in [
     "Mỗi trình quản lý cho phép chọn nhiều tệp",
     "Mô tả cho AI",
 ]:
-    if removed in component:
+    if removed in component or removed in audio_manager:
         raise SystemExit("XPK_FINAL_UI obsolete explanatory audio prose remains: " + removed)
 
 music_start = reader.find('    if (showMusicLibrary) {')

@@ -130,6 +130,8 @@ class SceneMusicAnalysisWorker(
      * That silently truncates valid normalization results (especially very quiet
      * tracks and ambience/SFX targets above -18 LUFS). Read the latest row before
      * writing so a concurrent title/tag/enable edit is not overwritten.
+     * A successful normalization also clears the legacy per-track volume multiplier;
+     * from that point loudness is controlled by the measured normalization gain.
      */
     private suspend fun persistNormalization(
         trackId: String,
@@ -140,6 +142,7 @@ class SceneMusicAnalysisWorker(
         val current = container.libraryRepository.getSceneMusicTrack(trackId) ?: return
         container.database.sceneMusicTrackDao().upsert(
             current.copy(
+                volume = 1f,
                 loudnessLufsEstimate = loudnessLufs.coerceIn(-120f, 12f),
                 peakDbfs = peakDbfs.coerceIn(-120f, 12f),
                 normalizationTargetLufs = normalization.targetLufs.coerceIn(

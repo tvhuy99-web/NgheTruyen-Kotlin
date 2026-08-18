@@ -31,25 +31,46 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Apply generic vBook script compiler fix
+        id: patch
+        continue-on-error: true
         run: python3 scripts/agent_fix_vbook_script_scope.py
 
       - name: Verify patch formatting
+        id: diffcheck
+        if: steps.patch.outcome == 'success'
+        continue-on-error: true
         run: git diff --check
 
       - name: Run source-vBook tests
+        id: tests
+        if: steps.patch.outcome == 'success' && steps.diffcheck.outcome == 'success'
+        continue-on-error: true
         run: ./gradlew --no-daemon :source-vbook:test
 
-      - name: Commit verified runtime fix
+      - name: Publish verified fix or failure beacon
+        if: always()
+        env:
+          PATCH_OUTCOME: ${{ steps.patch.outcome }}
+          DIFF_OUTCOME: ${{ steps.diffcheck.outcome }}
+          TEST_OUTCOME: ${{ steps.tests.outcome }}
         run: |
-          rm -f scripts/agent_fix_vbook_script_scope.py .github/workflows/agent-fix-vbook-script-scope.yml
+          mkdir -p .agent
+          printf 'patch=%s\ndiffcheck=%s\ntests=%s\n' "$PATCH_OUTCOME" "$DIFF_OUTCOME" "$TEST_OUTCOME" > .agent/vbook-script-scope-status.txt
+          if [ "$PATCH_OUTCOME" = success ] && [ "$DIFF_OUTCOME" = success ] && [ "$TEST_OUTCOME" = success ]; then
+            rm -f scripts/agent_fix_vbook_script_scope.py .github/workflows/agent-fix-vbook-script-scope.yml .agent/vbook-script-scope-status.txt
+            message='fix: compile vBook loads in one lexical scope'
+          else
+            message='ci: record vBook script scope patch failure'
+          fi
           git add -A
           if git diff --cached --quiet; then
-            echo 'No changes to commit'
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'fix: compile vBook loads in one lexical scope'
+          git commit -m "$message"
           git push origin HEAD:agent/generalize-browser-session-fetch
 
-      # Kept only to ensure this existing workflow receives a second push trigger.
+      - name: Fail workflow when verification failed
+        if: always() && (steps.patch.outcome != 'success' || steps.diffcheck.outcome != 'success' || steps.tests.outcome != 'success')
+        run: exit 1

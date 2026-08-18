@@ -51,3 +51,5 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'fix: compile vBook loads in one lexical scope'
           git push origin HEAD:agent/generalize-browser-session-fetch
+
+      # Kept only to ensure this existing workflow receives a second push trigger.

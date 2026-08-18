@@ -147,15 +147,15 @@ class XpkNarrationAiServices(
             context = request.context,
             profileSettingsById = profileSettingsById,
         )
-        val validSceneTrackIds = if (request.includeSceneMusic) {
-            XpkSceneMusicParity.normalizeTracks(request.tracks).map(XpkSceneMusicParity.PromptTrack::id)
-        } else emptyList()
-        val validAmbienceIds = if (request.includeAmbience) {
-            XpkUnifiedNarrationPrompt.normalize(request.ambienceTracks).map(SceneMusicTrackOption::id).toSet()
-        } else emptySet()
-        val validSfxIds = if (request.includeSoundEffects) {
-            XpkUnifiedNarrationPrompt.normalize(request.soundEffectTracks).map(SceneMusicTrackOption::id).toSet()
-        } else emptySet()
+        val validSceneTrackIds = if (request.includeSceneMusic) bundle.sceneTrackIds else emptyList()
+        val ambienceAliasToId = if (request.includeAmbience) {
+            XpkUnifiedNarrationPrompt.aliasToId(request.ambienceTracks)
+        } else emptyMap()
+        val sfxAliasToId = if (request.includeSoundEffects) {
+            XpkUnifiedNarrationPrompt.aliasToId(request.soundEffectTracks)
+        } else emptyMap()
+        val validAmbienceIds = ambienceAliasToId.values.toSet()
+        val validSfxIds = sfxAliasToId.values.toSet()
 
         if (request.includeSceneMusic && validSceneTrackIds.isEmpty()) {
             return failure("AI_TRACKS_EMPTY", "Không có bài nhạc cảnh hợp lệ để gửi AI.")
@@ -219,6 +219,9 @@ class XpkNarrationAiServices(
                         dialogueGroupByUnitId = bundle.units
                             .mapNotNull { unit -> unit.dialogueGroupId?.takeIf(String::isNotBlank)?.let { unit.id to it } }
                             .toMap(),
+                        trackAliasToId = bundle.sceneTrackAliasToId,
+                        ambienceAliasToId = ambienceAliasToId,
+                        sfxAliasToId = sfxAliasToId,
                     ),
                 )
                 val roleByPromptId = profiles.associateBy(XpkVoiceCastPrompt::promptVoiceId)

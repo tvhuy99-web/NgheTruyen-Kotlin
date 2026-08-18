@@ -161,12 +161,16 @@ object VBookConfigPrelude {
     private val reserved = VBookConfigValues.BUILT_IN_KEYS
 
     fun build(profile: VBookContractProfile, config: VBookConfigValues): String {
-        if (profile != VBookContractProfile.CURRENT_JS) return ""
+        if (profile == VBookContractProfile.UNKNOWN) return ""
+        val declaration = if (profile == VBookContractProfile.LEGACY_JS) "var " else "const "
         return buildString {
             config.values.toSortedMap().forEach { (key, value) ->
-                require(identifier.matches(key)) { "VBOOK_CONFIG_IDENTIFIER_INVALID:$key" }
+                if (!identifier.matches(key)) {
+                    if (profile == VBookContractProfile.LEGACY_JS) return@forEach
+                    error("VBOOK_CONFIG_IDENTIFIER_INVALID:$key")
+                }
                 if (key in reserved) return@forEach
-                append("const ").append(key).append(" = ")
+                append(declaration).append(key).append(" = ")
                     .append(JsonCodec.stringify(JsonValue.Str(value))).append(";\n")
             }
         }

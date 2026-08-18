@@ -72,7 +72,13 @@ fun AudioDirectionLayerSwitches(
     var dynamicsSettingsDirty by remember { mutableStateOf(false) }
     var managerKind by remember { mutableStateOf<AudioAssetKind?>(null) }
 
+    var showVolumeDialog by remember { mutableStateOf(false) }
+    var musicVolumeDraft by remember { mutableStateOf(AudioDirectionPreferences.DEFAULT_MUSIC_VOLUME) }
+    var ambienceVolumeDraft by remember { mutableStateOf(AudioDirectionPreferences.DEFAULT_AMBIENCE_VOLUME) }
+    var sfxVolumeDraft by remember { mutableStateOf(AudioDirectionPreferences.DEFAULT_SFX_VOLUME) }
+
     var showNormalizationDialog by remember { mutableStateOf(false) }
+    var normalizationStarting by remember { mutableStateOf(false) }
     var normalizationMusicDraft by remember { mutableStateOf(-24f) }
     var normalizationAmbienceDraft by remember { mutableStateOf(AudioDirectionPreferences.DEFAULT_AMBIENCE_NORMALIZATION_TARGET_LUFS) }
     var normalizationSfxDraft by remember { mutableStateOf(AudioDirectionPreferences.DEFAULT_SFX_NORMALIZATION_TARGET_LUFS) }
@@ -139,19 +145,14 @@ fun AudioDirectionLayerSwitches(
             checked = snapshot.soundEffectsEnabled,
             onCheckedChange = preferences::setSoundEffectsEnabled,
         )
-        AudioFloatSlider(
-            title = "Âm lượng môi trường",
-            value = snapshot.ambienceMasterVolume,
-            range = 0f..1f,
-            shown = { "%.0f%%".format(it * 100f) },
-            onValueChange = preferences::setAmbienceMasterVolume,
-        )
-        AudioFloatSlider(
-            title = "Âm lượng hiệu ứng",
-            value = snapshot.soundEffectsMasterVolume,
-            range = 0f..1f,
-            shown = { "%.0f%%".format(it * 100f) },
-            onValueChange = preferences::setSoundEffectsMasterVolume,
+        AudioManagerButton(
+            label = "ÂM LƯỢNG",
+            onClick = {
+                musicVolumeDraft = snapshot.musicMasterVolume
+                ambienceVolumeDraft = snapshot.ambienceMasterVolume
+                sfxVolumeDraft = snapshot.soundEffectsMasterVolume
+                showVolumeDialog = true
+            },
         )
 
         HorizontalDivider(Modifier.padding(vertical = 6.dp))
@@ -199,12 +200,55 @@ fun AudioDirectionLayerSwitches(
         )
     }
 
+    if (showVolumeDialog) {
+        AlertDialog(
+            onDismissRequest = { showVolumeDialog = false },
+            title = { Text("ÂM LƯỢNG") },
+            text = {
+                Column {
+                    AudioFloatSlider(
+                        title = "Nhạc nền",
+                        value = musicVolumeDraft,
+                        range = 0f..1f,
+                        shown = { "%.0f%%".format(it * 100f) },
+                        onValueChange = { musicVolumeDraft = it },
+                    )
+                    AudioFloatSlider(
+                        title = "Âm thanh môi trường",
+                        value = ambienceVolumeDraft,
+                        range = 0f..1f,
+                        shown = { "%.0f%%".format(it * 100f) },
+                        onValueChange = { ambienceVolumeDraft = it },
+                    )
+                    AudioFloatSlider(
+                        title = "Hiệu ứng âm thanh",
+                        value = sfxVolumeDraft,
+                        range = 0f..1f,
+                        shown = { "%.0f%%".format(it * 100f) },
+                        onValueChange = { sfxVolumeDraft = it },
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    preferences.setMusicMasterVolume(musicVolumeDraft)
+                    preferences.setAmbienceMasterVolume(ambienceVolumeDraft)
+                    preferences.setSoundEffectsMasterVolume(sfxVolumeDraft)
+                    showVolumeDialog = false
+                }) { Text("LƯU") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showVolumeDialog = false }) { Text("HỦY") }
+            },
+        )
+    }
+
     if (showNormalizationDialog) {
         val musicCount = tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }
         val ambienceCount = tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.AMBIENCE }
         val sfxCount = tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.SFX }
         AlertDialog(
-            onDismissRequest = { showNormalizationDialog = false },
+            onDismissRequest = { if (!normalizationStarting) showNormalizationDialog = false },
             title = { Text("CHUẨN HÓA TOÀN BỘ ÂM THANH") },
             text = {
                 Column {
@@ -214,78 +258,92 @@ fun AudioDirectionLayerSwitches(
                         value = normalizationMusicDraft,
                         range = PcmLoudnessEstimator.MIN_TARGET_LUFS..PcmLoudnessEstimator.MAX_MUSIC_TARGET_LUFS,
                         shown = { "%.0f LUFS".format(it) },
-                        onValueChange = { normalizationMusicDraft = it },
+                        onValueChange = { if (!normalizationStarting) normalizationMusicDraft = it },
                     )
                     AudioFloatSlider(
                         title = "Âm thanh môi trường ($ambienceCount tệp)",
                         value = normalizationAmbienceDraft,
                         range = PcmLoudnessEstimator.MIN_TARGET_LUFS..PcmLoudnessEstimator.MAX_TARGET_LUFS,
                         shown = { "%.0f LUFS".format(it) },
-                        onValueChange = { normalizationAmbienceDraft = it },
+                        onValueChange = { if (!normalizationStarting) normalizationAmbienceDraft = it },
                     )
                     AudioFloatSlider(
                         title = "Hiệu ứng âm thanh ($sfxCount tệp)",
                         value = normalizationSfxDraft,
                         range = PcmLoudnessEstimator.MIN_TARGET_LUFS..PcmLoudnessEstimator.MAX_TARGET_LUFS,
                         shown = { "%.0f LUFS".format(it) },
-                        onValueChange = { normalizationSfxDraft = it },
+                        onValueChange = { if (!normalizationStarting) normalizationSfxDraft = it },
                     )
+                    if (normalizationStarting) Text("Đang lưu thiết lập chuẩn hóa…")
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    val musicTarget = normalizationMusicDraft
-                        .coerceIn(PcmLoudnessEstimator.MIN_TARGET_LUFS, PcmLoudnessEstimator.MAX_MUSIC_TARGET_LUFS)
-                    val ambienceTarget = normalizationAmbienceDraft
-                        .coerceIn(PcmLoudnessEstimator.MIN_TARGET_LUFS, PcmLoudnessEstimator.MAX_TARGET_LUFS)
-                    val sfxTarget = normalizationSfxDraft
-                        .coerceIn(PcmLoudnessEstimator.MIN_TARGET_LUFS, PcmLoudnessEstimator.MAX_TARGET_LUFS)
+                TextButton(
+                    enabled = !normalizationStarting,
+                    onClick = {
+                        val musicTarget = normalizationMusicDraft
+                            .coerceIn(PcmLoudnessEstimator.MIN_TARGET_LUFS, PcmLoudnessEstimator.MAX_MUSIC_TARGET_LUFS)
+                        val ambienceTarget = normalizationAmbienceDraft
+                            .coerceIn(PcmLoudnessEstimator.MIN_TARGET_LUFS, PcmLoudnessEstimator.MAX_TARGET_LUFS)
+                        val sfxTarget = normalizationSfxDraft
+                            .coerceIn(PcmLoudnessEstimator.MIN_TARGET_LUFS, PcmLoudnessEstimator.MAX_TARGET_LUFS)
 
-                    musicNormalizationTarget = musicTarget
-                    preferences.setAmbienceNormalizationTargetLufs(ambienceTarget)
-                    preferences.setSoundEffectsNormalizationTargetLufs(sfxTarget)
-                    scope.launch { settingsRepository.setSceneMusicTargetLufs(musicTarget) }
-
-                    normalizationRunMusicTarget = musicTarget
-                    normalizationRunAmbienceTarget = ambienceTarget
-                    normalizationRunSfxTarget = sfxTarget
-                    normalizationDone = 0
-                    normalizationFailed = 0
-                    normalizationCancelled = 0
-
-                    val workIds = tracks.map { track ->
-                        val target = when (AudioAssetClassifier.classify(track)) {
-                            AudioAssetKind.MUSIC -> musicTarget
-                            AudioAssetKind.AMBIENCE -> ambienceTarget
-                            AudioAssetKind.SFX -> sfxTarget
-                        }
-                        SceneMusicAnalysisWorker.enqueue(context, track.id, target)
-                    }
-                    normalizationWorkIds = workIds
-                    showNormalizationDialog = false
-                    showNormalizationProgress = workIds.isNotEmpty()
-
-                    if (workIds.isNotEmpty()) {
+                        normalizationStarting = true
                         scope.launch {
-                            val workManager = WorkManager.getInstance(context.applicationContext)
-                            while (showNormalizationProgress) {
-                                val infos = withContext(Dispatchers.IO) {
-                                    workIds.mapNotNull { id ->
-                                        runCatching { workManager.getWorkInfoById(id).get() }.getOrNull()
+                            try {
+                                settingsRepository.setSceneMusicTargetLufs(musicTarget)
+                                musicNormalizationTarget = musicTarget
+                                preferences.setAmbienceNormalizationTargetLufs(ambienceTarget)
+                                preferences.setSoundEffectsNormalizationTargetLufs(sfxTarget)
+
+                                normalizationRunMusicTarget = musicTarget
+                                normalizationRunAmbienceTarget = ambienceTarget
+                                normalizationRunSfxTarget = sfxTarget
+                                normalizationDone = 0
+                                normalizationFailed = 0
+                                normalizationCancelled = 0
+
+                                val workIds = tracks.map { track ->
+                                    val target = when (AudioAssetClassifier.classify(track)) {
+                                        AudioAssetKind.MUSIC -> musicTarget
+                                        AudioAssetKind.AMBIENCE -> ambienceTarget
+                                        AudioAssetKind.SFX -> sfxTarget
+                                    }
+                                    SceneMusicAnalysisWorker.enqueue(context, track.id, target)
+                                }
+                                normalizationWorkIds = workIds
+                                showNormalizationDialog = false
+                                showNormalizationProgress = workIds.isNotEmpty()
+
+                                if (workIds.isNotEmpty()) {
+                                    scope.launch {
+                                        val workManager = WorkManager.getInstance(context.applicationContext)
+                                        while (showNormalizationProgress) {
+                                            val infos = withContext(Dispatchers.IO) {
+                                                workIds.mapNotNull { id ->
+                                                    runCatching { workManager.getWorkInfoById(id).get() }.getOrNull()
+                                                }
+                                            }
+                                            normalizationDone = infos.count { it.state == WorkInfo.State.SUCCEEDED }
+                                            normalizationFailed = infos.count { it.state == WorkInfo.State.FAILED }
+                                            normalizationCancelled = infos.count { it.state == WorkInfo.State.CANCELLED }
+                                            if (infos.size == workIds.size && infos.all { it.state.isFinished }) break
+                                            delay(300)
+                                        }
                                     }
                                 }
-                                normalizationDone = infos.count { it.state == WorkInfo.State.SUCCEEDED }
-                                normalizationFailed = infos.count { it.state == WorkInfo.State.FAILED }
-                                normalizationCancelled = infos.count { it.state == WorkInfo.State.CANCELLED }
-                                if (infos.size == workIds.size && infos.all { it.state.isFinished }) break
-                                delay(300)
+                            } finally {
+                                normalizationStarting = false
                             }
                         }
-                    }
-                }) { Text("CHUẨN HÓA") }
+                    },
+                ) { Text("CHUẨN HÓA") }
             },
             dismissButton = {
-                TextButton(onClick = { showNormalizationDialog = false }) { Text("HỦY") }
+                TextButton(
+                    enabled = !normalizationStarting,
+                    onClick = { showNormalizationDialog = false },
+                ) { Text("HỦY") }
             },
         )
     }

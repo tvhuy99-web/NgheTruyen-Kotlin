@@ -18,6 +18,7 @@ class AudioDirectionPreferences(context: Context) {
     data class Snapshot(
         val ambienceEnabled: Boolean = false,
         val soundEffectsEnabled: Boolean = false,
+        val musicMasterVolume: Float = DEFAULT_MUSIC_VOLUME,
         val ambienceMasterVolume: Float = DEFAULT_AMBIENCE_VOLUME,
         val soundEffectsMasterVolume: Float = DEFAULT_SFX_VOLUME,
         val ambienceNormalizationTargetLufs: Float = DEFAULT_AMBIENCE_NORMALIZATION_TARGET_LUFS,
@@ -47,6 +48,8 @@ class AudioDirectionPreferences(context: Context) {
         val value = Snapshot(
             ambienceEnabled = preferences.getBoolean(KEY_AMBIENCE_ENABLED, false),
             soundEffectsEnabled = preferences.getBoolean(KEY_SFX_ENABLED, false),
+            musicMasterVolume = preferences.getFloat(KEY_MUSIC_VOLUME, DEFAULT_MUSIC_VOLUME)
+                .coerceIn(0f, 1f),
             ambienceMasterVolume = preferences.getFloat(KEY_AMBIENCE_VOLUME, DEFAULT_AMBIENCE_VOLUME)
                 .coerceIn(0f, 1f),
             soundEffectsMasterVolume = preferences.getFloat(KEY_SFX_VOLUME, DEFAULT_SFX_VOLUME)
@@ -81,6 +84,11 @@ class AudioDirectionPreferences(context: Context) {
 
     fun setSoundEffectsEnabled(enabled: Boolean) {
         preferences.edit().putBoolean(KEY_SFX_ENABLED, enabled).apply()
+        snapshot()
+    }
+
+    fun setMusicMasterVolume(value: Float) {
+        preferences.edit().putFloat(KEY_MUSIC_VOLUME, value.coerceIn(0f, 1f)).apply()
         snapshot()
     }
 
@@ -152,6 +160,7 @@ class AudioDirectionPreferences(context: Context) {
         private const val FILE_NAME = "ai_sound_director"
         private const val KEY_AMBIENCE_ENABLED = "ambience_enabled"
         private const val KEY_SFX_ENABLED = "sound_effects_enabled"
+        private const val KEY_MUSIC_VOLUME = "music_master_volume"
         private const val KEY_AMBIENCE_VOLUME = "ambience_master_volume"
         private const val KEY_SFX_VOLUME = "sound_effects_master_volume"
         private const val KEY_AMBIENCE_NORMALIZATION_TARGET_LUFS = "ambience_normalization_target_lufs"
@@ -178,6 +187,7 @@ class AudioDirectionPreferences(context: Context) {
 
         fun currentSnapshot(): Snapshot = latestSnapshot
 
+        const val DEFAULT_MUSIC_VOLUME = 1.0f
         const val DEFAULT_AMBIENCE_VOLUME = 0.63095734f
         const val DEFAULT_SFX_VOLUME = 0.63095734f
         const val DEFAULT_AMBIENCE_NORMALIZATION_TARGET_LUFS = -27f

@@ -271,6 +271,13 @@ class VBookJsRuntime(
                 val baseUrl = Context.toString(args.getOrNull(1) ?: request.input.string("url").orEmpty())
                 JsoupDocumentObject(Jsoup.parse(content, baseUrl), scope)
             })
+            ScriptableObject.putProperty(obj, "clean", hostFunction { args ->
+                val content = Context.toString(args.getOrNull(0) ?: "")
+                val allowed = (args.getOrNull(1) as? NativeArray)?.ids.orEmpty().map { index ->
+                    Context.toString(ScriptableObject.getProperty(args[1] as NativeArray, index.toString()))
+                }
+                VBookHtmlCleaner.clean(content, allowed)
+            })
         }
         ScriptableObject.putProperty(scope, "Html", html)
         ScriptableObject.putProperty(scope, "HTML", html)

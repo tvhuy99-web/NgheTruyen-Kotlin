@@ -21,7 +21,7 @@ class XpkUnifiedNarrationPlanTest {
     )
 
     @Test
-    fun audioOnlyPromptUsesCanonicalTimelineAndOnlyEnabledModules() {
+    fun audioOnlyPromptUsesNumericDescriptionOnlyCatalogsAndCanonicalTimeline() {
         val prompt = XpkUnifiedNarrationPrompt.compose(
             base = base(),
             title = "Chương thử",
@@ -30,10 +30,20 @@ class XpkUnifiedNarrationPlanTest {
             includeAmbience = true,
             includeSoundEffects = true,
             ambienceTracks = listOf(
-                SceneMusicTrackOption("a1", "Mưa nhẹ.wav", emptyList(), "mưa nhẹ ngoài trời"),
+                SceneMusicTrackOption(
+                    "a1",
+                    "Mưa nhẹ.wav",
+                    emptyList(),
+                    "Nền: mưa nhẹ ngoài trời | Dùng: cảnh mưa kéo dài | Tránh: mưa thoáng qua",
+                ),
             ),
             soundEffectTracks = listOf(
-                SceneMusicTrackOption("s1", "Sấm.wav", emptyList(), "sấm gần đột ngột"),
+                SceneMusicTrackOption(
+                    "s1",
+                    "Sấm.wav",
+                    emptyList(),
+                    "Sự kiện: sét đánh gần | Dùng: sét thực sự đánh gần | Tránh: sấm rền xa",
+                ),
             ),
         )
 
@@ -42,11 +52,56 @@ class XpkUnifiedNarrationPlanTest {
         assertTrue(prompt.contains("\"ambience_scenes\""))
         assertTrue(prompt.contains("\"sfx_cues\""))
         assertTrue(prompt.contains("[UNIT id="))
-        assertTrue(prompt.contains("a1 | Mưa nhẹ | mưa nhẹ ngoài trời"))
-        assertTrue(prompt.contains("s1 | Sấm | sấm gần đột ngột"))
+        assertTrue(prompt.contains("1 | Nền: mưa nhẹ ngoài trời"))
+        assertTrue(prompt.contains("1 | Sự kiện: sét đánh gần"))
+        assertFalse(prompt.contains("Mưa nhẹ.wav"))
+        assertFalse(prompt.contains("Sấm.wav"))
+        assertFalse(prompt.contains("a1 |"))
+        assertFalse(prompt.contains("s1 |"))
         assertFalse(prompt.contains("\"time\":"))
         assertFalse(prompt.contains("\"uri\":"))
         assertFalse(prompt.contains("\"volume\":"))
+    }
+
+    @Test
+    fun ambienceAndSfxDescriptionsAreCappedAtThreeHundredCodePoints() {
+        val description = "ổ".repeat(340)
+        val normalized = XpkUnifiedNarrationPrompt.normalize(
+            listOf(SceneMusicTrackOption("asset", "Tên.wav", emptyList(), description)),
+        ).single()
+        assertEquals(300, normalized.description.codePointCount(0, normalized.description.length))
+    }
+
+    @Test
+    fun blankDescriptionIsExcludedInsteadOfFallingBackToFilename() {
+        val aliases = XpkUnifiedNarrationPrompt.aliasToId(
+            listOf(
+                SceneMusicTrackOption("hidden", "Epic Thunder.wav", emptyList(), ""),
+                SceneMusicTrackOption("kept", "Neutral.wav", emptyList(), "Nền: mưa | Dùng: ngoài trời | Tránh: trong nhà"),
+            ),
+        )
+        assertEquals(mapOf("1" to "kept"), aliases)
+    }
+
+    @Test
+    fun incomingAmbienceRealIdsAreConvertedToCurrentRequestAliases() {
+        val prompt = XpkUnifiedNarrationPrompt.compose(
+            base = base(),
+            title = "Chương thử",
+            includeVoiceCast = false,
+            includeSceneMusic = false,
+            includeAmbience = true,
+            includeSoundEffects = false,
+            ambienceTracks = listOf(
+                SceneMusicTrackOption("rain-real", "Mưa.wav", emptyList(), "Nền: mưa | Dùng: mưa kéo dài | Tránh: khô ráo"),
+                SceneMusicTrackOption("wind-real", "Gió.wav", emptyList(), "Nền: gió | Dùng: gió kéo dài | Tránh: phòng kín"),
+            ),
+            soundEffectTracks = emptyList(),
+            incomingAmbienceId = "wind-real|rain-real",
+        )
+        assertTrue(prompt.contains("INCOMING_AMBIENCE_IDS: 2 | 1"))
+        assertFalse(prompt.contains("wind-real"))
+        assertFalse(prompt.contains("rain-real"))
     }
 
     @Test
@@ -58,8 +113,8 @@ class XpkUnifiedNarrationPlanTest {
             includeSceneMusic = false,
             includeAmbience = false,
             includeSoundEffects = true,
-            ambienceTracks = listOf(SceneMusicTrackOption("a-secret", "Mưa.wav", emptyList(), "mưa")),
-            soundEffectTracks = listOf(SceneMusicTrackOption("s1", "Sấm.wav", emptyList(), "sấm")),
+            ambienceTracks = listOf(SceneMusicTrackOption("a-secret", "Mưa.wav", emptyList(), "Nền: mưa | Dùng: ngoài trời | Tránh: khô")),
+            soundEffectTracks = listOf(SceneMusicTrackOption("s1", "Sấm.wav", emptyList(), "Sự kiện: sấm | Dùng: sấm gần | Tránh: sấm xa")),
         )
 
         assertFalse(prompt.contains("MODULE AMBIENCE"))
@@ -79,8 +134,8 @@ class XpkUnifiedNarrationPlanTest {
             includeSceneMusic = false,
             includeAmbience = true,
             includeSoundEffects = false,
-            ambienceTracks = listOf(SceneMusicTrackOption("a1", "Rừng đêm.wav", emptyList(), "rừng đêm")),
-            soundEffectTracks = listOf(SceneMusicTrackOption("s-secret", "Kiếm.wav", emptyList(), "rút kiếm")),
+            ambienceTracks = listOf(SceneMusicTrackOption("a1", "Rừng đêm.wav", emptyList(), "Nền: rừng | Dùng: cảnh rừng | Tránh: thành thị")),
+            soundEffectTracks = listOf(SceneMusicTrackOption("s-secret", "Kiếm.wav", emptyList(), "Sự kiện: kiếm | Dùng: va kiếm | Tránh: rút kiếm")),
         )
 
         assertTrue(prompt.contains("MODULE AMBIENCE"))
@@ -100,7 +155,7 @@ class XpkUnifiedNarrationPlanTest {
             includeSceneMusic = false,
             includeAmbience = true,
             includeSoundEffects = false,
-            ambienceTracks = listOf(SceneMusicTrackOption("a1", "Mưa.wav", emptyList(), "mưa")),
+            ambienceTracks = listOf(SceneMusicTrackOption("a1", "Mưa.wav", emptyList(), "Nền: mưa | Dùng: cảnh mưa | Tránh: khô")),
             soundEffectTracks = emptyList(),
         )
 
@@ -151,6 +206,99 @@ class XpkUnifiedNarrationPlanTest {
         assertEquals("s1", plan.soundEffectCues.single().effectId)
         assertTrue(plan.musicSceneError.isBlank())
         assertTrue(plan.audioDirectionError.isBlank())
+    }
+
+    @Test
+    fun parserResolvesNumericAliasesToRealIdsBeforeValidationAndPersistence() {
+        val raw = """
+            {
+              "music_scenes": [
+                {"start_id":"P0001-U01","end_id":"P0002-U01","track_id":"2"}
+              ],
+              "ambience_scenes": [
+                {"start_id":"P0001-U01","end_id":"P0002-U01","ambience_id":"1"}
+              ],
+              "sfx_cues": [
+                {"unit_id":"P0002-U01","effect_id":"3"}
+              ]
+            }
+        """.trimIndent()
+
+        val plan = AiLineProtocol.parseXpkNarration(
+            raw,
+            AiLineProtocol.XpkParseOptions(
+                validDialogueIds = emptyList(),
+                validUnitIds = listOf("P0001-U01", "P0002-U01"),
+                validVoiceIds = emptyList(),
+                validTrackIds = listOf("music-real"),
+                validAmbienceIds = setOf("ambience-real"),
+                validSfxIds = setOf("sfx-real"),
+                includeVoiceCast = false,
+                includeSceneMusic = true,
+                includeAmbience = true,
+                includeSoundEffects = true,
+                incomingTrackId = "music-real",
+                trackAliasToId = mapOf("2" to "music-real"),
+                ambienceAliasToId = mapOf("1" to "ambience-real"),
+                sfxAliasToId = mapOf("3" to "sfx-real"),
+            ),
+        )
+
+        assertEquals("music-real", plan.musicCues.single().trackId)
+        assertEquals("ambience-real", plan.ambienceScenes.single().ambienceId)
+        assertEquals("sfx-real", plan.soundEffectCues.single().effectId)
+        assertTrue(plan.musicSceneError.isBlank())
+        assertTrue(plan.audioDirectionError.isBlank())
+    }
+
+    @Test
+    fun parserMapsMusicPromptZeroToInternalSilence() {
+        val raw = """
+            {
+              "music_scenes": [
+                {"start_id":"P0001-U01","end_id":"P0002-U01","track_id":"0"}
+              ]
+            }
+        """.trimIndent()
+        val plan = AiLineProtocol.parseXpkNarration(
+            raw,
+            AiLineProtocol.XpkParseOptions(
+                validDialogueIds = emptyList(),
+                validUnitIds = listOf("P0001-U01", "P0002-U01"),
+                validVoiceIds = emptyList(),
+                validTrackIds = listOf("music-real"),
+                includeVoiceCast = false,
+                includeSceneMusic = true,
+            ),
+        )
+        assertEquals(XpkSceneMusicParity.SILENCE_TRACK_ID, plan.musicCues.single().trackId)
+        assertTrue(plan.musicSceneError.isBlank())
+    }
+
+    @Test
+    fun invalidMusicAliasFallsBackToRealIncomingTrack() {
+        val raw = """
+            {
+              "music_scenes": [
+                {"start_id":"P0001-U01","end_id":"P0002-U01","track_id":"999"}
+              ]
+            }
+        """.trimIndent()
+        val plan = AiLineProtocol.parseXpkNarration(
+            raw,
+            AiLineProtocol.XpkParseOptions(
+                validDialogueIds = emptyList(),
+                validUnitIds = listOf("P0001-U01", "P0002-U01"),
+                validVoiceIds = emptyList(),
+                validTrackIds = listOf("previous-real"),
+                includeVoiceCast = false,
+                includeSceneMusic = true,
+                incomingTrackId = "previous-real",
+                trackAliasToId = mapOf("1" to "previous-real"),
+            ),
+        )
+        assertEquals("previous-real", plan.musicCues.single().trackId)
+        assertTrue(plan.musicSceneError.contains("đã phục hồi"))
     }
 
     @Test

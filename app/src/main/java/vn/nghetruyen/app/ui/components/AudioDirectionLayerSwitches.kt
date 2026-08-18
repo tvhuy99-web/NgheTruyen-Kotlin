@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import java.util.UUID
+import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -113,7 +114,7 @@ fun AudioDirectionLayerSwitches(
         val settings = settingsRepository.snapshot()
         musicEnabled = settings.autoSceneMusicEnabled
         musicNormalizationTarget = settings.sceneMusicTargetLufs
-            .coerceIn(PcmLoudnessEstimator.MIN_TARGET_LUFS, PcmLoudnessEstimator.MAX_TARGET_LUFS)
+            .coerceIn(PcmLoudnessEstimator.MIN_TARGET_LUFS, PcmLoudnessEstimator.MAX_MUSIC_TARGET_LUFS)
         attackMillis = settings.backgroundMusicAttackMillis.coerceIn(0, 2_000)
         releaseMillis = settings.backgroundMusicReleaseMillis.coerceIn(0, 5_000)
         dynamicsSettingsDirty = false
@@ -137,6 +138,20 @@ fun AudioDirectionLayerSwitches(
             title = "Hiệu ứng âm thanh AI",
             checked = snapshot.soundEffectsEnabled,
             onCheckedChange = preferences::setSoundEffectsEnabled,
+        )
+        AudioFloatSlider(
+            title = "Âm lượng môi trường",
+            value = snapshot.ambienceMasterVolume,
+            range = 0f..1f,
+            shown = { "%.0f%%".format(it * 100f) },
+            onValueChange = preferences::setAmbienceMasterVolume,
+        )
+        AudioFloatSlider(
+            title = "Âm lượng hiệu ứng",
+            value = snapshot.soundEffectsMasterVolume,
+            range = 0f..1f,
+            shown = { "%.0f%%".format(it * 100f) },
+            onValueChange = preferences::setSoundEffectsMasterVolume,
         )
 
         HorizontalDivider(Modifier.padding(vertical = 6.dp))
@@ -193,11 +208,11 @@ fun AudioDirectionLayerSwitches(
             title = { Text("CHUẨN HÓA TOÀN BỘ ÂM THANH") },
             text = {
                 Column {
-                    Text("Mỗi loại âm thanh dùng một mức LUFS riêng. Tất cả tệp sẽ được phân loại rồi chuẩn hóa theo đúng mức của loại đó.")
+                    Text("Mỗi loại âm thanh dùng một mức LUFS riêng. Nhạc giữ dải an toàn -36 đến -18 LUFS; môi trường và hiệu ứng có thể tăng tới -5 LUFS. Peak vẫn được chặn ở -1 dBFS.")
                     AudioFloatSlider(
                         title = "Nhạc nền ($musicCount tệp)",
                         value = normalizationMusicDraft,
-                        range = PcmLoudnessEstimator.MIN_TARGET_LUFS..PcmLoudnessEstimator.MAX_TARGET_LUFS,
+                        range = PcmLoudnessEstimator.MIN_TARGET_LUFS..PcmLoudnessEstimator.MAX_MUSIC_TARGET_LUFS,
                         shown = { "%.0f LUFS".format(it) },
                         onValueChange = { normalizationMusicDraft = it },
                     )
@@ -220,7 +235,7 @@ fun AudioDirectionLayerSwitches(
             confirmButton = {
                 TextButton(onClick = {
                     val musicTarget = normalizationMusicDraft
-                        .coerceIn(PcmLoudnessEstimator.MIN_TARGET_LUFS, PcmLoudnessEstimator.MAX_TARGET_LUFS)
+                        .coerceIn(PcmLoudnessEstimator.MIN_TARGET_LUFS, PcmLoudnessEstimator.MAX_MUSIC_TARGET_LUFS)
                     val ambienceTarget = normalizationAmbienceDraft
                         .coerceIn(PcmLoudnessEstimator.MIN_TARGET_LUFS, PcmLoudnessEstimator.MAX_TARGET_LUFS)
                     val sfxTarget = normalizationSfxDraft
@@ -347,12 +362,13 @@ private fun AudioFloatSlider(
     onValueChange: (Float) -> Unit,
 ) {
     val safe = value.coerceIn(range.start, range.endInclusive)
+    val intervals = (range.endInclusive - range.start).roundToInt().coerceAtLeast(1)
     Text("$title: ${shown(safe)}")
     Slider(
         value = safe,
-        onValueChange = onValueChange,
+        onValueChange = { onValueChange(it.coerceIn(range.start, range.endInclusive)) },
         valueRange = range,
-        steps = 17,
+        steps = (intervals - 1).coerceAtLeast(0),
         modifier = Modifier.fillMaxWidth(),
     )
 }

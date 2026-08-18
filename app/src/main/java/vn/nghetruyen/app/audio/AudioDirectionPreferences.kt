@@ -178,8 +178,8 @@ class AudioDirectionPreferences(context: Context) {
 
         fun currentSnapshot(): Snapshot = latestSnapshot
 
-        const val DEFAULT_AMBIENCE_VOLUME = 0.24f
-        const val DEFAULT_SFX_VOLUME = 0.42f
+        const val DEFAULT_AMBIENCE_VOLUME = 0.63095734f
+        const val DEFAULT_SFX_VOLUME = 0.63095734f
         const val DEFAULT_AMBIENCE_NORMALIZATION_TARGET_LUFS = -27f
         const val DEFAULT_SFX_NORMALIZATION_TARGET_LUFS = -20f
         const val DEFAULT_AMBIENCE_CROSSFADE_MS = 1_600

@@ -21,8 +21,13 @@ object AiLineProtocol {
         val pitchLimitPct: Float = 10f,
         val volumeLimitPct: Float = 10f,
         val expressiveAdjustment: Boolean = true,
+        /** Always a real persisted id. Used only by the internal fallback path. */
         val incomingTrackId: String? = null,
         val dialogueGroupByUnitId: Map<String, String> = emptyMap(),
+        /** Request-local numeric aliases exposed to AI. Values are the real persisted asset ids. */
+        val trackAliasToId: Map<String, String> = emptyMap(),
+        val ambienceAliasToId: Map<String, String> = emptyMap(),
+        val sfxAliasToId: Map<String, String> = emptyMap(),
     )
 
     data class XpkRawAssignment(
@@ -65,8 +70,22 @@ object AiLineProtocol {
                 }
                 XpkAmbienceSfxDirector.parseAndValidate(
                     JSONObject()
-                        .put("ambience_scenes", root.optJSONArray("ambience_scenes") ?: JSONArray())
-                        .put("sfx_cues", root.optJSONArray("sfx_cues") ?: JSONArray())
+                        .put(
+                            "ambience_scenes",
+                            remapAssetIds(
+                                root.optJSONArray("ambience_scenes") ?: JSONArray(),
+                                key = "ambience_id",
+                                aliasToId = options.ambienceAliasToId,
+                            ),
+                        )
+                        .put(
+                            "sfx_cues",
+                            remapAssetIds(
+                                root.optJSONArray("sfx_cues") ?: JSONArray(),
+                                key = "effect_id",
+                                aliasToId = options.sfxAliasToId,
+                            ),
+                        )
                         .toString(),
                     validUnitIds = options.validUnitIds,
                     validAmbienceIds = options.validAmbienceIds,
@@ -203,19 +222,45 @@ object AiLineProtocol {
         val rows = buildList {
             for (index in 0 until source.length()) {
                 val row = source.optJSONObject(index) ?: error("Cảnh nhạc thứ ${index + 1} không phải đối tượng")
+                val promptTrackId = row.optString("track_id")
+                    .ifBlank { row.optString("selected_track_id") }
+                    .ifBlank { row.optString("music_track_id") }
+                    .trim()
+                val realTrackId = when {
+                    promptTrackId == XpkSceneMusicParity.SILENCE_PROMPT_ID -> XpkSceneMusicParity.SILENCE_TRACK_ID
+                    else -> options.trackAliasToId[promptTrackId] ?: promptTrackId
+                }
                 add(
                     XpkSceneMusicParity.RawScene(
                         startId = row.optString("start_id").ifBlank { row.optString("start_unit_id") }.trim(),
                         endId = row.optString("end_id").ifBlank { row.optString("end_unit_id") }.trim(),
-                        trackId = row.optString("track_id")
-                            .ifBlank { row.optString("selected_track_id") }
-                            .ifBlank { row.optString("music_track_id") }
-                            .trim(),
+                        trackId = realTrackId,
                     ),
                 )
             }
         }
         return XpkSceneMusicParity.validateScenes(rows, options.validUnitIds, options.validTrackIds)
+    }
+
+    /**
+     * Resolve request-local numeric aliases before any runtime validator sees them. Non-object entries
+     * are retained unchanged so the downstream validator can still reject malformed AI output normally.
+     */
+    private fun remapAssetIds(source: JSONArray, key: String, aliasToId: Map<String, String>): JSONArray {
+        if (aliasToId.isEmpty()) return source
+        return JSONArray().also { output ->
+            for (index in 0 until source.length()) {
+                val value = source.opt(index)
+                if (value !is JSONObject) {
+                    output.put(value)
+                    continue
+                }
+                val row = JSONObject(value.toString())
+                val promptId = row.optString(key).trim()
+                aliasToId[promptId]?.let { row.put(key, it) }
+                output.put(row)
+            }
+        }
     }
 
     @Deprecated("Use parseXpkNarration; paragraph ROLE/ASSIGN protocol is not used by XPK narration runtime")

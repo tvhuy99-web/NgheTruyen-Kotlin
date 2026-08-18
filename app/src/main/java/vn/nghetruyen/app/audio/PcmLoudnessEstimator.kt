@@ -24,9 +24,10 @@ object PcmLoudnessEstimator {
     const val VERSION = 1
     const val DEFAULT_TARGET_LUFS = -24f
     const val MIN_TARGET_LUFS = -36f
-    const val MAX_TARGET_LUFS = -18f
+    const val MAX_MUSIC_TARGET_LUFS = -18f
+    const val MAX_TARGET_LUFS = -5f
     const val MIN_GAIN_DB = -36f
-    const val MAX_GAIN_DB = 12f
+    const val MAX_GAIN_DB = 24f
     const val PEAK_CEILING_DBFS = -1f
 
     data class Analysis(

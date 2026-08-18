@@ -26,24 +26,16 @@ object XpkUnifiedNarrationPrompt {
     private val shuffleSerial = AtomicLong(0L)
 
     /**
-     * Build exactly one request-local shuffled catalog. Callers must reuse the returned bundle for
-     * both prompt rendering and response alias decoding so randomization can never desynchronize ids.
+     * Build exactly one request-local shuffled catalog. Production callers must reuse the returned
+     * bundle for both prompt rendering and response alias decoding so randomization cannot desync ids.
      */
     fun buildCatalog(items: List<SceneMusicTrackOption>, salt: String = ""): CatalogBundle {
-        val normalized = normalize(items)
-        val shuffled = shuffleAssets(normalized, salt)
-        val promptItems = shuffled.mapIndexed { index, item ->
-            PromptAsset(
-                id = item.id,
-                description = item.description,
-                promptId = (index + 1).toString(),
-            )
-        }
-        return CatalogBundle(
-            items = promptItems,
-            aliasToId = promptItems.associate { it.promptId to it.id },
-        )
+        val shuffled = shuffleAssets(normalize(items), salt)
+        return catalogBundle(shuffled)
     }
+
+    /** Compatibility helper for deterministic tests/legacy callers. Production uses [buildCatalog]. */
+    fun aliasToId(items: List<SceneMusicTrackOption>): Map<String, String> = sequentialCatalog(items).aliasToId
 
     fun compose(
         base: XpkVoiceCastPrompt.Bundle,
@@ -61,12 +53,12 @@ object XpkUnifiedNarrationPrompt {
     ): String {
         if (!includeAmbience && !includeSoundEffects) return base.prompt
 
-        val ambience = if (includeAmbience) {
-            ambienceCatalog ?: buildCatalog(ambienceTracks, "ambience\u0000$title")
-        } else CatalogBundle(emptyList(), emptyMap())
-        val sfx = if (includeSoundEffects) {
-            sfxCatalog ?: buildCatalog(soundEffectTracks, "sfx\u0000$title")
-        } else CatalogBundle(emptyList(), emptyMap())
+        // Direct composition stays deterministic. The production service explicitly passes one
+        // request-local shuffled bundle for each enabled kind and reuses it in the response parser.
+        val ambience = if (includeAmbience) ambienceCatalog ?: sequentialCatalog(ambienceTracks)
+        else CatalogBundle(emptyList(), emptyMap())
+        val sfx = if (includeSoundEffects) sfxCatalog ?: sequentialCatalog(soundEffectTracks)
+        else CatalogBundle(emptyList(), emptyMap())
         val transcript = XpkVoiceCastPrompt.unitsForScenePrompt(base.units)
 
         val coordinationBlock = """
@@ -95,20 +87,10 @@ object XpkUnifiedNarrationPrompt {
 
         val blocks = buildList {
             if (includeAmbience) {
-                add(
-                    ambiencePromptBlock(
-                        tracks = ambience.items,
-                        incomingAmbienceId = incomingAmbienceId,
-                    ),
-                )
+                add(ambiencePromptBlock(ambience.items, incomingAmbienceId))
             }
             if (includeSoundEffects) {
-                add(
-                    sfxPromptBlock(
-                        tracks = sfx.items,
-                        maxSfx = ((base.unitIds.size + 3) / 4).coerceIn(4, 48),
-                    ),
-                )
+                add(sfxPromptBlock(sfx.items, ((base.unitIds.size + 3) / 4).coerceIn(4, 48)))
             }
         }
         val timelineBlock = if (includeSceneMusic) {
@@ -119,12 +101,7 @@ object XpkUnifiedNarrationPrompt {
             $transcript
             """.trimIndent()
         }
-        val finalContract = outputContract(
-            includeVoiceCast = includeVoiceCast,
-            includeSceneMusic = includeSceneMusic,
-            includeAmbience = includeAmbience,
-            includeSoundEffects = includeSoundEffects,
-        )
+        val finalContract = outputContract(includeVoiceCast, includeSceneMusic, includeAmbience, includeSoundEffects)
         val extension = buildString {
             appendLine("PHẦN MỞ RỘNG ĐẠO DIỄN ÂM THANH TRONG CÙNG PHẢN HỒI:")
             appendLine()
@@ -154,14 +131,10 @@ object XpkUnifiedNarrationPrompt {
                 $extension
             """.trimIndent()
         }
-
         return base.prompt + "\n\n" + extension
     }
 
-    private fun ambiencePromptBlock(
-        tracks: List<PromptAsset>,
-        incomingAmbienceId: String?,
-    ): String {
+    private fun ambiencePromptBlock(tracks: List<PromptAsset>, incomingAmbienceId: String?): String {
         val idToAlias = tracks.associate { it.id to it.promptId }
         val validIncoming = incomingAmbienceId.orEmpty()
             .split('|')
@@ -197,10 +170,7 @@ object XpkUnifiedNarrationPrompt {
         """.trimIndent()
     }
 
-    private fun sfxPromptBlock(
-        tracks: List<PromptAsset>,
-        maxSfx: Int,
-    ): String = """
+    private fun sfxPromptBlock(tracks: List<PromptAsset>, maxSfx: Int): String = """
         MODULE SFX — HIỆU ỨNG ÂM THANH ONE-SHOT:
         Mục tiêu: chỉ nhấn những sự kiện âm thanh cụ thể, ngắn và có giá trị kể chuyện; thưa nhưng đúng quan trọng hơn nhiều hiệu ứng.
 
@@ -252,10 +222,7 @@ object XpkUnifiedNarrationPrompt {
         """.trimIndent()
     }
 
-    /**
-     * Normalization shared by prompt rendering and parser catalog construction.
-     * Assets without a useful description are intentionally omitted instead of leaking the filename as fallback context.
-     */
+    /** Assets without a useful description are omitted instead of leaking filename semantics. */
     fun normalize(items: List<SceneMusicTrackOption>): List<SceneMusicTrackOption> = items.asSequence()
         .filter { it.id.trim().isNotBlank() }
         .distinctBy { it.id.trim() }
@@ -268,6 +235,18 @@ object XpkUnifiedNarrationPrompt {
         }
         .filter { it.description.isNotBlank() }
         .toList()
+
+    private fun sequentialCatalog(items: List<SceneMusicTrackOption>): CatalogBundle = catalogBundle(normalize(items))
+
+    private fun catalogBundle(items: List<SceneMusicTrackOption>): CatalogBundle {
+        val promptItems = items.mapIndexed { index, item ->
+            PromptAsset(item.id, item.description, (index + 1).toString())
+        }
+        return CatalogBundle(
+            items = promptItems,
+            aliasToId = promptItems.associate { it.promptId to it.id },
+        )
+    }
 
     private fun catalog(items: List<PromptAsset>): String = items.joinToString("\n") { item ->
         "${item.promptId} | ${item.description}"

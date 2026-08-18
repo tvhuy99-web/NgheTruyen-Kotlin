@@ -1,5 +1,6 @@
 package vn.nghetruyen.app.playback
 
+import java.security.MessageDigest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -309,12 +310,37 @@ object NextChapterNormalizer {
     )
 }
 
-/** Normalizes chapter text once for the reader, cache and playback queue. */
+/** Normalizes chapter metadata/text once for the reader, cache and playback queue. */
 object ReaderDocumentNormalizer {
+    private val truyenFullChapterUrl = Regex(
+        pattern = "^(https?://(?:www\\.)?truyenfull\\.live/[^?#]+?)/(?:chuong-[^/?#]+)/?(?:[?#].*)?$",
+        option = RegexOption.IGNORE_CASE,
+    )
+
     fun normalize(content: ChapterContent): ChapterContent {
-        val paragraphs = ReaderTextChunker.normalizeParagraphs(content.paragraphs)
-        return if (paragraphs == content.paragraphs) content else content.copy(paragraphs = paragraphs)
+        val repaired = repairMissingStoryId(content)
+        val paragraphs = ReaderTextChunker.normalizeParagraphs(repaired.paragraphs)
+        return if (paragraphs == repaired.paragraphs) repaired else repaired.copy(paragraphs = paragraphs)
     }
+
+    private fun repairMissingStoryId(content: ChapterContent): ChapterContent {
+        if (content.chapter.storyId.isNotBlank()) return content
+        val chapterUrl = content.chapter.url.trim()
+        val match = truyenFullChapterUrl.matchEntire(chapterUrl) ?: return content
+        val canonicalStoryUrl = match.groupValues[1].trimEnd('/') + "/"
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(canonicalStoryUrl.toByteArray(Charsets.UTF_8))
+        val storyId = buildString(24) {
+            for (index in 0 until 12) {
+                val value = digest[index].toInt() and 0xff
+                append(HEX[value ushr 4])
+                append(HEX[value and 0x0f])
+            }
+        }
+        return content.copy(chapter = content.chapter.copy(storyId = storyId))
+    }
+
+    private const val HEX = "0123456789abcdef"
 }
 
 object ReaderTextChunker {

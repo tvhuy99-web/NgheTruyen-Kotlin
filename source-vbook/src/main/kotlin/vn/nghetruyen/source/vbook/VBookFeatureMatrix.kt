@@ -90,6 +90,7 @@ object VBookEngineFeatureMatrix {
         VBookFeature.FETCH_REQUEST_INFO,
         VBookFeature.LEGACY_HTTP_SOURCE,
         VBookFeature.HTML_DOM,
+        VBookFeature.HTML_CLEAN,
         VBookFeature.HTML_COLLECTION_CALLBACKS,
         VBookFeature.HTML_MUTATION,
         VBookFeature.HTML_ATTRIBUTES,
@@ -175,6 +176,8 @@ object VBookEngineFeatureMatrix {
             "Declared suggest/suggests scripts are executed through the vBook ABI; string or story rows are normalized to bounded search suggestions."
         VBookFeature.LEGACY_HTTP_SOURCE ->
             "Cleartext is derived per extension and allowed only in VBOOK_JS_COMPAT while public-address DNS restrictions continue blocking private/LAN destinations."
+        VBookFeature.HTML_CLEAN ->
+            "Legacy Html.clean keeps explicitly allowed tags, unwraps other markup while preserving text, removes script/style/template/noscript content, and delegates to a native cleaner when the engine already provides one."
         VBookFeature.HTML_COLLECTION_CALLBACKS ->
             "Compatibility DOM exposes array-compatible forEach/map plus vBook collection helpers; reference certification still decides exact behavioral parity."
         VBookFeature.HTML_MUTATION ->

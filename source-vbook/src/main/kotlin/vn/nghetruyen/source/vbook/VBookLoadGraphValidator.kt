@@ -28,7 +28,7 @@ data class VBookLoadDirective(
 
 /**
  * Parses real load(...) calls through Rhino's JavaScript AST. String/comment lookalikes are ignored,
- * while absolute source positions let runtime compilers replace only the call expression itself.
+ * while absolute source positions let validators reason about the actual script graph.
  *
  * vBook scripts routinely use ES6 syntax (let/const/class, arrows, template literals). The parser
  * therefore uses the same ES6 language level as the compatibility runtime instead of Rhino's
@@ -65,14 +65,13 @@ object VBookLoadGraphValidator {
     fun validate(scripts: Map<String, String>, profile: VBookContractProfile): List<VBookLoadIssue> {
         if (profile != VBookContractProfile.CURRENT_JS) return emptyList()
         val normalized = scripts.entries.associate { (path, source) -> VBookPaths.normalizeScriptPath(path) to source }
-        val calls = normalized.mapValues { (path, source) ->
-            VBookLoadDirectiveParser.parse(path, source).map(VBookLoadDirective::target)
-        }
+        val directives = normalized.mapValues { (path, source) -> VBookLoadDirectiveParser.parse(path, source) }
+        val graph = normalized.keys.associateWithTo(linkedMapOf()) { linkedSetOf<String>() }
         val issues = mutableListOf<VBookLoadIssue>()
-        val loadedTargets = linkedSetOf<String>()
 
-        calls.forEach { (path, values) ->
-            values.forEach { call ->
+        directives.forEach { (path, calls) ->
+            calls.forEach { directive ->
+                val call = directive.target
                 if (call == null) {
                     issues += VBookLoadIssue(VBookLoadIssueCode.NON_LITERAL, path)
                     return@forEach
@@ -82,16 +81,26 @@ object VBookLoadGraphValidator {
                 if (target == null || target !in normalized) {
                     issues += VBookLoadIssue(VBookLoadIssueCode.MISSING_TARGET, path, target ?: call)
                 } else {
-                    loadedTargets += target
+                    graph.getValue(path) += target
                 }
             }
         }
 
-        loadedTargets.forEach { target ->
-            if (calls[target].orEmpty().isNotEmpty()) {
-                issues += VBookLoadIssue(VBookLoadIssueCode.RECURSIVE, target)
+        val visited = linkedSetOf<String>()
+        val visiting = linkedSetOf<String>()
+        fun visit(path: String) {
+            if (!visiting.add(path)) return
+            graph[path].orEmpty().forEach { target ->
+                if (target in visiting) {
+                    issues += VBookLoadIssue(VBookLoadIssueCode.RECURSIVE, path, target)
+                } else if (target !in visited) {
+                    visit(target)
+                }
             }
+            visiting.remove(path)
+            visited += path
         }
+        normalized.keys.forEach { if (it !in visited) visit(it) }
         return issues.distinct()
     }
 }

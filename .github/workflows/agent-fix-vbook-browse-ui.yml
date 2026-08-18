@@ -7,6 +7,7 @@ on:
     paths:
       - scripts/agent_fix_vbook_browse_ui.py
       - scripts/agent_refine_vbook_genre_entries.py
+      - scripts/agent_finish_vbook_genre_compile.py
       - .github/workflows/agent-fix-vbook-browse-ui.yml
 
 permissions:
@@ -26,7 +27,7 @@ jobs:
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Apply browse/presentation fixes when needed
+      - name: Apply complete browse/presentation architecture
         id: patch
         continue-on-error: true
         shell: bash
@@ -37,6 +38,9 @@ jobs:
           if ! grep -q 'data class SourceBrowseEntry' app/src/main/java/vn/nghetruyen/app/sources/StorySource.kt; then
             python3 scripts/agent_refine_vbook_genre_entries.py
           fi
+          if ! grep -q 'fun browseGenreEntry(categoryKey: String, displayName: String)' app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt; then
+            python3 scripts/agent_finish_vbook_genre_compile.py
+          fi
 
       - name: Verify diff
         id: diffcheck
@@ -44,14 +48,14 @@ jobs:
         continue-on-error: true
         run: git diff --check
 
-      - name: Run focused presentation test and compile
+      - name: Run full source platform, presentation regression and app compile
         id: tests
         if: steps.patch.outcome == 'success' && steps.diffcheck.outcome == 'success'
         continue-on-error: true
         shell: bash
         run: |
           set -o pipefail
-          ./gradlew --no-daemon :app:testDebugUnitTest --tests 'vn.nghetruyen.app.sourceplatform.VBookBrowsePresentationStaticTest' :source-vbook:test :app:compileDebugKotlin --stacktrace 2>&1 | tee /tmp/vbook-browse-ui.log
+          ./gradlew --no-daemon :source-api:test :source-js-sandbox:test :source-compat-testkit:test :source-store:test :source-runtime:test :source-diagnostics:test :source-network:test :source-repository:test :source-vbook:test :source-lua:test :app:testDebugUnitTest :app:compileDebugKotlin --stacktrace 2>&1 | tee /tmp/vbook-browse-ui.log
 
       - name: Publish verified fix or failure beacon
         if: always()
@@ -63,13 +67,13 @@ jobs:
           mkdir -p .agent
           printf 'patch=%s\ndiffcheck=%s\ntests=%s\n' "$PATCH_OUTCOME" "$DIFF_OUTCOME" "$TEST_OUTCOME" > .agent/vbook-browse-ui-status.txt
           if [ -f /tmp/vbook-browse-ui.log ] && [ "$TEST_OUTCOME" != success ]; then
-            tail -n 600 /tmp/vbook-browse-ui.log > .agent/vbook-browse-ui-test.log
+            tail -n 800 /tmp/vbook-browse-ui.log > .agent/vbook-browse-ui-test.log
           fi
           if [ "$PATCH_OUTCOME" = success ] && [ "$DIFF_OUTCOME" = success ] && [ "$TEST_OUTCOME" = success ]; then
-            rm -f scripts/agent_fix_vbook_browse_ui.py scripts/agent_refine_vbook_genre_entries.py .github/workflows/agent-fix-vbook-browse-ui.yml .agent/vbook-browse-ui-status.txt .agent/vbook-browse-ui-test.log
+            rm -f scripts/agent_fix_vbook_browse_ui.py scripts/agent_refine_vbook_genre_entries.py scripts/agent_finish_vbook_genre_compile.py .github/workflows/agent-fix-vbook-browse-ui.yml .agent/vbook-browse-ui-status.txt .agent/vbook-browse-ui-test.log
             message='fix: expose complete dynamic vBook genre navigation'
           else
-            message='ci: record keyed vBook browse UI verification failure'
+            message='ci: record complete vBook browse UI verification failure'
           fi
           git add -A
           if git diff --cached --quiet; then exit 0; fi
@@ -82,4 +86,4 @@ jobs:
         if: always() && (steps.patch.outcome != 'success' || steps.diffcheck.outcome != 'success' || steps.tests.outcome != 'success')
         run: exit 1
 
-      # Final architecture pass: labels are presentation, stable keys route duplicate actions.
+      # Final pass covers both UI shells, host-kernel refresh, duplicate labels and full app tests.

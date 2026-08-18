@@ -16,7 +16,6 @@ required = {
         "steps = 149",
         "label = \"Âm lượng\"",
         "label = \"Tốc độ Sonic mặc định\"",
-        "label = \"Mức chuẩn hóa nhạc\"",
         "label = \"Crossfade\"",
         "selectedEngineLabel",
         "selectedVoiceLabel",
@@ -96,6 +95,9 @@ required = {
         'title = "Nhạc nền ($musicCount tệp)"',
         'title = "Âm thanh môi trường ($ambienceCount tệp)"',
         'title = "Hiệu ứng âm thanh ($sfxCount tệp)"',
+        'Text("ĐO LẠI TỪ ĐẦU")',
+        "startNormalization(forceRemeasure = false)",
+        "startNormalization(forceRemeasure = true)",
         "UnifiedAudioAssetManagerDialog(",
     ],
     "UnifiedAudioAssetManagerDialog.kt": [
@@ -131,6 +133,14 @@ for token in [
         raise SystemExit(f"PersonalScreen.kt: forbidden numeric button remains: {token}")
 if "ValueStepper(" in reader:
     raise SystemExit("ReaderScreen.kt: ValueStepper remains")
+
+# MUSIC LUFS is edited only in AudioDirectionLayerSwitches' normalize-all dialog. The Personal
+# settings page must not expose a second target slider/callback path that can overwrite it.
+for token in [
+    'label = "Mức chuẩn hóa nhạc"',
+]:
+    if token in personal:
+        raise SystemExit(f"PersonalScreen.kt: duplicate normalization control remains: {token}")
 
 # Technical normalization controls are implemented in the embedded audio component rather than
 # duplicated as ReaderScreen-specific sliders/buttons.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Milestone 4 foundation gate: TTS recovery, media buttons, AI narration plans and scene music."""
+"""Milestone 4 foundation gate: TTS recovery, media buttons, unified AI narration and sound direction."""
 from __future__ import annotations
 
 import shutil
@@ -106,11 +106,16 @@ def main() -> None:
     )
     require(
         "app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt",
-        "ensureVoicePlan", "persistMusicPlan", "buildContinuityContext", "replaceVoiceAssignments",
-        "replaceSceneMusicCues", "SceneMusicTrackOption",
+        "planningMutex.withLock", "ensurePlansLocked", "persistVoicePlan", "persistMusicPlan",
+        "persistAudioDirectionPlan", "buildContinuityContext", "replaceVoiceAssignments",
+        "replaceSceneMusicCues", "SceneMusicTrackOption", "includeAmbience = effectiveAmbience",
+        "includeSoundEffects = effectiveSfx",
     )
-    # Scene-catalog randomization moved out of the coordinator when canonical XPK scene planning was
-    # introduced. Verify the behavior in its current owner rather than pinning the historical class.
+    require(
+        "app/src/main/java/vn/nghetruyen/app/ai/XpkNarrationAiServices.kt",
+        "XpkUnifiedNarrationPrompt.compose", "validAmbienceIds", "validSfxIds",
+        "includeAmbience = request.includeAmbience", "includeSoundEffects = request.includeSoundEffects",
+    )
     require(
         "app/src/main/java/vn/nghetruyen/app/ai/XpkSceneMusicParity.kt",
         "shuffleTracks", "Math.floorMod", "TRACK_CATALOG",
@@ -144,7 +149,7 @@ def main() -> None:
     )
     assert manifest.count("ReaderMediaButtonReceiver") == 1
     build = require(
-        "app/build.gradle.kts", "versionCode = 28", 'versionName = "2.8.0-ai-narration-priority2-complete"',
+        "app/build.gradle.kts", "versionCode = 36", 'versionName = "3.0.2"',
     )
     assert "compileSdk = 36" in build
     media_button_smoke()

@@ -18,24 +18,25 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import vn.nghetruyen.app.MainActivity
 import vn.nghetruyen.app.NgheTruyenApplication
 import vn.nghetruyen.app.R
 import vn.nghetruyen.app.ai.ChapterAiWorkflow
+import vn.nghetruyen.app.ai.NarrationPlanCoordinator
+import vn.nghetruyen.app.ai.XpkVoiceCastPrompt
 import vn.nghetruyen.app.core.model.AudioExportFormat
 import vn.nghetruyen.app.core.model.DownloadState
 import vn.nghetruyen.app.data.local.AudioExportJobEntity
 import vn.nghetruyen.app.data.local.ChapterEntity
-import vn.nghetruyen.app.data.local.ChapterVoiceAssignmentEntity
-import vn.nghetruyen.app.data.local.SceneMusicCueEntity
 import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
 import vn.nghetruyen.app.data.local.StoryTtsProfileEntity
 import vn.nghetruyen.app.data.local.VoiceRoleEntity
 import vn.nghetruyen.app.data.settings.AppSettings
 import vn.nghetruyen.app.playback.PronunciationProcessor
-import vn.nghetruyen.app.playback.ReaderTextChunker
 import vn.nghetruyen.app.playback.VoiceRoleResolver
 import vn.nghetruyen.app.playback.VoiceExpressionProcessor
+import vn.nghetruyen.app.playback.XpkPlaybackRuntime
 import vn.nghetruyen.app.ui.reference.ReferenceVoiceRoleExtras
 import java.io.File
 import java.io.IOException
@@ -43,15 +44,36 @@ import java.security.MessageDigest
 import java.text.Normalizer
 import java.util.Locale
 
-private data class ExportChunk(val text: String, val chapterId: String, val paragraphIndex: Int)
+private data class ExportChunk(
+    val text: String,
+    val chapterId: String,
+    val paragraphIndex: Int,
+    val unitId: String,
+)
+
+private data class ExportVoiceAssignment(
+    val voiceId: String,
+    val speedAdjustPct: Float,
+    val pitchAdjustPct: Float,
+    val volumeAdjustPct: Float,
+)
+
+private data class ExportMusicScene(
+    val startUnitId: String,
+    val endUnitId: String,
+    val trackId: String,
+)
+
 private data class ChapterPlan(
     val chapter: ChapterEntity,
     val segmentIndices: List<Int>,
     val startFrame: Long,
     val endFrameExclusive: Long,
 )
+
 private data class MusicPlan(
-    val cues: Map<String, List<SceneMusicCueEntity>>,
+    val scenes: Map<String, List<ExportMusicScene>>,
+    val audioDirections: Map<String, AmbienceSfxPlan>,
     val tracks: Map<String, SceneMusicTrackEntity>,
 )
 
@@ -66,7 +88,13 @@ class AudioExportWorker(
         val jobId = inputData.getString(KEY_JOB_ID).orEmpty()
         if (jobId.isBlank()) return Result.failure()
         val job = container.libraryRepository.getAudioExportJob(jobId) ?: return Result.failure()
-        container.sourceDiagnostics.mark(name = "AUDIO_EXPORT_STARTED", sourceId = "audio-export", traceId = "audio-export:$jobId", severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.INFO, attributes = mapOf("storyId" to job.storyId, "format" to job.outputFormat, "scope" to job.scope, "packaging" to job.packaging))
+        container.sourceDiagnostics.mark(
+            name = "AUDIO_EXPORT_STARTED",
+            sourceId = "audio-export",
+            traceId = "audio-export:$jobId",
+            severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.INFO,
+            attributes = mapOf("storyId" to job.storyId, "format" to job.outputFormat, "scope" to job.scope, "packaging" to job.packaging),
+        )
         val outputFormat = runCatching { AudioExportFormat.valueOf(job.outputFormat) }.getOrDefault(AudioExportFormat.WAV)
         val packaging = runCatching { AudioExportPackaging.valueOf(job.packaging) }.getOrDefault(AudioExportPackaging.SINGLE_FILE)
         createNotificationChannel()
@@ -86,25 +114,31 @@ class AudioExportWorker(
             val settings = container.settingsRepository.snapshot()
             val roles = container.narrationPlanCoordinator.effectiveVoiceRoles(job.storyId)
             val contentByChapter = LinkedHashMap<String, vn.nghetruyen.app.core.model.ChapterContent>()
-            val assignmentsByChapter = LinkedHashMap<String, Map<Int, ChapterVoiceAssignmentEntity>>()
+            val assignmentsByChapter = LinkedHashMap<String, Map<String, ExportVoiceAssignment>>()
+            val autoVoice = container.narrationPlanCoordinator.shouldAutoVoiceCast(job.storyId)
             for (chapter in chapters) {
                 val content = container.libraryRepository.loadCachedChapter(chapter.id) ?: continue
                 contentByChapter[chapter.id] = content
-                val sourceHash = ChapterAiWorkflow.sha256(content.paragraphs)
-                val plan = container.libraryRepository.getChapterTransform(chapter.id, ChapterAiWorkflow.KIND_VOICE_CAST)
-                assignmentsByChapter[chapter.id] = if (plan?.sourceSha256 == sourceHash) {
-                    container.libraryRepository.listVoiceAssignments(chapter.id).associateBy { it.paragraphIndex }
-                } else emptyMap()
+                // One coordinator owns every active layer. Export may request music even when live
+                // background music is currently off; Ambience/SFX still obey their independent switches.
+                runCatching {
+                    container.narrationPlanCoordinator.ensurePlans(
+                        content = content,
+                        voice = autoVoice,
+                        music = job.includeSceneMusic,
+                    )
+                }
+                assignmentsByChapter[chapter.id] = loadVoiceAssignments(content)
             }
             val chunks = buildChunks(chapters, contentByChapter)
             if (chunks.isEmpty()) throw IOException("Nội dung truyện không có văn bản để tổng hợp.")
             if (chunks.size > MAX_SYNTHESIS_SEGMENTS) {
-                throw IOException("Bản xuất có quá nhiều đoạn. Hãy chia truyện thành nhiều khoảng chương.")
+                throw IOException("Bản xuất có quá nhiều UNIT. Hãy chia truyện thành nhiều khoảng chương.")
             }
 
             val profile = container.libraryRepository.getStoryTtsProfile(job.storyId)
-            val musicPlan = loadMusicPlan(job, chapters)
-            val fingerprint = exportFingerprint(job, chunks, settings, profile, roles, rules, musicPlan)
+            val musicPlan = loadMusicPlan(job, chapters, contentByChapter)
+            val fingerprint = exportFingerprint(job, chunks, settings, profile, roles, rules, musicPlan, assignmentsByChapter)
             val fingerprintFile = File(workDir, "source.sha256")
             if (!fingerprintFile.isFile || fingerprintFile.readText().trim() != fingerprint) {
                 workDir.deleteRecursively()
@@ -162,10 +196,22 @@ class AudioExportWorker(
                 jobId, chunks.size, chunks.size, DownloadState.COMPLETED, null,
             )
             completedSuccessfully = true
-            container.sourceDiagnostics.mark(name = "AUDIO_EXPORT_COMPLETED", sourceId = "audio-export", traceId = "audio-export:$jobId", severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.INFO, attributes = mapOf("storyId" to job.storyId, "segments" to chunks.size.toString(), "format" to outputFormat.name))
+            container.sourceDiagnostics.mark(
+                name = "AUDIO_EXPORT_COMPLETED",
+                sourceId = "audio-export",
+                traceId = "audio-export:$jobId",
+                severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.INFO,
+                attributes = mapOf("storyId" to job.storyId, "segments" to chunks.size.toString(), "format" to outputFormat.name),
+            )
             Result.success(workDataOf(KEY_DESTINATION_URI to job.destinationUri))
         } catch (cancelled: CancellationException) {
-            container.sourceDiagnostics.mark(name = "AUDIO_EXPORT_CANCELLED", sourceId = "audio-export", traceId = "audio-export:$jobId", severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.WARN, attributes = mapOf("storyId" to job.storyId))
+            container.sourceDiagnostics.mark(
+                name = "AUDIO_EXPORT_CANCELLED",
+                sourceId = "audio-export",
+                traceId = "audio-export:$jobId",
+                severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.WARN,
+                attributes = mapOf("storyId" to job.storyId),
+            )
             withContext(NonCancellable) {
                 val latest = container.libraryRepository.getAudioExportJob(jobId)
                 container.libraryRepository.updateAudioExportProgress(
@@ -179,7 +225,13 @@ class AudioExportWorker(
             throw cancelled
         } catch (error: Throwable) {
             val message = error.message?.take(500) ?: "Không xuất được tệp âm thanh."
-            container.sourceDiagnostics.mark(name = "AUDIO_EXPORT_RUNTIME_ERROR", sourceId = "audio-export", traceId = "audio-export:$jobId", severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.ERROR, attributes = mapOf("storyId" to job.storyId, "error" to message, "type" to error.javaClass.simpleName, "attempt" to runAttemptCount.toString()))
+            container.sourceDiagnostics.mark(
+                name = "AUDIO_EXPORT_RUNTIME_ERROR",
+                sourceId = "audio-export",
+                traceId = "audio-export:$jobId",
+                severity = vn.nghetruyen.source.diagnostics.DiagnosticSeverity.ERROR,
+                attributes = mapOf("storyId" to job.storyId, "error" to message, "type" to error.javaClass.simpleName, "attempt" to runAttemptCount.toString()),
+            )
             val latest = container.libraryRepository.getAudioExportJob(jobId)
             val retryable = runAttemptCount < MAX_RETRIES && error is IOException && !isStopped
             container.libraryRepository.updateAudioExportProgress(
@@ -212,18 +264,61 @@ class AudioExportWorker(
         contentByChapter: Map<String, vn.nghetruyen.app.core.model.ChapterContent>,
     ): List<ExportChunk> = buildList {
         for (chapter in chapters) {
-            ReaderTextChunker.normalize(listOf(chapter.title)).forEach { add(ExportChunk(it, chapter.id, -1)) }
             val content = contentByChapter[chapter.id] ?: continue
-            content.paragraphs.forEachIndexed { paragraphIndex, paragraph ->
-                ReaderTextChunker.normalize(listOf(paragraph)).forEach { add(ExportChunk(it, chapter.id, paragraphIndex)) }
+            XpkPlaybackRuntime.buildSpeechTimeline(chapter.title, content.paragraphs).forEach { unit ->
+                val text = unit.text.trim()
+                if (text.isNotBlank() && unit.unitId.isNotBlank()) {
+                    add(
+                        ExportChunk(
+                            text = text,
+                            chapterId = chapter.id,
+                            paragraphIndex = if (unit.unitId == "TITLE-U01") -1 else unit.paragraphIndex,
+                            unitId = unit.unitId,
+                        ),
+                    )
+                }
             }
         }
+    }
+
+    private suspend fun loadVoiceAssignments(
+        content: vn.nghetruyen.app.core.model.ChapterContent,
+    ): Map<String, ExportVoiceAssignment> {
+        // Legacy paragraph API `listVoiceAssignments` is intentionally not used here. Export reads
+        // the canonical UNIT transform so realtime playback and audiobook export share one timeline.
+        val transform = container.libraryRepository.getChapterTransform(content.chapter.id, ChapterAiWorkflow.KIND_VOICE_CAST)
+            ?: return emptyMap()
+        if (transform.sourceSha256 != ChapterAiWorkflow.sha256(content.paragraphs)) return emptyMap()
+        return runCatching {
+            val root = JSONObject(transform.transformedText)
+            if (root.optInt("timeline_fingerprint_version", 0) != XpkPlaybackRuntime.TIMELINE_FINGERPRINT_VERSION) return@runCatching emptyMap()
+            val expected = XpkPlaybackRuntime.timelineFingerprint(content.chapter.title, content.paragraphs)
+            if (root.optString("timeline_fingerprint").trim() != expected) return@runCatching emptyMap()
+            val source = root.optJSONArray("assignments") ?: return@runCatching emptyMap()
+            buildMap {
+                for (index in 0 until source.length()) {
+                    val row = source.optJSONObject(index) ?: continue
+                    val id = row.optString("id").trim()
+                    val voice = row.optString("voice").trim()
+                    if (id.isBlank() || voice.isBlank() || containsKey(id)) continue
+                    put(
+                        id,
+                        ExportVoiceAssignment(
+                            voiceId = voice,
+                            speedAdjustPct = finiteFloat(row.opt("speed_adjust_pct")),
+                            pitchAdjustPct = finiteFloat(row.opt("pitch_adjust_pct")),
+                            volumeAdjustPct = finiteFloat(row.opt("volume_adjust_pct")),
+                        ),
+                    )
+                }
+            }
+        }.getOrDefault(emptyMap())
     }
 
     private suspend fun synthesizeChunks(
         job: AudioExportJobEntity,
         chunks: List<ExportChunk>,
-        assignmentsByChapter: Map<String, Map<Int, ChapterVoiceAssignmentEntity>>,
+        assignmentsByChapter: Map<String, Map<String, ExportVoiceAssignment>>,
         roles: List<VoiceRoleEntity>,
         settings: AppSettings,
         profile: StoryTtsProfileEntity?,
@@ -236,6 +331,7 @@ class AudioExportWorker(
         val baseVoice = baseVoice(settings, profile)
         val baseEngine = profile?.enginePackage?.takeIf(String::isNotBlank)
             ?: settings.ttsEnginePackage?.takeIf(String::isNotBlank)
+        val roleByPromptId = roles.associateBy(XpkVoiceCastPrompt::promptVoiceId)
         var synthesizer: TtsFileSynthesizer? = null
         var activeEngine: String? = null
         var configured: TtsSynthesisVoice? = null
@@ -245,10 +341,8 @@ class AudioExportWorker(
                 val normalizedOutput = File(workDir, "pcm-${index.toString().padStart(6, '0')}.wav")
                 val reusable = normalizedOutput.isFile && runCatching { WaveFileAssembler.inspect(normalizedOutput) }.isSuccess
                 if (!reusable) {
-                    val assigned = assignmentsByChapter[chunk.chapterId]?.get(chunk.paragraphIndex)
-                    val assignedRole = assigned?.roleName?.let { name ->
-                        roles.firstOrNull { it.roleName.equals(name, ignoreCase = true) }
-                    }
+                    val assigned = assignmentsByChapter[chunk.chapterId]?.get(chunk.unitId)
+                    val assignedRole = assigned?.voiceId?.let(roleByPromptId::get)
                     val resolved = if (assignedRole != null) {
                         vn.nghetruyen.app.playback.ResolvedVoiceRole(assignedRole, chunk.text)
                     } else VoiceRoleResolver.resolve(chunk.text, roles)
@@ -276,21 +370,25 @@ class AudioExportWorker(
                         configured = null
                     }
                     if (voice != configured) {
-                        synthesizer.configure(voice)
+                        synthesizer!!.configure(voice)
                         configured = voice
                     }
                     val spoken = PronunciationProcessor.apply(expression.text, rules).ifBlank { expression.text }
                     val rawOutput = File(workDir, "raw-${index.toString().padStart(6, '0')}.wav")
                     val pcmOutput = File(workDir, "gain-${index.toString().padStart(6, '0')}.wav")
-                    synthesizer.synthesize(spoken, rawOutput, "${job.id}:$index")
+                    synthesizer!!.synthesize(spoken, rawOutput, "${job.id}:$index")
                     val roleExtra = role?.let { ReferenceVoiceRoleExtras.load(applicationContext, it.id) }
                     val useSonic = roleExtra?.processingMethod?.equals("sonic") ?: settings.sonicProcessingEnabled
                     val accurateSonic = roleExtra?.sonicAccurate ?: settings.sonicAccurateMode
                     val volume = ((role?.volume ?: profile?.volume ?: settings.ttsVolume) * expression.volumeMultiplier * aiVolumeMultiplier)
                         .coerceIn(0f, if (useSonic) 2f else 1f)
                     Pcm16WaveConverter.convert(rawOutput, pcmOutput, volume)
-                    val sonicSpeed = if (useSonic) ((role?.sonicSpeed ?: settings.sonicDefaultSpeed) * expression.sonicSpeedMultiplier).coerceIn(0.25f, 3f) else 1f
-                    val sonicPitch = if (useSonic) ((role?.sonicPitch ?: settings.sonicDefaultPitch) * expression.sonicPitchMultiplier).coerceIn(0.5f, 2f) else 1f
+                    val sonicSpeed = if (useSonic) {
+                        ((role?.sonicSpeed ?: settings.sonicDefaultSpeed) * expression.sonicSpeedMultiplier).coerceIn(0.25f, 3f)
+                    } else 1f
+                    val sonicPitch = if (useSonic) {
+                        ((role?.sonicPitch ?: settings.sonicDefaultPitch) * expression.sonicPitchMultiplier).coerceIn(0.5f, 2f)
+                    } else 1f
                     if (useSonic) {
                         SonicPcmProcessor.process(pcmOutput, normalizedOutput, sonicSpeed, sonicPitch, accurateSonic)
                     } else {
@@ -302,7 +400,12 @@ class AudioExportWorker(
                 normalizedSegments += normalizedOutput
                 val completed = index + 1
                 container.libraryRepository.updateAudioExportProgress(job.id, completed, chunks.size, DownloadState.RUNNING, null)
-                container.sourceDiagnostics.mark(name = "AUDIO_EXPORT_SEGMENT_COMPLETED", sourceId = "audio-export", traceId = "audio-export:${job.id}", attributes = mapOf("segment" to completed.toString(), "total" to chunks.size.toString(), "reused" to reusable.toString()))
+                container.sourceDiagnostics.mark(
+                    name = "AUDIO_EXPORT_SEGMENT_COMPLETED",
+                    sourceId = "audio-export",
+                    traceId = "audio-export:${job.id}",
+                    attributes = mapOf("segment" to completed.toString(), "total" to chunks.size.toString(), "reused" to reusable.toString(), "unitId" to chunk.unitId),
+                )
                 setProgress(workDataOf(KEY_COMPLETED to completed, KEY_TOTAL to chunks.size))
                 setForeground(
                     createForegroundInfo(
@@ -311,7 +414,7 @@ class AudioExportWorker(
                         outputFormat,
                         completed,
                         chunks.size,
-                        if (reusable) "Khôi phục đoạn $completed/${chunks.size}" else "Đang tổng hợp đoạn $completed/${chunks.size}",
+                        if (reusable) "Khôi phục UNIT $completed/${chunks.size}" else "Đang tổng hợp UNIT $completed/${chunks.size}",
                     ),
                 )
             }
@@ -342,13 +445,57 @@ class AudioExportWorker(
         }
     }
 
-    private suspend fun loadMusicPlan(job: AudioExportJobEntity, chapters: List<ChapterEntity>): MusicPlan {
-        if (!job.includeSceneMusic) return MusicPlan(emptyMap(), emptyMap())
-        val cues = chapters.associate { it.id to container.libraryRepository.listSceneMusicCues(it.id) }
-        val ids = cues.values.flatten().map(SceneMusicCueEntity::trackId).toSet()
+    private suspend fun loadMusicPlan(
+        job: AudioExportJobEntity,
+        chapters: List<ChapterEntity>,
+        contentByChapter: Map<String, vn.nghetruyen.app.core.model.ChapterContent>,
+    ): MusicPlan {
+        val scenes = linkedMapOf<String, List<ExportMusicScene>>()
+        val audioDirections = linkedMapOf<String, AmbienceSfxPlan>()
+
+        for (chapter in chapters) {
+            val content = contentByChapter[chapter.id] ?: continue
+            if (job.includeSceneMusic) {
+                val transform = container.libraryRepository.getChapterTransform(chapter.id, ChapterAiWorkflow.KIND_SCENE_MUSIC)
+                val chapterScenes = runCatching {
+                    if (transform == null) return@runCatching emptyList()
+                    val root = JSONObject(transform.transformedText)
+                    val expected = XpkPlaybackRuntime.timelineFingerprint(content.chapter.title, content.paragraphs)
+                    if (root.optInt("timeline_fingerprint_version", 0) != XpkPlaybackRuntime.TIMELINE_FINGERPRINT_VERSION ||
+                        root.optString("timeline_fingerprint").trim() != expected
+                    ) return@runCatching emptyList()
+                    val array = root.optJSONArray("music_scenes") ?: return@runCatching emptyList()
+                    buildList {
+                        for (index in 0 until array.length()) {
+                            val row = array.optJSONObject(index) ?: continue
+                            val start = row.optString("start_id").trim()
+                            val end = row.optString("end_id").trim()
+                            val track = row.optString("track_id").trim()
+                            if (start.isNotBlank() && end.isNotBlank() && track.isNotBlank()) {
+                                add(ExportMusicScene(start, end, track))
+                            }
+                        }
+                    }
+                }.getOrDefault(emptyList())
+                if (chapterScenes.isNotEmpty()) scenes[chapter.id] = chapterScenes
+            }
+            container.narrationPlanCoordinator.loadAudioDirectionPlan(content)?.let { plan ->
+                if (plan.ambienceScenes.isNotEmpty() || plan.soundEffectCues.isNotEmpty()) {
+                    audioDirections[chapter.id] = plan
+                }
+            }
+        }
+
+        val ids = buildSet {
+            scenes.values.flatten().forEach { add(it.trackId) }
+            audioDirections.values.forEach { plan ->
+                plan.ambienceScenes.forEach { add(it.ambienceId) }
+                plan.soundEffectCues.forEach { add(it.effectId) }
+            }
+        }
         val tracks = ids.mapNotNull { id -> container.libraryRepository.getSceneMusicTrack(id)?.takeIf { it.enabled } }
             .associateBy(SceneMusicTrackEntity::id)
-        return MusicPlan(cues, tracks)
+        return MusicPlan(scenes, audioDirections, tracks)
     }
 
     private suspend fun exportSingleFile(
@@ -419,7 +566,12 @@ class AudioExportWorker(
             val localChunks = plan.segmentIndices.map(chunks::get)
             val mixed = mixIfRequested(
                 job = job,
-                chapters = listOf(plan.copy(startFrame = 0L, endFrameExclusive = WaveFileAssembler.inspect(narration).dataLength / WaveFileAssembler.inspect(narration).blockAlign)),
+                chapters = listOf(
+                    plan.copy(
+                        startFrame = 0L,
+                        endFrameExclusive = WaveFileAssembler.inspect(narration).dataLength / WaveFileAssembler.inspect(narration).blockAlign,
+                    ),
+                ),
                 chunks = localChunks,
                 segments = chapterSegments,
                 narration = narration,
@@ -456,8 +608,13 @@ class AudioExportWorker(
         workDir: File,
         filePrefix: String,
     ): File {
-        if (!job.includeSceneMusic || musicPlan.cues.isEmpty() || musicPlan.tracks.isEmpty()) return narration
-        updateStage(job.id, "MIXING_SCENE_MUSIC")
+        val directionSettings = AudioDirectionPreferences.currentSnapshot()
+        val hasMusic = job.includeSceneMusic && musicPlan.scenes.isNotEmpty()
+        val hasDirection = (directionSettings.ambienceEnabled || directionSettings.soundEffectsEnabled) &&
+            musicPlan.audioDirections.isNotEmpty()
+        if ((!hasMusic && !hasDirection) || musicPlan.tracks.isEmpty()) return narration
+
+        updateStage(job.id, "MIXING_AUDIO_DIRECTOR")
         val reference = WaveFileAssembler.inspect(narration)
         val starts = LongArray(segments.size + 1)
         for (index in segments.indices) {
@@ -466,54 +623,116 @@ class AudioExportWorker(
         }
         val decoded = mutableMapOf<String, File>()
         val layers = mutableListOf<SceneMixLayer>()
-        for (chapter in chapters) {
-            val chapterCues = musicPlan.cues[chapter.chapter.id].orEmpty().sortedBy(SceneMusicCueEntity::startParagraph)
-            chapterCues.forEachIndexed { cueIndex, cue ->
-                val track = musicPlan.tracks[cue.trackId] ?: return@forEachIndexed
-                val startSegment = chunks.indices.firstOrNull { index ->
-                    chunks[index].chapterId == chapter.chapter.id && chunks[index].paragraphIndex >= cue.startParagraph
-                } ?: chunks.indices.firstOrNull { chunks[it].chapterId == chapter.chapter.id } ?: return@forEachIndexed
-                val nextCue = chapterCues.getOrNull(cueIndex + 1)
-                val endSegment = if (nextCue == null) null else chunks.indices.firstOrNull { index ->
-                    chunks[index].chapterId == chapter.chapter.id && chunks[index].paragraphIndex >= nextCue.startParagraph
-                }
-                val layerStart = starts[startSegment].coerceAtLeast(chapter.startFrame)
-                val layerEnd = (endSegment?.let(starts::get) ?: chapter.endFrameExclusive).coerceAtMost(chapter.endFrameExclusive)
-                if (layerEnd <= layerStart) return@forEachIndexed
-                val trackWav = decoded.getOrPut(track.id) {
-                    File(workDir, "scene-${safeFileName(track.id)}-${reference.sampleRate}-${reference.channelCount}.wav").also { target ->
-                        if (!validWave(target)) {
-                            AndroidAudioTrackDecoder.decodeToWave(
-                                context = applicationContext,
-                                uri = Uri.parse(track.uri),
-                                targetSampleRate = reference.sampleRate.toInt(),
-                                targetChannels = reference.channelCount,
-                                destination = target,
-                            )
-                        }
-                    }
-                }
-                val normalizationGain = if (
-                    PcmLoudnessEstimator.isReady(
-                        version = track.normalizationVersion,
-                        error = track.normalizationError,
-                        loudnessLufs = track.loudnessLufsEstimate,
-                        targetLufs = settings.sceneMusicTargetLufs,
-                        storedTargetLufs = track.normalizationTargetLufs,
-                        gainDb = track.normalizationGainDb,
+        val unitIndex = chunks.withIndex().associate { (index, chunk) -> "${chunk.chapterId}\u0000${chunk.unitId}" to index }
+
+        fun decode(track: SceneMusicTrackEntity): File = decoded.getOrPut(track.id) {
+            File(workDir, "audio-${safeFileName(track.id)}-${reference.sampleRate}-${reference.channelCount}.wav").also { target ->
+                if (!validWave(target)) {
+                    AndroidAudioTrackDecoder.decodeToWave(
+                        context = applicationContext,
+                        uri = Uri.parse(track.uri),
+                        targetSampleRate = reference.sampleRate.toInt(),
+                        targetChannels = reference.channelCount,
+                        destination = target,
                     )
-                ) {
-                    PcmLoudnessEstimator.gainDbToLinear(track.normalizationGainDb)
-                } else 1f
-                val gain = cue.volume.coerceIn(0f, 1f) * track.volume.coerceIn(0f, 1f) * normalizationGain *
-                    settings.backgroundMusicDuckFactor.coerceIn(0.05f, 1f)
-                layers += SceneMixLayer(
-                    sourceWav = trackWav,
-                    startFrame = layerStart,
-                    endFrameExclusive = layerEnd,
-                    volume = gain.coerceIn(0f, 1f),
-                    fadeFrames = (reference.sampleRate * settings.sceneMusicCrossfadeMillis.coerceIn(0, 8_000) / 1_000L).toInt(),
-                )
+                }
+            }
+        }
+
+        fun normalizationGain(track: SceneMusicTrackEntity, requestedTarget: Float): Float = if (
+            PcmLoudnessEstimator.isReady(
+                version = track.normalizationVersion,
+                error = track.normalizationError,
+                loudnessLufs = track.loudnessLufsEstimate,
+                targetLufs = requestedTarget,
+                storedTargetLufs = track.normalizationTargetLufs,
+                gainDb = track.normalizationGainDb,
+            )
+        ) {
+            PcmLoudnessEstimator.gainDbToLinear(track.normalizationGainDb)
+        } else 1f
+
+        fun interval(chapterId: String, startUnitId: String, endUnitId: String, chapter: ChapterPlan): Pair<Long, Long>? {
+            val startIndex = unitIndex["$chapterId\u0000$startUnitId"] ?: return null
+            val endIndex = unitIndex["$chapterId\u0000$endUnitId"] ?: return null
+            if (endIndex < startIndex) return null
+            val startFrame = starts[startIndex].coerceAtLeast(chapter.startFrame)
+            val endFrame = starts[endIndex + 1].coerceAtMost(chapter.endFrameExclusive)
+            return if (endFrame > startFrame) startFrame to endFrame else null
+        }
+
+        for (chapter in chapters) {
+            if (job.includeSceneMusic) {
+                musicPlan.scenes[chapter.chapter.id].orEmpty().forEach { scene ->
+                    val track = musicPlan.tracks[scene.trackId]
+                        ?.takeIf { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }
+                        ?: return@forEach
+                    val (layerStart, layerEnd) = interval(
+                        chapter.chapter.id,
+                        scene.startUnitId,
+                        scene.endUnitId,
+                        chapter,
+                    ) ?: return@forEach
+                    val gain = track.volume.coerceIn(0f, 1f) *
+                        normalizationGain(track, settings.sceneMusicTargetLufs) *
+                        settings.backgroundMusicDuckFactor.coerceIn(0.05f, 1f)
+                    layers += SceneMixLayer(
+                        sourceWav = decode(track),
+                        startFrame = layerStart,
+                        endFrameExclusive = layerEnd,
+                        volume = gain.coerceIn(0f, 1f),
+                        fadeFrames = (reference.sampleRate * settings.sceneMusicCrossfadeMillis.coerceIn(0, 8_000) / 1_000L).toInt(),
+                        looping = true,
+                    )
+                }
+            }
+
+            val audioPlan = musicPlan.audioDirections[chapter.chapter.id] ?: continue
+            if (directionSettings.ambienceEnabled) {
+                audioPlan.ambienceScenes.forEach { scene ->
+                    val track = musicPlan.tracks[scene.ambienceId]
+                        ?.takeIf { AudioAssetClassifier.classify(it) == AudioAssetKind.AMBIENCE }
+                        ?: return@forEach
+                    val (layerStart, layerEnd) = interval(
+                        chapter.chapter.id,
+                        scene.startUnitId,
+                        scene.endUnitId,
+                        chapter,
+                    ) ?: return@forEach
+                    val gain = directionSettings.ambienceMasterVolume *
+                        track.volume.coerceIn(0f, 1f) *
+                        normalizationGain(track, track.normalizationTargetLufs) *
+                        settings.backgroundMusicDuckFactor.coerceIn(0.05f, 1f)
+                    layers += SceneMixLayer(
+                        sourceWav = decode(track),
+                        startFrame = layerStart,
+                        endFrameExclusive = layerEnd,
+                        volume = gain.coerceIn(0f, 1f),
+                        fadeFrames = (reference.sampleRate * 600L / 1_000L).toInt(),
+                        looping = true,
+                    )
+                }
+            }
+            if (directionSettings.soundEffectsEnabled) {
+                audioPlan.soundEffectCues.forEach { cue ->
+                    val track = musicPlan.tracks[cue.effectId]
+                        ?.takeIf { AudioAssetClassifier.classify(it) == AudioAssetKind.SFX }
+                        ?: return@forEach
+                    val startIndex = unitIndex["${chapter.chapter.id}\u0000${cue.unitId}"] ?: return@forEach
+                    val layerStart = starts[startIndex].coerceAtLeast(chapter.startFrame)
+                    if (layerStart >= chapter.endFrameExclusive) return@forEach
+                    val gain = directionSettings.soundEffectsMasterVolume *
+                        track.volume.coerceIn(0f, 1f) *
+                        normalizationGain(track, track.normalizationTargetLufs)
+                    layers += SceneMixLayer(
+                        sourceWav = decode(track),
+                        startFrame = layerStart,
+                        endFrameExclusive = chapter.endFrameExclusive,
+                        volume = gain.coerceIn(0f, 1f),
+                        fadeFrames = (reference.sampleRate * 8L / 1_000L).toInt(),
+                        looping = false,
+                    )
+                }
             }
         }
         if (layers.isEmpty()) return narration
@@ -569,41 +788,83 @@ class AudioExportWorker(
         roles: List<VoiceRoleEntity>,
         pronunciationRules: List<vn.nghetruyen.app.data.local.PronunciationEntity>,
         musicPlan: MusicPlan,
+        assignmentsByChapter: Map<String, Map<String, ExportVoiceAssignment>>,
     ): String {
         val digest = MessageDigest.getInstance("SHA-256")
         fun add(value: String) {
             digest.update(value.toByteArray(Charsets.UTF_8))
             digest.update(0)
         }
-        add(listOf(job.outputFormat, job.scope, job.startChapterIndex, job.endChapterIndex, job.includeSceneMusic, job.packaging, job.chapterMarkers).joinToString("|"))
-        add(listOf(
-            settings.ttsEnginePackage, settings.ttsVoiceName, settings.ttsLanguageTag,
-            settings.ttsRate, settings.ttsPitch, settings.ttsVolume, settings.sonicProcessingEnabled,
-            settings.sonicDefaultSpeed, settings.sonicDefaultPitch, settings.sceneMusicTargetLufs,
-            settings.backgroundMusicDuckFactor,
-        ).joinToString("|"))
-        pronunciationRules.sortedBy { it.original }.forEach { add(listOf(it.original, it.replacement, it.enabled).joinToString("|")) }
+        val direction = AudioDirectionPreferences.currentSnapshot()
+        add(
+            listOf(
+                job.outputFormat,
+                job.scope,
+                job.startChapterIndex,
+                job.endChapterIndex,
+                job.includeSceneMusic,
+                job.packaging,
+                job.chapterMarkers,
+                direction.ambienceEnabled,
+                direction.soundEffectsEnabled,
+                direction.ambienceMasterVolume,
+                direction.soundEffectsMasterVolume,
+            ).joinToString("|"),
+        )
+        add(
+            listOf(
+                settings.ttsEnginePackage, settings.ttsVoiceName, settings.ttsLanguageTag,
+                settings.ttsRate, settings.ttsPitch, settings.ttsVolume, settings.sonicProcessingEnabled,
+                settings.sonicDefaultSpeed, settings.sonicDefaultPitch, settings.sceneMusicTargetLufs,
+                settings.backgroundMusicDuckFactor,
+            ).joinToString("|"),
+        )
+        pronunciationRules.sortedBy { it.original }.forEach {
+            add(listOf(it.original, it.replacement, it.enabled).joinToString("|"))
+        }
         add(listOf(profile?.enginePackage, profile?.voiceName, profile?.languageTag, profile?.rate, profile?.pitch, profile?.volume).joinToString("|"))
         roles.sortedBy { it.id }.forEach {
             val extra = ReferenceVoiceRoleExtras.load(applicationContext, it.id)
-            add(listOf(
-                it.id, it.enginePackage, it.voiceName, it.languageTag, it.rate, it.pitch, it.volume,
-                it.expression, it.expressionStrength, it.sonicSpeed, it.sonicPitch, it.enabled,
-                extra.processingMethod, extra.sonicAccurate,
-            ).joinToString("|"))
+            add(
+                listOf(
+                    it.id, it.enginePackage, it.voiceName, it.languageTag, it.rate, it.pitch, it.volume,
+                    it.expression, it.expressionStrength, it.sonicSpeed, it.sonicPitch, it.enabled,
+                    extra.processingMethod, extra.sonicAccurate,
+                ).joinToString("|"),
+            )
         }
-        chunks.forEach { add("${it.chapterId}|${it.paragraphIndex}|${it.text}") }
-        musicPlan.cues.toSortedMap().values.flatten().sortedBy { it.id }.forEach {
-            add(listOf(it.id, it.chapterId, it.startParagraph, it.trackId, it.volume, it.mood, it.updatedAt).joinToString("|"))
+        chunks.forEach { add("${it.chapterId}|${it.unitId}|${it.paragraphIndex}|${it.text}") }
+        assignmentsByChapter.toSortedMap().forEach { (chapterId, assignments) ->
+            assignments.toSortedMap().forEach { (unitId, assignment) ->
+                add("V|$chapterId|$unitId|${assignment.voiceId}|${assignment.speedAdjustPct}|${assignment.pitchAdjustPct}|${assignment.volumeAdjustPct}")
+            }
+        }
+        musicPlan.scenes.toSortedMap().forEach { (chapterId, scenes) ->
+            scenes.forEach { add("M|$chapterId|${it.startUnitId}|${it.endUnitId}|${it.trackId}") }
+        }
+        musicPlan.audioDirections.toSortedMap().forEach { (chapterId, plan) ->
+            plan.ambienceScenes.forEach { add("A|$chapterId|${it.startUnitId}|${it.endUnitId}|${it.ambienceId}") }
+            plan.soundEffectCues.forEach { add("S|$chapterId|${it.unitId}|${it.effectId}") }
         }
         musicPlan.tracks.toSortedMap().values.forEach {
-            add(listOf(
-                it.id, it.uri, it.volume, it.enabled, it.loudnessLufsEstimate,
-                it.normalizationTargetLufs, it.normalizationGainDb, it.normalizationVersion, it.normalizationError,
-                it.playCount, it.lastPlayedAt, it.orderIndex, it.updatedAt,
-            ).joinToString("|"))
+            add(
+                listOf(
+                    it.id, it.uri, it.volume, it.enabled, it.loudnessLufsEstimate,
+                    it.normalizationTargetLufs, it.normalizationGainDb, it.normalizationVersion, it.normalizationError,
+                    it.playCount, it.lastPlayedAt, it.orderIndex, it.updatedAt,
+                ).joinToString("|"),
+            )
         }
         return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    private fun finiteFloat(value: Any?): Float {
+        val parsed = when (value) {
+            is Number -> value.toFloat()
+            null -> 0f
+            else -> value.toString().trim().replace(',', '.').toFloatOrNull() ?: 0f
+        }
+        return if (parsed.isFinite()) parsed else 0f
     }
 
     private fun bitrateFor(wav: File): Int = when (WaveFileAssembler.inspect(wav).channelCount) {

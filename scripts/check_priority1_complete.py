@@ -120,8 +120,8 @@ def verify_manifest(name: str) -> None:
 
 def main() -> None:
     build = (ROOT / "app/build.gradle.kts").read_text(encoding="utf-8")
-    assert 'versionName = "2.8.0-ai-narration-priority2-complete"' in build
-    assert "versionCode = 28" in build
+    assert 'versionName = "3.0.2"' in build
+    assert "versionCode = 36" in build
     action_enum = (ROOT / "source-api/src/main/kotlin/vn/nghetruyen/source/api/SourceManifest.kt").read_text(encoding="utf-8")
     assert "LATEST_CHAPTER" in action_enum
     registry = (ROOT / "app/src/main/java/vn/nghetruyen/app/sources/SourceRegistry.kt").read_text(encoding="utf-8")

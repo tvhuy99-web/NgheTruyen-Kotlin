@@ -519,9 +519,8 @@ def main() -> None:
     )
     require_text(
         "app/src/main/java/vn/nghetruyen/app/data/local/AppDatabase.kt",
-        "observeStorageUsage",
+        "observeStorageSnapshot",
         "clearTransientCache",
-        "observeOfflineStorage",
         "LENGTH(CAST(c.content AS BLOB))",
         "listForUpdate(limit: Int)",
         "tts_pronunciations",
@@ -690,8 +689,8 @@ def main() -> None:
     )
     require_text(
         "app/build.gradle.kts",
-        'versionName = "2.8.0-ai-narration-priority2-complete"',
-        "versionCode = 28",
+        'versionName = "3.0.2"',
+        "versionCode = 36",
         "compileSdk = 36",
         "targetSdk = 36",
         'org.jsoup:jsoup:1.23.1',

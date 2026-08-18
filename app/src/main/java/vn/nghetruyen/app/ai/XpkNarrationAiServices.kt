@@ -10,8 +10,6 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import vn.nghetruyen.app.NgheTruyenApplication
-import vn.nghetruyen.source.diagnostics.DiagnosticCategory
-import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 import vn.nghetruyen.app.core.common.AppResult
 import vn.nghetruyen.app.core.model.GLOBAL_VOICE_PROFILE_STORY_ID
 import vn.nghetruyen.app.data.local.VoiceRoleEntity
@@ -20,13 +18,15 @@ import vn.nghetruyen.app.data.settings.AiOnlineSettings
 import vn.nghetruyen.app.data.settings.AiProvider
 import vn.nghetruyen.app.data.settings.SettingsRepository
 import vn.nghetruyen.app.ui.reference.ReferenceVoiceRoleExtras
+import vn.nghetruyen.source.diagnostics.DiagnosticCategory
+import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlin.math.min
 
 /**
- * Narration-only AI path that mirrors the XPK voice-cast + scene-music contract without disturbing
- * translation or VietPhrase traffic handled by [OnlineAiServices].
+ * Canonical XPK chapter-director transport. Voice, scene music, ambience and SFX share one prompt,
+ * one provider request, one quota reservation and one response parser.
  */
 class XpkNarrationAiServices(
     context: Context,
@@ -68,16 +68,31 @@ class XpkNarrationAiServices(
     suspend fun planNarration(request: NarrationPlanRequest): AppResult<NarrationPlan> {
         diagnostic(
             "AI_NARRATION_PLAN_START",
-            attributes = mapOf("storyId" to request.storyId, "chapterId" to request.chapterId, "voiceCast" to request.includeVoiceCast.toString(), "sceneMusic" to request.includeSceneMusic.toString(), "inputChars" to request.rawText.length.toString()),
+            attributes = mapOf(
+                "storyId" to request.storyId,
+                "chapterId" to request.chapterId,
+                "voiceCast" to request.includeVoiceCast.toString(),
+                "sceneMusic" to request.includeSceneMusic.toString(),
+                "ambience" to request.includeAmbience.toString(),
+                "sfx" to request.includeSoundEffects.toString(),
+                "inputChars" to request.rawText.length.toString(),
+            ),
         )
         val rawText = request.rawText.trim()
         if (rawText.isBlank()) return failure("AI_EMPTY_INPUT", "Chương không có nội dung để lập kế hoạch kể chuyện.")
         if (rawText.length > MAX_PLAN_CHARS) return failure("AI_INPUT_TOO_LARGE", "Chương quá dài để lập kế hoạch kể chuyện trong một lượt.")
-        if (!request.includeVoiceCast && !request.includeSceneMusic) return failure("AI_PLAN_EMPTY", "Không có hạng mục kể chuyện nào được yêu cầu.")
-        if (!request.includeVoiceCast && request.includeSceneMusic) {
-            return failure("AI_SCENE_MUSIC_REQUIRES_VOICE_CAST", "Nhạc theo cảnh AI chỉ được lập cùng phân vai TTS.")
+        if (!request.includeVoiceCast && !request.includeSceneMusic && !request.includeAmbience && !request.includeSoundEffects) {
+            return failure("AI_PLAN_EMPTY", "Không có hạng mục kể chuyện nào được yêu cầu.")
         }
-        if (request.includeSceneMusic && request.tracks.isEmpty()) return failure("AI_TRACKS_EMPTY", "Chưa có tệp nhạc cảnh đang bật.")
+        if (request.includeSceneMusic && request.tracks.isEmpty()) {
+            return failure("AI_TRACKS_EMPTY", "Chưa có tệp nhạc cảnh đang bật.")
+        }
+        if (request.includeAmbience && request.ambienceTracks.isEmpty()) {
+            return failure("AI_AMBIENCE_EMPTY", "Chưa có tệp âm thanh môi trường đang bật.")
+        }
+        if (request.includeSoundEffects && request.soundEffectTracks.isEmpty()) {
+            return failure("AI_SFX_EMPTY", "Chưa có tệp hiệu ứng âm thanh đang bật.")
+        }
 
         val config = resolveConfiguration(request.storyId)
         validateConfiguration(config)?.let { return it }
@@ -135,10 +150,27 @@ class XpkNarrationAiServices(
         val validSceneTrackIds = if (request.includeSceneMusic) {
             XpkSceneMusicParity.normalizeTracks(request.tracks).map(XpkSceneMusicParity.PromptTrack::id)
         } else emptyList()
+        val validAmbienceIds = if (request.includeAmbience) {
+            XpkUnifiedNarrationPrompt.normalize(request.ambienceTracks).map(SceneMusicTrackOption::id).toSet()
+        } else emptySet()
+        val validSfxIds = if (request.includeSoundEffects) {
+            XpkUnifiedNarrationPrompt.normalize(request.soundEffectTracks).map(SceneMusicTrackOption::id).toSet()
+        } else emptySet()
+
         if (request.includeSceneMusic && validSceneTrackIds.isEmpty()) {
             return failure("AI_TRACKS_EMPTY", "Không có bài nhạc cảnh hợp lệ để gửi AI.")
         }
-        if (request.includeVoiceCast && bundle.dialogueIds.isEmpty() && !request.includeSceneMusic) {
+        if (request.includeAmbience && validAmbienceIds.isEmpty()) {
+            return failure("AI_AMBIENCE_EMPTY", "Không có asset AMBIENCE hợp lệ để gửi AI.")
+        }
+        if (request.includeSoundEffects && validSfxIds.isEmpty()) {
+            return failure("AI_SFX_EMPTY", "Không có asset SFX hợp lệ để gửi AI.")
+        }
+
+        if (
+            request.includeVoiceCast && bundle.dialogueIds.isEmpty() &&
+            !request.includeSceneMusic && !request.includeAmbience && !request.includeSoundEffects
+        ) {
             return AppResult.Success(
                 NarrationPlan(
                     voiceCast = VoiceCastPlan(configuredRoles(profiles), emptyList()),
@@ -146,9 +178,24 @@ class XpkNarrationAiServices(
                 ),
             )
         }
-        if (bundle.prompt.length > MAX_PROMPT_CHARS) return failure("AI_INPUT_TOO_LARGE", "Bản chép phân vai vượt giới hạn gửi AI.")
 
-        return when (val response = chat(bundle.prompt, config)) {
+        val prompt = XpkUnifiedNarrationPrompt.compose(
+            base = bundle,
+            title = request.chapterTitle,
+            includeVoiceCast = request.includeVoiceCast,
+            includeSceneMusic = request.includeSceneMusic,
+            includeAmbience = request.includeAmbience,
+            includeSoundEffects = request.includeSoundEffects,
+            ambienceTracks = request.ambienceTracks,
+            soundEffectTracks = request.soundEffectTracks,
+            previousChapterTail = request.context.previousChapterEnding,
+            incomingAmbienceId = request.context.incomingAmbienceId,
+        )
+        if (prompt.length > MAX_PROMPT_CHARS) {
+            return failure("AI_INPUT_TOO_LARGE", "Bản chép đạo diễn âm thanh vượt giới hạn gửi AI.")
+        }
+
+        return when (val response = chat(prompt, config)) {
             is AppResult.Failure -> response
             is AppResult.Success -> runCatching {
                 val parsed = AiLineProtocol.parseXpkNarration(
@@ -158,8 +205,12 @@ class XpkNarrationAiServices(
                         validUnitIds = bundle.unitIds,
                         validVoiceIds = bundle.voiceIds,
                         validTrackIds = validSceneTrackIds,
+                        validAmbienceIds = validAmbienceIds,
+                        validSfxIds = validSfxIds,
                         includeVoiceCast = request.includeVoiceCast,
                         includeSceneMusic = request.includeSceneMusic,
+                        includeAmbience = request.includeAmbience,
+                        includeSoundEffects = request.includeSoundEffects,
                         speedLimitPct = config.expressionSpeedLimitPct.toFloat(),
                         pitchLimitPct = config.expressionPitchLimitPct.toFloat(),
                         volumeLimitPct = config.expressionVolumeLimitPct.toFloat(),
@@ -182,7 +233,18 @@ class XpkNarrationAiServices(
                 parsed.copy(voiceCast = normalizedVoice)
             }.fold(
                 {
-                    diagnostic("AI_NARRATION_PLAN_COMPLETED", DiagnosticSeverity.INFO, mapOf("storyId" to request.storyId, "chapterId" to request.chapterId))
+                    diagnostic(
+                        "AI_NARRATION_PLAN_COMPLETED",
+                        DiagnosticSeverity.INFO,
+                        mapOf(
+                            "storyId" to request.storyId,
+                            "chapterId" to request.chapterId,
+                            "voiceCast" to request.includeVoiceCast.toString(),
+                            "sceneMusic" to request.includeSceneMusic.toString(),
+                            "ambience" to request.includeAmbience.toString(),
+                            "sfx" to request.includeSoundEffects.toString(),
+                        ),
+                    )
                     AppResult.Success(it)
                 },
                 { failure("AI_BAD_RESPONSE", it.message ?: "Kết quả kế hoạch kể chuyện không hợp lệ.", it) },
@@ -265,7 +327,7 @@ class XpkNarrationAiServices(
                         lastFailure = failure("AI_REDIRECT_BLOCKED", "Endpoint AI trả redirect; yêu cầu URL API trực tiếp.")
                         return@forEachIndexed
                     }
-                    val raw = response.body.charStream().use { reader ->
+                    val raw = response.body?.charStream()?.use { reader ->
                         buildString {
                             val buffer = CharArray(8_192)
                             while (length <= MAX_RESPONSE_CHARS) {
@@ -459,11 +521,21 @@ class XpkNarrationAiServices(
     )
 
     private fun diagnostic(name: String, severity: DiagnosticSeverity = DiagnosticSeverity.DEBUG, attributes: Map<String, String> = emptyMap()) {
-        (appContext as? NgheTruyenApplication)?.container?.sourceDiagnostics?.mark(name = name, category = DiagnosticCategory.RUNTIME, severity = severity, sourceId = "ai", attributes = attributes)
+        (appContext as? NgheTruyenApplication)?.container?.sourceDiagnostics?.mark(
+            name = name,
+            category = DiagnosticCategory.RUNTIME,
+            severity = severity,
+            sourceId = "ai",
+            attributes = attributes,
+        )
     }
 
     private fun failure(code: String, message: String, cause: Throwable? = null): AppResult.Failure {
-        diagnostic("AI_NARRATION_FAILURE", DiagnosticSeverity.WARN, mapOf("code" to code, "message" to message.take(500), "cause" to (cause?.javaClass?.simpleName ?: "")))
+        diagnostic(
+            "AI_NARRATION_FAILURE",
+            DiagnosticSeverity.WARN,
+            mapOf("code" to code, "message" to message.take(500), "cause" to (cause?.javaClass?.simpleName ?: "")),
+        )
         return AppResult.Failure(code, message, cause)
     }
 

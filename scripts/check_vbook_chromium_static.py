@@ -17,6 +17,7 @@ def require(text: str, label: str, *tokens: str) -> None:
 def main() -> None:
     runtime = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidChromiumVBookRuntime.kt")
     replay = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/ChromiumVBookBrowserReplayRuntime.kt")
+    browser_session = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidWebViewSessionNetworkBroker.kt")
     prelude = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/ChromiumVBookPrelude.kt")
     dispatch_decoder = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/ChromiumVBookDispatchDecoder.kt")
     browser_parity = read("app/src/main/java/vn/nghetruyen/app/sourceplatform/ChromiumVBookDispatcherParityRuntime.kt")
@@ -54,16 +55,34 @@ def main() -> None:
         replay,
         "Chromium Browser replay coordinator",
         'CHROMIUM_BROWSER_REPLAY_REQUIRED = "SOURCE_BROWSER_REPLAY_REQUIRED"',
+        'CHROMIUM_BROWSER_NETWORK_REPLAY_REQUIRED = "SOURCE_BROWSER_NETWORK_REPLAY_REQUIRED"',
         "ChromiumVBookBrowserReplayRuntime",
         "ChromiumVBookReplayCoordinator",
         "pendingBrowser",
+        "pendingBrowserNetwork",
         "browserCache",
         "networkCache",
         "resolvePendingBrowser",
+        "resolvePendingBrowserNetwork",
         "networkReplayHits",
+        "browserNetworkDelegate",
         "MAX_REPLAYS",
         "replayAwareChromiumDiagnostics",
         "CHROMIUM_BROWSER_REPLAY_YIELDED",
+    )
+    require(
+        browser_session,
+        "Chromium browser-session network transport",
+        "AndroidWebViewSessionNetworkBroker",
+        "CookieManager.getInstance()",
+        "ExtensionWebViewAuthority.apply(appContext, view)",
+        "webView.loadDataWithBaseURL(",
+        "fetch(${jsString(url)},options)",
+        "credentials:'include'",
+        "response.arrayBuffer()",
+        "SourceNetworkResponse(",
+        'actualRequestHeaders["User-Agent"]',
+        'actualRequestHeaders["Cookie"]',
     )
     require(
         dispatch_decoder,
@@ -96,11 +115,14 @@ def main() -> None:
         "envelope=JSON.parse(String(response.body || '{}'))",
         "envelope.__ngheVBookFetch !== 1",
         "__vbookSafeCachedResponse",
+        "envelope.responseKey || requestKey",
     )
     require(
         raw_network,
         "raw vBook network broker",
-        "responseEnvelopeJson(response, key ?: \"\")",
+        "val key = requestKey?.takeIf(String::isNotBlank) ?: return result",
+        "put(CacheKey(request.sourceId, key), response)",
+        "responseEnvelopeJson(response, key)",
         '"__ngheVBookFetch" to JsonValue.Num(1.0, "1")',
         "INTERNAL_REQUEST_KEY",
         "INTERNAL_OPERATION",
@@ -124,6 +146,8 @@ def main() -> None:
         "VBookActionRuntimeRegistry.install",
         "WebView.getCurrentWebViewPackage() == null",
         '"CHROMIUM_WEBVIEW_UNAVAILABLE:provider-missing"',
+        "AndroidWebViewSessionNetworkBroker(",
+        "browserNetworkDelegate = browserSessionNetwork",
         "ChromiumVBookReplayCoordinator(",
         "brokers = brokers.copy(",
         "browser = replay.browserBroker",
@@ -147,7 +171,7 @@ def main() -> None:
     require(registry, "platform runtime registry", "AtomicReference<VBookActionRuntimeFactory?>(null)", "platformRuntime(")
     require(compatibility, "runtime-neutral compatibility facade", "private val runtime: VBookActionRuntime")
 
-    combined = "\n".join((runtime, replay, prelude, dispatch_decoder, browser_parity))
+    combined = "\n".join((runtime, replay, browser_session, prelude, dispatch_decoder, browser_parity))
     for forbidden in (
         "addJavascriptInterface(",
         "setAllowUniversalAccessFromFileURLs(",

@@ -258,7 +258,8 @@ fun main(args:Array<String>) {
 
     val activeData = File(args[5], "sources/${p1.manifest.id}/versions/1.0.0/data.json")
     activeData.appendText(" ")
-    check(store.readActivePack(p1.manifest.id) == null)
+    val reloadedStore = SourcePackStore(root, recorder)
+    check(reloadedStore.readActivePack(p1.manifest.id) == null)
     println("SOURCE_PLATFORM_FOUNDATION_SMOKE_OK events=" + recorder.snapshot().size)
 }
 ''', encoding="utf-8")

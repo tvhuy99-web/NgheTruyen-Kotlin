@@ -53,6 +53,47 @@ class ChapterPaginationTest {
     }
 
     @Test
+    fun `conflicting duplicate chapter id is blocked before UI state changes`() {
+        val existing = listOf(chapter(1), chapter(2))
+        val conflicting = chapter(3).copy(id = chapter(2).id)
+        val page = ChapterPage(
+            chapters = listOf(conflicting, chapter(4)),
+            nextPageUrl = "https://example.test/story/page/3",
+        )
+
+        val merged = ChapterCatalogMerger.merge(
+            existing = existing,
+            requestedPageUrl = "https://example.test/story/page/2",
+            page = page,
+        )
+
+        assertEquals(existing, merged.chapters)
+        assertEquals(0, merged.addedCount)
+        assertTrue(merged.repeatedCursor)
+        assertNull(merged.nextPageUrl)
+    }
+
+    @Test
+    fun `page with no new chapters is stopped instead of chaining more loads`() {
+        val existing = listOf(chapter(1), chapter(2))
+        val page = ChapterPage(
+            chapters = listOf(chapter(1), chapter(2)),
+            nextPageUrl = "https://example.test/story/page/3",
+        )
+
+        val merged = ChapterCatalogMerger.merge(
+            existing = existing,
+            requestedPageUrl = "https://example.test/story/page/2",
+            page = page,
+        )
+
+        assertEquals(existing, merged.chapters)
+        assertEquals(0, merged.addedCount)
+        assertTrue(merged.repeatedCursor)
+        assertNull(merged.nextPageUrl)
+    }
+
+    @Test
     fun `every chapter on a loaded page receives automatic navigation`() {
         val cache = ChapterPageNavigationCache()
         cache.registerPage(

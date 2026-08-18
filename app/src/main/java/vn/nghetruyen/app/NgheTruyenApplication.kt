@@ -3,6 +3,8 @@ package vn.nghetruyen.app
 import android.app.Application
 import android.webkit.WebView
 import vn.nghetruyen.app.ai.vietphrase.ReferenceVietPhraseRuntime
+import vn.nghetruyen.app.audio.AudioDirectionPreferences
+import vn.nghetruyen.app.playback.AudioDirectionRuntime
 import vn.nghetruyen.app.sourceplatform.AndroidChromiumVBookRuntime
 import vn.nghetruyen.app.sourceplatform.AndroidWebViewSessionNetworkBroker
 import vn.nghetruyen.app.sourceplatform.ChromiumVBookBrowserReplayRuntime
@@ -24,6 +26,7 @@ class NgheTruyenApplication : Application() {
     val container: AppContainer by lazy { AppContainer(this) }
     private val chromiumRuntimeLock = Any()
     private val chromiumRuntimes = IdentityHashMap<Any, VBookActionRuntime>()
+    private var audioDirectionRuntime: AudioDirectionRuntime? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -71,5 +74,14 @@ class NgheTruyenApplication : Application() {
             }
         }
         ReferenceVietPhraseRuntime.load(this)
+
+        // Hydrate the process-wide snapshot before any narration planning can inspect ambience/SFX.
+        val audioPreferences = AudioDirectionPreferences.shared(this)
+        audioDirectionRuntime = AudioDirectionRuntime(
+            context = this,
+            libraryRepository = container.libraryRepository,
+            preferences = audioPreferences,
+            narrationPlanCoordinator = container.narrationPlanCoordinator,
+        ).also(AudioDirectionRuntime::start)
     }
 }

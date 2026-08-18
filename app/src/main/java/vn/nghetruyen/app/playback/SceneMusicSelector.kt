@@ -8,10 +8,17 @@ import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
  *
  * When a scene plan provides a track id, runtime either plays that exact enabled track or plays no
  * replacement. Playlist order, shuffle, mood tags and repeat-avoidance must never override AI's
- * selected track. The extra parameters remain only for source compatibility with the existing player
- * call site until milestone 5 removes the paragraph-era API.
+ * selected track. Intentional silence is represented by a zero-volume sentinel copied from an
+ * existing catalog row; [SceneMusicController] recognizes the sentinel id and stops music without
+ * opening its URI. This keeps the existing service call site from misclassifying NONE as a missing
+ * track while keeping silence out of the persisted audio library.
+ *
+ * The extra parameters remain only for source compatibility with the existing player call site until
+ * milestone 5 removes the paragraph-era API.
  */
 object SceneMusicSelector {
+    const val SILENCE_TRACK_ID = "NONE"
+
     @Suppress("UNUSED_PARAMETER")
     fun select(
         tracks: Collection<SceneMusicTrackEntity>,
@@ -23,6 +30,13 @@ object SceneMusicSelector {
     ): SceneMusicTrackEntity? {
         val target = requestedTrackId.orEmpty().trim()
         if (target.isBlank()) return null
+        if (target == SILENCE_TRACK_ID) {
+            return tracks.firstOrNull()?.copy(
+                id = SILENCE_TRACK_ID,
+                volume = 0f,
+                enabled = true,
+            )
+        }
         return tracks.firstOrNull { it.enabled && it.id == target }
     }
 }

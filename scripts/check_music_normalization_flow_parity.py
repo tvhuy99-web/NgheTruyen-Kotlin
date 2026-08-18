@@ -6,10 +6,16 @@ reader = Path("app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt").
 component = Path("app/src/main/java/vn/nghetruyen/app/ui/components/AudioDirectionLayerSwitches.kt").read_text()
 manager = Path("app/src/main/java/vn/nghetruyen/app/ui/components/UnifiedAudioAssetManagerDialog.kt").read_text()
 preferences = Path("app/src/main/java/vn/nghetruyen/app/audio/AudioDirectionPreferences.kt").read_text()
+personal = Path("app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt").read_text()
 
 for token in [
     "KEY_TARGET_LUFS",
+    "KEY_FORCE_REMEASURE",
     "targetLufs: Float? = null",
+    "forceRemeasure: Boolean = false",
+    "inputData.getBoolean(KEY_FORCE_REMEASURE, false)",
+    "invalidateStoredNormalization(trackId, target)",
+    "if (!forceRemeasure &&",
     "return request.id",
     "fun cancel(context: Context, workId: UUID)",
 ]:
@@ -27,7 +33,10 @@ for token in [
     "AudioAssetKind.MUSIC -> musicTarget",
     "AudioAssetKind.AMBIENCE -> ambienceTarget",
     "AudioAssetKind.SFX -> sfxTarget",
-    "SceneMusicAnalysisWorker.enqueue(context, track.id, target)",
+    "forceRemeasure = forceRemeasure",
+    "startNormalization(forceRemeasure = false)",
+    "startNormalization(forceRemeasure = true)",
+    'Text("ĐO LẠI TỪ ĐẦU")',
     "WorkInfo.State.SUCCEEDED",
     "WorkInfo.State.FAILED",
     "WorkInfo.State.CANCELLED",
@@ -46,6 +55,9 @@ for token in [
     "settingsRepository.setSceneMusicTargetLufs(musicTarget)",
     "preferences.setAmbienceNormalizationTargetLufs(ambienceTarget)",
     "preferences.setSoundEffectsNormalizationTargetLufs(sfxTarget)",
+    "settingsRepository.snapshot().sceneMusicTargetLufs",
+    "preferences.snapshot()",
+    "abs(savedMusic - musicTarget) < 0.01f",
     "settingsRepository.setBackgroundMusicAttackMillis(attack)",
     "settingsRepository.setBackgroundMusicReleaseMillis(release)",
     "latestDynamicsDirty",
@@ -63,6 +75,7 @@ for token in [
     "DEFAULT_SFX_NORMALIZATION_TARGET_LUFS = -20f",
     "fun setAmbienceNormalizationTargetLufs",
     "fun setSoundEffectsNormalizationTargetLufs",
+    ").commit()",
 ]:
     if token not in preferences:
         raise SystemExit("MUSIC_NORMALIZE_FLOW preferences missing: " + token)
@@ -84,6 +97,16 @@ for forbidden in [
 ]:
     if forbidden in component + manager:
         raise SystemExit("MUSIC_NORMALIZE_FLOW obsolete single-target flow remains: " + forbidden)
+
+# The normalize-all dialog is the only user-facing editor for the music LUFS target.
+# Personal/settings screens may still receive legacy callback parameters for source compatibility,
+# but they must not render a second target control that can race or overwrite the authoritative value.
+for forbidden in [
+    'label = "Mức chuẩn hóa nhạc"',
+    'shown = { "%.1f LUFS".format(it) },\n                onChange = onSceneMusicTargetLufsChange',
+]:
+    if forbidden in personal:
+        raise SystemExit("MUSIC_NORMALIZE_FLOW duplicate settings target control remains: " + forbidden)
 
 music_start = reader.find('    if (showMusicDialog) {')
 library_start = reader.find('    if (showMusicLibrary) {', music_start)

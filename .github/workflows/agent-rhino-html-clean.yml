@@ -78,3 +78,5 @@ jobs:
       - name: Fail when verification failed
         if: always() && (steps.patch.outcome != 'success' || steps.diffcheck.outcome != 'success' || steps.tests.outcome != 'success')
         run: exit 1
+
+      # Trigger after workflow creation.

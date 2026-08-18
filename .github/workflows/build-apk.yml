@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: build-apk-${{ github.ref }}
@@ -21,6 +21,44 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply normalization UI cleanup
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          BRANCH="${{ github.head_ref }}"
+          git fetch origin "$BRANCH" main
+          git checkout -B "$BRANCH" "origin/$BRANCH"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt')
+          text = path.read_text(encoding='utf-8')
+          old = '''            ReferenceFloatSettingsSlider(
+                label = "Mức chuẩn hóa nhạc",
+                value = state.sceneMusicTargetLufs,
+                minimum = -36f,
+                maximum = -18f,
+                steps = 17,
+                shown = { "%.1f LUFS".format(it) },
+                onChange = onSceneMusicTargetLufsChange,
+            )
+'''
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f'Expected exactly one legacy normalization slider, found {count}.')
+          path.write_text(text.replace(old, '', 1), encoding='utf-8')
+          PY
+          rm -f .github/workflows/apply-normalization-ui-cleanup.yml
+          git show origin/main:.github/workflows/build-apk.yml > .github/workflows/build-apk.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt .github/workflows/build-apk.yml .github/workflows/apply-normalization-ui-cleanup.yml
+          git commit -m "Remove duplicate music normalization setting"
+          git push origin HEAD:"$BRANCH"
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5

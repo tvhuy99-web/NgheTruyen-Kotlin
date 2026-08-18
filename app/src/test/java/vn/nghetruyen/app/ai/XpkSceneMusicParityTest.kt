@@ -8,8 +8,8 @@ import org.junit.Test
 
 class XpkSceneMusicParityTest {
     @Test
-    fun catalogUsesFreeformDescriptionAndStripsAudioExtension() {
-        val description = "Sắc thái: kiềm chế, cô độc; Dùng: cảnh suy tư; Tránh: giao chiến."
+    fun catalogUsesFreeformDescriptionAndKeepsFilenameLocalOnly() {
+        val description = "Sắc thái: kiềm chế, cô độc | Dùng: cảnh suy tư | Tránh: giao chiến"
         val rows = XpkSceneMusicParity.normalizeTracks(
             listOf(SceneMusicTrackOption("track-a", "Cô độc.mp3", emptyList(), description)),
         )
@@ -28,14 +28,15 @@ class XpkSceneMusicParityTest {
     }
 
     @Test
-    fun promptContainsIncomingContinuityStableSceneRulesAndSilenceOption() {
+    fun promptShufflesThenAliasesWithoutLeakingNameOrRealIdAndMapsIncomingTrack() {
         val block = XpkSceneMusicParity.promptBlock(
             title = "Chương 9",
             firstUnitId = "P0001-U01",
             lastUnitId = "P0004-U01",
             tracks = listOf(
-                SceneMusicTrackOption("track-a", "A.mp3", emptyList(), "Sắc thái: tĩnh; Dùng: suy tư; Tránh: giao chiến"),
-                SceneMusicTrackOption("track-b", "B.ogg", emptyList(), "Sắc thái: căng; Dùng: xung đột; Tránh: nghỉ ngơi"),
+                SceneMusicTrackOption("track-a", "A.mp3", emptyList(), "Sắc thái: tĩnh | Dùng: suy tư | Tránh: giao chiến"),
+                SceneMusicTrackOption("track-b", "B.ogg", emptyList(), "Sắc thái: căng | Dùng: xung đột | Tránh: nghỉ ngơi"),
+                SceneMusicTrackOption("track-c", "C.wav", emptyList(), "Sắc thái: ấm | Dùng: đoàn tụ | Tránh: hiểm nguy"),
             ),
             context = NarrationPlanContext(
                 previousChapterEnding = "[PREVIOUS_UNIT offset=-1 | kind=narration] Kết chương trước.",
@@ -43,30 +44,65 @@ class XpkSceneMusicParityTest {
                 incomingSource = "final_scene",
             ),
         )
-        assertTrue(block.instructions.contains("INCOMING_TRACK_ID: track-b"))
+        val incomingAlias = block.trackAliasToId.entries.single { it.value == "track-b" }.key
+
+        assertEquals("track-b", block.incomingTrackId)
+        assertEquals(incomingAlias, block.incomingPromptTrackId)
+        assertTrue(block.instructions.contains("INCOMING_TRACK_ID: $incomingAlias"))
         assertTrue(block.instructions.contains("NGUỒN XÁC ĐỊNH: final_scene"))
         assertTrue(block.instructions.contains("[PREVIOUS_UNIT offset=-1"))
         assertTrue(block.instructions.contains("Không đặt mục tiêu về số lần đổi nhạc"))
         assertTrue(block.instructions.contains("Đổi tại đúng UNIT đầu tiên"))
         assertTrue(block.instructions.contains("Ổn định quan trọng hơn phản ứng theo từng câu"))
-        assertTrue(block.instructions.contains("track-a | A | Sắc thái: tĩnh"))
-        assertTrue(block.instructions.contains("NONE | IM LẶNG"))
+        assertTrue(block.instructions.contains("0 | Sắc thái: im lặng"))
         assertTrue(block.instructions.contains("Im lặng hoàn toàn hợp lệ"))
+        assertEquals(setOf("1", "2", "3"), block.trackAliasToId.keys)
+        block.tracks.forEachIndexed { index, track ->
+            assertEquals((index + 1).toString(), track.promptId)
+            assertEquals(track.id, block.trackAliasToId.getValue(track.promptId))
+            assertTrue(block.instructions.contains("${track.promptId} | ${track.description}"))
+        }
+        assertFalse(block.instructions.contains("track-a"))
+        assertFalse(block.instructions.contains("track-b"))
+        assertFalse(block.instructions.contains("track-c"))
+        assertFalse(block.instructions.contains("A.mp3"))
+        assertFalse(block.instructions.contains("B.ogg"))
+        assertFalse(block.instructions.contains("C.wav"))
         assertFalse(block.instructions.contains("Tối đa 12"))
         assertFalse(block.instructions.contains("cách nhau ít nhất 3"))
     }
 
     @Test
-    fun invalidIncomingBecomesNone() {
+    fun blankDescriptionIsNotSentEvenWhenFilenameExists() {
+        val rows = XpkSceneMusicParity.normalizeTracks(
+            listOf(
+                SceneMusicTrackOption("track-a", "Tên rất gợi ý Epic Battle.mp3", emptyList(), ""),
+                SceneMusicTrackOption("track-b", "Tên khác.mp3", emptyList(), "Sắc thái: nhẹ | Dùng: nghỉ | Tránh: chiến"),
+            ),
+        )
+        assertEquals(listOf("track-b"), rows.map { it.id })
+    }
+
+    @Test
+    fun invalidIncomingBecomesInternalNoneAndPromptZero() {
         val block = XpkSceneMusicParity.promptBlock(
             title = "Chương",
             firstUnitId = "P0001-U01",
             lastUnitId = "P0001-U01",
-            tracks = listOf(SceneMusicTrackOption("track-a", "A", emptyList())),
+            tracks = listOf(
+                SceneMusicTrackOption(
+                    "track-a",
+                    "A.mp3",
+                    emptyList(),
+                    "Sắc thái: tĩnh | Dùng: suy tư | Tránh: giao chiến",
+                ),
+            ),
             context = NarrationPlanContext(activeTrackId = "missing"),
         )
-        assertEquals("NONE", block.incomingTrackId)
-        assertTrue(block.instructions.contains("INCOMING_TRACK_ID: NONE"))
+        assertEquals(XpkSceneMusicParity.SILENCE_TRACK_ID, block.incomingTrackId)
+        assertEquals(XpkSceneMusicParity.SILENCE_PROMPT_ID, block.incomingPromptTrackId)
+        assertTrue(block.instructions.contains("INCOMING_TRACK_ID: 0"))
+        assertFalse(block.instructions.contains("INCOMING_TRACK_ID: NONE"))
     }
 
     @Test
@@ -182,7 +218,7 @@ class XpkSceneMusicParityTest {
     }
 
     @Test
-    fun fallbackKeepsValidIncomingOtherwiseUsesSilence() {
+    fun fallbackKeepsRealIncomingOtherwiseUsesInternalSilence() {
         val units = listOf("P0001-U01", "P0002-U01")
         val incoming = XpkSceneMusicParity.fallbackScene(units, listOf("a", "b"), "b").single()
         assertEquals("b", incoming.trackId)

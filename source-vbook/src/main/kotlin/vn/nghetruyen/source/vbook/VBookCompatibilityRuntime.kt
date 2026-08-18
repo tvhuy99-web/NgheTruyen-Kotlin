@@ -167,6 +167,7 @@ class VBookCompatibilityRuntime(
             config.values.forEach { (key, value) -> put(key, JsonValue.Str(value)) }
         }))
         val connection = config.connectionSettings()
+        val targetScriptPreludeJson = JsonCodec.stringify(JsonValue.Str(VBookConfigPrelude.build(profile, config)))
         val prelude = buildString {
             append(VBookConfigPrelude.build(profile, config))
             if (profile == VBookContractProfile.CURRENT_JS) {
@@ -199,6 +200,10 @@ class VBookCompatibilityRuntime(
               key:function(index){ var keys=Object.keys(__vbookConfigValues).sort(); return keys[Number(index)||0]; },
               length:Object.keys(__vbookConfigValues).length
             });
+            var __vbookTargetScriptPrelude = $targetScriptPreludeJson;
+            if (Script && typeof Script.__ngheSetExecutionPrelude === 'function') {
+              Script.__ngheSetExecutionPrelude(__vbookTargetScriptPrelude);
+            }
 
             var __vbookPackageLoad = load;
             var __vbookInsideLoad = false;

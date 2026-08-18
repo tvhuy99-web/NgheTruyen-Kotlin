@@ -18,12 +18,47 @@ data class VBookLoadIssue(
     val target: String? = null,
 )
 
+data class VBookLoadDirective(
+    val target: String?,
+    val start: Int,
+    val length: Int,
+)
+
+/**
+ * Parses real load(...) calls through Rhino's JavaScript AST. String/comment lookalikes are ignored,
+ * while absolute source positions let runtime compilers replace only the call expression itself.
+ */
+object VBookLoadDirectiveParser {
+    fun parse(path: String, source: String): List<VBookLoadDirective> {
+        val root = runCatching { Parser().parse(source, path, 1) }
+            .getOrElse { error -> throw IllegalArgumentException("VBOOK_LOAD_PARSE_FAILED:$path:${error.message}", error) }
+        val calls = mutableListOf<VBookLoadDirective>()
+        root.visit(NodeVisitor { node ->
+            if (node is FunctionCall) {
+                val target = node.target as? Name
+                if (target?.identifier == "load") {
+                    val first = node.arguments.firstOrNull()
+                    calls += VBookLoadDirective(
+                        target = (first as? StringLiteral)?.value,
+                        start = node.absolutePosition,
+                        length = node.length,
+                    )
+                }
+            }
+            true
+        })
+        return calls.sortedBy(VBookLoadDirective::start)
+    }
+}
+
 /** Static validation for the documented current-engine load('file.js') contract. */
 object VBookLoadGraphValidator {
     fun validate(scripts: Map<String, String>, profile: VBookContractProfile): List<VBookLoadIssue> {
         if (profile != VBookContractProfile.CURRENT_JS) return emptyList()
         val normalized = scripts.entries.associate { (path, source) -> VBookPaths.normalizeScriptPath(path) to source }
-        val calls = normalized.mapValues { (path, source) -> loadCalls(path, source) }
+        val calls = normalized.mapValues { (path, source) ->
+            VBookLoadDirectiveParser.parse(path, source).map(VBookLoadDirective::target)
+        }
         val issues = mutableListOf<VBookLoadIssue>()
         val loadedTargets = linkedSetOf<String>()
 
@@ -49,22 +84,5 @@ object VBookLoadGraphValidator {
             }
         }
         return issues.distinct()
-    }
-
-    /** null means a load(...) call whose first argument is not a string literal. */
-    private fun loadCalls(path: String, source: String): List<String?> {
-        val root = Parser().parse(source, path, 1)
-        val calls = mutableListOf<String?>()
-        root.visit(NodeVisitor { node ->
-            if (node is FunctionCall) {
-                val target = node.target as? Name
-                if (target?.identifier == "load") {
-                    val first = node.arguments.firstOrNull()
-                    calls += (first as? StringLiteral)?.value
-                }
-            }
-            true
-        })
-        return calls
     }
 }

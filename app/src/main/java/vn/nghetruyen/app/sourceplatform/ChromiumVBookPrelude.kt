@@ -42,29 +42,31 @@ internal object ChromiumVBookPrelude {
                 var clean=String(raw||'').replace(/\\/g,'/').replace(/^\/+/, '');
                 return clean.indexOf('src/')===0?clean:'src/'+clean;
               }
-              var __loaded={};
-              function __source(raw){ return String(__rpc('resource_read',{path:__path(raw)})||''); }
-              function load(raw){
-                if(String(raw||'').toLowerCase()==='crypto.js') return true;
-                var path=__path(raw);
-                if(__loaded[path]) return true;
-                __loaded[path]=true;
-                var code=__source(path);
-                (0,eval)(code+'\n//# sourceURL='+path.replace(/\s/g,'_'));
-                return true;
+              var __scriptExecutionPrelude='';
+              function load(){
+                throw new Error('VBOOK_LOAD_LITERAL_REQUIRED');
               }
               global.load=load;
-              global.Script=Object.freeze({
+              var __scriptApi={
                 execute:function(rawPath,functionName){
                   var path=__path(rawPath), requested=String(functionName||'execute');
                   if(!/^[A-Za-z_$][A-Za-z0-9_$]{0,127}$/.test(requested)) throw new Error('VBOOK_SCRIPT_FUNCTION_INVALID');
-                  var code=__source(path);
-                  var factory=(0,eval)('(function(){\n'+code+'\n;return (typeof '+requested+'===\'function\'?'+requested+':(typeof execute===\'function\'?execute:null));})\n//# sourceURL='+path.replace(/\s/g,'_'));
+                  var compiled=__rpc('script_compile',{path:path})||{};
+                  var code=String(compiled.source||'');
+                  var prefix=String(__scriptExecutionPrelude||'');
+                  var factory=(0,eval)('(function(){\n'+prefix+'\n'+code+'\n;return (typeof '+requested+'===\'function\'?'+requested+':(typeof execute===\'function\'?execute:null));})\n//# sourceURL='+path.replace(/\s/g,'_'));
                   var fn=factory.call(global);
                   if(typeof fn!=='function') throw new Error('VBOOK_SCRIPT_FUNCTION_MISSING:'+requested);
                   return fn.apply(global,Array.prototype.slice.call(arguments,2));
                 }
+              };
+              Object.defineProperty(__scriptApi,'__ngheSetExecutionPrelude',{
+                value:function(code){__scriptExecutionPrelude=String(code||'');return true;},
+                enumerable:false,
+                writable:false,
+                configurable:false
               });
+              global.Script=Object.freeze(__scriptApi);
 
               function __nativeElements(nodes,baseUrl){
                 var arr=[];

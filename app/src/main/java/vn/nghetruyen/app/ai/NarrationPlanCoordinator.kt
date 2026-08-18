@@ -18,6 +18,7 @@ import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
 import vn.nghetruyen.app.data.local.VoiceRoleEntity
 import vn.nghetruyen.app.data.repository.LibraryRepository
 import vn.nghetruyen.app.data.settings.SettingsRepository
+import vn.nghetruyen.app.playback.PlaybackQueueStore
 import vn.nghetruyen.app.playback.XpkPlaybackRuntime
 import java.util.UUID
 
@@ -47,7 +48,7 @@ class NarrationPlanCoordinator(
         force: Boolean = false,
         activeTrackId: String? = null,
     ): Result = planningMutex.withLock {
-        ensurePlansLocked(content, voice, music, force, activeTrackId)
+        ensurePlansLocked(currentPlaybackContent(content), voice, music, force, activeTrackId)
     }
 
     /** Used by the Ambience/SFX runtime when voice auto-cast itself is disabled. */
@@ -189,6 +190,7 @@ class NarrationPlanCoordinator(
     }
 
     suspend fun loadAudioDirectionPlan(content: ChapterContent): AmbienceSfxPlan? {
+        val effectiveContent = currentPlaybackContent(content)
         val audioSettings = AudioDirectionPreferences.currentSnapshot()
         if (!audioSettings.ambienceEnabled && !audioSettings.soundEffectsEnabled) return AmbienceSfxPlan()
         val enabledAssets = library.listEnabledSceneMusicTracks()
@@ -203,15 +205,19 @@ class NarrationPlanCoordinator(
         if (!effectiveAmbience && !effectiveSfx) return AmbienceSfxPlan()
 
         val sourceHash = audioDirectionSourceHash(
-            content,
+            effectiveContent,
             ambienceTracks,
             soundEffectTracks,
             effectiveAmbience,
             effectiveSfx,
         )
-        val cached = library.getChapterTransform(content.chapter.id, KIND_AUDIO_DIRECTION) ?: return null
+        val cached = library.getChapterTransform(effectiveContent.chapter.id, KIND_AUDIO_DIRECTION) ?: return null
         if (cached.sourceSha256 != sourceHash) return null
-        val unitIds = XpkVoiceCastSplitter.buildUnits(content.chapter.title, chapterBody(content)).map { it.id }
+        if (!isCurrentTimelineTransform(cached.transformedText, XpkAmbienceSfxDirector.ENGINE, effectiveContent)) return null
+        val unitIds = XpkVoiceCastSplitter.buildUnits(
+            effectiveContent.chapter.title,
+            chapterBody(effectiveContent),
+        ).map { it.id }
         return runCatching {
             XpkAmbienceSfxDirector.decodePersisted(
                 text = cached.transformedText,
@@ -225,11 +231,12 @@ class NarrationPlanCoordinator(
     }
 
     suspend fun voicePlanAssignmentCount(content: ChapterContent): Int {
-        val sourceHash = ChapterAiWorkflow.sha256(content.paragraphs)
-        val cached = library.getChapterTransform(content.chapter.id, ChapterAiWorkflow.KIND_VOICE_CAST)
+        val effectiveContent = currentPlaybackContent(content)
+        val sourceHash = voiceSourceHash(effectiveContent)
+        val cached = library.getChapterTransform(effectiveContent.chapter.id, ChapterAiWorkflow.KIND_VOICE_CAST)
             ?: return 0
         if (cached.sourceSha256 != sourceHash) return 0
-        if (!isCurrentTimelineTransform(cached.transformedText, VOICE_TRANSFORM_ENGINE, content)) return 0
+        if (!isCurrentTimelineTransform(cached.transformedText, VOICE_TRANSFORM_ENGINE, effectiveContent)) return 0
         return runCatching {
             JSONObject(cached.transformedText).optJSONArray("assignments")?.length() ?: 0
         }.getOrDefault(0)
@@ -263,7 +270,7 @@ class NarrationPlanCoordinator(
     private suspend fun needsVoicePlan(content: ChapterContent, force: Boolean): Boolean {
         if (storyVoiceSettings(content.chapter.storyId).mode == StoryVoiceCastMode.OFF) return false
         if (force) return true
-        val sourceHash = ChapterAiWorkflow.sha256(content.paragraphs)
+        val sourceHash = voiceSourceHash(content)
         val cached = library.getChapterTransform(content.chapter.id, ChapterAiWorkflow.KIND_VOICE_CAST)
         if (cached?.sourceSha256 != sourceHash) return true
         return !isCurrentTimelineTransform(cached.transformedText, VOICE_TRANSFORM_ENGINE, content)
@@ -300,7 +307,8 @@ class NarrationPlanCoordinator(
             soundEffectsEnabled,
         )
         val cached = library.getChapterTransform(content.chapter.id, KIND_AUDIO_DIRECTION)
-        return cached?.sourceSha256 != sourceHash
+        if (cached?.sourceSha256 != sourceHash) return true
+        return !isCurrentTimelineTransform(cached.transformedText, XpkAmbienceSfxDirector.ENGINE, content)
     }
 
     /** Canonical XPK assignments live in chapter_transforms; paragraph rows are legacy-only. */
@@ -347,7 +355,7 @@ class NarrationPlanCoordinator(
                 kind = ChapterAiWorkflow.KIND_VOICE_CAST,
                 provider = provider,
                 model = model,
-                sourceSha256 = ChapterAiWorkflow.sha256(content.paragraphs),
+                sourceSha256 = voiceSourceHash(content),
                 transformedText = payload,
                 updatedAt = System.currentTimeMillis(),
             ),
@@ -523,6 +531,19 @@ class NarrationPlanCoordinator(
             root.optString("timeline_fingerprint").trim() == timelineFingerprint(content)
     }.getOrDefault(false)
 
+    /**
+     * Planning must follow the exact text currently sent to TTS. The cached chapter remains the
+     * source-of-truth for source hashes, while the playback snapshot owns the active XPK timeline.
+     * This keeps AI/VietPhrase variants addressable without making old cache identities unstable.
+     */
+    private fun currentPlaybackContent(content: ChapterContent): ChapterContent {
+        val snapshot = PlaybackQueueStore.state.value
+        if (snapshot.chapterId != content.chapter.id || snapshot.paragraphs.isEmpty()) return content
+        val runtimeParagraphs = XpkPlaybackRuntime.canonicalLines(snapshot.paragraphs)
+        return if (runtimeParagraphs == canonicalParagraphs(content)) content
+        else content.copy(paragraphs = runtimeParagraphs)
+    }
+
     private fun canonicalParagraphs(content: ChapterContent): List<String> =
         XpkPlaybackRuntime.canonicalLines(content.paragraphs)
 
@@ -531,9 +552,21 @@ class NarrationPlanCoordinator(
 
     private fun chapterBody(content: ChapterContent): String = canonicalParagraphs(content).joinToString("\n")
 
+    /**
+     * ReaderPlaybackService still validates transform.sourceSha256 against the cached source chapter.
+     * Keep that stable identity while timeline_fingerprint represents the exact active playback text.
+     */
+    private suspend fun voiceSourceHash(content: ChapterContent): String {
+        val source = library.loadCachedChapter(content.chapter.id)
+        return ChapterAiWorkflow.sha256(source?.paragraphs ?: content.paragraphs)
+    }
+
     // Keep this formula identical to ReaderPlaybackService so saved XPK scene plans are loadable now.
-    private fun musicSourceHash(content: ChapterContent, tracks: List<SceneMusicTrackEntity>): String =
-        ChapterAiWorkflow.sha256(content.paragraphs + tracks.flatMap { listOf(it.id, it.tagsCsv, it.title) })
+    private suspend fun musicSourceHash(content: ChapterContent, tracks: List<SceneMusicTrackEntity>): String {
+        val source = library.loadCachedChapter(content.chapter.id)
+        val sourceParagraphs = source?.paragraphs ?: content.paragraphs
+        return ChapterAiWorkflow.sha256(sourceParagraphs + tracks.flatMap { listOf(it.id, it.tagsCsv, it.title) })
+    }
 
     private fun audioDirectionSourceHash(
         content: ChapterContent,

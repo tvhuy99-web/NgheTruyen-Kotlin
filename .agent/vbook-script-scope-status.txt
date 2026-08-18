@@ -1,3 +1,0 @@
-patch=success
-diffcheck=success
-tests=failure

@@ -201,8 +201,8 @@ class VBookCompatibilityRuntime(
               length:Object.keys(__vbookConfigValues).length
             });
             var __vbookTargetScriptPrelude = $targetScriptPreludeJson;
-            if (Script && typeof Script.__ngheSetExecutionPrelude === 'function') {
-              Script.__ngheSetExecutionPrelude(__vbookTargetScriptPrelude);
+            if (Script && typeof Script.__ngheInstallGlobalPrelude === 'function') {
+              Script.__ngheInstallGlobalPrelude(__vbookTargetScriptPrelude);
             }
 
             var __vbookPackageLoad = load;

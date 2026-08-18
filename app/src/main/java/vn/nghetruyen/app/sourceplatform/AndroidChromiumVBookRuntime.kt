@@ -47,7 +47,6 @@ import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 import vn.nghetruyen.source.diagnostics.DiagnosticSink
 import vn.nghetruyen.source.runtime.SourceResourceProvider
 import vn.nghetruyen.source.vbook.VBookActionRuntime
-import vn.nghetruyen.source.vbook.VBookScriptBundleCompiler
 import java.io.ByteArrayInputStream
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -459,7 +458,6 @@ class AndroidChromiumVBookRuntime(
                 "payloadKeys" to payload.values.size.toString(),
             ))
             val value = when (operation) {
-                "script_compile" -> scriptCompile(payload)
                 "resource_read" -> resourceRead(payload)
                 "host_command" -> hostCommand(payload)
                 "network_fetch" -> networkFetch(payload)
@@ -512,44 +510,6 @@ class AndroidChromiumVBookRuntime(
                 "bridgeCalls" to calls.toString(),
                 "requestId" to request.traceId,
             )))
-        }
-
-        private fun scriptCompile(payload: JsonValue.Obj): JsonValue {
-            val rawPath = payload.string("path")?.trim().orEmpty()
-            val clean = rawPath.replace('\\', '/').removePrefix("/")
-            val path = if (clean.startsWith("src/")) clean else "src/$clean"
-            SourceManifest.requireSafeRelativePath(path)
-            val entryBytes = resources.read(path, MAX_SCRIPT_BYTES) ?: error("VBOOK_RESOURCE_MISSING:$path")
-            val compiled = VBookScriptBundleCompiler.compile(
-                entryPath = path,
-                entrySource = entryBytes.toString(Charsets.UTF_8),
-            ) { dependencyPath ->
-                resources.read(dependencyPath, MAX_SCRIPT_BYTES)?.toString(Charsets.UTF_8)
-            }
-            val compiledBytes = compiled.source.toByteArray(Charsets.UTF_8).size
-            require(compiledBytes <= MAX_COMPILED_SCRIPT_BYTES) { "CHROMIUM_COMPILED_SCRIPT_TOO_LARGE:$compiledBytes" }
-            diagnostics.emit(event(manifest, request, "CHROMIUM_SCRIPT_COMPILED", DiagnosticSeverity.DEBUG, attributes = mapOf(
-                "flow" to "compile",
-                "stage" to "bundle",
-                "entry" to compiled.entryPath.take(500),
-                "dependencies" to compiled.dependencies.joinToString(",").take(2_000),
-                "dependencyCount" to compiled.dependencies.size.toString(),
-                "loadDirectiveCount" to compiled.loadDirectiveCount.toString(),
-                "compiledBytes" to compiledBytes.toString(),
-            )))
-            captureEvidence(
-                manifest,
-                request,
-                "chromium-compiled-script.js",
-                "text/javascript",
-                compiled.source,
-            )
-            return JsonValue.Obj(linkedMapOf(
-                "source" to JsonValue.Str(compiled.source),
-                "entry" to JsonValue.Str(compiled.entryPath),
-                "dependencies" to JsonValue.Arr(compiled.dependencies.map(JsonValue::Str)),
-                "loadDirectiveCount" to number(compiled.loadDirectiveCount),
-            ))
         }
 
         private fun resourceRead(payload: JsonValue.Obj): JsonValue {
@@ -995,7 +955,6 @@ class AndroidChromiumVBookRuntime(
 
     companion object {
         private const val MAX_SCRIPT_BYTES = 2 * 1024 * 1024
-        private const val MAX_COMPILED_SCRIPT_BYTES = 6 * 1024 * 1024
         private const val MAX_PROGRAM_BYTES = 8 * 1024 * 1024
         private const val MAX_BRIDGE_BYTES = 8 * 1024 * 1024
         private const val MAX_BRIDGE_CALLS = 20_000

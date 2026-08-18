@@ -55,7 +55,7 @@ class XpkSceneMusicParityTest {
         assertTrue(block.instructions.contains("Đổi tại đúng UNIT đầu tiên"))
         assertTrue(block.instructions.contains("Ổn định quan trọng hơn phản ứng theo từng câu"))
         assertTrue(block.instructions.contains("0 | Sắc thái: im lặng"))
-        assertTrue(block.instructions.contains("Im lặng hoàn toàn hợp lệ"))
+        assertTrue(block.instructions.contains("Im lặng là một lựa chọn bình đẳng với track"))
         assertEquals(setOf("1", "2", "3"), block.trackAliasToId.keys)
         block.tracks.forEachIndexed { index, track ->
             assertEquals((index + 1).toString(), track.promptId)

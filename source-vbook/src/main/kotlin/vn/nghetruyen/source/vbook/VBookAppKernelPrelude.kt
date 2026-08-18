@@ -10,7 +10,14 @@ package vn.nghetruyen.source.vbook
  * extension model.
  */
 object VBookAppKernelPrelude {
-    fun build(): String = """
+    fun build(): String {
+        val safeFetchPrelude = VBookFetchSafePrelude.build()
+        return """
+        if (typeof __vbookNativeFetch === 'function' && typeof __vbookFetchSeq !== 'undefined') {
+          (function(){
+            $safeFetchPrelude
+          })();
+        }
         (function(global){
           function present(name) {
             try { return typeof global[name] !== 'undefined' && global[name] !== null; }
@@ -238,5 +245,6 @@ object VBookAppKernelPrelude {
             command: hostCommand
           });
         })(this);
-    """.trimIndent()
+        """.trimIndent()
+    }
 }

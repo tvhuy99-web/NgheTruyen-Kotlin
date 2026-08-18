@@ -30,16 +30,10 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Apply generic vBook script compiler fix
+      - name: Apply generic vBook script realm fix
         id: patch
         continue-on-error: true
-        shell: bash
-        run: |
-          if [ -f source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookScriptBundleCompiler.kt ]; then
-            echo 'Compiler patch already present; validating current tree.'
-          else
-            python3 scripts/agent_fix_vbook_script_scope.py
-          fi
+        run: python3 scripts/agent_fix_vbook_script_scope.py
 
       - name: Verify patch formatting
         id: diffcheck
@@ -70,9 +64,9 @@ jobs:
           fi
           if [ "$PATCH_OUTCOME" = success ] && [ "$DIFF_OUTCOME" = success ] && [ "$TEST_OUTCOME" = success ]; then
             rm -f scripts/agent_fix_vbook_script_scope.py .github/workflows/agent-fix-vbook-script-scope.yml .agent/vbook-script-scope-status.txt .agent/vbook-script-scope-test.log
-            message='fix: compile vBook loads in one lexical scope'
+            message='fix: run vBook loads in shared Chromium script realm'
           else
-            message='ci: record detailed vBook scope test failure'
+            message='ci: record detailed vBook script realm test failure'
           fi
           git add -A
           if git diff --cached --quiet; then

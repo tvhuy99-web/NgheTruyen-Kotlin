@@ -40,8 +40,20 @@ class SceneMusicAnalysisWorker(
             PcmLoudnessEstimator.MAX_TARGET_LUFS
         }
         val requestedTarget = inputData.getFloat(KEY_TARGET_LUFS, Float.NaN)
-        val target = (requestedTarget.takeIf(Float::isFinite)
-            ?: container.settingsRepository.snapshot().sceneMusicTargetLufs)
+        val defaultTarget = when (kind) {
+            AudioAssetKind.MUSIC -> container.settingsRepository.snapshot().sceneMusicTargetLufs
+            AudioAssetKind.AMBIENCE,
+            AudioAssetKind.SFX,
+            -> {
+                val directionSettings = AudioDirectionPreferences.shared(applicationContext).snapshot()
+                if (kind == AudioAssetKind.AMBIENCE) {
+                    directionSettings.ambienceNormalizationTargetLufs
+                } else {
+                    directionSettings.soundEffectsNormalizationTargetLufs
+                }
+            }
+        }
+        val target = (requestedTarget.takeIf(Float::isFinite) ?: defaultTarget)
             .coerceIn(PcmLoudnessEstimator.MIN_TARGET_LUFS, maxTarget)
 
         if (track.normalizationVersion >= PcmLoudnessEstimator.VERSION &&

@@ -19,12 +19,16 @@ class VBookBrowsePresentationStaticTest {
 
         assertTrue("StorySource must expose a generic dynamic genre capability", "val supportsGenre: Boolean" in storySource)
         assertTrue("StorySource must expose a generic genre menu API", "suspend fun genreMenu()" in storySource)
+        assertTrue("browse entries must separate routing identity from labels", "data class SourceBrowseEntry(" in storySource)
         assertTrue("vBook descriptor must derive genre support from plugin.json", "supportsGenre = plugin.script(VBookScriptRole.GENRE) != null" in vbook)
         assertTrue("vBook genre.js output must become dynamic menu actions", "VBookStoryNormalizer.dynamicActions(menu.value.data)" in vbook)
+        assertTrue("duplicate labels must route by stable action identity", "genreActionKey(it) == category" in vbook)
         assertTrue("ViewModel must own an explicit GENRE explore state", "ExploreMode { HOME, GENRE, SEARCH, CATEGORY }" in viewModel)
         assertTrue("UI must expose the dynamic genre surface", "text = \"THỂ LOẠI\"" in explore)
-        assertTrue("Dynamic genre menu must be vertically scalable", "items(state.genreEntries" in explore)
+        assertTrue("Dynamic genre menu must be vertically scalable", "items(state.genreEntries, key = { it.key })" in explore)
+        assertTrue("non-action headings must stay visible but disabled", "if (entry.selectable)" in explore)
         assertTrue("App navigation must route the genre tab", "viewModel.browseGenreMenu()" in app)
+        assertTrue("dynamic entries must route key and label separately", "viewModel.browseGenreEntry(key, label)" in app)
 
         assertFalse("Story cards must not speak raw source ids", "Nguồn: \${story.sourceId}" in common)
         assertFalse("Story cards must not render raw source ids", "Text(story.sourceId" in common)

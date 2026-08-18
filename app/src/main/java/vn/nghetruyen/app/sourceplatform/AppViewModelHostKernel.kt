@@ -75,6 +75,7 @@ object ExtensionHostKernelInstaller {
                     Destination.Root -> when (current.rootTab) {
                         RootTab.EXPLORE -> when (current.exploreMode) {
                             ExploreMode.HOME -> host.browseHome()
+                            ExploreMode.GENRE -> host.browseGenreMenu()
                             ExploreMode.CATEGORY -> current.activeCategory?.let(host::browseCategory) ?: host.browseHome()
                             ExploreMode.SEARCH -> host.search()
                         }

@@ -71,6 +71,7 @@ fun ExploreScreen(
     onSourceSelected: (String) -> Unit,
     onHomeSelected: () -> Unit,
     onGenreSelected: () -> Unit,
+    onGenreEntrySelected: (String, String) -> Unit,
     onCategorySelected: (String) -> Unit,
     onSuggestionSelected: (String) -> Unit,
     onLoadMore: () -> Unit,
@@ -109,7 +110,10 @@ fun ExploreScreen(
     val listTitle = when (state.exploreMode) {
         ExploreMode.HOME -> "TRANG CHỦ"
         ExploreMode.GENRE -> "THỂ LOẠI"
-        ExploreMode.CATEGORY -> state.activeCategory.orEmpty().ifBlank { "DANH SÁCH TRUYỆN" }.uppercase()
+        ExploreMode.CATEGORY -> state.activeCategoryLabel.orEmpty()
+            .ifBlank { state.activeCategory.orEmpty() }
+            .ifBlank { "DANH SÁCH TRUYỆN" }
+            .uppercase()
         ExploreMode.SEARCH -> "KẾT QUẢ TÌM KIẾM"
     }
 
@@ -132,10 +136,12 @@ fun ExploreScreen(
         searchPrefs.edit().putString("history", searchHistory.joinToString("\n")).apply()
     }
 
-    LaunchedEffect(state.exploreMode, state.activeCategory, state.stories.size, state.loading) {
+    LaunchedEffect(state.exploreMode, state.activeCategory, state.genreEntries.size, state.stories.size, state.loading) {
         if (!state.loading) {
             delay(120)
-            view.announceForAccessibility("$listTitle, ${state.stories.size} truyện")
+            val count = if (state.exploreMode == ExploreMode.GENRE) state.genreEntries.size else state.stories.size
+            val unit = if (state.exploreMode == ExploreMode.GENRE) "mục" else "truyện"
+            view.announceForAccessibility("$listTitle, $count $unit")
         }
     }
 
@@ -316,15 +322,24 @@ fun ExploreScreen(
                 )
             } else {
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    items(state.genreEntries, key = { it }) { category ->
-                        ReferenceActionButton(
-                            text = category,
-                            onClick = { onCategorySelected(category) },
-                            accessibilityLabel = category,
-                            normalColor = ReferencePanelBackground,
-                            normalContentColor = ReferenceText,
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
-                        )
+                    items(state.genreEntries, key = { it.key }) { entry ->
+                        if (entry.selectable) {
+                            ReferenceActionButton(
+                                text = entry.label,
+                                onClick = { onGenreEntrySelected(entry.key, entry.label) },
+                                accessibilityLabel = entry.label,
+                                normalColor = ReferencePanelBackground,
+                                normalContentColor = ReferenceText,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
+                            )
+                        } else {
+                            Text(
+                                text = entry.label,
+                                color = ReferenceSecondaryText,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
+                            )
+                        }
                     }
                 }
             }

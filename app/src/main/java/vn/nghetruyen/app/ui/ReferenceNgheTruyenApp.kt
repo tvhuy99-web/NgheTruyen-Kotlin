@@ -148,6 +148,13 @@ fun ReferenceNgheTruyenApp(
                             activateExploreDiagnosticContext(mode = ExploreMode.GENRE)
                             viewModel.browseGenreMenu()
                         },
+                        onGenreEntrySelected = { key, label ->
+                            activateExploreDiagnosticContext(
+                                mode = ExploreMode.CATEGORY,
+                                category = label,
+                            )
+                            viewModel.browseGenreEntry(key, label)
+                        },
                         onCategorySelected = { category ->
                             activateExploreDiagnosticContext(
                                 mode = ExploreMode.CATEGORY,

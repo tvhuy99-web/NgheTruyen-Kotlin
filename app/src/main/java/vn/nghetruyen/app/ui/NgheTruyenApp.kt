@@ -78,6 +78,8 @@ fun NgheTruyenApp(
                         onCancelSearch = viewModel::cancelSearch,
                         onSourceSelected = viewModel::selectSource,
                         onHomeSelected = viewModel::browseHome,
+                        onGenreSelected = viewModel::browseGenreMenu,
+                        onGenreEntrySelected = viewModel::browseGenreEntry,
                         onCategorySelected = viewModel::browseCategory,
                         onSuggestionSelected = viewModel::selectSearchSuggestion,
                         onLoadMore = viewModel::loadMoreStories,

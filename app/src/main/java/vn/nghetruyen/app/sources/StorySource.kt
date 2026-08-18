@@ -42,6 +42,12 @@ data class SourceUiActionResult(
     val refresh: Boolean = false,
 )
 
+data class SourceBrowseEntry(
+    val key: String,
+    val label: String,
+    val selectable: Boolean = true,
+)
+
 data class SourceDescriptor(
     val id: String,
     val displayName: String,
@@ -91,8 +97,10 @@ interface StorySource {
 
     suspend fun home(page: Int = 1): AppResult<List<StorySummary>> = search("", page)
 
-    /** Top-level browse menu. Static sources fall back to descriptor categories. */
-    suspend fun genreMenu(): AppResult<List<String>> = AppResult.Success(descriptor.categories)
+    /** Top-level browse menu. Labels are presentation only; keys are passed back to category(). */
+    suspend fun genreMenu(): AppResult<List<SourceBrowseEntry>> = AppResult.Success(
+        descriptor.categories.map { category -> SourceBrowseEntry(key = category, label = category) },
+    )
 
     suspend fun suggestions(query: String): AppResult<List<String>> = AppResult.Success(emptyList())
 

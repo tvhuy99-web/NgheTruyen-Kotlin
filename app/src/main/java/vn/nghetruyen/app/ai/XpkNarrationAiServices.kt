@@ -130,6 +130,19 @@ class XpkNarrationAiServices(
             }
         } else emptyMap()
 
+        val ambienceCatalog = if (request.includeAmbience) {
+            XpkUnifiedNarrationPrompt.buildCatalog(
+                request.ambienceTracks,
+                "ambience\u0000${request.storyId}\u0000${request.chapterId}",
+            )
+        } else XpkUnifiedNarrationPrompt.CatalogBundle(emptyList(), emptyMap())
+        val sfxCatalog = if (request.includeSoundEffects) {
+            XpkUnifiedNarrationPrompt.buildCatalog(
+                request.soundEffectTracks,
+                "sfx\u0000${request.storyId}\u0000${request.chapterId}",
+            )
+        } else XpkUnifiedNarrationPrompt.CatalogBundle(emptyList(), emptyMap())
+
         val storyNote = StoryVoiceCastReferenceCodec.userNote(config.voiceCastNote)
         val bundle = XpkVoiceCastPrompt.build(
             title = request.chapterTitle,
@@ -146,14 +159,11 @@ class XpkNarrationAiServices(
             tracks = request.tracks,
             context = request.context,
             profileSettingsById = profileSettingsById,
+            includeAudioDirection = request.includeAmbience || request.includeSoundEffects,
         )
         val validSceneTrackIds = if (request.includeSceneMusic) bundle.sceneTrackIds else emptyList()
-        val ambienceAliasToId = if (request.includeAmbience) {
-            XpkUnifiedNarrationPrompt.aliasToId(request.ambienceTracks)
-        } else emptyMap()
-        val sfxAliasToId = if (request.includeSoundEffects) {
-            XpkUnifiedNarrationPrompt.aliasToId(request.soundEffectTracks)
-        } else emptyMap()
+        val ambienceAliasToId = if (request.includeAmbience) ambienceCatalog.aliasToId else emptyMap()
+        val sfxAliasToId = if (request.includeSoundEffects) sfxCatalog.aliasToId else emptyMap()
         val validAmbienceIds = ambienceAliasToId.values.toSet()
         val validSfxIds = sfxAliasToId.values.toSet()
 
@@ -190,6 +200,8 @@ class XpkNarrationAiServices(
             soundEffectTracks = request.soundEffectTracks,
             previousChapterTail = request.context.previousChapterEnding,
             incomingAmbienceId = request.context.incomingAmbienceId,
+            ambienceCatalog = ambienceCatalog.takeIf { request.includeAmbience },
+            sfxCatalog = sfxCatalog.takeIf { request.includeSoundEffects },
         )
         if (prompt.length > MAX_PROMPT_CHARS) {
             return failure("AI_INPUT_TOO_LARGE", "Bản chép đạo diễn âm thanh vượt giới hạn gửi AI.")

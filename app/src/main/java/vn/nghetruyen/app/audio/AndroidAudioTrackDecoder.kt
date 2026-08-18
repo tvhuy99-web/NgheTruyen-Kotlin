@@ -6,8 +6,10 @@ import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
+import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
 import java.nio.ByteBuffer
@@ -18,7 +20,7 @@ import kotlin.math.roundToLong
 /** Decodes a user-selected audio document and normalizes it to narration PCM16 WAV. */
 object AndroidAudioTrackDecoder {
     private const val TIMEOUT_US = 10_000L
-    private const val MAX_DECODED_PCM_BYTES = 64L * 1024L * 1024L
+    private const val MAX_DECODED_PCM_BYTES = 512L * 1024L * 1024L
 
     fun decodeToWave(
         context: Context,
@@ -36,11 +38,11 @@ object AndroidAudioTrackDecoder {
             extractor.setDataSource(context, uri, null)
             val trackIndex = (0 until extractor.trackCount).firstOrNull { index ->
                 extractor.getTrackFormat(index).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
-            } ?: throw IOException("Tệp nhạc không có track âm thanh.")
+            } ?: throw IOException("Tệp âm thanh không có track âm thanh.")
             extractor.selectTrack(trackIndex)
             val inputFormat = extractor.getTrackFormat(trackIndex)
             val mime = inputFormat.getString(MediaFormat.KEY_MIME)
-                ?: throw IOException("Tệp nhạc thiếu MIME codec.")
+                ?: throw IOException("Tệp âm thanh thiếu MIME codec.")
             codec = MediaCodec.createDecoderByType(mime)
             codec.configure(inputFormat, null, null, 0)
             codec.start()
@@ -90,7 +92,7 @@ object AndroidAudioTrackDecoder {
                                 throw IOException("Thông số PCM giải mã không hợp lệ.")
                             }
                             if (pcmEncoding !in setOf(AudioFormat.ENCODING_PCM_16BIT, AudioFormat.ENCODING_PCM_FLOAT)) {
-                                throw IOException("PCM ${pcmEncoding} của track chưa được hỗ trợ.")
+                                throw IOException("PCM $pcmEncoding của track chưa được hỗ trợ.")
                             }
                         }
                         else -> if (outputIndex >= 0) {
@@ -112,7 +114,7 @@ object AndroidAudioTrackDecoder {
                                 }
                                 written += normalized.size
                                 if (written > MAX_DECODED_PCM_BYTES) {
-                                    throw IOException("Track nhạc sau giải mã vượt giới hạn 64 MiB PCM.")
+                                    throw IOException("Track âm thanh sau giải mã vượt giới hạn 512 MiB PCM.")
                                 }
                                 output.write(normalized)
                             }
@@ -123,7 +125,7 @@ object AndroidAudioTrackDecoder {
                 }
             }
             if (decodedRate <= 0 || decodedChannels <= 0 || raw.length() <= 0L) {
-                throw IOException("Không giải mã được PCM từ track nhạc.")
+                throw IOException("Không giải mã được PCM từ track âm thanh.")
             }
             Pcm16Resampler.convertRaw(
                 raw = raw,
@@ -153,7 +155,7 @@ object AndroidAudioTrackDecoder {
     }
 }
 
-/** Bounded linear resampler used only for user-selected scene music. */
+/** Streaming linear resampler used only for user-selected local audio. */
 object Pcm16Resampler {
     fun convertRaw(
         raw: File,
@@ -163,44 +165,65 @@ object Pcm16Resampler {
         targetChannels: Int,
         destination: File,
     ) {
-        val bytes = raw.readBytes()
         val sourceFrameBytes = sourceChannels * 2
-        if (bytes.isEmpty() || bytes.size % sourceFrameBytes != 0) {
+        val rawLength = raw.length()
+        if (rawLength <= 0L || rawLength % sourceFrameBytes.toLong() != 0L) {
             throw IOException("PCM track bị cắt ngắn hoặc sai số kênh.")
         }
-        val sourceFrames = bytes.size / sourceFrameBytes
+        val sourceFrames = rawLength / sourceFrameBytes
         val targetFrames = (sourceFrames.toDouble() * targetSampleRate / sourceSampleRate)
             .roundToLong().coerceAtLeast(1L)
         val dataBytes = targetFrames * targetChannels * 2L
         if (dataBytes > 0xfffffff0L) throw IOException("Track sau resample vượt giới hạn WAV.")
         destination.parentFile?.mkdirs()
-        BufferedOutputStream(FileOutputStream(destination)).use { output ->
-            writeWaveHeader(output, targetSampleRate, targetChannels, dataBytes)
-            for (targetFrame in 0 until targetFrames) {
-                val sourcePosition = targetFrame.toDouble() * sourceSampleRate / targetSampleRate
-                val leftIndex = floor(sourcePosition).toInt().coerceIn(0, sourceFrames - 1)
-                val rightIndex = (leftIndex + 1).coerceAtMost(sourceFrames - 1)
-                val fraction = (sourcePosition - leftIndex).toFloat()
-                if (targetChannels == 1) {
-                    writeLe16(output, interpolate(mono(bytes, leftIndex, sourceChannels), mono(bytes, rightIndex, sourceChannels), fraction))
-                } else {
-                    writeLe16(output, interpolate(sampleAt(bytes, leftIndex, sourceChannels, 0), sampleAt(bytes, rightIndex, sourceChannels, 0), fraction))
-                    val rightChannel = if (sourceChannels == 1) 0 else 1
-                    writeLe16(output, interpolate(sampleAt(bytes, leftIndex, sourceChannels, rightChannel), sampleAt(bytes, rightIndex, sourceChannels, rightChannel), fraction))
+
+        BufferedInputStream(FileInputStream(raw), 64 * 1024).use { input ->
+            BufferedOutputStream(FileOutputStream(destination), 64 * 1024).use { output ->
+                writeWaveHeader(output, targetSampleRate, targetChannels, dataBytes)
+                val current = IntArray(sourceChannels)
+                val next = IntArray(sourceChannels)
+                readFrame(input, current)
+                if (sourceFrames > 1L) readFrame(input, next) else current.copyInto(next)
+                var currentIndex = 0L
+
+                for (targetFrame in 0L until targetFrames) {
+                    val sourcePosition = targetFrame.toDouble() * sourceSampleRate / targetSampleRate
+                    val leftIndex = floor(sourcePosition).toLong().coerceIn(0L, sourceFrames - 1L)
+                    while (currentIndex < leftIndex) {
+                        next.copyInto(current)
+                        currentIndex += 1L
+                        if (currentIndex + 1L < sourceFrames) {
+                            readFrame(input, next)
+                        } else {
+                            current.copyInto(next)
+                        }
+                    }
+                    val fraction = (sourcePosition - leftIndex.toDouble()).toFloat().coerceIn(0f, 1f)
+                    if (targetChannels == 1) {
+                        writeLe16(output, interpolate(mono(current), mono(next), fraction))
+                    } else {
+                        writeLe16(output, interpolate(current[0], next[0], fraction))
+                        val rightChannel = if (sourceChannels == 1) 0 else 1
+                        writeLe16(output, interpolate(current[rightChannel], next[rightChannel], fraction))
+                    }
                 }
             }
         }
     }
 
-    private fun mono(bytes: ByteArray, frame: Int, channels: Int): Int {
-        var sum = 0L
-        for (channelIndex in 0 until channels) sum += sampleAt(bytes, frame, channels, channelIndex)
-        return (sum / channels).toInt()
+    private fun readFrame(input: BufferedInputStream, samples: IntArray) {
+        for (channel in samples.indices) {
+            val lo = input.read()
+            val hi = input.read()
+            if (lo < 0 || hi < 0) throw IOException("PCM track bị cắt ngắn khi resample.")
+            samples[channel] = (((hi and 0xff) shl 8) or (lo and 0xff)).toShort().toInt()
+        }
     }
 
-    private fun sampleAt(bytes: ByteArray, frame: Int, channels: Int, channel: Int): Int {
-        val offset = (frame * channels + channel.coerceIn(0, channels - 1)) * 2
-        return (((bytes[offset + 1].toInt() and 0xff) shl 8) or (bytes[offset].toInt() and 0xff)).toShort().toInt()
+    private fun mono(samples: IntArray): Int {
+        var sum = 0L
+        samples.forEach { sum += it.toLong() }
+        return (sum / samples.size.coerceAtLeast(1)).toInt()
     }
 
     private fun interpolate(a: Int, b: Int, fraction: Float): Int =

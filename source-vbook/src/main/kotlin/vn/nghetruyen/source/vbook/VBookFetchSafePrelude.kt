@@ -72,7 +72,7 @@ object VBookFetchSafePrelude {
             return String(__vbookSafeCachedResponse(url,nativeOptions,nativeHeaders,responseKey,'${VBookRawNetworkBroker.OP_TEXT}',charset).body || '');
           };
           response.string=response.text;
-          response.json=function(){return JSON.parse(response.text());};
+          response.json=function(charset){return JSON.parse(response.text(charset));};
           response.html=function(charset){return Html.parse(response.text(charset),response.url||url);};
           response.document=response.html;
           response.base64=function(){return String(__vbookSafeCachedResponse(url,nativeOptions,nativeHeaders,responseKey,'${VBookRawNetworkBroker.OP_BASE64}',null).body || '');};

@@ -38,7 +38,7 @@ class SceneAmbienceController(context: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private data class Slot(
-        val asset: AudioDirectionAsset,
+        var asset: AudioDirectionAsset,
         val player: MediaPlayer,
         var fade: Float,
     )
@@ -198,6 +198,9 @@ class SceneAmbienceController(context: Context) {
                 existing.mixScale = mixScale
                 existing.overlapMinMillis = overlapMinMillis
                 existing.overlapMaxMillis = overlapMaxMillis
+                val refreshedAsset = candidates.firstOrNull { it.id == existing.current.asset.id } ?: asset
+                existing.current.asset = refreshedAsset
+                installPositiveBoost(existing.current.player, refreshedAsset.normalizationGainDb)
                 applyLevel(existing, existing.current)
                 val playing = runCatching { existing.current.player.isPlaying }.getOrDefault(false)
                 if (!playing) runCatching { existing.current.player.start() }
@@ -463,15 +466,13 @@ class SceneAmbienceController(context: Context) {
     }
 
     private fun releasePlayer(player: MediaPlayer) {
-        positiveBoosts.remove(player)?.let { enhancer ->
-            runCatching { enhancer.enabled = false }
-            runCatching { enhancer.release() }
-        }
+        clearPositiveBoost(player)
         runCatching { player.stop() }
         runCatching { player.release() }
     }
 
     private fun installPositiveBoost(player: MediaPlayer, gainDb: Float) {
+        clearPositiveBoost(player)
         val positiveDb = gainDb.coerceIn(0f, PcmLoudnessEstimator.MAX_GAIN_DB)
         if (positiveDb <= 0.001f) return
         val enhancer = runCatching {
@@ -481,6 +482,13 @@ class SceneAmbienceController(context: Context) {
             }
         }.getOrNull() ?: return
         positiveBoosts[player] = enhancer
+    }
+
+    private fun clearPositiveBoost(player: MediaPlayer) {
+        positiveBoosts.remove(player)?.let { enhancer ->
+            runCatching { enhancer.enabled = false }
+            runCatching { enhancer.release() }
+        }
     }
 
     private fun initialPhaseMillis(duration: Int, assetId: String, layerIndex: Int): Int {

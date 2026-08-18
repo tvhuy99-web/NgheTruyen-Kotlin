@@ -8,10 +8,14 @@ import org.mozilla.javascript.Context
  * Mirrors the lexical contract used by Chromium classic scripts: config, loaded libraries and the
  * entry script execute as separate scripts in one global realm. Top-level lexical declarations from
  * an earlier script must remain visible to later scripts even though they are not window properties.
+ *
+ * Rhino in the JVM test harness cannot execute every Chromium ES6 syntax form (notably `class` in
+ * this version), so this regression intentionally targets the declarations that caused the real
+ * compatibility failure: let/const plus legacy var/function globals.
  */
 class VBookSharedScriptRealmTest {
     @Test
-    fun configLibraryAndEntryShareEs6GlobalLexicalBindings() {
+    fun configLibraryAndEntryShareGlobalLexicalBindings() {
         val cx = Context.enter()
         try {
             cx.languageVersion = Context.VERSION_ES6
@@ -30,7 +34,7 @@ class VBookSharedScriptRealmTest {
                     let STVHOST='https://default.example';
                     try { if (CONFIG_URL) STVHOST=CONFIG_URL; } catch (ignored) {}
                     const LIB_CONST='const-ok';
-                    class SharedType { static value(){ return 'class-ok'; } }
+                    let LIB_LET='let-ok';
                     var LEGACY_VAR='var-ok';
                     function sharedHelper(){ return CONFIG_TIME; }
                 """.trimIndent(),
@@ -44,7 +48,7 @@ class VBookSharedScriptRealmTest {
                 """
                     (function(){
                       function execute(){
-                        return [STVHOST,LIB_CONST,SharedType.value(),LEGACY_VAR,sharedHelper()].join('|');
+                        return [STVHOST,LIB_CONST,LIB_LET,LEGACY_VAR,sharedHelper()].join('|');
                       }
                       return execute();
                     })()
@@ -54,7 +58,7 @@ class VBookSharedScriptRealmTest {
                 null,
             ))
 
-            assertEquals("https://configured.example|const-ok|class-ok|var-ok|2026", result)
+            assertEquals("https://configured.example|const-ok|let-ok|var-ok|2026", result)
         } finally {
             Context.exit()
         }

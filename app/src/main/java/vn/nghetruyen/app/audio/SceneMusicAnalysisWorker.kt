@@ -21,7 +21,8 @@ import vn.nghetruyen.app.NgheTruyenApplication
 /**
  * Measures a scene track once, then stores the XPK-style fixed normalization gain.
  * If loudness and peak measurements are already available, a new target LUFS only
- * recalculates gain and does not decode the file again.
+ * recalculates gain and does not decode the file again unless force remeasurement
+ * was explicitly requested by the normalization dialog.
  */
 class SceneMusicAnalysisWorker(
     appContext: Context,
@@ -49,8 +50,14 @@ class SceneMusicAnalysisWorker(
         }
         val target = (requestedTarget.takeIf(Float::isFinite) ?: defaultTarget)
             .coerceIn(PcmLoudnessEstimator.MIN_TARGET_LUFS, maxTarget)
+        val forceRemeasure = inputData.getBoolean(KEY_FORCE_REMEASURE, false)
 
-        if (track.normalizationVersion >= PcmLoudnessEstimator.VERSION &&
+        if (forceRemeasure) {
+            invalidateStoredNormalization(trackId, target)
+        }
+
+        if (!forceRemeasure &&
+            track.normalizationVersion >= PcmLoudnessEstimator.VERSION &&
             track.normalizationError.isBlank() &&
             track.loudnessLufsEstimate.isFinite() &&
             track.peakDbfs.isFinite()
@@ -123,6 +130,25 @@ class SceneMusicAnalysisWorker(
         }
     }
 
+    /** Marks the previous result unusable before a forced full decode begins. */
+    private suspend fun invalidateStoredNormalization(trackId: String, targetLufs: Float) {
+        val current = container.libraryRepository.getSceneMusicTrack(trackId) ?: return
+        container.database.sceneMusicTrackDao().upsert(
+            current.copy(
+                volume = 1f,
+                normalizationTargetLufs = targetLufs.coerceIn(
+                    PcmLoudnessEstimator.MIN_TARGET_LUFS,
+                    PcmLoudnessEstimator.MAX_TARGET_LUFS,
+                ),
+                normalizationGainDb = 0f,
+                normalizationPeakLimited = false,
+                normalizationVersion = 0,
+                normalizationError = "",
+                updatedAt = System.currentTimeMillis(),
+            ),
+        )
+    }
+
     /**
      * Persist exactly the range produced by [PcmLoudnessEstimator].
      *
@@ -164,6 +190,7 @@ class SceneMusicAnalysisWorker(
     companion object {
         private const val KEY_TRACK_ID = "track_id"
         private const val KEY_TARGET_LUFS = "target_lufs"
+        private const val KEY_FORCE_REMEASURE = "force_remeasure"
         private const val KEY_LOUDNESS = "loudness_lufs"
         private const val KEY_PEAK = "peak_dbfs"
         private const val KEY_GAIN_DB = "normalization_gain_db"
@@ -173,8 +200,15 @@ class SceneMusicAnalysisWorker(
         private const val RETRY_BACKOFF_SECONDS = 10L
         private val analysisMutex = Mutex()
 
-        fun enqueue(context: Context, trackId: String, targetLufs: Float? = null): UUID {
-            val data = Data.Builder().putString(KEY_TRACK_ID, trackId)
+        fun enqueue(
+            context: Context,
+            trackId: String,
+            targetLufs: Float? = null,
+            forceRemeasure: Boolean = false,
+        ): UUID {
+            val data = Data.Builder()
+                .putString(KEY_TRACK_ID, trackId)
+                .putBoolean(KEY_FORCE_REMEASURE, forceRemeasure)
             targetLufs?.takeIf(Float::isFinite)?.let { data.putFloat(KEY_TARGET_LUFS, it) }
             val request = OneTimeWorkRequestBuilder<SceneMusicAnalysisWorker>()
                 .setInputData(data.build())

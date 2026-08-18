@@ -5,6 +5,41 @@ import vn.nghetruyen.app.core.model.ChapterContent
 import vn.nghetruyen.app.core.model.ChapterPage
 import vn.nghetruyen.app.core.model.ChapterSummary
 
+/**
+ * Lightweight bridge from pagination code into the app diagnostics runtime.
+ *
+ * The playback package deliberately does not own an Android Context. The Application installs a
+ * reporter once, and pagination can then emit exact stage/failure events without reaching through
+ * global singletons or changing the public merge API.
+ */
+object ChapterPaginationDiagnostics {
+    @Volatile
+    private var reporter: ((String, Boolean, Map<String, String>) -> Unit)? = null
+
+    fun install(reporter: (String, Boolean, Map<String, String>) -> Unit) {
+        this.reporter = reporter
+    }
+
+    internal fun mark(
+        name: String,
+        error: Boolean = false,
+        attributes: Map<String, String> = emptyMap(),
+    ) {
+        runCatching { reporter?.invoke(name, error, attributes) }
+        if (error) {
+            System.err.println(
+                buildString {
+                    append(name)
+                    if (attributes.isNotEmpty()) {
+                        append(' ')
+                        append(attributes.entries.joinToString(" ") { (key, value) -> "$key=$value" })
+                    }
+                },
+            )
+        }
+    }
+}
+
 data class PersistedChapterPageCursor(
     val url: String,
     val startIndex: Int,
@@ -67,23 +102,140 @@ object ChapterCatalogMerger {
         page: ChapterPage,
         previouslyRequestedPages: Set<String> = emptySet(),
     ): ChapterCatalogMergeResult {
+        val storyId = existing.firstOrNull()?.storyId
+            ?.takeIf(String::isNotBlank)
+            ?: page.chapters.firstOrNull()?.storyId.orEmpty()
+        ChapterPaginationDiagnostics.mark(
+            name = "CHAPTER_PAGE_MERGE_STARTED",
+            attributes = mapOf(
+                "storyId" to storyId.take(160),
+                "existingCount" to existing.size.toString(),
+                "incomingCount" to page.chapters.size.toString(),
+                "requestedPage" to pageIdentity(requestedPageUrl).takeLast(500),
+            ),
+        )
+
+        return try {
+            mergeGuarded(existing, requestedPageUrl, page, previouslyRequestedPages, storyId)
+        } catch (error: Exception) {
+            ChapterPaginationDiagnostics.mark(
+                name = "CHAPTER_PAGE_MERGE_FAILED",
+                error = true,
+                attributes = mapOf(
+                    "storyId" to storyId.take(160),
+                    "existingCount" to existing.size.toString(),
+                    "incomingCount" to page.chapters.size.toString(),
+                    "exception" to error::class.java.name.take(240),
+                    "message" to error.message.orEmpty().take(500),
+                ),
+            )
+            ChapterCatalogMergeResult(
+                chapters = existing,
+                nextPageUrl = null,
+                addedCount = 0,
+                repeatedCursor = true,
+            )
+        }
+    }
+
+    private fun mergeGuarded(
+        existing: List<ChapterSummary>,
+        requestedPageUrl: String,
+        page: ChapterPage,
+        previouslyRequestedPages: Set<String>,
+        storyId: String,
+    ): ChapterCatalogMergeResult {
+        val identitiesById = linkedMapOf<String, String>()
+        existing.forEach { chapter ->
+            val id = chapter.id.trim()
+            if (id.isNotBlank()) identitiesById.putIfAbsent(id, chapterIdentity(chapter))
+        }
+
+        val conflictingIds = linkedSetOf<String>()
+        var blankIdCount = 0
+        page.chapters.forEach { chapter ->
+            val id = chapter.id.trim()
+            if (id.isBlank()) {
+                blankIdCount += 1
+                return@forEach
+            }
+            val identity = chapterIdentity(chapter)
+            val previousIdentity = identitiesById[id]
+            if (previousIdentity != null && previousIdentity != identity) {
+                conflictingIds += id
+            } else {
+                identitiesById.putIfAbsent(id, identity)
+            }
+        }
+
+        if (blankIdCount > 0 || conflictingIds.isNotEmpty()) {
+            ChapterPaginationDiagnostics.mark(
+                name = "CHAPTER_PAGE_UNSAFE_ID_BLOCKED",
+                error = true,
+                attributes = mapOf(
+                    "storyId" to storyId.take(160),
+                    "blankIdCount" to blankIdCount.toString(),
+                    "conflictingIdCount" to conflictingIds.size.toString(),
+                    "conflictingIds" to conflictingIds.joinToString(",").take(700),
+                    "existingCount" to existing.size.toString(),
+                    "incomingCount" to page.chapters.size.toString(),
+                    "reason" to "compose-key-safety",
+                ),
+            )
+            return ChapterCatalogMergeResult(
+                chapters = existing,
+                nextPageUrl = null,
+                addedCount = 0,
+                repeatedCursor = true,
+            )
+        }
+
         val seen = existing.mapTo(linkedSetOf(), ::chapterIdentity)
         val merged = existing.toMutableList()
         page.chapters.forEach { chapter ->
             if (seen.add(chapterIdentity(chapter))) merged += chapter
         }
 
+        val addedCount = merged.size - existing.size
         val requestedIdentity = pageIdentity(requestedPageUrl)
         val visitedIdentities = previouslyRequestedPages.mapTo(hashSetOf(), ::pageIdentity)
         visitedIdentities += requestedIdentity
         val candidate = page.nextPageUrl?.trim()?.takeIf(String::isNotBlank)
         val repeated = candidate != null && pageIdentity(candidate) in visitedIdentities
-        return ChapterCatalogMergeResult(
+        val noProgress = addedCount == 0
+
+        if (noProgress) {
+            ChapterPaginationDiagnostics.mark(
+                name = "CHAPTER_PAGE_NO_PROGRESS_BLOCKED",
+                error = true,
+                attributes = mapOf(
+                    "storyId" to storyId.take(160),
+                    "existingCount" to existing.size.toString(),
+                    "incomingCount" to page.chapters.size.toString(),
+                    "candidateNextPage" to candidate.orEmpty().takeLast(500),
+                    "reason" to "zero-new-chapters",
+                ),
+            )
+        }
+
+        val stopPaging = repeated || noProgress
+        val result = ChapterCatalogMergeResult(
             chapters = merged,
-            nextPageUrl = candidate?.takeUnless { repeated },
-            addedCount = merged.size - existing.size,
-            repeatedCursor = repeated,
+            nextPageUrl = candidate?.takeUnless { stopPaging },
+            addedCount = addedCount,
+            repeatedCursor = stopPaging,
         )
+        ChapterPaginationDiagnostics.mark(
+            name = "CHAPTER_PAGE_MERGE_COMPLETED",
+            attributes = mapOf(
+                "storyId" to storyId.take(160),
+                "addedCount" to result.addedCount.toString(),
+                "totalCount" to result.chapters.size.toString(),
+                "hasNextPage" to (!result.nextPageUrl.isNullOrBlank()).toString(),
+                "stoppedSafely" to result.repeatedCursor.toString(),
+            ),
+        )
+        return result
     }
 
     fun sameChapter(left: ChapterSummary, right: ChapterSummary): Boolean =

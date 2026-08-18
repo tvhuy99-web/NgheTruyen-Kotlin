@@ -18,7 +18,8 @@ import vn.nghetruyen.app.core.model.StorySummary
 internal fun StorySource.withStableDefaultLuaId(): StorySource {
     val stableId = DEFAULT_LUA_STABLE_IDS[descriptor.id] ?: return this
     if (descriptor.id == stableId) return this
-    return StableDefaultLuaSourceAlias(this, stableId)
+    val aliased = StableDefaultLuaSourceAlias(this, stableId)
+    return if (stableId == "truyenfull") aliased.withChapterCatalogSafety() else aliased
 }
 
 private class StableDefaultLuaSourceAlias(

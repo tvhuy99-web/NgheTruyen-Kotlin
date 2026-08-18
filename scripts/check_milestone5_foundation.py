@@ -138,7 +138,7 @@ def java_api_static() -> None:
 
 
 def main() -> None:
-    require("app/build.gradle.kts", "versionCode = 28", 'versionName = "2.8.0-ai-narration-priority2-complete"', 'implementation("co.ntbl:lame:1.0.0")', "verifyReleaseSigning")
+    require("app/build.gradle.kts", "versionCode = 36", 'versionName = "3.0.2"', 'implementation("co.ntbl:lame:1.0.0")', "verifyReleaseSigning")
     require("app/src/main/java/vn/nghetruyen/app/core/model/Models.kt", 'MP3("mp3", "audio/mpeg")')
     require("app/src/main/java/vn/nghetruyen/app/audio/AudioExportEngine.kt", "AudioExportPackaging", "ONE_FILE_PER_CHAPTER", "chapterMarkers")
     require("app/src/main/java/vn/nghetruyen/app/audio/Mp3LameEncoder.kt", "Lame()", "encodeBuffer", "encodeFlush", "Id3v23Writer")
@@ -162,7 +162,8 @@ def main() -> None:
     require("app/src/main/java/vn/nghetruyen/app/transfer/BackupTransferManager.kt", "FORMAT_VERSION = 15", "writeChapterTransforms", "writeVoiceAssignments", "writeSceneMusicTracks", "writeSceneMusicCues")
     require("app/src/main/java/vn/nghetruyen/app/diagnostics/PerformanceDiagnostics.kt", "Debug.getPss", "chapterSearchP95Millis", "10_000")
     require("app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt", "resumeAudioExport", "AudioExportRequest", "runPerformanceDiagnostics")
-    require("app/src/main/java/vn/nghetruyen/app/MainActivity.kt", "audioExportDirectoryLauncher", "OpenDocumentTree", "AudioExportRequest", "OpenMultipleDocuments")
+    require("app/src/main/java/vn/nghetruyen/app/MainActivity.kt", "audioExportDirectoryLauncher", "OpenDocumentTree", "AudioExportRequest")
+    require("app/src/main/java/vn/nghetruyen/app/ui/components/UnifiedAudioAssetManagerDialog.kt", "ActivityResultContracts.OpenMultipleDocuments()")
     require(
         "app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt",
         "XUẤT SÁCH NÓI",

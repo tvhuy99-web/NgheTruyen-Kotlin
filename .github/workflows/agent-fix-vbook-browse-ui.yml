@@ -6,6 +6,7 @@ on:
       - agent/generalize-browser-session-fetch
     paths:
       - scripts/agent_fix_vbook_browse_ui.py
+      - scripts/agent_refine_vbook_genre_entries.py
       - .github/workflows/agent-fix-vbook-browse-ui.yml
 
 permissions:
@@ -25,15 +26,16 @@ jobs:
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Apply browse/presentation fix when needed
+      - name: Apply browse/presentation fixes when needed
         id: patch
         continue-on-error: true
         shell: bash
         run: |
-          if grep -q 'val supportsGenre: Boolean' app/src/main/java/vn/nghetruyen/app/sources/StorySource.kt; then
-            echo 'Browse patch already present; validating current tree.'
-          else
+          if ! grep -q 'val supportsGenre: Boolean' app/src/main/java/vn/nghetruyen/app/sources/StorySource.kt; then
             python3 scripts/agent_fix_vbook_browse_ui.py
+          fi
+          if ! grep -q 'data class SourceBrowseEntry' app/src/main/java/vn/nghetruyen/app/sources/StorySource.kt; then
+            python3 scripts/agent_refine_vbook_genre_entries.py
           fi
 
       - name: Verify diff
@@ -64,10 +66,10 @@ jobs:
             tail -n 600 /tmp/vbook-browse-ui.log > .agent/vbook-browse-ui-test.log
           fi
           if [ "$PATCH_OUTCOME" = success ] && [ "$DIFF_OUTCOME" = success ] && [ "$TEST_OUTCOME" = success ]; then
-            rm -f scripts/agent_fix_vbook_browse_ui.py .github/workflows/agent-fix-vbook-browse-ui.yml .agent/vbook-browse-ui-status.txt .agent/vbook-browse-ui-test.log
-            message='fix: expose dynamic vBook genre navigation'
+            rm -f scripts/agent_fix_vbook_browse_ui.py scripts/agent_refine_vbook_genre_entries.py .github/workflows/agent-fix-vbook-browse-ui.yml .agent/vbook-browse-ui-status.txt .agent/vbook-browse-ui-test.log
+            message='fix: expose complete dynamic vBook genre navigation'
           else
-            message='ci: record vBook browse UI verification failure'
+            message='ci: record keyed vBook browse UI verification failure'
           fi
           git add -A
           if git diff --cached --quiet; then exit 0; fi
@@ -80,4 +82,4 @@ jobs:
         if: always() && (steps.patch.outcome != 'success' || steps.diffcheck.outcome != 'success' || steps.tests.outcome != 'success')
         run: exit 1
 
-      # Re-run after fixing the regression-test string literal.
+      # Final architecture pass: labels are presentation, stable keys route duplicate actions.

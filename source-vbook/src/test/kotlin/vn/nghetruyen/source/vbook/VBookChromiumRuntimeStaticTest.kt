@@ -26,6 +26,9 @@ class VBookChromiumRuntimeStaticTest {
             "SourceHostKernelWireExecutor.execute(",
             "brokers.network.execute(",
             "brokers.browser.execute(",
+            "\"script_compile\" -> scriptCompile(payload)",
+            "VBookScriptBundleCompiler.compile(",
+            "MAX_COMPILED_SCRIPT_BYTES",
             "MAX_BRIDGE_CALLS",
         ).forEach { token -> assertTrue("missing Chromium containment invariant: $token", token in runtime) }
 
@@ -33,7 +36,8 @@ class VBookChromiumRuntimeStaticTest {
             "global.prompt.bind(global)",
             "Object.defineProperty(global,'__bridge'",
             "__rpc('network_fetch'",
-            "__rpc('resource_read'",
+            "__rpc('script_compile'",
+            "__ngheSetExecutionPrelude",
             "factory.call(global)",
             "return String(Script.execute(\$entry,'execute',__payload));",
             "global.Html=global.HTML=global.Document={",
@@ -51,11 +55,12 @@ class VBookChromiumRuntimeStaticTest {
             "Class.forName(",
             "Runtime.getRuntime(",
             "ProcessBuilder(",
+            "(0,eval)(code+'\\n//# sourceURL='",
             "global.Html=global.HTML=global.Document=Object.freeze(",
             "global.Engine=Object.freeze(",
             "global.Qt=Object.freeze(",
         )) {
-            assertFalse("Chromium action engine must not expose process/platform escape or freeze compatibility decorators: $forbidden", forbidden in runtime || forbidden in prelude)
+            assertFalse("Chromium action engine must not expose process/platform escape, use the old per-load eval, or freeze compatibility decorators: $forbidden", forbidden in runtime || forbidden in prelude)
         }
     }
 

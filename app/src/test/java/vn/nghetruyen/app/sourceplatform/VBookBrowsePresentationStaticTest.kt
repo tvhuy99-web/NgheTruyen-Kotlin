@@ -3,6 +3,7 @@ package vn.nghetruyen.app.sourceplatform
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -10,13 +11,13 @@ class VBookBrowsePresentationStaticTest {
     @Test
     fun dynamicGenreNavigationAndPrivateSourceIdsStayWired() {
         val root = repositoryRoot()
-        val storySource = Files.readString(root.resolve("app/src/main/java/vn/nghetruyen/app/sources/StorySource.kt"))
-        val vbook = Files.readString(root.resolve("app/src/main/java/vn/nghetruyen/app/sourceplatform/VBookStorySource.kt"))
-        val viewModel = Files.readString(root.resolve("app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt"))
-        val explore = Files.readString(root.resolve("app/src/main/java/vn/nghetruyen/app/ui/screens/ExploreScreen.kt"))
-        val common = Files.readString(root.resolve("app/src/main/java/vn/nghetruyen/app/ui/components/Common.kt"))
-        val app = Files.readString(root.resolve("app/src/main/java/vn/nghetruyen/app/ui/ReferenceNgheTruyenApp.kt"))
-        val legacyApp = Files.readString(root.resolve("app/src/main/java/vn/nghetruyen/app/ui/NgheTruyenApp.kt"))
+        val storySource = readUtf8(root.resolve("app/src/main/java/vn/nghetruyen/app/sources/StorySource.kt"))
+        val vbook = readUtf8(root.resolve("app/src/main/java/vn/nghetruyen/app/sourceplatform/VBookStorySource.kt"))
+        val viewModel = readUtf8(root.resolve("app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt"))
+        val explore = readUtf8(root.resolve("app/src/main/java/vn/nghetruyen/app/ui/screens/ExploreScreen.kt"))
+        val common = readUtf8(root.resolve("app/src/main/java/vn/nghetruyen/app/ui/components/Common.kt"))
+        val app = readUtf8(root.resolve("app/src/main/java/vn/nghetruyen/app/ui/ReferenceNgheTruyenApp.kt"))
+        val legacyApp = readUtf8(root.resolve("app/src/main/java/vn/nghetruyen/app/ui/NgheTruyenApp.kt"))
 
         assertTrue("StorySource must expose a generic dynamic genre capability", "val supportsGenre: Boolean" in storySource)
         assertTrue("StorySource must expose a generic genre menu API", "suspend fun genreMenu()" in storySource)
@@ -36,6 +37,8 @@ class VBookBrowsePresentationStaticTest {
         assertFalse("Story cards must not speak raw source ids", "Nguồn: \${story.sourceId}" in common)
         assertFalse("Story cards must not render raw source ids", "Text(story.sourceId" in common)
     }
+
+    private fun readUtf8(path: Path): String = String(Files.readAllBytes(path), StandardCharsets.UTF_8)
 
     private fun repositoryRoot(): Path {
         val working = Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize()

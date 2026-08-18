@@ -80,3 +80,5 @@ jobs:
       - name: Fail workflow when verification failed
         if: always() && (steps.patch.outcome != 'success' || steps.diffcheck.outcome != 'success' || steps.tests.outcome != 'success')
         run: exit 1
+
+      # Trigger after the static contract was updated to shared classic-script loading.

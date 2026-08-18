@@ -60,14 +60,11 @@ class SceneMusicAnalysisWorker(
                 track.peakDbfs,
                 target,
             )
-            container.libraryRepository.updateSceneMusicNormalization(
-                id = trackId,
+            persistNormalization(
+                trackId = trackId,
                 loudnessLufs = track.loudnessLufsEstimate,
                 peakDbfs = track.peakDbfs,
-                targetLufs = normalization.targetLufs,
-                gainDb = normalization.gainDb,
-                peakLimited = normalization.peakLimited,
-                version = PcmLoudnessEstimator.VERSION,
+                normalization = normalization,
             )
             return Result.success(
                 workDataOf(
@@ -96,14 +93,11 @@ class SceneMusicAnalysisWorker(
                     analysis.peakDbfs,
                     target,
                 )
-                container.libraryRepository.updateSceneMusicNormalization(
-                    id = trackId,
+                persistNormalization(
+                    trackId = trackId,
                     loudnessLufs = analysis.loudnessLufs,
                     peakDbfs = analysis.peakDbfs,
-                    targetLufs = normalization.targetLufs,
-                    gainDb = normalization.gainDb,
-                    peakLimited = normalization.peakLimited,
-                    version = PcmLoudnessEstimator.VERSION,
+                    normalization = normalization,
                 )
                 Result.success(
                     workDataOf(
@@ -127,6 +121,41 @@ class SceneMusicAnalysisWorker(
         } finally {
             temp.delete()
         }
+    }
+
+    /**
+     * Persist exactly the range produced by [PcmLoudnessEstimator].
+     *
+     * The legacy repository helper clamps gain to +12 dB and target to -18 LUFS.
+     * That silently truncates valid normalization results (especially very quiet
+     * tracks and ambience/SFX targets above -18 LUFS). Read the latest row before
+     * writing so a concurrent title/tag/enable edit is not overwritten.
+     */
+    private suspend fun persistNormalization(
+        trackId: String,
+        loudnessLufs: Float,
+        peakDbfs: Float,
+        normalization: PcmLoudnessEstimator.Normalization,
+    ) {
+        val current = container.libraryRepository.getSceneMusicTrack(trackId) ?: return
+        container.database.sceneMusicTrackDao().upsert(
+            current.copy(
+                loudnessLufsEstimate = loudnessLufs.coerceIn(-120f, 12f),
+                peakDbfs = peakDbfs.coerceIn(-120f, 12f),
+                normalizationTargetLufs = normalization.targetLufs.coerceIn(
+                    PcmLoudnessEstimator.MIN_TARGET_LUFS,
+                    PcmLoudnessEstimator.MAX_TARGET_LUFS,
+                ),
+                normalizationGainDb = normalization.gainDb.coerceIn(
+                    PcmLoudnessEstimator.MIN_GAIN_DB,
+                    PcmLoudnessEstimator.MAX_GAIN_DB,
+                ),
+                normalizationPeakLimited = normalization.peakLimited,
+                normalizationVersion = PcmLoudnessEstimator.VERSION,
+                normalizationError = "",
+                updatedAt = System.currentTimeMillis(),
+            ),
+        )
     }
 
     companion object {

@@ -26,7 +26,7 @@ class VBookBrowsePresentationStaticTest {
         assertTrue("Dynamic genre menu must be vertically scalable", "items(state.genreEntries" in explore)
         assertTrue("App navigation must route the genre tab", "viewModel.browseGenreMenu()" in app)
 
-        assertFalse("Story cards must not speak raw source ids", "Nguồn: ${story.sourceId}" in common)
+        assertFalse("Story cards must not speak raw source ids", "Nguồn: \${story.sourceId}" in common)
         assertFalse("Story cards must not render raw source ids", "Text(story.sourceId" in common)
     }
 

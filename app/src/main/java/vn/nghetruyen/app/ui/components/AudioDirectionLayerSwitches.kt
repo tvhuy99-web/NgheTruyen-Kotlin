@@ -139,20 +139,6 @@ fun AudioDirectionLayerSwitches(
             checked = snapshot.soundEffectsEnabled,
             onCheckedChange = preferences::setSoundEffectsEnabled,
         )
-        AudioFloatSlider(
-            title = "Âm lượng môi trường",
-            value = snapshot.ambienceMasterVolume,
-            range = 0f..1f,
-            shown = { "%.0f%%".format(it * 100f) },
-            onValueChange = preferences::setAmbienceMasterVolume,
-        )
-        AudioFloatSlider(
-            title = "Âm lượng hiệu ứng",
-            value = snapshot.soundEffectsMasterVolume,
-            range = 0f..1f,
-            shown = { "%.0f%%".format(it * 100f) },
-            onValueChange = preferences::setSoundEffectsMasterVolume,
-        )
 
         HorizontalDivider(Modifier.padding(vertical = 6.dp))
         AudioIntSlider(
@@ -309,9 +295,15 @@ fun AudioDirectionLayerSwitches(
             confirmButton = {
                 if (total > 0 && finished >= total) {
                     TextButton(onClick = {
+                        musicNormalizationTarget = normalizationRunMusicTarget
+                        preferences.setAmbienceNormalizationTargetLufs(normalizationRunAmbienceTarget)
+                        preferences.setSoundEffectsNormalizationTargetLufs(normalizationRunSfxTarget)
+                        scope.launch {
+                            settingsRepository.setSceneMusicTargetLufs(normalizationRunMusicTarget)
+                        }
                         showNormalizationProgress = false
                         normalizationWorkIds = emptyList()
-                    }) { Text("ĐÓNG") }
+                    }) { Text("LƯU") }
                 }
             },
             dismissButton = {

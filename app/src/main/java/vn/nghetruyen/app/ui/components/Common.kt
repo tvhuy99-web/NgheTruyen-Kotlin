@@ -172,7 +172,6 @@ fun StoryCard(story: StorySummary, onClick: () -> Unit) {
     val spoken = buildString {
         append(story.title)
         if (story.author.isNotBlank()) append(". Tác giả: ${story.author}")
-        append(". Nguồn: ${story.sourceId}")
         if (story.description.isNotBlank()) append(". ${story.description}")
     }
     Card(
@@ -192,7 +191,7 @@ fun StoryCard(story: StorySummary, onClick: () -> Unit) {
             if (story.author.isNotBlank()) {
                 Text(story.author, style = MaterialTheme.typography.bodyMedium, color = ReferenceSecondaryText)
             }
-            Text(story.sourceId, style = MaterialTheme.typography.labelMedium, color = ReferenceSecondaryText)
+            // Source identity remains internal for routing/deduplication; cards never expose raw source ids.
             if (story.description.isNotBlank()) {
                 Text(story.description, style = MaterialTheme.typography.bodySmall, maxLines = 3, color = ReferenceSecondaryText)
             }

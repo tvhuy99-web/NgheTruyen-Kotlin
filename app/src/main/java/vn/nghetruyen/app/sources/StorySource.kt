@@ -54,6 +54,7 @@ data class SourceDescriptor(
     val supportsComments: Boolean = false,
     val commentCapability: SourceCommentCapability = if (supportsComments) SourceCommentCapability.PAGED else SourceCommentCapability.NONE,
     val supportsHome: Boolean = true,
+    val supportsGenre: Boolean = false,
     val supportsSuggestions: Boolean = false,
     val implementationKind: SourceImplementationKind = SourceImplementationKind.BUILT_IN,
     val uiActions: List<SourceUiActionDescriptor> = emptyList(),
@@ -89,6 +90,9 @@ interface StorySource {
     suspend fun chapter(url: String): AppResult<ChapterContent>
 
     suspend fun home(page: Int = 1): AppResult<List<StorySummary>> = search("", page)
+
+    /** Top-level browse menu. Static sources fall back to descriptor categories. */
+    suspend fun genreMenu(): AppResult<List<String>> = AppResult.Success(descriptor.categories)
 
     suspend fun suggestions(query: String): AppResult<List<String>> = AppResult.Success(emptyList())
 

@@ -144,6 +144,10 @@ fun ReferenceNgheTruyenApp(
                             activateExploreDiagnosticContext(mode = ExploreMode.HOME)
                             viewModel.browseHome()
                         },
+                        onGenreSelected = {
+                            activateExploreDiagnosticContext(mode = ExploreMode.GENRE)
+                            viewModel.browseGenreMenu()
+                        },
                         onCategorySelected = { category ->
                             activateExploreDiagnosticContext(
                                 mode = ExploreMode.CATEGORY,

@@ -70,6 +70,7 @@ fun ExploreScreen(
     onCancelSearch: () -> Unit,
     onSourceSelected: (String) -> Unit,
     onHomeSelected: () -> Unit,
+    onGenreSelected: () -> Unit,
     onCategorySelected: (String) -> Unit,
     onSuggestionSelected: (String) -> Unit,
     onLoadMore: () -> Unit,
@@ -107,6 +108,7 @@ fun ExploreScreen(
     val view = LocalView.current
     val listTitle = when (state.exploreMode) {
         ExploreMode.HOME -> "TRANG CHỦ"
+        ExploreMode.GENRE -> "THỂ LOẠI"
         ExploreMode.CATEGORY -> state.activeCategory.orEmpty().ifBlank { "DANH SÁCH TRUYỆN" }.uppercase()
         ExploreMode.SEARCH -> "KẾT QUẢ TÌM KIẾM"
     }
@@ -229,7 +231,7 @@ fun ExploreScreen(
                 }
             }
 
-            if (!state.searchAllSources && (selectedSource?.supportsHome == true || state.categories.isNotEmpty())) {
+            if (!state.searchAllSources && (selectedSource?.supportsHome == true || selectedSource?.supportsGenre == true || state.categories.isNotEmpty())) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -243,6 +245,17 @@ fun ExploreScreen(
                             selected = state.exploreMode == ExploreMode.HOME,
                             onClick = onHomeSelected,
                             accessibilityLabel = "TRANG CHỦ",
+                            minHeight = 54.dp,
+                            unselectedColor = ReferenceDivider,
+                            unselectedContentColor = ReferenceText,
+                        )
+                    }
+                    if (selectedSource?.supportsGenre == true) {
+                        ReferenceTabButton(
+                            text = "THỂ LOẠI",
+                            selected = state.exploreMode == ExploreMode.GENRE,
+                            onClick = onGenreSelected,
+                            accessibilityLabel = "THỂ LOẠI",
                             minHeight = 54.dp,
                             unselectedColor = ReferenceDivider,
                             unselectedContentColor = ReferenceText,
@@ -264,8 +277,9 @@ fun ExploreScreen(
             }
         }
 
+        val visibleItemCount = if (state.exploreMode == ExploreMode.GENRE) state.genreEntries.size else state.stories.size
         Text(
-            text = "$listTitle • ${state.stories.size}",
+            text = "$listTitle • $visibleItemCount",
             color = ReferenceText,
             fontSize = 18.sp,
             fontWeight = FontWeight.SemiBold,
@@ -274,7 +288,11 @@ fun ExploreScreen(
                 .background(ReferencePanelBackground)
                 .semantics {
                     heading()
-                    contentDescription = "$listTitle, ${state.stories.size} truyện"
+                    contentDescription = if (state.exploreMode == ExploreMode.GENRE) {
+                        "$listTitle, ${state.genreEntries.size} mục"
+                    } else {
+                        "$listTitle, ${state.stories.size} truyện"
+                    }
                 }
                 .padding(8.dp),
         )
@@ -288,10 +306,33 @@ fun ExploreScreen(
             )
         }
 
-        if (state.stories.isEmpty() && !state.loading) {
+        if (state.exploreMode == ExploreMode.GENRE) {
+            if (state.genreEntries.isEmpty() && !state.loading) {
+                Text(
+                    text = "Tiện ích chưa trả về mục thể loại nào.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = ReferenceSecondaryText,
+                    modifier = Modifier.padding(16.dp),
+                )
+            } else {
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    items(state.genreEntries, key = { it }) { category ->
+                        ReferenceActionButton(
+                            text = category,
+                            onClick = { onCategorySelected(category) },
+                            accessibilityLabel = category,
+                            normalColor = ReferencePanelBackground,
+                            normalContentColor = ReferenceText,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
+                        )
+                    }
+                }
+            }
+        } else if (state.stories.isEmpty() && !state.loading) {
             Text(
                 text = when (state.exploreMode) {
                     ExploreMode.HOME -> "Trang chủ nguồn chưa trả về truyện nào."
+                    ExploreMode.GENRE -> "Tiện ích chưa trả về mục thể loại nào."
                     ExploreMode.CATEGORY -> "Danh mục đang chọn chưa có kết quả."
                     ExploreMode.SEARCH -> "Chưa có kết quả từ nguồn đang chọn."
                 },

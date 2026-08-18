@@ -322,43 +322,45 @@ class SceneMusicController(
     private fun refreshPositiveNormalizationBoost(slot: Slot) {
         scope.launch(Dispatchers.IO) {
             val application = context.applicationContext as? NgheTruyenApplication ?: return@launch
-            val track = application.container.libraryRepository.getSceneMusicTrack(slot.trackId) ?: return@launch
-            if (
-                track.normalizationVersion < PcmLoudnessEstimator.VERSION ||
-                track.normalizationError.isNotBlank() ||
-                !track.loudnessLufsEstimate.isFinite() ||
-                !track.peakDbfs.isFinite()
+            val track = application.container.libraryRepository.getSceneMusicTrack(slot.trackId)
+            val gainDb = if (
+                track != null &&
+                track.normalizationVersion >= PcmLoudnessEstimator.VERSION &&
+                track.normalizationError.isBlank() &&
+                track.loudnessLufsEstimate.isFinite() &&
+                track.peakDbfs.isFinite()
             ) {
-                return@launch
+                val target = application.container.settingsRepository.snapshot().sceneMusicTargetLufs
+                PcmLoudnessEstimator.calculateNormalization(
+                    track.loudnessLufsEstimate,
+                    track.peakDbfs,
+                    target,
+                ).gainDb
+            } else {
+                0f
             }
-            val target = application.container.settingsRepository.snapshot().sceneMusicTargetLufs
-            val gainDb = PcmLoudnessEstimator.calculateNormalization(
-                track.loudnessLufsEstimate,
-                track.peakDbfs,
-                target,
-            ).gainDb
-            if (gainDb <= 0.001f) return@launch
-            val gainLinear = PcmLoudnessEstimator.gainDbToLinear(gainDb)
+            val gainLinear = PcmLoudnessEstimator.gainDbToLinear(gainDb.coerceAtLeast(0f))
             withContext(Dispatchers.Main.immediate) {
                 if (releasedController || (active !== slot && outgoing !== slot)) return@withContext
-                // ReaderPlaybackService already folds normalization into baseVolume until MediaPlayer's
-                // 1.0 ceiling. When it has not hit that ceiling, remove that folded positive part here
-                // and let LoudnessEnhancer apply it once. When it has hit the ceiling, the enhancer
-                // supplies the positive gain that MediaPlayer.setVolume could not represent.
-                if (slot.baseVolume < 0.999f && gainLinear > 1f) {
-                    slot.baseVolume = (slot.baseVolume / gainLinear).coerceIn(0f, 1f)
+                if (gainDb > 0.001f) {
+                    // ReaderPlaybackService already folds normalization into baseVolume until MediaPlayer's
+                    // 1.0 ceiling. When it has not hit that ceiling, remove that folded positive part here
+                    // and let LoudnessEnhancer apply it once. When it has hit the ceiling, the enhancer
+                    // supplies the positive gain that MediaPlayer.setVolume could not represent.
+                    if (slot.baseVolume < 0.999f && gainLinear > 1f) {
+                        slot.baseVolume = (slot.baseVolume / gainLinear).coerceIn(0f, 1f)
+                    }
+                    installPositiveBoost(slot.player, gainDb)
+                } else {
+                    clearPositiveBoost(slot.player)
                 }
-                installPositiveBoost(slot.player, gainDb)
                 applyLevel(slot)
             }
         }
     }
 
     private fun installPositiveBoost(player: MediaPlayer, gainDb: Float) {
-        positiveBoosts.remove(player)?.let { previous ->
-            runCatching { previous.enabled = false }
-            runCatching { previous.release() }
-        }
+        clearPositiveBoost(player)
         val positiveDb = gainDb.coerceIn(0f, PcmLoudnessEstimator.MAX_GAIN_DB)
         if (positiveDb <= 0.001f) return
         val enhancer = runCatching {
@@ -374,6 +376,13 @@ class SceneMusicController(
             return
         }
         positiveBoosts[player] = enhancer
+    }
+
+    private fun clearPositiveBoost(player: MediaPlayer) {
+        positiveBoosts.remove(player)?.let { enhancer ->
+            runCatching { enhancer.enabled = false }
+            runCatching { enhancer.release() }
+        }
     }
 
     private fun animateDuck(target: Float, durationMillis: Int) {
@@ -442,10 +451,7 @@ class SceneMusicController(
 
     private fun releasePlayer(player: MediaPlayer) {
         pendingPlayers.remove(player)
-        positiveBoosts.remove(player)?.let { enhancer ->
-            runCatching { enhancer.enabled = false }
-            runCatching { enhancer.release() }
-        }
+        clearPositiveBoost(player)
         runCatching { player.stop() }
         runCatching { player.release() }
     }

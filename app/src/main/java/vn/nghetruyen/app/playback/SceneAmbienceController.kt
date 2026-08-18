@@ -15,7 +15,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import vn.nghetruyen.app.audio.AudioDirectionAsset
 import vn.nghetruyen.app.audio.AudioDirectionLimits
-import kotlin.math.pow
+import vn.nghetruyen.app.audio.PcmLoudnessEstimator
 import kotlin.random.Random
 
 /**
@@ -41,8 +41,6 @@ class SceneAmbienceController(context: Context) {
         var fade: Float,
     )
 
-    // Identity semantics are intentional: Layer contains mutable playback state and is also kept in
-    // fadingLayers. A data-class hash would change while fade/current/jobs mutate and corrupt Set removal.
     private class Layer(
         var anchorAsset: AudioDirectionAsset,
         var variants: List<AudioDirectionAsset>,
@@ -98,7 +96,6 @@ class SceneAmbienceController(context: Context) {
         }
     }
 
-    /** Brief priority duck for an AI-selected one-shot SFX. */
     fun duckForImportantSfx(factor: Float = SFX_DUCK_FACTOR, holdMillis: Long = SFX_DUCK_HOLD_MS) {
         val target = factor.coerceIn(0.45f, 1f)
         sfxDuckJob?.cancel()
@@ -480,14 +477,12 @@ class SceneAmbienceController(context: Context) {
     }
 
     private fun effectiveVolume(asset: AudioDirectionAsset, masterVolume: Float): Float {
-        val normalization = 10.0.pow(asset.normalizationGainDb.coerceIn(-18f, 12f) / 20.0).toFloat()
-        return (asset.volume * masterVolume.coerceIn(0f, 1f) * normalization * VOICE_PRIORITY_DUCK)
-            .coerceIn(0f, MAX_AMBIENCE_VOLUME)
+        val normalization = PcmLoudnessEstimator.gainDbToLinear(asset.normalizationGainDb)
+        return (asset.volume * masterVolume.coerceIn(0f, 1f) * normalization)
+            .coerceIn(0f, 1f)
     }
 
     companion object {
-        private const val VOICE_PRIORITY_DUCK = 0.58f
-        private const val MAX_AMBIENCE_VOLUME = 0.34f
         private const val DUAL_LAYER_SCALE = 0.78f
         private const val MAX_VARIANTS_PER_FAMILY = 12
         private const val SFX_DUCK_FACTOR = 0.72f

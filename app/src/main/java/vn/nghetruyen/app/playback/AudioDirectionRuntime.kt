@@ -19,6 +19,7 @@ import vn.nghetruyen.app.audio.AudioAssetVariantFamily
 import vn.nghetruyen.app.audio.AudioDirectionAsset
 import vn.nghetruyen.app.audio.AudioDirectionLimits
 import vn.nghetruyen.app.audio.AudioDirectionPreferences
+import vn.nghetruyen.app.audio.PcmLoudnessEstimator
 import vn.nghetruyen.app.data.repository.LibraryRepository
 
 /**
@@ -154,8 +155,33 @@ class AudioDirectionRuntime(
 
         val rawTracks = libraryRepository.listEnabledSceneMusicTracks()
         val rawTracksById = rawTracks.associateBy { it.id }
-        val allAssets = rawTracks.map(AudioAssetClassifier::toAsset)
-            .filter { it.id.isNotBlank() && it.uri.isNotBlank() }
+        val allAssets = rawTracks.map { track ->
+            val asset = AudioAssetClassifier.toAsset(track)
+            if (asset.kind == AudioAssetKind.MUSIC) {
+                asset
+            } else {
+                val targetLufs = when (asset.kind) {
+                    AudioAssetKind.AMBIENCE -> settings.ambienceNormalizationTargetLufs
+                    AudioAssetKind.SFX -> settings.soundEffectsNormalizationTargetLufs
+                    AudioAssetKind.MUSIC -> track.normalizationTargetLufs
+                }
+                val gainDb = if (
+                    track.normalizationVersion >= PcmLoudnessEstimator.VERSION &&
+                    track.normalizationError.isBlank() &&
+                    track.loudnessLufsEstimate.isFinite() &&
+                    track.peakDbfs.isFinite()
+                ) {
+                    PcmLoudnessEstimator.calculateNormalization(
+                        track.loudnessLufsEstimate,
+                        track.peakDbfs,
+                        targetLufs,
+                    ).gainDb
+                } else {
+                    0f
+                }
+                asset.copy(normalizationGainDb = gainDb)
+            }
+        }.filter { it.id.isNotBlank() && it.uri.isNotBlank() }
         val activeAudioAssets = allAssets.filter { asset ->
             (settings.ambienceEnabled && asset.kind == AudioAssetKind.AMBIENCE) ||
                 (settings.soundEffectsEnabled && asset.kind == AudioAssetKind.SFX)
@@ -234,6 +260,8 @@ class AudioDirectionRuntime(
         append(':').append(snapshot.speechChunks.size)
         append('|').append(settings.ambienceEnabled)
         append('|').append(settings.soundEffectsEnabled)
+        append('|').append(settings.ambienceNormalizationTargetLufs)
+        append('|').append(settings.soundEffectsNormalizationTargetLufs)
     }
 
     private fun paragraphFingerprint(snapshot: PlaybackSnapshot): String {
@@ -308,7 +336,7 @@ class AudioDirectionRuntime(
             variantsByAssetId = assets.associate { asset ->
                 asset.id to ambienceVariantsById[asset.id].orEmpty()
             },
-            masterVolume = settings.ambienceMasterVolume,
+            masterVolume = 1f,
             crossfadeMillis = settings.ambienceCrossfadeMillis,
             overlapMinMillis = settings.ambienceLoopOverlapMinMillis,
             overlapMaxMillis = settings.ambienceLoopOverlapMaxMillis,
@@ -346,7 +374,7 @@ class AudioDirectionRuntime(
         // an important foreground event and briefly ducks the two background buses, never narration.
         ambienceController.duckForImportantSfx(SFX_DUCK_FACTOR, SFX_DUCK_HOLD_MS)
         SceneMusicSfxDuckBus.duck(SFX_DUCK_FACTOR, SFX_DUCK_HOLD_MS)
-        sfxController.play(asset, settings.soundEffectsMasterVolume, settings.maxConcurrentSfx)
+        sfxController.play(asset, 1f, settings.maxConcurrentSfx)
     }
 
     private fun buildAmbienceVariants(allAssets: List<AudioDirectionAsset>): Map<String, List<AudioDirectionAsset>> {

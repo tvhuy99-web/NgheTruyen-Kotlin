@@ -21,7 +21,8 @@ import vn.nghetruyen.app.NgheTruyenApplication
 /**
  * Measures a scene track once, then stores the XPK-style fixed normalization gain.
  * If loudness and peak measurements are already available, a new target LUFS only
- * recalculates gain and does not decode the file again.
+ * recalculates gain and does not decode the file again unless force remeasurement
+ * was explicitly requested by the normalization dialog.
  */
 class SceneMusicAnalysisWorker(
     appContext: Context,
@@ -40,11 +41,23 @@ class SceneMusicAnalysisWorker(
             PcmLoudnessEstimator.MAX_TARGET_LUFS
         }
         val requestedTarget = inputData.getFloat(KEY_TARGET_LUFS, Float.NaN)
-        val target = (requestedTarget.takeIf(Float::isFinite)
-            ?: container.settingsRepository.snapshot().sceneMusicTargetLufs)
+        val defaultTarget = when (kind) {
+            AudioAssetKind.MUSIC -> container.settingsRepository.snapshot().sceneMusicTargetLufs
+            AudioAssetKind.AMBIENCE -> AudioDirectionPreferences.shared(applicationContext)
+                .snapshot().ambienceNormalizationTargetLufs
+            AudioAssetKind.SFX -> AudioDirectionPreferences.shared(applicationContext)
+                .snapshot().soundEffectsNormalizationTargetLufs
+        }
+        val target = (requestedTarget.takeIf(Float::isFinite) ?: defaultTarget)
             .coerceIn(PcmLoudnessEstimator.MIN_TARGET_LUFS, maxTarget)
+        val forceRemeasure = inputData.getBoolean(KEY_FORCE_REMEASURE, false)
 
-        if (track.normalizationVersion >= PcmLoudnessEstimator.VERSION &&
+        if (forceRemeasure) {
+            invalidateStoredNormalization(trackId, target)
+        }
+
+        if (!forceRemeasure &&
+            track.normalizationVersion >= PcmLoudnessEstimator.VERSION &&
             track.normalizationError.isBlank() &&
             track.loudnessLufsEstimate.isFinite() &&
             track.peakDbfs.isFinite()
@@ -54,14 +67,11 @@ class SceneMusicAnalysisWorker(
                 track.peakDbfs,
                 target,
             )
-            container.libraryRepository.updateSceneMusicNormalization(
-                id = trackId,
+            persistNormalization(
+                trackId = trackId,
                 loudnessLufs = track.loudnessLufsEstimate,
                 peakDbfs = track.peakDbfs,
-                targetLufs = normalization.targetLufs,
-                gainDb = normalization.gainDb,
-                peakLimited = normalization.peakLimited,
-                version = PcmLoudnessEstimator.VERSION,
+                normalization = normalization,
             )
             return Result.success(
                 workDataOf(
@@ -90,14 +100,11 @@ class SceneMusicAnalysisWorker(
                     analysis.peakDbfs,
                     target,
                 )
-                container.libraryRepository.updateSceneMusicNormalization(
-                    id = trackId,
+                persistNormalization(
+                    trackId = trackId,
                     loudnessLufs = analysis.loudnessLufs,
                     peakDbfs = analysis.peakDbfs,
-                    targetLufs = normalization.targetLufs,
-                    gainDb = normalization.gainDb,
-                    peakLimited = normalization.peakLimited,
-                    version = PcmLoudnessEstimator.VERSION,
+                    normalization = normalization,
                 )
                 Result.success(
                     workDataOf(
@@ -123,9 +130,67 @@ class SceneMusicAnalysisWorker(
         }
     }
 
+    /** Marks the previous result unusable before a forced full decode begins. */
+    private suspend fun invalidateStoredNormalization(trackId: String, targetLufs: Float) {
+        val current = container.libraryRepository.getSceneMusicTrack(trackId) ?: return
+        container.database.sceneMusicTrackDao().upsert(
+            current.copy(
+                volume = 1f,
+                normalizationTargetLufs = targetLufs.coerceIn(
+                    PcmLoudnessEstimator.MIN_TARGET_LUFS,
+                    PcmLoudnessEstimator.MAX_TARGET_LUFS,
+                ),
+                normalizationGainDb = 0f,
+                normalizationPeakLimited = false,
+                normalizationVersion = 0,
+                normalizationError = "",
+                updatedAt = System.currentTimeMillis(),
+            ),
+        )
+    }
+
+    /**
+     * Persist exactly the range produced by [PcmLoudnessEstimator].
+     *
+     * The legacy repository helper clamps gain to +12 dB and target to -18 LUFS.
+     * That silently truncates valid normalization results (especially very quiet
+     * tracks and ambience/SFX targets above -18 LUFS). Read the latest row before
+     * writing so a concurrent title/tag/enable edit is not overwritten.
+     * A successful normalization also clears the legacy per-track volume multiplier;
+     * from that point loudness is controlled by the measured normalization gain.
+     */
+    private suspend fun persistNormalization(
+        trackId: String,
+        loudnessLufs: Float,
+        peakDbfs: Float,
+        normalization: PcmLoudnessEstimator.Normalization,
+    ) {
+        val current = container.libraryRepository.getSceneMusicTrack(trackId) ?: return
+        container.database.sceneMusicTrackDao().upsert(
+            current.copy(
+                volume = 1f,
+                loudnessLufsEstimate = loudnessLufs.coerceIn(-120f, 12f),
+                peakDbfs = peakDbfs.coerceIn(-120f, 12f),
+                normalizationTargetLufs = normalization.targetLufs.coerceIn(
+                    PcmLoudnessEstimator.MIN_TARGET_LUFS,
+                    PcmLoudnessEstimator.MAX_TARGET_LUFS,
+                ),
+                normalizationGainDb = normalization.gainDb.coerceIn(
+                    PcmLoudnessEstimator.MIN_GAIN_DB,
+                    PcmLoudnessEstimator.MAX_GAIN_DB,
+                ),
+                normalizationPeakLimited = normalization.peakLimited,
+                normalizationVersion = PcmLoudnessEstimator.VERSION,
+                normalizationError = "",
+                updatedAt = System.currentTimeMillis(),
+            ),
+        )
+    }
+
     companion object {
         private const val KEY_TRACK_ID = "track_id"
         private const val KEY_TARGET_LUFS = "target_lufs"
+        private const val KEY_FORCE_REMEASURE = "force_remeasure"
         private const val KEY_LOUDNESS = "loudness_lufs"
         private const val KEY_PEAK = "peak_dbfs"
         private const val KEY_GAIN_DB = "normalization_gain_db"
@@ -135,8 +200,15 @@ class SceneMusicAnalysisWorker(
         private const val RETRY_BACKOFF_SECONDS = 10L
         private val analysisMutex = Mutex()
 
-        fun enqueue(context: Context, trackId: String, targetLufs: Float? = null): UUID {
-            val data = Data.Builder().putString(KEY_TRACK_ID, trackId)
+        fun enqueue(
+            context: Context,
+            trackId: String,
+            targetLufs: Float? = null,
+            forceRemeasure: Boolean = false,
+        ): UUID {
+            val data = Data.Builder()
+                .putString(KEY_TRACK_ID, trackId)
+                .putBoolean(KEY_FORCE_REMEASURE, forceRemeasure)
             targetLufs?.takeIf(Float::isFinite)?.let { data.putFloat(KEY_TARGET_LUFS, it) }
             val request = OneTimeWorkRequestBuilder<SceneMusicAnalysisWorker>()
                 .setInputData(data.build())

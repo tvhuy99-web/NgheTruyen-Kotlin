@@ -95,18 +95,20 @@ class AudioDirectionPreferences(context: Context) {
     }
 
     fun setAmbienceNormalizationTargetLufs(value: Float) {
-        preferences.edit().putFloat(
+        val persisted = preferences.edit().putFloat(
             KEY_AMBIENCE_NORMALIZATION_TARGET_LUFS,
             value.coerceIn(PcmLoudnessEstimator.MIN_TARGET_LUFS, PcmLoudnessEstimator.MAX_TARGET_LUFS),
-        ).apply()
+        ).commit()
+        check(persisted) { "Không lưu được mức chuẩn hóa âm thanh môi trường." }
         snapshot()
     }
 
     fun setSoundEffectsNormalizationTargetLufs(value: Float) {
-        preferences.edit().putFloat(
+        val persisted = preferences.edit().putFloat(
             KEY_SFX_NORMALIZATION_TARGET_LUFS,
             value.coerceIn(PcmLoudnessEstimator.MIN_TARGET_LUFS, PcmLoudnessEstimator.MAX_TARGET_LUFS),
-        ).apply()
+        ).commit()
+        check(persisted) { "Không lưu được mức chuẩn hóa hiệu ứng âm thanh." }
         snapshot()
     }
 

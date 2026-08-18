@@ -1107,7 +1107,6 @@ private fun InstalledSourcesSection(
         }
     }
 
-
     selectedPackId?.let { selectedId ->
         state.sourcePacks.firstOrNull { it.id == selectedId }?.let { pack ->
             AlertDialog(
@@ -1290,7 +1289,7 @@ private fun InstalledSourcesSection(
         val pack = state.sourcePacks.firstOrNull { it.id == packId }
         if (pack != null) {
             val clipboard = LocalClipboardManager.current
-            val events = state.sourceDiagnostics.filter { it.sourceId == packId }
+            val events = state.sourceDiagnostics.filter { it.sourceId == pack.id }
             val logText = DiagnosticHumanFormatter.formatUi(
                 events = events,
                 mode = state.diagnosticsMode,
@@ -1515,7 +1514,6 @@ private fun SourceRepositorySection(
             }
         }
     }
-
 
     if (selectedRepository != null && selectedPackageId != null) {
         val item = state.sourceRepositoryPackages.firstOrNull {
@@ -1971,15 +1969,6 @@ private fun PlaybackAutomationCard(
                     }
                 }
             }
-            ReferenceFloatSettingsSlider(
-                label = "Mức chuẩn hóa nhạc",
-                value = state.sceneMusicTargetLufs,
-                minimum = -36f,
-                maximum = -18f,
-                steps = 17,
-                shown = { "%.1f LUFS".format(it) },
-                onChange = onSceneMusicTargetLufsChange,
-            )
             ReferenceIntSettingsSlider(
                 label = "Tránh lặp",
                 value = state.sceneMusicAvoidRepeatWindow,

@@ -5,8 +5,8 @@ import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.net.Uri
 import vn.nghetruyen.app.audio.AudioDirectionAsset
+import vn.nghetruyen.app.audio.PcmLoudnessEstimator
 import java.util.ArrayDeque
-import kotlin.math.pow
 
 /** Bounded one-shot player. Runtime guardrails remain authoritative even if AI over-selects cues. */
 class SceneSfxController(context: Context) {
@@ -23,7 +23,7 @@ class SceneSfxController(context: Context) {
                 setAudioAttributes(
                     AudioAttributes.Builder()
                         .setUsage(AudioAttributes.USAGE_MEDIA)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
                         .build(),
                 )
                 setDataSource(appContext, Uri.parse(asset.uri))
@@ -65,12 +65,8 @@ class SceneSfxController(context: Context) {
     }
 
     private fun effectiveVolume(asset: AudioDirectionAsset, masterVolume: Float): Float {
-        val normalization = 10.0.pow(asset.normalizationGainDb.coerceIn(-18f, 12f) / 20.0).toFloat()
+        val normalization = PcmLoudnessEstimator.gainDbToLinear(asset.normalizationGainDb)
         return (asset.volume * masterVolume.coerceIn(0f, 1f) * normalization)
-            .coerceIn(0f, MAX_SFX_VOLUME)
-    }
-
-    companion object {
-        private const val MAX_SFX_VOLUME = 0.58f
+            .coerceIn(0f, 1f)
     }
 }

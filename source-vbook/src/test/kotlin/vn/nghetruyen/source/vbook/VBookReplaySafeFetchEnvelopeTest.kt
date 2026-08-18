@@ -7,7 +7,7 @@ import org.mozilla.javascript.Context
 
 class VBookReplaySafeFetchEnvelopeTest {
     @Test
-    fun appKernelRecoversOriginalRawResponseKeyFromReplayedEnvelope() {
+    fun appKernelRecoversOriginalRawResponseKeyAndCharsetFromReplayedEnvelope() {
         val cx = Context.enter()
         try {
             cx.languageVersion = Context.VERSION_ES6
@@ -25,7 +25,8 @@ class VBookReplaySafeFetchEnvelopeTest {
                       var headers=options.headers||{};
                       var operation=String(headers['${VBookRawNetworkBroker.INTERNAL_OPERATION}']||'');
                       var requestKey=String(headers['${VBookRawNetworkBroker.INTERNAL_REQUEST_KEY}']||'');
-                      __calls.push({operation:operation,requestKey:requestKey});
+                      var decodeCharset=String(headers['${VBookRawNetworkBroker.INTERNAL_DECODE_CHARSET}']||'');
+                      __calls.push({operation:operation,requestKey:requestKey,decodeCharset:decodeCharset});
                       if(!operation){
                         return {
                           status:200,
@@ -38,7 +39,7 @@ class VBookReplaySafeFetchEnvelopeTest {
                             body:'{\"ok\":true}',
                             rawSize:11,
                             statusText:'OK',
-                            headers:{'Content-Type':'application/json; charset=utf-8'},
+                            headers:{'Content-Type':'application/json; charset=gbk'},
                             request:{url:String(url),headers:{'X-Upstream':'real'}}
                           })
                         };
@@ -61,12 +62,13 @@ class VBookReplaySafeFetchEnvelopeTest {
                     var response=fetch('https://example.com/protected');
                     JSON.stringify({
                       body:response.body,
-                      ok:response.json().ok,
+                      ok:response.json('gbk').ok,
                       requestUrl:response.request.url,
                       contentType:response.header('content-type'),
                       callCount:__calls.length,
                       initialKey:__calls[0].requestKey,
-                      cacheKey:__calls[1].requestKey
+                      cacheKey:__calls[1].requestKey,
+                      decodeCharset:__calls[1].decodeCharset
                     });
                 """.trimIndent(),
                 "replay-safe-fetch-assertion",
@@ -77,13 +79,15 @@ class VBookReplaySafeFetchEnvelopeTest {
             assertTrue("\"body\":\"{\\\"ok\\\":true}\"" in result)
             assertTrue("\"ok\":true" in result)
             assertTrue("\"requestUrl\":\"https://example.com/protected\"" in result)
-            assertTrue("\"contentType\":\"application/json; charset=utf-8\"" in result)
+            assertTrue("\"contentType\":\"application/json; charset=gbk\"" in result)
             assertTrue("\"callCount\":2" in result)
             assertTrue("\"cacheKey\":\"cached-pass-a\"" in result)
+            assertTrue("\"decodeCharset\":\"gbk\"" in result)
             val initialKey = Context.toString(cx.evaluateString(scope, "__calls[0].requestKey", "initial-key", 1, null))
             assertTrue(initialKey.startsWith("vbr-"))
             assertTrue(initialKey != "cached-pass-a")
             assertEquals("cached-pass-a", Context.toString(cx.evaluateString(scope, "__calls[1].requestKey", "cache-key", 1, null)))
+            assertEquals("gbk", Context.toString(cx.evaluateString(scope, "__calls[1].decodeCharset", "decode-charset", 1, null)))
         } finally {
             Context.exit()
         }

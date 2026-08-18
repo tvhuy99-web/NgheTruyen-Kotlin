@@ -13,10 +13,6 @@ object AiLineProtocol {
         val validTrackIds: List<String> = emptyList(),
         val validAmbienceIds: Set<String> = emptySet(),
         val validSfxIds: Set<String> = emptySet(),
-        /** Request-local numeric aliases exposed to AI. Values are the real persisted asset ids. */
-        val trackAliasToId: Map<String, String> = emptyMap(),
-        val ambienceAliasToId: Map<String, String> = emptyMap(),
-        val sfxAliasToId: Map<String, String> = emptyMap(),
         val includeVoiceCast: Boolean = true,
         val includeSceneMusic: Boolean = false,
         val includeAmbience: Boolean = false,
@@ -28,6 +24,10 @@ object AiLineProtocol {
         /** Always a real persisted id. Used only by the internal fallback path. */
         val incomingTrackId: String? = null,
         val dialogueGroupByUnitId: Map<String, String> = emptyMap(),
+        /** Request-local numeric aliases exposed to AI. Values are the real persisted asset ids. */
+        val trackAliasToId: Map<String, String> = emptyMap(),
+        val ambienceAliasToId: Map<String, String> = emptyMap(),
+        val sfxAliasToId: Map<String, String> = emptyMap(),
     )
 
     data class XpkRawAssignment(
@@ -131,7 +131,7 @@ object AiLineProtocol {
                         volumeAdjustPct = adjustment(
                             row,
                             "volume_adjust_pct",
-                            listOf("volume_pct", "volume_delta_pct", "volumeAdjustPct", "volume_adjustment_pct", "pitch"),
+                            listOf("volume_pct", "volume_delta_pct", "volumeAdjustPct", "volume_adjustment_pct", "gain_adjust_pct", "gain_pct", "volume", "gain"),
                         ),
                     ),
                 )

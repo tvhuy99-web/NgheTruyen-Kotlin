@@ -13,7 +13,10 @@ object XpkVoiceCastPrompt {
         val dialogueIds: List<String>,
         val unitIds: List<String>,
         val voiceIds: List<String>,
+        /** Real persisted track ids that actually made it into the scene-music catalog. */
         val sceneTrackIds: List<String> = emptyList(),
+        /** Request-local numeric alias -> real persisted track id. This map is never included in the prompt. */
+        val sceneTrackAliasToId: Map<String, String> = emptyMap(),
     )
 
     /** Exact method-specific settings that XPK profilesForPrompt() exposes to AI. */
@@ -106,7 +109,7 @@ object XpkVoiceCastPrompt {
                 {
                   "start_id": "$firstUnitId",
                   "end_id": "$lastUnitId",
-                  "track_id": "${track.id}"
+                  "track_id": "${track.promptId}"
                 }
               ]
             """.trimIndent()
@@ -196,6 +199,7 @@ object XpkVoiceCastPrompt {
             unitIds = unitIds,
             voiceIds = voiceIds,
             sceneTrackIds = sceneBlock?.tracks?.map { it.id }.orEmpty(),
+            sceneTrackAliasToId = sceneBlock?.trackAliasToId.orEmpty(),
         )
     }
 

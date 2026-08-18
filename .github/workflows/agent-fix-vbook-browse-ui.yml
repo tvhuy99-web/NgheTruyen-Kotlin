@@ -25,10 +25,16 @@ jobs:
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Apply browse/presentation fix
+      - name: Apply browse/presentation fix when needed
         id: patch
         continue-on-error: true
-        run: python3 scripts/agent_fix_vbook_browse_ui.py
+        shell: bash
+        run: |
+          if grep -q 'val supportsGenre: Boolean' app/src/main/java/vn/nghetruyen/app/sources/StorySource.kt; then
+            echo 'Browse patch already present; validating current tree.'
+          else
+            python3 scripts/agent_fix_vbook_browse_ui.py
+          fi
 
       - name: Verify diff
         id: diffcheck
@@ -74,4 +80,4 @@ jobs:
         if: always() && (steps.patch.outcome != 'success' || steps.diffcheck.outcome != 'success' || steps.tests.outcome != 'success')
         run: exit 1
 
-      # Trigger after workflow creation.
+      # Re-run after fixing the regression-test string literal.

@@ -42,6 +42,10 @@ import vn.nghetruyen.app.audio.AudioAssetKind
 import vn.nghetruyen.app.audio.AudioDirectionPreferences
 import vn.nghetruyen.app.audio.PcmLoudnessEstimator
 import vn.nghetruyen.app.audio.SceneMusicAnalysisWorker
+import vn.nghetruyen.app.playback.PlaybackQueueStore
+import vn.nghetruyen.app.playback.ReaderPlaybackService
+
+private val audioSettingsPersistenceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
 /**
  * Reader audio-layer controls. MUSIC, AMBIENCE and SFX deliberately route to the same asset manager
@@ -102,7 +106,7 @@ fun AudioDirectionLayerSwitches(
             if (latestDynamicsDirty) {
                 val attack = latestAttackMillis
                 val release = latestReleaseMillis
-                CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                audioSettingsPersistenceScope.launch {
                     settingsRepository.setBackgroundMusicAttackMillis(attack)
                     settingsRepository.setBackgroundMusicReleaseMillis(release)
                 }
@@ -230,7 +234,9 @@ fun AudioDirectionLayerSwitches(
                     musicNormalizationTarget = musicTarget
                     preferences.setAmbienceNormalizationTargetLufs(ambienceTarget)
                     preferences.setSoundEffectsNormalizationTargetLufs(sfxTarget)
-                    scope.launch { settingsRepository.setSceneMusicTargetLufs(musicTarget) }
+                    audioSettingsPersistenceScope.launch {
+                        settingsRepository.setSceneMusicTargetLufs(musicTarget)
+                    }
 
                     normalizationRunMusicTarget = musicTarget
                     normalizationRunAmbienceTarget = ambienceTarget
@@ -295,11 +301,18 @@ fun AudioDirectionLayerSwitches(
             confirmButton = {
                 if (total > 0 && finished >= total) {
                     TextButton(onClick = {
-                        musicNormalizationTarget = normalizationRunMusicTarget
+                        val musicTarget = normalizationRunMusicTarget
+                        musicNormalizationTarget = musicTarget
                         preferences.setAmbienceNormalizationTargetLufs(normalizationRunAmbienceTarget)
                         preferences.setSoundEffectsNormalizationTargetLufs(normalizationRunSfxTarget)
-                        scope.launch {
-                            settingsRepository.setSceneMusicTargetLufs(normalizationRunMusicTarget)
+                        audioSettingsPersistenceScope.launch {
+                            settingsRepository.setSceneMusicTargetLufs(musicTarget)
+                            if (PlaybackQueueStore.state.value.isPlaying) {
+                                ReaderPlaybackService.command(
+                                    application,
+                                    ReaderPlaybackService.ACTION_REFRESH,
+                                )
+                            }
                         }
                         showNormalizationProgress = false
                         normalizationWorkIds = emptyList()

@@ -81,4 +81,4 @@ jobs:
         if: always() && (steps.patch.outcome != 'success' || steps.diffcheck.outcome != 'success' || steps.tests.outcome != 'success')
         run: exit 1
 
-      # Trigger after the static contract was updated to shared classic-script loading.
+      # Final trigger after loader semantics, ES6 parsing and legacy JSON charset coverage were updated.

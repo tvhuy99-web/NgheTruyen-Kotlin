@@ -242,8 +242,18 @@ fun UnifiedAudioAssetManagerDialog(
                                     val existing = dao.listAll()
                                     val existingKind = existing.filter { AudioAssetClassifier.classify(it) == kind }
                                     val now = System.currentTimeMillis()
+                                    val existingById = existing.associateBy(SceneMusicTrackEntity::id)
                                     val normalized = draft.mapIndexed { index, row ->
-                                        row.copy(orderIndex = index, updatedAt = now)
+                                        val current = existingById[row.id] ?: row
+                                        current.copy(
+                                            title = row.title,
+                                            uri = row.uri,
+                                            tagsCsv = row.tagsCsv,
+                                            volume = row.volume,
+                                            enabled = row.enabled,
+                                            orderIndex = index,
+                                            updatedAt = now,
+                                        )
                                     }
                                     val keepIds = normalized.mapTo(hashSetOf()) { it.id }
                                     existingKind.filter { it.id !in keepIds }.forEach { dao.delete(it.id) }

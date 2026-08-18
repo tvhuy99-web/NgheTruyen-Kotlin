@@ -1,6 +1,7 @@
 package vn.nghetruyen.app.playback
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.net.Uri
@@ -10,6 +11,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
+import vn.nghetruyen.app.audio.AudioDirectionPreferences
 
 /**
  * Process-local bridge from the application-level AudioDirectionRuntime to the active reader music
@@ -69,11 +71,21 @@ class SceneMusicController(
     private var sfxDuckMultiplier = 1f
     private var duckAttackMillis = 1850
     private var duckReleaseMillis = 2050
+    private val audioPreferences = AudioDirectionPreferences.shared(context)
+    private var musicMasterVolume = audioPreferences.snapshot().musicMasterVolume
+    private val audioPreferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+        musicMasterVolume = audioPreferences.snapshot().musicMasterVolume
+        scope.launch(Dispatchers.Main.immediate) {
+            active?.let(::applyLevel)
+            outgoing?.let(::applyLevel)
+        }
+    }
     private val sfxDuckListener: (Float, Long) -> Unit = { factor, holdMillis ->
         duckForImportantSfx(factor, holdMillis)
     }
 
     init {
+        audioPreferences.addChangeListener(audioPreferenceListener)
         SceneMusicSfxDuckBus.attach(sfxDuckListener)
     }
 
@@ -202,6 +214,7 @@ class SceneMusicController(
     fun release() {
         if (releasedController) return
         releasedController = true
+        audioPreferences.removeChangeListener(audioPreferenceListener)
         SceneMusicSfxDuckBus.detach(sfxDuckListener)
         stop(clearTrack = true)
     }
@@ -355,8 +368,10 @@ class SceneMusicController(
 
     private fun applyLevel(slot: Slot) = setSlotLevel(slot, desiredLevel(slot))
 
-    private fun desiredLevel(slot: Slot): Float =
-        (slot.baseVolume * duckMultiplier * sfxDuckMultiplier * slot.fadeMultiplier).coerceIn(0f, 1f)
+    private fun desiredLevel(slot: Slot): Float {
+        val routedLevel = slot.baseVolume * duckMultiplier * sfxDuckMultiplier * slot.fadeMultiplier
+        return (routedLevel * musicMasterVolume).coerceIn(0f, 1f)
+    }
 
     private fun setSlotLevel(slot: Slot, level: Float) {
         runCatching { slot.player.setVolume(level, level) }

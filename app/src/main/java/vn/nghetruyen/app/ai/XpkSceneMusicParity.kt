@@ -10,20 +10,28 @@ object XpkSceneMusicParity {
     const val MAX_DESCRIPTION_CHARS = 300
     const val MODE = "ai_full_authority"
     const val SILENCE_TRACK_ID = "NONE"
+    const val SILENCE_PROMPT_ID = "0"
     private const val MIN_MIDDLE_SCENE_UNITS = 2
 
     data class PromptTrack(
         val id: String,
         val name: String,
         val description: String,
+        /** Request-local numeric alias exposed to AI. [id] remains the real persisted asset id. */
+        val promptId: String = "",
     )
 
     data class PromptBlock(
         val instructions: String,
         val outputRules: String,
         val tracks: List<PromptTrack>,
+        /** Real persisted id used by runtime/fallback continuity. */
         val incomingTrackId: String,
         val continuitySource: String,
+        /** Request-local numeric alias -> real persisted id. Never serialized into the AI prompt. */
+        val trackAliasToId: Map<String, String> = emptyMap(),
+        /** Numeric alias exposed to AI for the incoming track; 0 means intentional silence/no valid incoming. */
+        val incomingPromptTrackId: String = SILENCE_PROMPT_ID,
     )
 
     data class RawScene(
@@ -45,25 +53,37 @@ object XpkSceneMusicParity {
         context: NarrationPlanContext,
     ): PromptBlock {
         val normalized = normalizeTracks(tracks)
+        // Preserve the anti-position-bias shuffle, then assign compact aliases in the exact shuffled order.
+        // The alias map below is carried out-of-band to the parser so randomization never breaks real ids.
         val shuffled = shuffleTracks(
             normalized,
             listOf(title, context.activeTrackId.orEmpty(), normalized.size.toString()).joinToString("\u0000"),
         )
+        val aliased = shuffled.mapIndexed { index, track ->
+            track.copy(promptId = (index + 1).toString())
+        }
+        val aliasToId = aliased.associate { it.promptId to it.id }
+        val idToAlias = aliased.associate { it.id to it.promptId }
         val validIds = normalized.map(PromptTrack::id).toHashSet()
         val incoming = context.activeTrackId.orEmpty().trim().takeIf { it in validIds } ?: SILENCE_TRACK_ID
+        val incomingPromptId = if (incoming == SILENCE_TRACK_ID) {
+            SILENCE_PROMPT_ID
+        } else {
+            idToAlias[incoming] ?: SILENCE_PROMPT_ID
+        }
         val source = context.incomingSource.trim().ifBlank { if (incoming == SILENCE_TRACK_ID) "none" else "provided" }
         val previousTail = context.previousChapterEnding.trim()
             .ifBlank { "Không có ngữ cảnh chương trước." }
             .let { utf8Tail(it, 3000) }
         val catalog = buildString {
-            append("$SILENCE_TRACK_ID | IM LẶNG | Không phát nhạc nền; dùng khi im lặng phục vụ lời kể tốt hơn một bài nhạc gượng ép.")
-            if (shuffled.isNotEmpty()) append('\n')
             append(
-                shuffled.joinToString("\n") { track ->
-                    buildString {
-                        append(track.id).append(" | ").append(track.name)
-                        if (track.description.isNotBlank()) append(" | ").append(track.description)
-                    }
+                "$SILENCE_PROMPT_ID | Sắc thái: im lặng có chủ ý | Dùng: khi lời kể cần đứng một mình | " +
+                    "Tránh: khi một bài nhạc phù hợp hỗ trợ cảnh tốt hơn",
+            )
+            if (aliased.isNotEmpty()) append('\n')
+            append(
+                aliased.joinToString("\n") { track ->
+                    "${track.promptId} | ${track.description}"
                 },
             )
         }
@@ -74,10 +94,10 @@ object XpkSceneMusicParity {
 
             DỮ LIỆU NỐI CHƯƠNG:
 
-            INCOMING_TRACK_ID: $incoming
+            INCOMING_TRACK_ID: $incomingPromptId
             NGUỒN XÁC ĐỊNH: $source
 
-            INCOMING_TRACK_ID là bài dự kiến tiếp tục từ cảnh cuối chương trước. $SILENCE_TRACK_ID nghĩa là cuối chương trước đang im lặng hoặc không có bài hợp lệ để kế thừa.
+            INCOMING_TRACK_ID là mã số tạm của bài dự kiến tiếp tục từ cảnh cuối chương trước trong TRACK_CATALOG của chính yêu cầu này. $SILENCE_PROMPT_ID nghĩa là cuối chương trước đang im lặng hoặc không có bài hợp lệ để kế thừa. Mã số chỉ dùng trong phản hồi hiện tại; tên tệp và ID lưu trữ thật không được cung cấp cho bạn.
 
             PREVIOUS_CHAPTER_TAIL chỉ dùng để hiểu sự tiếp nối. Không tạo assignment, music_scene hoặc sử dụng ID từ phần này:
 
@@ -86,32 +106,32 @@ object XpkSceneMusicParity {
             QUY TẮC ĐẠO DIỄN:
 
             1. Đọc phần cuối chương trước và toàn bộ chương hiện tại trước khi chọn bài, chọn im lặng hoặc đặt bất kỳ ranh giới nào.
-            2. INCOMING_TRACK_ID cho biết trạng thái nhạc ở cuối chương trước. Hãy đánh giá trạng thái đó cùng mọi bài trong TRACK_CATALOG và lựa chọn $SILENCE_TRACK_ID, không giữ hoặc đổi chỉ vì ranh giới chương.
-            3. Ở đầu chương, giữ INCOMING_TRACK_ID khi nó vẫn phù hợp với chức năng kể chuyện và trạng thái thực tế của phần mở đầu; đổi ngay tại ID đầu khi một bài khác hoặc im lặng phù hợp hơn. Nếu INCOMING_TRACK_ID là $SILENCE_TRACK_ID và phần mở đầu vẫn nên im lặng thì tiếp tục $SILENCE_TRACK_ID.
-            4. Nếu INCOMING_TRACK_ID là $SILENCE_TRACK_ID, không bắt buộc phải mở nhạc. So sánh im lặng với TRACK_CATALOG và chỉ chọn bài khi bài đó thực sự hỗ trợ cảnh tốt hơn.
-            5. Trong toàn chương, tại mỗi chuyển biến đáng kể, đánh giá lại trạng thái đang dùng dựa trên ngữ cảnh trước sau, chức năng kể chuyện, hướng cảm xúc, nhịp kể, mức căng thẳng, không gian, thời gian, quy mô và tính chất của diễn biến. Trạng thái mới có thể là một track_id hoặc $SILENCE_TRACK_ID.
+            2. INCOMING_TRACK_ID cho biết trạng thái nhạc ở cuối chương trước. Hãy đánh giá trạng thái đó cùng mọi mục trong TRACK_CATALOG và lựa chọn $SILENCE_PROMPT_ID, không giữ hoặc đổi chỉ vì ranh giới chương.
+            3. Ở đầu chương, giữ INCOMING_TRACK_ID khi nó vẫn phù hợp với chức năng kể chuyện và trạng thái thực tế của phần mở đầu; đổi ngay tại ID đầu khi một bài khác hoặc im lặng phù hợp hơn. Nếu INCOMING_TRACK_ID là $SILENCE_PROMPT_ID và phần mở đầu vẫn nên im lặng thì tiếp tục $SILENCE_PROMPT_ID.
+            4. Nếu INCOMING_TRACK_ID là $SILENCE_PROMPT_ID, không bắt buộc phải mở nhạc. So sánh im lặng với TRACK_CATALOG và chỉ chọn bài khi bài đó thực sự hỗ trợ cảnh tốt hơn.
+            5. Trong toàn chương, tại mỗi chuyển biến đáng kể, đánh giá lại trạng thái đang dùng dựa trên ngữ cảnh trước sau, chức năng kể chuyện, hướng cảm xúc, nhịp kể, mức căng thẳng, không gian, thời gian, quy mô và tính chất của diễn biến. Trạng thái mới có thể là một track_id trong catalog hoặc $SILENCE_PROMPT_ID.
             6. Giữ bài hoặc giữ im lặng trong khoảng mà trạng thái đó còn phù hợp. Đổi tại đúng UNIT đầu tiên nơi trạng thái khác trở thành lựa chọn phù hợp hơn cho diễn biến đang bắt đầu.
             7. Ổn định quan trọng hơn phản ứng theo từng câu: không đổi giữa bài và im lặng vì một câu thoại, một cảm xúc thoáng qua, một động tác ngắn hoặc một từ khóa. Một cảnh nhạc/im lặng nằm giữa chương phải kéo dài ít nhất $MIN_MIDDLE_SCENE_UNITS UNIT; nếu thay đổi không đủ bền thì giữ trạng thái hiện tại.
             8. Không đặt mục tiêu về số lần đổi nhạc, số khoảng im lặng hoặc số lượng music_scene. Không ưu tiên một bài cho cả chương, không ưu tiên luôn có nhạc, không ưu tiên im lặng, không ưu tiên đổi ít và cũng không ưu tiên đổi nhiều. Số cảnh phải hoàn toàn là kết quả của nhu cầu thực tế trong nội dung.
             9. Một chuyển biến quan trọng chỉ tạo ranh giới khi nó thực sự mở ra một đơn vị kể chuyện mới có chức năng âm nhạc khác; không dùng BGM như SFX để nhấn một khoảnh khắc đơn lẻ.
             10. Không dựa riêng vào từ khóa, nhãn cảm xúc hoặc độ dài bài đã phát. Luôn xét diễn biến đầy đủ trước và sau ranh giới.
-            11. Có thể giữ INCOMING_TRACK_ID qua một phần hoặc toàn bộ chương, đổi khỏi nó ngay đầu chương, dùng lại một bài sau khi đã chuyển qua bài khác, hoặc xen các khoảng $SILENCE_TRACK_ID khi lời kể nên đứng một mình, miễn mỗi quyết định phù hợp với nội dung.
-            12. Hai cảnh liền nhau không được cùng track_id; nếu cùng bài hoặc cùng $SILENCE_TRACK_ID thì phải gộp thành một cảnh liên tục.
-            13. Mỗi music_scene là một khoảng liên tục dùng cùng một track_id hoặc $SILENCE_TRACK_ID. start_id và end_id đều được tính bao gồm.
+            11. Có thể giữ INCOMING_TRACK_ID qua một phần hoặc toàn bộ chương, đổi khỏi nó ngay đầu chương, dùng lại một bài sau khi đã chuyển qua bài khác, hoặc xen các khoảng $SILENCE_PROMPT_ID khi lời kể nên đứng một mình, miễn mỗi quyết định phù hợp với nội dung.
+            12. Hai cảnh liền nhau không được cùng track_id; nếu cùng bài hoặc cùng $SILENCE_PROMPT_ID thì phải gộp thành một cảnh liên tục.
+            13. Mỗi music_scene là một khoảng liên tục dùng cùng một track_id trong catalog hoặc $SILENCE_PROMPT_ID. start_id và end_id đều được tính bao gồm.
             14. Cảnh đầu bắt đầu tại ID $firstUnitId; cảnh cuối kết thúc tại ID $lastUnitId. Các cảnh phải đúng thứ tự TIMELINE, liên tục, không chồng lấn và không bỏ sót UNIT hoặc DIALOGUE.
-            15. Với hai cảnh liên tiếp, start_id của cảnh sau phải là phần tử ngay sau end_id của cảnh trước. Mọi ID phải có thật trong chương; track_id phải có thật trong TRACK_CATALOG hoặc chính xác là $SILENCE_TRACK_ID.
-            16. Phần mô tả sau tên bài, nếu có, chỉ là dữ liệu tham khảo về đặc tính của chính tệp nhạc. Hãy đối chiếu mô tả với toàn bộ ngữ cảnh và tự chọn bài phù hợp nhất; không coi một nhãn riêng lẻ là mệnh lệnh bắt buộc.
-            17. Không trả tên bài, URI, đường dẫn, thời gian theo giây, cảm xúc, thể loại, cường độ, lý do lựa chọn hoặc trường phụ.
+            15. Với hai cảnh liên tiếp, start_id của cảnh sau phải là phần tử ngay sau end_id của cảnh trước. Mọi ID timeline phải có thật trong chương; track_id phải là đúng mã số có trong TRACK_CATALOG.
+            16. Mỗi dòng nhạc chỉ có mã số và mô tả. Mô tả được viết theo ba phần “Sắc thái | Dùng | Tránh”, tối đa $MAX_DESCRIPTION_CHARS ký tự, và là dữ liệu tham khảo về đặc tính của chính tệp nhạc. Hãy đối chiếu mô tả với toàn bộ ngữ cảnh; không coi một nhãn riêng lẻ là mệnh lệnh bắt buộc.
+            17. Không suy đoán hoặc trả tên bài, tên tệp, ID lưu trữ thật, URI, đường dẫn, thời gian theo giây, cảm xúc, thể loại, cường độ, lý do lựa chọn hoặc trường phụ.
 
             KIỂM TRA ÂM THẦM TRƯỚC KHI TRẢ:
 
-            18. Kiểm tra toàn chương được phủ kín, các ID và track_id/$SILENCE_TRACK_ID hợp lệ, không có hai cảnh liền nhau cùng trạng thái.
+            18. Kiểm tra toàn chương được phủ kín, các ID timeline và track_id số hợp lệ, không có hai cảnh liền nhau cùng trạng thái.
             19. Kiểm tra không có cảnh nhạc hoặc im lặng giữa chương chỉ tồn tại một UNIT; nếu có, hãy bỏ ranh giới phản ứng quá nhanh và gộp nó vào ngữ cảnh ổn định phù hợp hơn.
             20. Kiểm tra từng khoảng và từng ranh giới chỉ theo mức độ phù hợp với diễn biến, không theo mong muốn tăng hoặc giảm số lần đổi nhạc hay số đoạn im lặng.
             21. Kiểm tra riêng điểm đầu chương: INCOMING_TRACK_ID đã được giữ hoặc thay thế sau khi so sánh thực chất với phần mở đầu, TRACK_CATALOG và lựa chọn im lặng, không phải do thói quen.
             22. Không trình bày quá trình suy luận hoặc kết quả kiểm tra.
 
-            TRACK_CATALOG, định dạng track_id | tên bài | mô tả tham khảo nếu có:
+            TRACK_CATALOG, định dạng track_id_số | mô tả:
 
             $catalog
         """.trimIndent()
@@ -119,11 +139,19 @@ object XpkSceneMusicParity {
             - Khi nhiệm vụ nhạc được bật, JSON phải có mảng music_scenes.
             - music_scenes phải giữ đúng thứ tự từ đầu đến cuối chương và phủ kín toàn bộ UNIT, kể cả khoảng chủ ý im lặng.
             - Mỗi phần tử music_scenes có đúng ba trường: start_id, end_id, track_id.
-            - track_id phải khớp chính xác một mã trong TRACK_CATALOG hoặc là $SILENCE_TRACK_ID để biểu diễn im lặng.
+            - track_id phải khớp chính xác một mã số trong TRACK_CATALOG; dùng $SILENCE_PROMPT_ID để biểu diễn im lặng.
             - Không có hai phần tử music_scenes liền nhau dùng cùng track_id.
             - Cảnh nhạc hoặc im lặng nằm giữa chương không được ngắn hơn $MIN_MIDDLE_SCENE_UNITS UNIT.
         """.trimIndent()
-        return PromptBlock(instructions, outputRules, shuffled, incoming, source)
+        return PromptBlock(
+            instructions = instructions,
+            outputRules = outputRules,
+            tracks = aliased,
+            incomingTrackId = incoming,
+            continuitySource = source,
+            trackAliasToId = aliasToId,
+            incomingPromptTrackId = incomingPromptId,
+        )
     }
 
     fun continuityTailForPrompt(title: String, body: String, maxUnits: Int = 5): String {
@@ -231,8 +259,10 @@ object XpkSceneMusicParity {
                 var description = oneLine(track.description.ifBlank { track.tags.joinToString(" ") })
                 description = takeCodePoints(description, MAX_DESCRIPTION_CHARS)
                 description = utf8Head(description, 1200)
-                if (id.isNotBlank() && id != SILENCE_TRACK_ID && name.isNotBlank() && seen.add(id)) {
-                    add(PromptTrack(id, name, description))
+                if (
+                    id.isNotBlank() && id != SILENCE_TRACK_ID && description.isNotBlank() && seen.add(id)
+                ) {
+                    add(PromptTrack(id = id, name = name, description = description))
                 }
             }
         }

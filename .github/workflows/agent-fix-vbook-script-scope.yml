@@ -33,7 +33,13 @@ jobs:
       - name: Apply generic vBook script compiler fix
         id: patch
         continue-on-error: true
-        run: python3 scripts/agent_fix_vbook_script_scope.py
+        shell: bash
+        run: |
+          if [ -f source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookScriptBundleCompiler.kt ]; then
+            echo 'Compiler patch already present; validating current tree.'
+          else
+            python3 scripts/agent_fix_vbook_script_scope.py
+          fi
 
       - name: Verify patch formatting
         id: diffcheck
@@ -41,13 +47,16 @@ jobs:
         continue-on-error: true
         run: git diff --check
 
-      - name: Run source-vBook tests
+      - name: Run source-vBook tests with captured output
         id: tests
         if: steps.patch.outcome == 'success' && steps.diffcheck.outcome == 'success'
         continue-on-error: true
-        run: ./gradlew --no-daemon :source-vbook:test
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon :source-vbook:test --stacktrace 2>&1 | tee /tmp/vbook-script-scope-test.log
 
-      - name: Publish verified fix or failure beacon
+      - name: Publish verified fix or detailed failure beacon
         if: always()
         env:
           PATCH_OUTCOME: ${{ steps.patch.outcome }}
@@ -56,11 +65,14 @@ jobs:
         run: |
           mkdir -p .agent
           printf 'patch=%s\ndiffcheck=%s\ntests=%s\n' "$PATCH_OUTCOME" "$DIFF_OUTCOME" "$TEST_OUTCOME" > .agent/vbook-script-scope-status.txt
+          if [ -f /tmp/vbook-script-scope-test.log ] && [ "$TEST_OUTCOME" != success ]; then
+            tail -n 500 /tmp/vbook-script-scope-test.log > .agent/vbook-script-scope-test.log
+          fi
           if [ "$PATCH_OUTCOME" = success ] && [ "$DIFF_OUTCOME" = success ] && [ "$TEST_OUTCOME" = success ]; then
-            rm -f scripts/agent_fix_vbook_script_scope.py .github/workflows/agent-fix-vbook-script-scope.yml .agent/vbook-script-scope-status.txt
+            rm -f scripts/agent_fix_vbook_script_scope.py .github/workflows/agent-fix-vbook-script-scope.yml .agent/vbook-script-scope-status.txt .agent/vbook-script-scope-test.log
             message='fix: compile vBook loads in one lexical scope'
           else
-            message='ci: record vBook script scope patch failure'
+            message='ci: record detailed vBook scope test failure'
           fi
           git add -A
           if git diff --cached --quiet; then

@@ -596,22 +596,17 @@ class NarrationPlanCoordinator(
     }
 
     private fun aiDescription(value: String): String = value.lineSequence()
-        .filterNot { line ->
-            val lower = line.trim().lowercase()
-            lower.startsWith("type:") || lower.startsWith("type=") ||
-                lower in setOf(
-                    "[music]",
-                    "[ambience]",
-                    "[environment]",
-                    "[sfx]",
-                    "[continuous]",
-                    "[sfx_continuous]",
-                    "[sfx-continuous]",
-                )
-        }
+        .map(::stripLeadingAudioTypeMarker)
+        .filter(String::isNotBlank)
         .joinToString(" ")
         .trim()
         .take(300)
+
+    private fun stripLeadingAudioTypeMarker(value: String): String {
+        val trimmed = value.trim()
+        if (trimmed.isBlank()) return ""
+        return AUDIO_TYPE_PREFIX.replaceFirst(trimmed, "").trim()
+    }
 
     private suspend fun effectiveAiMetadata(storyId: String, globalProvider: String, globalModel: String): Pair<String, String> {
         val profile = library.getStoryAiProfile(storyId)
@@ -627,5 +622,8 @@ class NarrationPlanCoordinator(
         const val KIND_AUDIO_DIRECTION = "AUDIO_DIRECTION"
         private const val VOICE_TRANSFORM_ENGINE = "xpk-unit-v8"
         private const val MUSIC_TRANSFORM_ENGINE = "xpk-ai-full-authority-v1"
+        private val AUDIO_TYPE_PREFIX = Regex(
+            "(?i)^(?:type\\s*[:=]\\s*(?:music|ambience|environment|sfx|sound[_-]?effect|sfx[_-]?continuous|continuous)|\\[(?:music|ambience|environment|sfx|continuous|sfx[_-]?continuous)\\])(?:\\s*[,;|]\\s*|\\s+|$)",
+        )
     }
 }

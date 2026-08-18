@@ -7,7 +7,7 @@ import org.mozilla.javascript.Context
 
 class VBookReplaySafeFetchEnvelopeTest {
     @Test
-    fun appKernelRecoversOriginalRawResponseKeyAndCharsetFromReplayedEnvelope() {
+    fun appKernelRecoversRawKeyCharsetAndCaseCompatibleHeadersFromReplay() {
         val cx = Context.enter()
         try {
             cx.languageVersion = Context.VERSION_ES6
@@ -39,8 +39,8 @@ class VBookReplaySafeFetchEnvelopeTest {
                             body:'{\"ok\":true}',
                             rawSize:11,
                             statusText:'OK',
-                            headers:{'Content-Type':'application/json; charset=gbk'},
-                            request:{url:String(url),headers:{'X-Upstream':'real'}}
+                            headers:{'Content-Type':'application/json; charset=gbk','X-Rate-Limit':'7'},
+                            request:{url:String(url),headers:{'Cookie':'_csrfToken=abc; session=xyz','X-Upstream':'real'}}
                           })
                         };
                       }
@@ -64,7 +64,11 @@ class VBookReplaySafeFetchEnvelopeTest {
                       body:response.body,
                       ok:response.json('gbk').ok,
                       requestUrl:response.request.url,
+                      requestCookie:response.request.headers.cookie,
+                      requestCookieCanonical:response.request.headers.Cookie,
                       contentType:response.header('content-type'),
+                      responseHeaderLower:response.headers['x-rate-limit'],
+                      responseHeaderCanonical:response.headers['X-Rate-Limit'],
                       callCount:__calls.length,
                       initialKey:__calls[0].requestKey,
                       cacheKey:__calls[1].requestKey,
@@ -79,7 +83,11 @@ class VBookReplaySafeFetchEnvelopeTest {
             assertTrue("\"body\":\"{\\\"ok\\\":true}\"" in result)
             assertTrue("\"ok\":true" in result)
             assertTrue("\"requestUrl\":\"https://example.com/protected\"" in result)
+            assertTrue("\"requestCookie\":\"_csrfToken=abc; session=xyz\"" in result)
+            assertTrue("\"requestCookieCanonical\":\"_csrfToken=abc; session=xyz\"" in result)
             assertTrue("\"contentType\":\"application/json; charset=gbk\"" in result)
+            assertTrue("\"responseHeaderLower\":\"7\"" in result)
+            assertTrue("\"responseHeaderCanonical\":\"7\"" in result)
             assertTrue("\"callCount\":2" in result)
             assertTrue("\"cacheKey\":\"cached-pass-a\"" in result)
             assertTrue("\"decodeCharset\":\"gbk\"" in result)

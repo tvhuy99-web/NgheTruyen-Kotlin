@@ -9,7 +9,7 @@ import java.nio.charset.StandardCharsets
 import java.util.Base64
 
 data class VBookContinuation(val token: String = "") {
-    /** Tokens are opaque. Never parse, increment, multiply or otherwise reinterpret them. */
+
     fun hasNext(): Boolean = token.isNotEmpty()
 }
 
@@ -29,7 +29,7 @@ data class VBookDynamicAction(
     val input: String,
     val scriptPath: String,
     val data: String = "",
-    /** Explore actions may explicitly declare `data`, including an empty string, as args[1]. */
+
     val hasDataArgument: Boolean = false,
     val type: String? = null,
 ) {
@@ -99,7 +99,7 @@ object VBookInvocationPlanner {
         return VBookScriptInvocation(scriptPath, args)
     }
 
-    /** Legacy callers may provide exact positional arguments. We do not invent page arithmetic. */
+
     fun legacy(scriptPath: String, args: List<String>): VBookScriptInvocation = VBookScriptInvocation(scriptPath, args)
 }
 
@@ -271,7 +271,7 @@ object VBookFetchPlanner {
         require(normalizedMethod in setOf("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE")) { "VBOOK_FETCH_METHOD_INVALID" }
         require(headers.size <= 128) { "VBOOK_FETCH_HEADERS_TOO_MANY" }
         val resolvedUrl = appendQueries(url, queries)
-        URI(resolvedUrl) // validate syntax without restricting the host here; the network broker owns egress policy.
+        URI(resolvedUrl)
         return VBookFetchPlan(resolvedUrl, normalizedMethod, headers, body, timeoutMs?.coerceIn(100L, 120_000L))
     }
 

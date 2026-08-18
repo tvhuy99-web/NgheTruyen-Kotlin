@@ -46,7 +46,7 @@ data class PersistedChapterPageCursor(
     val nextChapterUrl: String? = null,
 )
 
-/** Stores a TOC-page continuation inside the existing persisted next-navigation column. */
+
 object ChapterPageCursorCodec {
     private const val PREFIX = "nghetruyen:toc-page:v1:"
 
@@ -94,7 +94,7 @@ data class ChapterCatalogMergeResult(
     val repeatedCursor: Boolean,
 )
 
-/** Deterministic append-only merge shared by automatic catalog pagination and its tests. */
+
 object ChapterCatalogMerger {
     fun merge(
         existing: List<ChapterSummary>,
@@ -260,10 +260,10 @@ private data class ChapterNavigationHint(
     val nextChapterPageStartIndex: Int?,
 )
 
-/**
- * Keeps navigation for every chapter returned by a newly loaded TOC page. The active chapter's
- * hint is also copied into the persisted playback snapshot, so process recreation remains safe.
- */
+
+
+
+
 class ChapterPageNavigationCache {
     private val hints = LinkedHashMap<String, ChapterNavigationHint>()
     private var activeStoryId: String = ""

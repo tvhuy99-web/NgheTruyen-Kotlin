@@ -84,7 +84,7 @@ class SourcePackStore(
                 stage.mkdirs()
                 try {
                     writePack(stage, pack)
-                    // Re-read from disk before activation so partial/corrupt writes cannot become active.
+
                     val staged = loadVersion(stage)
                     require(staged.manifest.id == pack.manifest.id && staged.manifest.version == pack.manifest.version) {
                         "SOURCE_STAGE_VERIFY_FAILED"

@@ -63,8 +63,8 @@ class ReferenceTtsPersistenceTest {
             ),
         )
 
-        // The first rendered stage intentionally remains capped at 100% for preview;
-        // Sonic's independent gain carries the selected 175% value into the Sonic stage.
+
+
         assertEquals(1f, preview.volume, 0.0001f)
         assertEquals(1.75f, preview.sonicVolume, 0.0001f)
     }

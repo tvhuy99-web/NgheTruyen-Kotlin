@@ -60,7 +60,7 @@ object VBookLoadDirectiveParser {
     }
 }
 
-/** Static validation for the documented current-engine load('file.js') contract. */
+
 object VBookLoadGraphValidator {
     fun validate(scripts: Map<String, String>, profile: VBookContractProfile): List<VBookLoadIssue> {
         if (profile != VBookContractProfile.CURRENT_JS) return emptyList()

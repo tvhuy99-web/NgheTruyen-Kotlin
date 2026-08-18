@@ -12,13 +12,13 @@ import vn.nghetruyen.app.sources.SourceRegistry
 import java.text.Normalizer
 import java.util.Locale
 
-/**
- * Final guard around the XPK migration path.
- *
- * The lower compatibility layers perform the conversion. This layer repairs legacy source aliases,
- * makes restored offline chapters visible to the current library model, and verifies persisted
- * Room/runtime state before the UI is told that the operation completed.
- */
+
+
+
+
+
+
+
 class LegacyXpkVerifiedRestoreCoordinator(
     context: Context,
     private val delegate: LegacyXpkEverythingRestoreCoordinator,

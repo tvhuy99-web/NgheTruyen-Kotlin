@@ -195,8 +195,8 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
-    // Local JVM tests exercise narration parsers that use org.json. Android's android.jar exposes
-    // non-functional stubs here, so use the real JVM implementation for unit tests.
+
+
     testImplementation("org.json:json:20251224")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.room:room-testing:2.8.4")

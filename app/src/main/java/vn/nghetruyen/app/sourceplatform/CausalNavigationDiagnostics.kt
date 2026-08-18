@@ -25,14 +25,14 @@ internal interface CausalNavigationRuntime {
     fun emitReady(event: CausalNavigationReadyEvent)
 }
 
-/**
- * One navigation contract for every source-backed screen transition.
- *
- * The source action runs inside one causal CoroutineContext. A destination generation is created
- * only after the block returns Success, and only that root trace is handed off. Failures therefore
- * stay on the origin screen with their complete timeline/evidence, while unrelated origin events
- * can never leak into the destination.
- */
+
+
+
+
+
+
+
+
 internal suspend fun <T> runCausalNavigation(
     runtime: CausalNavigationRuntime,
     traceKind: String,

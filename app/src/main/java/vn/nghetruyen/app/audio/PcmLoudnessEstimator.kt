@@ -12,14 +12,14 @@ import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.tan
 
-/**
- * XPK-compatible scene-music loudness analysis.
- *
- * The reference tool measures K-weighted integrated loudness with 400 ms blocks,
- * an absolute -70 LUFS gate and a relative -10 LU gate. It also stores the sample
- * peak so normalization can be capped at -1 dBFS without decoding the track again
- * when the user later changes the target LUFS.
- */
+
+
+
+
+
+
+
+
 object PcmLoudnessEstimator {
     const val VERSION = 1
     const val DEFAULT_TARGET_LUFS = -24f
@@ -135,7 +135,7 @@ object PcmLoudnessEstimator {
         )
     }
 
-    /** Compatibility helper for callers that only need the measured LUFS value. */
+
     fun estimateLufs(wavFile: File): Float = analyze(wavFile).loudnessLufs
 
     fun calculateNormalization(
@@ -164,7 +164,7 @@ object PcmLoudnessEstimator {
     fun gainDbToLinear(gainDb: Float): Float =
         10.0.pow(gainDb.coerceIn(MIN_GAIN_DB, MAX_GAIN_DB) / 20.0).toFloat()
 
-    /** Legacy API kept for older export/runtime callers. */
+
     fun normalizationGain(measuredLufs: Float, targetLufs: Float): Float =
         gainDbToLinear(calculateNormalization(measuredLufs, null, targetLufs).gainDb)
 

@@ -176,8 +176,8 @@ def migration_gate() -> None:
     ).fetchone()
     assert row == ("chapter", 3, 0, None, None, None, "", 1), row
 
-    # The 15->16 block includes a concatenated index SQL that the conservative
-    # extractor may omit, so execute every extracted statement and verify schema.
+
+
     migration_15_16 = extract_migration("MIGRATION_15_16", "MIGRATION_16_17")
     assert migration_15_16, migration_15_16
     for sql in migration_15_16:

@@ -6,14 +6,14 @@ import android.webkit.CookieManager
 import android.webkit.WebSettings
 import android.webkit.WebView
 
-/**
- * Canonical WebView configuration for installed extensions.
- *
- * The goal is browser parity, not a second permission system. JavaScript, DOM storage, mixed HTTP
- * content, third-party cookies, scripted windows and media are browser features available to every
- * installed extension. The containment boundary stays at Android: file/content access and Java
- * object bridges are intentionally outside this policy.
- */
+
+
+
+
+
+
+
+
 object ExtensionWebViewAuthority {
     @SuppressLint("SetJavaScriptEnabled")
     fun apply(context: Context, webView: WebView) {

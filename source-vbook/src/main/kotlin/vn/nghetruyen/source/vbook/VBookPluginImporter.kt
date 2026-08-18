@@ -19,7 +19,7 @@ import vn.nghetruyen.source.packagekit.SourceManifestWriter
 import java.net.URI
 import java.util.Locale
 
-/** Historical conversion model retained only for legacy SourcePack migration/import compatibility. */
+
 data class LegacyVBookMetadata(
     val name: String,
     val id: String,
@@ -45,7 +45,7 @@ data class VBookImportResult(
     val warnings: List<String>,
 )
 
-/** Legacy converter. New vBook installations must use VBookPackageReader/VBookSourcePlatform. */
+
 object VBookPluginImporter {
     private val DIRECT_ACTIONS = linkedMapOf(
         "search" to SourceActionName.SEARCH,

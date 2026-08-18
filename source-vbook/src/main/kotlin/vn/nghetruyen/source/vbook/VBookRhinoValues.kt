@@ -5,7 +5,7 @@ import org.mozilla.javascript.Scriptable
 import org.mozilla.javascript.ScriptableObject
 import org.mozilla.javascript.Undefined
 
-/** Explicit host-to-JavaScript value boundary. No JVM collection wrapper reaches extension code. */
+// No JVM collection wrapper reaches extension code
 internal object VBookRhinoValues {
     fun array(context: Context, scope: Scriptable, values: Iterable<Any?>): Scriptable {
         val safe = values.map { value ->

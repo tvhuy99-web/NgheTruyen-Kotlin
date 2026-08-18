@@ -161,7 +161,7 @@ data class SourceWebSocketRequest(
 
 data class SourceWebSocketFrame(
     val type: String,
-    /** Text payload for text frames; base64 payload for binary frames. */
+
     val data: String,
 ) {
     init {
@@ -174,7 +174,7 @@ data class SourceWebSocketResponse(
     val closeCode: Int?,
     val closeReason: String?,
     val traceId: String,
-    /** Rich frame representation for vBook-compatible hosts. Empty means legacy text-only broker. */
+
     val frames: List<SourceWebSocketFrame> = emptyList(),
 )
 
@@ -202,7 +202,7 @@ data class SourceTranslationRequest(
     val instruction: String = "",
     val maxOutputBytes: Int = 2 * 1024 * 1024,
     val traceId: String = UUID.randomUUID().toString(),
-    /** Ecosystem-specific, string-only options. Generic translators may safely ignore them. */
+
     val options: Map<String, String> = emptyMap(),
 )
 
@@ -219,7 +219,7 @@ data class SourceTranslationResponse(
     val segments: List<String> = emptyList(),
     val provider: String? = null,
     val traceId: String,
-    /** Offset metadata used by vBook Quick Translator; empty means unavailable. */
+
     val segmentMetadata: List<SourceTranslationSegment> = emptyList(),
 )
 
@@ -308,13 +308,13 @@ data class SourceCapabilityBrokers(
     val websocket: SourceWebSocketBroker = SourceWebSocketBroker.DENY_ALL,
     val nativeHooks: SourceNativeHookBroker = SourceNativeHookBroker.DENY_ALL,
     val graphics: SourceGraphicsBroker = SourceGraphicsBroker.DENY_ALL,
-    /** Generic translation extension/provider path. */
+
     val translation: SourceTranslationBroker = SourceTranslationBroker.DENY_ALL,
     val cookies: SourceCookiePartition = SourceCookiePartition.NONE,
-    /** vBook Qt.translate vp/hv path. Kept separate from generic AI/translate extensions. */
+
     val quickTranslation: SourceTranslationBroker = SourceTranslationBroker.DENY_ALL,
-    /** NgheTruyen-owned UI/reader/library/TTS host command boundary. */
+
     val hostKernel: SourceHostKernelBroker = SourceHostKernelBroker.UNAVAILABLE,
-    /** Host-to-extension lifecycle/event delivery boundary. */
+
     val hostEvents: SourceHostEventSink = SourceHostEventSink.NONE,
 )

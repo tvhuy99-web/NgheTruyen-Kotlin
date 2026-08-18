@@ -311,7 +311,7 @@ class NarrationPlanCoordinator(
         return !isCurrentTimelineTransform(cached.transformedText, XpkAmbienceSfxDirector.ENGINE, content)
     }
 
-    /** Canonical XPK assignments live in chapter_transforms; paragraph rows are legacy-only. */
+
     private suspend fun persistVoicePlan(content: ChapterContent, plan: VoiceCastPlan) {
         val appSettings = settings.snapshot()
         val canonicalAssignments = plan.assignments
@@ -561,7 +561,7 @@ class NarrationPlanCoordinator(
         return ChapterAiWorkflow.sha256(source?.paragraphs ?: content.paragraphs)
     }
 
-    // Keep this formula identical to ReaderPlaybackService so saved XPK scene plans are loadable now.
+
     private suspend fun musicSourceHash(content: ChapterContent, tracks: List<SceneMusicTrackEntity>): String {
         val source = library.loadCachedChapter(content.chapter.id)
         val sourceParagraphs = source?.paragraphs ?: content.paragraphs

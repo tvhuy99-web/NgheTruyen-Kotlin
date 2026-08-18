@@ -3,10 +3,10 @@ package vn.nghetruyen.app.sourceplatform
 import vn.nghetruyen.app.sources.SourceSessionStore
 import vn.nghetruyen.source.api.SourceCookiePartition
 
-/**
- * Keeps the structured vBook cookie jar and the encrypted manual-login session store coherent.
- * The session store is authoritative when the login WebView changes or clears a session.
- */
+
+
+
+
 class VBookSessionCookiePartition(
     private val delegate: SourceCookiePartition,
     private val sessions: SourceSessionStore,

@@ -12,13 +12,13 @@ import java.io.RandomAccessFile
 import kotlin.math.abs
 import sonic.Sonic
 
-/**
- * PCM16 WAV adapter around Bill Cox's upstream Sonic Java implementation.
- *
- * The DSP algorithm lives in the vendored `sonic.Sonic` upstream implementation.
- * This class only validates WAV input, streams little-endian PCM into Sonic, and
- * writes the processed samples back to a standard PCM16 WAV container.
- */
+
+
+
+
+
+
+
 object SonicPcmProcessor {
     private const val MAX_PCM_BYTES = 64L * 1024L * 1024L
     private const val BUFFER_BYTES = 64 * 1024
@@ -46,8 +46,8 @@ object SonicPcmProcessor {
 
         val normalizedSpeed = speed.coerceIn(0.25f, 3f)
         val normalizedPitch = pitch.coerceIn(0.5f, 2f)
-        // Keep the existing reference-volume behavior intentionally: the converter
-        // applies the first gain stage and upstream Sonic applies this second stage.
+
+
         val normalizedGain = gain.coerceIn(0f, 2f)
         if (
             abs(normalizedSpeed - 1f) < 0.005f &&

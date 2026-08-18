@@ -3,7 +3,7 @@ package vn.nghetruyen.app.ai.vietphrase
 import java.nio.charset.Charset
 import java.util.Locale
 
-/** Bounded text dictionary importer with delimiter and kind detection. */
+
 object VietPhraseDictionaryCodec {
     data class DecodeResult(
         val kind: VietPhraseDictionaryKind,

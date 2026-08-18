@@ -174,7 +174,7 @@ internal class ChromiumVBookBrowserReplayRuntime(
     }
 }
 
-/** Per-trace replay state shared by Chromium's Browser and network broker facades. */
+
 internal class ChromiumVBookReplayCoordinator(
     private val browserDelegate: SourceBrowserBroker,
     private val networkDelegate: SourceNetworkBroker,

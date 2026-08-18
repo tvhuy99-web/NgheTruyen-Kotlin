@@ -39,9 +39,9 @@ def main() -> None:
         print("M1_READER_CORE_STATIC_OK; EXECUTABLE_CHECK_SKIPPED: Kotlin CLI unavailable")
         return
 
-    # This gate intentionally isolates reader queue/index mechanics from the XPK splitter/parser.
-    # XPK behavior has its own executable/static gates. The adapter below supplies only the three
-    # runtime hooks PlaybackQueueStore needs so this small kotlinc harness stays dependency-light.
+
+
+
     xpk_runtime_stub = r'''
 package vn.nghetruyen.app.playback
 

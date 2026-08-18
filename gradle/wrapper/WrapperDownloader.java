@@ -12,11 +12,11 @@ import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.HexFormat;
 
-/**
- * Small, dependency-free bootstrap for source archives that cannot carry the
- * Gradle Wrapper binary. The downloaded JAR is accepted only when its official
- * Gradle 8.13 SHA-256 checksum matches.
- */
+
+
+
+
+
 public final class WrapperDownloader {
     private static final URI WRAPPER_URI = URI.create(
         "https://raw.githubusercontent.com/gradle/gradle/v8.13.0/gradle/wrapper/gradle-wrapper.jar"

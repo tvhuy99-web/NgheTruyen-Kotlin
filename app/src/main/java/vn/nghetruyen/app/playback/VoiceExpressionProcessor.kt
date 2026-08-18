@@ -4,7 +4,7 @@ import vn.nghetruyen.app.core.model.VoiceExpression
 import vn.nghetruyen.app.data.local.VoiceRoleEntity
 import java.text.Normalizer
 
-/** Maps a role and paragraph into deterministic TTS/Sonic adjustments. */
+
 data class ExpressiveSpeech(
     val text: String,
     val expression: VoiceExpression,
@@ -17,8 +17,8 @@ data class ExpressiveSpeech(
 
 object VoiceExpressionProcessor {
     fun resolve(text: String, role: VoiceRoleEntity?): ExpressiveSpeech {
-        // XPK applyAssignments() uses only the base profile multiplied by AI percentages. Do not add
-        // a second local emotion/prosody layer or rewrite pauses while a canonical XPK unit is playing.
+
+
         if (XpkPlaybackRuntime.shouldBypassLocalExpression(text)) {
             return ExpressiveSpeech(
                 text = text,

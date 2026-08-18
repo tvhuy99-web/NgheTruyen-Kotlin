@@ -195,9 +195,9 @@ object VBookCorpusAnalyzer {
             }
             fun hitLiteralArgument(feature: VBookFeature, regex: Regex) {
                 regex.findAll(code).firstOrNull { match ->
-                    // The match starts in executable code only when the method dot survived masking.
-                    // This preserves literal arguments for evidence without treating generated JS/HTML
-                    // strings or comments as host-API requirements.
+
+
+
                     executableCode.getOrNull(match.range.first) == '.'
                 }?.let { match -> add(feature, path, match.value.take(160)) }
             }

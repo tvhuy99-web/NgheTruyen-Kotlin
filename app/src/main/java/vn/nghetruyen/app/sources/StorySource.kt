@@ -67,13 +67,13 @@ data class SourceDescriptor(
 )
 
 
-/**
- * A SourcePack can opt into a certified bridge to a richer built-in adapter.
- * The bridge lets the installed pack own metadata, permissions and update state
- * while the website-specific parser remains the same tested implementation used
- * by the application. It is deliberately explicit so an untrusted pack cannot
- * silently capture an arbitrary built-in source.
- */
+
+
+
+
+
+
+
 interface BuiltInSourcePackBridge {
     val builtInDelegateId: String?
     fun attachBuiltInDelegate(delegate: StorySource): StorySource
@@ -82,12 +82,12 @@ interface BuiltInSourcePackBridge {
 interface StorySource {
     val descriptor: SourceDescriptor
 
-    /**
-     * Used only when more than one implementation exposes the same stable source id.
-     * Built-in adapters deliberately outrank compatibility packs until a pack explicitly
-     * declares that it has reached full parity. This prevents a small selector pack from
-     * silently hiding a richer website-specific adapter.
-     */
+
+
+
+
+
+
     val selectionPriority: Int get() = 100
 
     suspend fun search(query: String, page: Int = 1): AppResult<List<StorySummary>>

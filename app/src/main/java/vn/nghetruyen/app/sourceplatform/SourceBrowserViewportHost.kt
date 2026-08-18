@@ -11,15 +11,15 @@ import java.lang.ref.WeakReference
 import java.util.Collections
 import java.util.IdentityHashMap
 
-/**
- * Gives extension WebViews a real, non-zero viewport without exposing them in the application UI.
- *
- * A measured but detached WebView reports a 0x0 JavaScript viewport on some Android/WebView builds.
- * Anti-bot pages use that as a headless-browser signal and never finish their cookie challenge. The
- * Lua host keeps its browser attached just outside the visible screen; this host provides the same
- * rendering contract while an Activity is resumed and falls back to an explicitly measured layout
- * for background work.
- */
+
+
+
+
+
+
+
+
+
 internal object SourceBrowserViewportHost : Application.ActivityLifecycleCallbacks {
     private var initialized = false
     private var resumedActivity = WeakReference<Activity>(null)

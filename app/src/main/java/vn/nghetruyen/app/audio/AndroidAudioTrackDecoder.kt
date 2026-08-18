@@ -17,7 +17,7 @@ import java.nio.ByteOrder
 import kotlin.math.floor
 import kotlin.math.roundToLong
 
-/** Decodes a user-selected audio document and normalizes it to narration PCM16 WAV. */
+
 object AndroidAudioTrackDecoder {
     private const val TIMEOUT_US = 10_000L
     private const val MAX_DECODED_PCM_BYTES = 512L * 1024L * 1024L

@@ -114,7 +114,7 @@ class AppContainer(context: Context) {
         )
     }
 
-    /** One authoritative refresh point after native or vBook install/update/rollback. */
+
     fun refreshSourceRegistry() {
         sourceRegistry.replaceExternalSources(currentExternalStorySources())
     }

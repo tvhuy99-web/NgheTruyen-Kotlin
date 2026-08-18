@@ -54,10 +54,10 @@ class LuaNativeHookBroker : SourceNativeHookBroker {
         val encoded = JsonCodec.stringify(sandbox.luaToJson(output))
         require(encoded.toByteArray(Charsets.UTF_8).size <= request.maxOutputBytes) { "NATIVE_LUA_HOOK_OUTPUT_TOO_LARGE" }
 
-        // VBookJsRuntime materializes a broker String through JSON.parse before returning it to the
-        // Native API 2 adapter. Native packages already installed on disk therefore need one wire
-        // layer around the hook JSON so the adapter receives JSON text, not an already-decoded JS
-        // value. This keeps strings (including JavaScript snippets), objects and arrays lossless.
+
+
+
+
         val wireOutput = if (manifest.runtime.mode == SourceRuntimeMode.NATIVE_LUA_COMPAT) {
             JsonCodec.stringify(JsonValue.Str(encoded))
         } else {

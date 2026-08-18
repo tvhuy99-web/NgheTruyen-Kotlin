@@ -5,14 +5,14 @@ import java.nio.charset.CharacterCodingException
 import java.nio.charset.Charset
 import java.nio.charset.CodingErrorAction
 
-/**
- * Bounded parser for unencrypted PalmDOC/MOBI containers.
- *
- * It supports raw PalmDOC, PalmDOC LZ77, and bounded HUFF/CDIC text records.
- * DRM-encrypted books are rejected explicitly instead of returning corrupted
- * text. MOBI 8 / KF8-only text containers are accepted when their text records
- * use one of the supported compression modes.
- */
+
+
+
+
+
+
+
+
 object MobiParser {
     data class Document(
         val title: String,

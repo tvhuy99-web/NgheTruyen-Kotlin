@@ -2,12 +2,12 @@ package vn.nghetruyen.app.importers
 
 import java.io.ByteArrayOutputStream
 
-/**
- * Bounded MOBI HUFF/CDIC decoder.
- *
- * The table layout and decoding procedure follow the public libmobi implementation,
- * rewritten in Kotlin with explicit bounds, recursion, and output limits.
- */
+
+
+
+
+
+
 internal object HuffCdicDecoder {
     private const val MASK_32 = 0xffff_ffffL
     private const val HUFF_HEADER_BYTES = 16

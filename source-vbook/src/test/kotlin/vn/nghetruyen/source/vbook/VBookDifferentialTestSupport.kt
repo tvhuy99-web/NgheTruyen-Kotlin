@@ -10,7 +10,7 @@ import com.nghetruyen.source.platform.SourceEcosystem
 import vn.nghetruyen.source.api.JsonCodec
 import vn.nghetruyen.source.api.JsonValue
 
-/** Captured output from the official vBook POST /extension/test endpoint. */
+
 data class VBookOfficialTestCapture(
     val caseId: String,
     val artifactId: String,

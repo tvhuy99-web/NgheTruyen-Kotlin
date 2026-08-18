@@ -25,14 +25,14 @@ import java.util.UUID
 import java.util.zip.ZipInputStream
 import kotlin.math.pow
 
-/**
- * Completes the legacy XPK migration without changing the existing restore UI.
- *
- * Structured reading data remains owned by [LegacyXpkBackupImporter]. This coordinator additionally
- * migrates physical scene-music files and installs legacy extension payloads through the current
- * source-platform importers. Raw legacy extension payloads are also preserved inertly so a failed
- * or no-longer-supported extension format is never silently lost.
- */
+
+
+
+
+
+
+
+
 class LegacyXpkCompleteRestoreCoordinator(
     context: Context,
     private val legacyImporter: LegacyXpkBackupImporter,

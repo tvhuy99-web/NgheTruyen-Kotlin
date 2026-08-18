@@ -1,12 +1,12 @@
 package vn.nghetruyen.source.api
 
-/**
- * JSON-only adapter for runtimes that cannot or should not receive host implementation objects.
- *
- * A JavaScript/Lua bridge only needs to stringify its v2 command envelope and pass it here. Parsing,
- * validation and host dispatch stay in source-api; the bridge gets back JSON or a normal platform
- * failure. This keeps runtime-specific code deliberately tiny.
- */
+
+
+
+
+
+
+
 object SourceHostKernelWireExecutor {
     fun execute(
         broker: SourceHostKernelBroker,

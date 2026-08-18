@@ -43,9 +43,9 @@ data class SourceNetworkCapability(
     val maxRequestBytes: Int = 0,
     val requestsPerMinute: Int = 60,
     val maxConcurrent: Int = 2,
-    /** Allow arbitrary public Internet hosts instead of only declared origins. */
+
     val publicInternet: Boolean = false,
-    /** Allow public cleartext HTTP for extension compatibility. Requires [publicInternet]. */
+
     val allowCleartext: Boolean = false,
 )
 

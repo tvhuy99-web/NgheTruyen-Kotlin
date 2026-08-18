@@ -14,7 +14,7 @@ import vn.nghetruyen.source.api.SourcePlatformResult
 import vn.nghetruyen.source.diagnostics.DiagnosticSink
 import vn.nghetruyen.source.runtime.SourceResourceProvider
 
-/** Contract-aware facade over the mature vBook host API implementation. */
+
 class VBookCompatibilityRuntime(
     private val runtime: VBookActionRuntime = RhinoVBookActionRuntime(),
 ) {

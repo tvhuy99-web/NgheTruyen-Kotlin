@@ -2,11 +2,11 @@ package vn.nghetruyen.app.playback
 
 import vn.nghetruyen.app.data.local.PronunciationEntity
 
-/**
- * Applies enabled pronunciation rules with a deterministic left-to-right,
- * longest-match strategy. Replacements are not fed back into the matcher,
- * which prevents accidental recursive/cascading substitutions.
- */
+
+
+
+
+
 object PronunciationProcessor {
     fun apply(text: String, rules: List<PronunciationEntity>): String {
         if (text.isEmpty() || rules.isEmpty()) return text

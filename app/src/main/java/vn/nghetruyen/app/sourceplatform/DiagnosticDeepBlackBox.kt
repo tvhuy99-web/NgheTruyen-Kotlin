@@ -21,13 +21,13 @@ data class DiagnosticDeepBlackBoxReport(
     val flowLogs: Map<String, String>,
 )
 
-/**
- * Forensic reconstruction inspired by the Lua/XPK advanced black box.
- *
- * The UI stays intentionally simple. This object turns the unified event stream into the richer
- * developer-facing views that Lua exposed internally: operation/deadline state, latest state per
- * flow, browser session counters/probes, and explicit data-loss accounting.
- */
+
+
+
+
+
+
+
 object DiagnosticDeepBlackBox {
     fun analyze(
         events: List<DiagnosticEvent>,

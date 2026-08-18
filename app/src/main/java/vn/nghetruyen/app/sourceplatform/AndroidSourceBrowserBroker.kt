@@ -60,15 +60,15 @@ import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
-/**
- * Serialized WebView capability broker.
- *
- * Android WebView owns one CookieManager/profile per process, so this implementation exports/imports
- * a source-partitioned cookie jar and clears WebView state whenever the active SourcePack changes.
- * The response marks this fallback as degraded isolation. No Java object is exposed to page scripts.
- * Browser feature defaults are centralized in [ExtensionWebViewAuthority] so installed extensions
- * receive a capable browser without adding another per-feature permission maze.
- */
+
+
+
+
+
+
+
+
+
 class AndroidSourceBrowserBroker(
     context: Context,
     private val cookiePartition: SourceCookiePartition,

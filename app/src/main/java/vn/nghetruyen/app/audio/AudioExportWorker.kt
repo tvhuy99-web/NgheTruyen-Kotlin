@@ -77,7 +77,7 @@ private data class MusicPlan(
     val tracks: Map<String, SceneMusicTrackEntity>,
 )
 
-/** Resumable audiobook export to WAV, AAC-LC/M4A or MP3. */
+
 class AudioExportWorker(
     appContext: Context,
     params: WorkerParameters,

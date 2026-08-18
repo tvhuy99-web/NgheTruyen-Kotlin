@@ -40,12 +40,12 @@ import java.net.URI
 import java.util.Base64
 import java.util.UUID
 
-/**
- * Story adapter for an immutable active vBook artifact.
- *
- * It never translates an extension into NgheTruyen rules. plugin.json/src stay authoritative and
- * are executed through [VBookCompatibilityRuntime]. Only the returned data is normalized.
- */
+
+
+
+
+
+
 class VBookStorySource(
     private val artifact: SourceArtifactDescriptor,
     packageBytes: ByteArray,

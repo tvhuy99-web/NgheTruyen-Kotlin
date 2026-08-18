@@ -1,6 +1,6 @@
 package vn.nghetruyen.app.playback
 
-/** Pure policy used by the Activity so volume navigation can be tested off-device. */
+
 object ReaderVolumeKeyPolicy {
     enum class Key { VOLUME_UP, VOLUME_DOWN, OTHER }
 

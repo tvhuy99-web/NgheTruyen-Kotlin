@@ -10,7 +10,7 @@ def write(path: str, text: str) -> None:
     Path(path).write_text(text, encoding="utf-8")
 
 
-# Personal: finish the partially persisted two-level navigation cleanly.
+
 personal = "app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt"
 text = read(personal)
 architecture = '        SettingsCard("Kiến trúc ứng dụng", "Kotlin, Compose, Room, DataStore, WorkManager và foreground TTS service. Lua Native Source API 2 chạy trong LuaJ sandbox; không AndroLua, không luajava và không nạp DEX động.")\n'
@@ -38,8 +38,8 @@ elif new_tail not in text:
     raise SystemExit("PersonalScreen.kt: could not finalize page structure")
 write(personal, text)
 
-# Story detail: advanced configuration should contain configuration only. The compact
-# TÙY CHỌN dialog already owns follow/download/export/profile actions.
+
+
 story = "app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt"
 text = read(story)
 advanced_start = text.find('        if (showAdvancedOptions) {\n')
@@ -57,8 +57,8 @@ if advanced_start >= 0 and voice_card >= 0:
         text = text[:close_end] + text[voice_card:]
 write(story, text)
 
-# Reader: reference order is playback controls first, then AI actions. Use anchor
-# positions rather than brittle line fragments, so this stays idempotent.
+
+
 reader = "app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt"
 text = read(reader)
 status_sentinel = 'Đang chuẩn bị giọng đọc và nội dung tiếp theo…'
@@ -96,7 +96,7 @@ if status_sentinel not in text:
     text = text[:actions_index] + status + ai_block + text[actions_index:]
 write(reader, text)
 
-# Guardrails for the final UI structure.
+
 checks = {
     "ExploreScreen.kt": (
         "app/src/main/java/vn/nghetruyen/app/ui/screens/ExploreScreen.kt",

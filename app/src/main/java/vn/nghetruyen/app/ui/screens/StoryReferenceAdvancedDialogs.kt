@@ -44,11 +44,11 @@ import vn.nghetruyen.app.ui.components.ReferencePanelBackground
 import vn.nghetruyen.app.ui.components.ReferenceText
 import vn.nghetruyen.app.ui.reference.ReferenceVoiceRoleExtras
 
-/**
- * Story-scoped reference dialogs that can be hosted by either StoryDetail or Reader.
- * Keeping them inside the current destination is important: the XPK opens these
- * dialogs over the reader instead of navigating away and then navigating back.
- */
+
+
+
+
+
 @Composable
 fun StoryReferenceAdvancedDialogs(
     state: MainUiState,

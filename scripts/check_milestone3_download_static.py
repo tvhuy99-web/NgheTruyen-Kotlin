@@ -15,10 +15,10 @@ def require(path: str, *tokens: str) -> None:
 
 
 def main() -> None:
-    # The download worker now relies on current WorkManager expedited/foreground APIs.
-    # The former hand-written WorkManager stub did not model getForegroundInfo or
-    # OutOfQuotaPolicy, so it produced false compiler failures. M0's real Gradle
-    # build is the authoritative Android compile; this gate verifies feature wiring.
+
+
+
+
     require(
         "app/src/main/java/vn/nghetruyen/app/downloads/ChapterDownloadWorker.kt",
         "override suspend fun getForegroundInfo()",

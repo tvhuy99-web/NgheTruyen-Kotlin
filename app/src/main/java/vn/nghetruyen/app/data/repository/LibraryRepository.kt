@@ -134,9 +134,9 @@ class LibraryRepository(private val db: AppDatabase) {
             ReadingHistoryEntity(
                 id = id,
                 storyId = chapter.storyId,
-                // A remotely sourced story may currently be read from its downloaded copy.
-                // Keep the canonical source in history so reopening it follows the same online
-                // story flow as Home instead of being permanently routed through offline mode.
+
+
+
                 sourceId = storedStory?.sourceId?.takeIf(String::isNotBlank)
                     ?: sourceId,
                 storyTitle = storyTitle.ifBlank { storedStory?.title.orEmpty() }.ifBlank { "Truyện" },
@@ -241,12 +241,12 @@ class LibraryRepository(private val db: AppDatabase) {
         )
     }
 
-    /**
-     * Stores chapter text as a local cache. The story is only shown in the
-     * downloaded shelf after [markStoryDownloaded] is called, so normal reading
-     * can safely cache recently opened chapters without pretending that the
-     * complete story is available offline.
-     */
+
+
+
+
+
+
     suspend fun cacheChapter(content: ChapterContent) {
         val existingDownloadedAt = db.chapterDao().get(content.chapter.id)?.downloadedAt
         db.chapterDao().upsert(content.toEntity(downloadedAt = existingDownloadedAt))
@@ -361,7 +361,7 @@ class LibraryRepository(private val db: AppDatabase) {
         )
     }
 
-    /** Persists the canonical current position and its history row as one Room transaction. */
+
     suspend fun saveReadingPosition(
         sourceId: String,
         storyTitle: String,
@@ -384,10 +384,10 @@ class LibraryRepository(private val db: AppDatabase) {
         )
     }
 
-    /**
-     * Chapters that can actually be opened without network access. Imported books may use every
-     * stored body; remote stories expose only chapters explicitly marked as downloaded.
-     */
+
+
+
+
     suspend fun listReadableOfflineChapters(storyId: String, importedBook: Boolean): List<ChapterEntity> =
         db.chapterDao().listExportableForStory(storyId)
             .filter { importedBook || it.downloadedAt != null }
@@ -1129,7 +1129,7 @@ class LibraryRepository(private val db: AppDatabase) {
         db.sceneMusicTrackDao().upsert(
             current.copy(
                 title = title.trim().ifBlank { current.title }.take(120),
-                // Legacy column name; XPK stores one freeform AI description, not CSV tags.
+
                 tagsCsv = tagsCsv.trim().take(300),
                 updatedAt = System.currentTimeMillis(),
             ),

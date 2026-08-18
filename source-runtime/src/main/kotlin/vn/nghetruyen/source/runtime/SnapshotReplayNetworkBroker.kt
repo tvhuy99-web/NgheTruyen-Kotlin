@@ -14,7 +14,7 @@ import vn.nghetruyen.source.api.SourceRedirectHop
 import java.util.Base64
 import java.util.Locale
 
-/** Deterministic network replay used by mandatory SourcePack fixtures. No live network is touched. */
+
 class SnapshotReplayNetworkBroker private constructor(
     private val responses: MutableList<ReplayResponse>,
     private val clockMs: () -> Long = System::currentTimeMillis,

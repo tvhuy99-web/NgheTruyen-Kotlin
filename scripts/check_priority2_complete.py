@@ -46,10 +46,10 @@ require('app/src/main/java/vn/nghetruyen/app/core/model/Models.kt',
         'data class VoiceRoleDraft', 'originalRoleId', 'enginePackage',
         'expressionStrength', 'sonicSpeed', 'sonicPitch')
 
-# Priority 2 originally used the combined ROLE/ASSIGN/CUE line protocol. That parser is now a
-# deliberately deprecated compatibility surface: canonical narration runs through XPK JSON and its
-# Gradle/JUnit parity tests. Keep this historical gate source-level only so a tiny standalone kotlinc
-# harness does not need Android's org.json plus the full XPK splitter/music dependency graph.
+
+
+
+
 require('app/src/main/java/vn/nghetruyen/app/ai/AiLineProtocol.kt',
         'fun parseVoiceCast(raw: String): VoiceCastPlan',
         'fun parseSceneCues(raw: String): List<SceneMusicCue>',

@@ -18,11 +18,11 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import vn.nghetruyen.app.NgheTruyenApplication
 
-/**
- * Measures a scene track once, then stores the XPK-style fixed normalization gain.
- * If loudness and peak measurements are already available, a new target LUFS only
- * recalculates gain and does not decode the file again.
- */
+
+
+
+
+
 class SceneMusicAnalysisWorker(
     appContext: Context,
     params: WorkerParameters,

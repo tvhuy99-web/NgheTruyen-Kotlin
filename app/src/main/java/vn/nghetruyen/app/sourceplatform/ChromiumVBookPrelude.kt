@@ -3,13 +3,13 @@ package vn.nghetruyen.app.sourceplatform
 import vn.nghetruyen.source.api.JsonCodec
 import vn.nghetruyen.source.api.JsonValue
 
-/**
- * Synchronous string-only host surface for the headless Chromium action runtime.
- *
- * The only native rendezvous is window.prompt(token, json). No Java object is installed into the
- * page. The random token stays inside this closure and every host operation is still revalidated by
- * the Kotlin broker boundary.
- */
+
+
+
+
+
+
+
 internal object ChromiumVBookPrelude {
     fun build(bridgeToken: String, entryPath: String, inputJson: String): String {
         val token = JsonCodec.stringify(JsonValue.Str(bridgeToken))

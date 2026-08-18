@@ -10,7 +10,7 @@ import org.junit.Test
 import vn.nghetruyen.app.core.common.AppResult
 import vn.nghetruyen.app.sources.currentDiagnosticCausalTraceId
 
-// Shared regression contract for every source-backed navigation boundary.
+
 class CausalNavigationDiagnosticsTest {
     private class FakeRuntime(
         private val generation: Long = 41L,

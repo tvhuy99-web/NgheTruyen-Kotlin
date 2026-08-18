@@ -8,7 +8,7 @@ import vn.nghetruyen.source.api.SourceTranslationBroker
 import vn.nghetruyen.source.api.SourceTranslationRequest
 import vn.nghetruyen.source.api.SourceTranslationResponse
 
-/** Keeps vBook's offline Quick Translator ABI separate from generic translation/AI brokers. */
+
 class VBookTranslationBrokerRouter(
     private val generic: SourceTranslationBroker,
     private val quick: SourceTranslationBroker,

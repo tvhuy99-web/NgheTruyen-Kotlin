@@ -1,9 +1,9 @@
 package vn.nghetruyen.app.ai
 
-/**
- * The legacy Room entity has no dedicated story voice-cast mode columns. Keep the reference-only
- * mode metadata in a reserved first line of voiceCastNote, and strip it before text is sent to AI.
- */
+
+
+
+
 enum class StoryVoiceCastMode { GLOBAL, PRIVATE, OFF }
 
 data class StoryVoiceCastReferenceSettings(

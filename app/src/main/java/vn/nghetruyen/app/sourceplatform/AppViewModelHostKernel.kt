@@ -18,14 +18,14 @@ import vn.nghetruyen.source.api.SourcePlatformFailure
 import vn.nghetruyen.source.api.SourcePlatformResult
 import java.lang.ref.WeakReference
 
-/**
- * NgheTruyen-owned host bindings for extension kernel v2.
- *
- * The extension side only sends SourceHostCommand JSON values. This adapter intentionally owns all
- * Android/ViewModel interaction so no Activity, Context, Service or repository instance crosses the
- * extension boundary. The dispatcher keeps only a WeakReference to the UI session; the process bus
- * therefore cannot keep a dead Activity/ViewModel alive.
- */
+
+
+
+
+
+
+
+
 object ExtensionHostKernelInstaller {
     fun install(viewModel: AppViewModel): SourceHostKernelDispatcher {
         val app = viewModel.getApplication<Application>()

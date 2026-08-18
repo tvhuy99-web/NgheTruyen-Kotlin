@@ -34,6 +34,10 @@ class VBookChromiumRuntimeStaticTest {
             "Object.defineProperty(global,'__bridge'",
             "__rpc('network_fetch'",
             "__rpc('resource_read'",
+            "function __runClassicScript(path,code)",
+            "global.document.createElement('script')",
+            "VBOOK_LOAD_CYCLE:",
+            "__ngheInstallGlobalPrelude",
             "factory.call(global)",
             "return String(Script.execute(\$entry,'execute',__payload));",
             "global.Html=global.HTML=global.Document={",
@@ -51,11 +55,18 @@ class VBookChromiumRuntimeStaticTest {
             "Class.forName(",
             "Runtime.getRuntime(",
             "ProcessBuilder(",
+            "__rpc('script_compile'",
+            "VBookScriptBundleCompiler.compile(",
+            "MAX_COMPILED_SCRIPT_BYTES",
+            "(0,eval)(code+'\\n//# sourceURL='",
             "global.Html=global.HTML=global.Document=Object.freeze(",
             "global.Engine=Object.freeze(",
             "global.Qt=Object.freeze(",
         )) {
-            assertFalse("Chromium action engine must not expose process/platform escape or freeze compatibility decorators: $forbidden", forbidden in runtime || forbidden in prelude)
+            assertFalse(
+                "Chromium action engine must not expose process/platform escape, restore the removed eager compiler/per-load eval, or freeze compatibility decorators: $forbidden",
+                forbidden in runtime || forbidden in prelude,
+            )
         }
     }
 

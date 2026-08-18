@@ -38,6 +38,7 @@ enum class VBookFeature {
     FETCH_BLOB,
     FETCH_REQUEST_INFO,
     HTML_DOM,
+    HTML_CLEAN,
     HTML_COLLECTION_CALLBACKS,
     HTML_MUTATION,
     HTML_ATTRIBUTES,
@@ -213,6 +214,7 @@ object VBookCorpusAnalyzer {
             hit(VBookFeature.FETCH_BLOB, Regex("\\.blob\\s*\\("))
             hit(VBookFeature.FETCH_REQUEST_INFO, Regex("\\.request\\.(?:url|headers)\\b"))
             hit(VBookFeature.HTML_DOM, Regex("\\b(?:Html|HTML)\\.parse\\s*\\(|\\.select\\s*\\("))
+            hit(VBookFeature.HTML_CLEAN, Regex("\\b(?:Html|HTML)\\.clean\\s*\\("))
             hit(VBookFeature.HTML_COLLECTION_CALLBACKS, Regex("\\.(?:forEach|map)\\s*\\("))
             hit(VBookFeature.HTML_MUTATION, Regex("\\.remove\\s*\\("))
             hit(VBookFeature.HTML_ATTRIBUTES, Regex("\\.attributes\\s*\\("))

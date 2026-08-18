@@ -42,19 +42,60 @@ internal object ChromiumVBookPrelude {
                 var clean=String(raw||'').replace(/\\/g,'/').replace(/^\/+/, '');
                 return clean.indexOf('src/')===0?clean:'src/'+clean;
               }
-              var __loaded={};
+              var __loadedScripts={};
+              var __loadingScripts={};
+              var __globalPreludeSource=null;
+              var __scriptMarkerSeq=0;
+              var __scriptMarkers={};
               function __source(raw){ return String(__rpc('resource_read',{path:__path(raw)})||''); }
+              function __runClassicScript(path,code){
+                path=__path(path);
+                code=String(code==null?'':code);
+                var marker='m'+String(++__scriptMarkerSeq);
+                var capturedError='';
+                function onError(event){
+                  if(!capturedError) capturedError=String(event&&(event.error&&(event.error.stack||event.error.message)||event.message)||'VBOOK_SCRIPT_ERROR');
+                }
+                global.addEventListener('error',onError);
+                try{
+                  var node=global.document.createElement('script');
+                  node.type='text/javascript';
+                  node.text=code+'\n;globalThis.__ngheVBookScriptMarker("'+marker+'");\n//# sourceURL='+path.replace(/\s/g,'_');
+                  var parent=global.document.head||global.document.documentElement||global.document.body;
+                  if(!parent) throw new Error('VBOOK_SCRIPT_DOCUMENT_ROOT_MISSING');
+                  parent.appendChild(node);
+                  if(node.parentNode) node.parentNode.removeChild(node);
+                }finally{
+                  global.removeEventListener('error',onError);
+                }
+                var completed=__scriptMarkers[marker]===true;
+                delete __scriptMarkers[marker];
+                if(capturedError) throw new Error('VBOOK_SCRIPT_EXECUTION_FAILED:'+path+':'+capturedError);
+                if(!completed) throw new Error('VBOOK_SCRIPT_EXECUTION_INCOMPLETE:'+path);
+                return true;
+              }
+              Object.defineProperty(global,'__ngheVBookScriptMarker',{
+                value:function(marker){__scriptMarkers[String(marker||'')]=true;},
+                enumerable:false,
+                writable:false,
+                configurable:false
+              });
               function load(raw){
                 if(String(raw||'').toLowerCase()==='crypto.js') return true;
                 var path=__path(raw);
-                if(__loaded[path]) return true;
-                __loaded[path]=true;
-                var code=__source(path);
-                (0,eval)(code+'\n//# sourceURL='+path.replace(/\s/g,'_'));
-                return true;
+                if(__loadedScripts[path]) return true;
+                if(__loadingScripts[path]) throw new Error('VBOOK_LOAD_CYCLE:'+path);
+                __loadingScripts[path]=true;
+                try{
+                  __runClassicScript(path,__source(path));
+                  __loadedScripts[path]=true;
+                  return true;
+                }finally{
+                  delete __loadingScripts[path];
+                }
               }
               global.load=load;
-              global.Script=Object.freeze({
+              var __scriptApi={
                 execute:function(rawPath,functionName){
                   var path=__path(rawPath), requested=String(functionName||'execute');
                   if(!/^[A-Za-z_$][A-Za-z0-9_$]{0,127}$/.test(requested)) throw new Error('VBOOK_SCRIPT_FUNCTION_INVALID');
@@ -64,7 +105,24 @@ internal object ChromiumVBookPrelude {
                   if(typeof fn!=='function') throw new Error('VBOOK_SCRIPT_FUNCTION_MISSING:'+requested);
                   return fn.apply(global,Array.prototype.slice.call(arguments,2));
                 }
+              };
+              Object.defineProperty(__scriptApi,'__ngheInstallGlobalPrelude',{
+                value:function(code){
+                  code=String(code||'');
+                  if(!code) return true;
+                  if(__globalPreludeSource!==null){
+                    if(__globalPreludeSource!==code) throw new Error('VBOOK_GLOBAL_PRELUDE_CONFLICT');
+                    return true;
+                  }
+                  __runClassicScript('src/__nghe_vbook_config.js',code);
+                  __globalPreludeSource=code;
+                  return true;
+                },
+                enumerable:false,
+                writable:false,
+                configurable:false
               });
+              global.Script=Object.freeze(__scriptApi);
 
               function __nativeElements(nodes,baseUrl){
                 var arr=[];

@@ -167,9 +167,8 @@ class VBookCompatibilityRuntime(
             config.values.forEach { (key, value) -> put(key, JsonValue.Str(value)) }
         }))
         val connection = config.connectionSettings()
+        val targetScriptPreludeJson = JsonCodec.stringify(JsonValue.Str(VBookConfigPrelude.build(profile, config)))
         val prelude = buildString {
-            append(VBookFetchSafePrelude.build())
-            append('\n')
             append(VBookConfigPrelude.build(profile, config))
             if (profile == VBookContractProfile.CURRENT_JS) {
                 if (isNotEmpty()) append('\n')
@@ -201,19 +200,13 @@ class VBookCompatibilityRuntime(
               key:function(index){ var keys=Object.keys(__vbookConfigValues).sort(); return keys[Number(index)||0]; },
               length:Object.keys(__vbookConfigValues).length
             });
-
-            var __vbookPackageLoad = load;
-            var __vbookInsideLoad = false;
-            load = function(name) {
-              name = String(name || '');
-              if (name.toLowerCase() === 'crypto.js') return true;
-              if (__vbookInsideLoad) throw new Error('VBOOK_RECURSIVE_LOAD_NOT_ALLOWED');
-              __vbookInsideLoad = true;
-              try { return __vbookPackageLoad(name); }
-              finally { __vbookInsideLoad = false; }
-            };
+            var __vbookTargetScriptPrelude = $targetScriptPreludeJson;
+            if (Script && typeof Script.__ngheInstallGlobalPrelude === 'function') {
+              Script.__ngheInstallGlobalPrelude(__vbookTargetScriptPrelude);
+            }
 
             var __vbookNativeHtmlParse = Html.parse;
+            var __vbookNativeHtmlClean = (typeof Html.clean === 'function') ? Html.clean : null;
             function __vbookDomState(){ return {removed:[]}; }
             function __vbookCleanHtml(raw,state){
               var out=String(raw==null?'':raw), removed=(state&&state.removed?state.removed:[]).slice();
@@ -324,6 +317,28 @@ class VBookCompatibilityRuntime(
               return out;
             }
             Html.parse=function(content,baseUrl){return __vbookWrapDocument(__vbookNativeHtmlParse(String(content==null?'':content),String(baseUrl||'')));};
+            Html.clean=function(content,allowedTags){
+              var raw=String(content==null?'':content);
+              if(__vbookNativeHtmlClean){
+                try{return String(__vbookNativeHtmlClean(raw,allowedTags||[]));}catch(nativeError){}
+              }
+              if(typeof DOMParser!=='function') throw new Error('VBOOK_HTML_CLEAN_UNAVAILABLE');
+              var allow={}, tags=allowedTags&&typeof allowedTags.length==='number'?allowedTags:[];
+              for(var ai=0;ai<tags.length;ai++){var tag=String(tags[ai]||'').toLowerCase();if(tag)allow[tag]=true;}
+              var doc=(new DOMParser()).parseFromString(raw,'text/html'), body=doc.body;
+              if(!body)return '';
+              var dangerous=body.querySelectorAll('script,style,template,noscript');
+              for(var di=dangerous.length-1;di>=0;di--){var dn=dangerous[di];if(dn.parentNode)dn.parentNode.removeChild(dn);}
+              var nodes=Array.prototype.slice.call(body.querySelectorAll('*'));
+              for(var ni=nodes.length-1;ni>=0;ni--){
+                var node=nodes[ni], name=String(node.tagName||'').toLowerCase();
+                if(allow[name])continue;
+                var parent=node.parentNode;if(!parent)continue;
+                while(node.firstChild)parent.insertBefore(node.firstChild,node);
+                parent.removeChild(node);
+              }
+              return String(body.innerHTML||'');
+            };
 
             var __vbookNativeNewBrowser = Engine.newBrowser;
             var __vbookNativeBrowser = Engine.browser;

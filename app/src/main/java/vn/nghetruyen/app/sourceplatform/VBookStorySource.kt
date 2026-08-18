@@ -9,6 +9,7 @@ import vn.nghetruyen.app.core.model.SourceHealth
 import vn.nghetruyen.app.core.model.StoryCommentPage
 import vn.nghetruyen.app.core.model.StoryDetail
 import vn.nghetruyen.app.core.model.StorySummary
+import vn.nghetruyen.app.sources.SourceBrowseEntry
 import vn.nghetruyen.app.sources.SourceCommentCapability
 import vn.nghetruyen.app.sources.SourceDescriptor
 import vn.nghetruyen.app.sources.SourceImplementationKind
@@ -80,6 +81,7 @@ class VBookStorySource(
         supportsComments = plugin.script(VBookScriptRole.COMMENT) != null,
         commentCapability = if (plugin.script(VBookScriptRole.COMMENT) != null) SourceCommentCapability.PAGED else SourceCommentCapability.NONE,
         supportsHome = plugin.script(VBookScriptRole.HOME) != null || plugin.script(VBookScriptRole.EXPLORE) != null,
+        supportsGenre = plugin.script(VBookScriptRole.GENRE) != null,
         supportsSuggestions = plugin.script(VBookScriptRole.SUGGEST) != null,
         implementationKind = SourceImplementationKind.VBOOK,
     )
@@ -92,6 +94,28 @@ class VBookStorySource(
             is AppResult.Failure -> result
             is AppResult.Success -> AppResult.Success(
                 result.value?.let { VBookStoryNormalizer.stories(it.data, plugin.metadata.source).map(::storySummary) }.orEmpty(),
+            )
+        }
+    }
+
+    override suspend fun genreMenu(): AppResult<List<SourceBrowseEntry>> {
+        if (plugin.script(VBookScriptRole.GENRE) == null) return AppResult.Success(emptyList())
+        return when (val menu = executeDeclared(VBookScriptRole.GENRE, input = "")) {
+            is AppResult.Failure -> menu
+            is AppResult.Success -> AppResult.Success(
+                VBookStoryNormalizer.dynamicActions(menu.value.data)
+                    .asSequence()
+                    .mapNotNull { action ->
+                        val label = action.title.trim().takeIf(String::isNotBlank) ?: return@mapNotNull null
+                        SourceBrowseEntry(
+                            key = genreActionKey(action),
+                            label = label,
+                            selectable = action.input.isNotBlank() || action.hasDataArgument || !action.type.isNullOrBlank(),
+                        )
+                    }
+                    .distinctBy(SourceBrowseEntry::key)
+                    .take(MAX_GENRE_MENU_ENTRIES)
+                    .toList(),
             )
         }
     }
@@ -157,9 +181,11 @@ class VBookStorySource(
         val menu = executeDeclared(role, input = "")
         if (menu is AppResult.Failure) return menu
         val actions = VBookStoryNormalizer.dynamicActions((menu as AppResult.Success).value.data)
-        val action = actions.firstOrNull {
-            it.title.equals(category, ignoreCase = true) || it.input == category
-        } ?: return failure("VBOOK_CATEGORY_NOT_FOUND:$category")
+        val action = actions.firstOrNull { genreActionKey(it) == category }
+            ?: actions.firstOrNull {
+                it.title.equals(category, ignoreCase = true) || it.input == category
+            }
+            ?: return failure("VBOOK_CATEGORY_NOT_FOUND:$category")
         return when (val result = dynamicPage(action, page)) {
             is AppResult.Failure -> result
             is AppResult.Success -> AppResult.Success(
@@ -409,6 +435,18 @@ class VBookStorySource(
     private fun chooseListAction(actions: List<VBookDynamicAction>): VBookDynamicAction? =
         actions.firstOrNull { it.type.equals("list", ignoreCase = true) } ?: actions.firstOrNull()
 
+    private fun genreActionKey(action: VBookDynamicAction): String {
+        val identity = listOf(
+            action.title,
+            action.input,
+            action.scriptPath,
+            action.data,
+            action.hasDataArgument.toString(),
+            action.type.orEmpty(),
+        ).joinToString(" ")
+        return VBOOK_GENRE_ACTION_PREFIX + VBookStoryNormalizer.stableId(identity)
+    }
+
     private fun suggestionStrings(data: JsonValue): List<String> {
         val values = when (data) {
             is JsonValue.Arr -> data.values
@@ -481,8 +519,10 @@ class VBookStorySource(
 
     companion object {
         private const val COMMENT_CURSOR_PREFIX = "vbook-comment:"
+        private const val VBOOK_GENRE_ACTION_PREFIX = "vbook-genre-action:"
         private const val MAX_COMMENT_CURSOR_CHARS = 64 * 1024
         private const val MAX_SUGGESTIONS = 30
+        private const val MAX_GENRE_MENU_ENTRIES = 2_000
         private const val MAX_PAGE_CACHE_ENTRIES = 128
         private const val MAX_CHAPTER_CACHE_ENTRIES = 4_096
     }

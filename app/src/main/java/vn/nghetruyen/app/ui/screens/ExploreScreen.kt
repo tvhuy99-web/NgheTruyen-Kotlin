@@ -70,6 +70,8 @@ fun ExploreScreen(
     onCancelSearch: () -> Unit,
     onSourceSelected: (String) -> Unit,
     onHomeSelected: () -> Unit,
+    onGenreSelected: () -> Unit,
+    onGenreEntrySelected: (String, String) -> Unit,
     onCategorySelected: (String) -> Unit,
     onSuggestionSelected: (String) -> Unit,
     onLoadMore: () -> Unit,
@@ -107,7 +109,11 @@ fun ExploreScreen(
     val view = LocalView.current
     val listTitle = when (state.exploreMode) {
         ExploreMode.HOME -> "TRANG CHỦ"
-        ExploreMode.CATEGORY -> state.activeCategory.orEmpty().ifBlank { "DANH SÁCH TRUYỆN" }.uppercase()
+        ExploreMode.GENRE -> "THỂ LOẠI"
+        ExploreMode.CATEGORY -> state.activeCategoryLabel.orEmpty()
+            .ifBlank { state.activeCategory.orEmpty() }
+            .ifBlank { "DANH SÁCH TRUYỆN" }
+            .uppercase()
         ExploreMode.SEARCH -> "KẾT QUẢ TÌM KIẾM"
     }
 
@@ -130,10 +136,12 @@ fun ExploreScreen(
         searchPrefs.edit().putString("history", searchHistory.joinToString("\n")).apply()
     }
 
-    LaunchedEffect(state.exploreMode, state.activeCategory, state.stories.size, state.loading) {
+    LaunchedEffect(state.exploreMode, state.activeCategory, state.genreEntries.size, state.stories.size, state.loading) {
         if (!state.loading) {
             delay(120)
-            view.announceForAccessibility("$listTitle, ${state.stories.size} truyện")
+            val count = if (state.exploreMode == ExploreMode.GENRE) state.genreEntries.size else state.stories.size
+            val unit = if (state.exploreMode == ExploreMode.GENRE) "mục" else "truyện"
+            view.announceForAccessibility("$listTitle, $count $unit")
         }
     }
 
@@ -229,7 +237,7 @@ fun ExploreScreen(
                 }
             }
 
-            if (!state.searchAllSources && (selectedSource?.supportsHome == true || state.categories.isNotEmpty())) {
+            if (!state.searchAllSources && (selectedSource?.supportsHome == true || selectedSource?.supportsGenre == true || state.categories.isNotEmpty())) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -243,6 +251,17 @@ fun ExploreScreen(
                             selected = state.exploreMode == ExploreMode.HOME,
                             onClick = onHomeSelected,
                             accessibilityLabel = "TRANG CHỦ",
+                            minHeight = 54.dp,
+                            unselectedColor = ReferenceDivider,
+                            unselectedContentColor = ReferenceText,
+                        )
+                    }
+                    if (selectedSource?.supportsGenre == true) {
+                        ReferenceTabButton(
+                            text = "THỂ LOẠI",
+                            selected = state.exploreMode == ExploreMode.GENRE,
+                            onClick = onGenreSelected,
+                            accessibilityLabel = "THỂ LOẠI",
                             minHeight = 54.dp,
                             unselectedColor = ReferenceDivider,
                             unselectedContentColor = ReferenceText,
@@ -264,8 +283,9 @@ fun ExploreScreen(
             }
         }
 
+        val visibleItemCount = if (state.exploreMode == ExploreMode.GENRE) state.genreEntries.size else state.stories.size
         Text(
-            text = "$listTitle • ${state.stories.size}",
+            text = "$listTitle • $visibleItemCount",
             color = ReferenceText,
             fontSize = 18.sp,
             fontWeight = FontWeight.SemiBold,
@@ -274,7 +294,11 @@ fun ExploreScreen(
                 .background(ReferencePanelBackground)
                 .semantics {
                     heading()
-                    contentDescription = "$listTitle, ${state.stories.size} truyện"
+                    contentDescription = if (state.exploreMode == ExploreMode.GENRE) {
+                        "$listTitle, ${state.genreEntries.size} mục"
+                    } else {
+                        "$listTitle, ${state.stories.size} truyện"
+                    }
                 }
                 .padding(8.dp),
         )
@@ -288,10 +312,42 @@ fun ExploreScreen(
             )
         }
 
-        if (state.stories.isEmpty() && !state.loading) {
+        if (state.exploreMode == ExploreMode.GENRE) {
+            if (state.genreEntries.isEmpty() && !state.loading) {
+                Text(
+                    text = "Tiện ích chưa trả về mục thể loại nào.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = ReferenceSecondaryText,
+                    modifier = Modifier.padding(16.dp),
+                )
+            } else {
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    items(state.genreEntries, key = { it.key }) { entry ->
+                        if (entry.selectable) {
+                            ReferenceActionButton(
+                                text = entry.label,
+                                onClick = { onGenreEntrySelected(entry.key, entry.label) },
+                                accessibilityLabel = entry.label,
+                                normalColor = ReferencePanelBackground,
+                                normalContentColor = ReferenceText,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
+                            )
+                        } else {
+                            Text(
+                                text = entry.label,
+                                color = ReferenceSecondaryText,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        } else if (state.stories.isEmpty() && !state.loading) {
             Text(
                 text = when (state.exploreMode) {
                     ExploreMode.HOME -> "Trang chủ nguồn chưa trả về truyện nào."
+                    ExploreMode.GENRE -> "Tiện ích chưa trả về mục thể loại nào."
                     ExploreMode.CATEGORY -> "Danh mục đang chọn chưa có kết quả."
                     ExploreMode.SEARCH -> "Chưa có kết quả từ nguồn đang chọn."
                 },

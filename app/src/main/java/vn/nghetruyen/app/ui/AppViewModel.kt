@@ -100,6 +100,7 @@ import vn.nghetruyen.app.ui.reference.ReferenceVoiceRoleExtra
 import vn.nghetruyen.app.ui.reference.ReferenceVoiceRoleExtras
 import vn.nghetruyen.app.playback.ReaderPositionResolver
 import vn.nghetruyen.app.playback.ReaderChapterNavigation
+import vn.nghetruyen.app.sources.SourceBrowseEntry
 import vn.nghetruyen.app.sources.SourceCheckReport
 import vn.nghetruyen.app.sources.SourceDescriptor
 import vn.nghetruyen.app.sources.SourceDiagnosticBrowserActivity
@@ -135,7 +136,7 @@ import vn.nghetruyen.source.diagnostics.DiagnosticEvent
 enum class RootTab { EXPLORE, LIBRARY, PERSONAL }
 enum class LibrarySection { READING, DOWNLOADED, BOOKMARKS, NOTES, FOLLOWING }
 enum class ChapterTextMode { ORIGINAL, VIETPHRASE, AI_TRANSLATION }
-enum class ExploreMode { HOME, SEARCH, CATEGORY }
+enum class ExploreMode { HOME, GENRE, SEARCH, CATEGORY }
 
 sealed interface Destination {
     data object Root : Destination
@@ -157,12 +158,14 @@ data class MainUiState(
     val sources: List<SourceDescriptor> = emptyList(),
     val selectedSourceId: String = "truyenfull",
     val categories: List<String> = emptyList(),
+    val genreEntries: List<SourceBrowseEntry> = emptyList(),
     val query: String = "",
     val sourceSuggestions: List<String> = emptyList(),
     val stories: List<StorySummary> = emptyList(),
     val explorePage: Int = 1,
     val exploreMode: ExploreMode = ExploreMode.HOME,
     val activeCategory: String? = null,
+    val activeCategoryLabel: String? = null,
     val canLoadMoreStories: Boolean = false,
     val searchAllSources: Boolean = false,
     val searchSortMode: SearchSortMode = SearchSortMode.RELEVANCE,
@@ -1898,6 +1901,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val matched = source.descriptor.categories.firstOrNull {
             StorySearch.normalize(it) == StorySearch.normalize(clean)
         }
+        val canBrowseDynamicGenre = source.descriptor.supportsGenre
         mutableState.update { current ->
             current.copy(
                 destination = Destination.Root,
@@ -1905,17 +1909,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 selectedSourceId = sourceId,
                 categories = source.descriptor.categories,
                 searchAllSources = false,
-                query = if (matched == null) clean else "",
+                query = if (matched == null && !canBrowseDynamicGenre) clean else "",
                 stories = emptyList(),
                 explorePage = 1,
                 activeCategory = null,
+                activeCategoryLabel = null,
+                genreEntries = emptyList(),
                 sourceSuggestions = emptyList(),
                 storyAdvancedOptionsRequested = false,
             )
         }
         viewModelScope.launch {
             container.settingsRepository.selectSource(sourceId)
-            if (matched != null) browseCategory(matched) else search(clean)
+            if (matched != null) browseCategory(matched)
+            else if (canBrowseDynamicGenre) browseCategory(clean)
+            else search(clean)
         }
     }
 
@@ -1954,6 +1962,53 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         search("")
     }
 
+    fun browseGenreMenu() {
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch {
+            val source = container.sourceRegistry.get(state.value.selectedSourceId) ?: return@launch
+            if (!source.descriptor.supportsGenre) {
+                mutableState.update {
+                    it.copy(
+                        exploreMode = ExploreMode.GENRE,
+                        genreEntries = source.descriptor.categories.map { category ->
+                            SourceBrowseEntry(key = category, label = category)
+                        },
+                        stories = emptyList(),
+                        canLoadMoreStories = false,
+                        loading = false,
+                    )
+                }
+                return@launch
+            }
+            mutableState.update {
+                it.copy(
+                    loading = true,
+                    message = null,
+                    explorePage = 1,
+                    exploreMode = ExploreMode.GENRE,
+                    activeCategory = null,
+                    activeCategoryLabel = null,
+                    genreEntries = emptyList(),
+                    stories = emptyList(),
+                    sourceSuggestions = emptyList(),
+                    canLoadMoreStories = false,
+                )
+            }
+            when (val result = source.genreMenu()) {
+                is AppResult.Success -> mutableState.update {
+                    it.copy(
+                        loading = false,
+                        genreEntries = result.value,
+                        message = if (result.value.isEmpty()) "Tiện ích chưa trả về mục thể loại nào." else null,
+                    )
+                }
+                is AppResult.Failure -> mutableState.update {
+                    it.copy(loading = false, genreEntries = emptyList(), message = result.message)
+                }
+            }
+        }
+    }
+
     fun selectSource(sourceId: String) {
         searchJob?.cancel()
         searchJob = null
@@ -1964,10 +2019,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 it.copy(
                     selectedSourceId = sourceId,
                     categories = descriptor?.categories.orEmpty(),
+                    genreEntries = emptyList(),
                     stories = emptyList(),
                     explorePage = 1,
                     exploreMode = ExploreMode.HOME,
                     activeCategory = null,
+                    activeCategoryLabel = null,
                     canLoadMoreStories = false,
                     sourceSuggestions = emptyList(),
                     searchAllSources = false,
@@ -1991,6 +2048,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             it.copy(
                 searchAllSources = enabled,
                 activeCategory = null,
+                activeCategoryLabel = null,
+                genreEntries = emptyList(),
                 stories = emptyList(),
                 explorePage = 1,
                 exploreMode = if (enabled) ExploreMode.SEARCH else ExploreMode.HOME,
@@ -2024,7 +2083,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (mode == SearchSortMode.RELEVANCE && snapshot.exploreMode != ExploreMode.SEARCH && !snapshot.searchAllSources) {
             when (snapshot.exploreMode) {
                 ExploreMode.HOME -> browseHome()
-                ExploreMode.CATEGORY -> snapshot.activeCategory?.let(::browseCategory)
+                ExploreMode.GENRE -> browseGenreMenu()
+                ExploreMode.CATEGORY -> snapshot.activeCategory?.let { key ->
+                    browseCategoryInternal(key, snapshot.activeCategoryLabel ?: key)
+                }
                 ExploreMode.SEARCH -> Unit
             }
         }
@@ -2056,6 +2118,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     explorePage = 1,
                     exploreMode = if (cleanQuery.isBlank() && !snapshot.searchAllSources) ExploreMode.HOME else ExploreMode.SEARCH,
                     activeCategory = null,
+                    activeCategoryLabel = null,
+                    genreEntries = emptyList(),
                     canLoadMoreStories = false,
                     searchedSourceCount = 0,
                     totalSearchSourceCount = if (snapshot.searchAllSources) container.sourceRegistry.searchableSources().size else 1,
@@ -2140,6 +2204,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun browseCategory(category: String) {
+        browseCategoryInternal(category, category)
+    }
+
+    fun browseGenreEntry(categoryKey: String, displayName: String) {
+        browseCategoryInternal(categoryKey, displayName)
+    }
+
+    private fun browseCategoryInternal(category: String, displayName: String) {
         searchJob?.cancel()
         searchJob = viewModelScope.launch {
             val source = container.sourceRegistry.get(state.value.selectedSourceId) ?: return@launch
@@ -2150,6 +2222,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     explorePage = 1,
                     exploreMode = ExploreMode.CATEGORY,
                     activeCategory = category,
+                    activeCategoryLabel = displayName,
+                    query = "",
+                    genreEntries = emptyList(),
                     sourceSuggestions = emptyList(),
                     canLoadMoreStories = false,
                 )
@@ -2188,6 +2263,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val source = container.sourceRegistry.get(snapshot.selectedSourceId) ?: return@launch
             val result = when (snapshot.exploreMode) {
                 ExploreMode.HOME -> source.home(nextPage)
+                ExploreMode.GENRE -> return@launch mutableState.update { it.copy(loading = false, canLoadMoreStories = false) }
                 ExploreMode.CATEGORY -> snapshot.activeCategory?.let { source.category(it, nextPage) }
                     ?: source.home(nextPage)
                 ExploreMode.SEARCH -> source.search(snapshot.query, nextPage)
@@ -3842,7 +3918,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         when (surface) {
                             SourceUiSurface.EXPLORE -> when (state.value.exploreMode) {
                                 ExploreMode.HOME -> browseHome()
-                                ExploreMode.CATEGORY -> state.value.activeCategory?.let(::browseCategory) ?: browseHome()
+                                ExploreMode.GENRE -> browseGenreMenu()
+                                ExploreMode.CATEGORY -> state.value.activeCategory?.let { key ->
+                                    browseCategoryInternal(key, state.value.activeCategoryLabel ?: key)
+                                } ?: browseHome()
                                 ExploreMode.SEARCH -> search()
                             }
                             SourceUiSurface.STORY -> state.value.storyDetail?.story?.let(::openStory)

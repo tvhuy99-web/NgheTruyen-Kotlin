@@ -6,6 +6,7 @@ import vn.nghetruyen.app.ai.vietphrase.ReferenceVietPhraseRuntime
 import vn.nghetruyen.app.audio.AudioDirectionPreferences
 import vn.nghetruyen.app.playback.AudioDirectionRuntime
 import vn.nghetruyen.app.sourceplatform.AndroidChromiumVBookRuntime
+import vn.nghetruyen.app.sourceplatform.AndroidWebViewSessionNetworkBroker
 import vn.nghetruyen.app.sourceplatform.ChromiumVBookBrowserReplayRuntime
 import vn.nghetruyen.app.sourceplatform.ChromiumVBookDispatcherParityRuntime
 import vn.nghetruyen.app.sourceplatform.ChromiumVBookReplayCoordinator
@@ -42,18 +43,22 @@ class NgheTruyenApplication : Application() {
                 }
             } else synchronized(chromiumRuntimeLock) {
                 chromiumRuntimes[brokers.storage] ?: run {
+                    val browserSessionNetwork = VBookRawNetworkBroker(
+                        AndroidWebViewSessionNetworkBroker(
+                            context = this,
+                            cookiePartition = brokers.cookies,
+                        ),
+                    )
                     val replay = ChromiumVBookReplayCoordinator(
                         browserDelegate = brokers.browser,
                         networkDelegate = brokers.network,
+                        browserNetworkDelegate = browserSessionNetwork,
                     )
                     val chromium = AndroidChromiumVBookRuntime(
                         context = this,
                         brokers = brokers.copy(
                             browser = replay.browserBroker,
-                            // Chromium executes the VBookFetchSafePrelude contract. Its first native
-                            // fetch must therefore return the raw-response metadata envelope while
-                            // subsequent text/base64/request reads reuse the captured response bytes.
-                            network = VBookRawNetworkBroker(replay.networkBroker),
+                            network = replay.networkBroker,
                         ),
                         diagnostics = replayAwareChromiumDiagnostics(diagnostics),
                         webViewCookieReader = brokers.browser as? SourceWebViewCookieReader,

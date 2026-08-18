@@ -16,6 +16,7 @@ import vn.nghetruyen.source.api.SourceBrowserRequest
 import vn.nghetruyen.source.api.SourceBrowserResponse
 import vn.nghetruyen.source.api.SourceCapabilities
 import vn.nghetruyen.source.api.SourceContentType
+import vn.nghetruyen.source.api.SourceCookieMode
 import vn.nghetruyen.source.api.SourceManifest
 import vn.nghetruyen.source.api.SourceNetworkBroker
 import vn.nghetruyen.source.api.SourceNetworkRequest
@@ -55,9 +56,34 @@ class ChromiumVBookBrowserReplayRuntimeTest {
         assertEquals("CHROMIUM_BROWSER_REPLAY_YIELDED", event.name)
         assertEquals(DiagnosticSeverity.DEBUG, event.severity)
         assertEquals("2", event.attributes["replayIndex"])
+        assertEquals("browser-action", event.attributes["yieldReason"])
         assertEquals("12", event.attributes["bridgeCalls"])
         assertFalse(event.attributes.containsKey("code"))
         assertFalse(event.attributes.containsKey("error"))
+    }
+
+    @Test
+    fun browserNetworkReplayYieldIsClassifiedSeparately() {
+        val captured = mutableListOf<DiagnosticEvent>()
+        val sink = replayAwareChromiumDiagnostics(DiagnosticSink { captured += it })
+
+        sink.emit(DiagnosticEvent(
+            timestampEpochMs = 1L,
+            traceId = "trace",
+            sourceId = "source",
+            category = DiagnosticCategory.RUNTIME,
+            name = "CHROMIUM_ACTION_FAILED",
+            severity = DiagnosticSeverity.ERROR,
+            attributes = mapOf(
+                "error" to "CHROMIUM_EVAL_ERROR:$CHROMIUM_BROWSER_NETWORK_REPLAY_REQUIRED:4\nstack",
+            ),
+        ))
+
+        val event = captured.single()
+        assertEquals("CHROMIUM_BROWSER_REPLAY_YIELDED", event.name)
+        assertEquals("4", event.attributes["replayIndex"])
+        assertEquals("browser-network", event.attributes["yieldReason"])
+        assertEquals(DiagnosticSeverity.DEBUG, event.severity)
     }
 
     @Test
@@ -145,13 +171,115 @@ class ChromiumVBookBrowserReplayRuntimeTest {
         assertEquals(2, browserCalls)
     }
 
+    @Test
+    fun networkAfterBrowserUsesBrowserTransportAndDoesNotRepeatPreBrowserNetwork() {
+        var now = 1_000L
+        var delegateCalls = 0
+        var nativeNetworkCalls = 0
+        var browserNetworkCalls = 0
+        var browserCalls = 0
+        var insideDelegate = false
+
+        val nativeNetwork = SourceNetworkBroker { _, request ->
+            assertTrue(insideDelegate)
+            nativeNetworkCalls += 1
+            SourcePlatformResult.Success(SourceNetworkResponse(
+                statusCode = 200,
+                finalUrl = request.url,
+                headers = emptyMap(),
+                body = "bootstrap".toByteArray(),
+                timing = SourceNetworkTiming(now, now + 1),
+                traceId = request.traceId,
+            ))
+        }
+        val browserNetwork = SourceNetworkBroker { _, request ->
+            assertFalse(insideDelegate)
+            browserNetworkCalls += 1
+            SourcePlatformResult.Success(SourceNetworkResponse(
+                statusCode = 200,
+                finalUrl = request.url,
+                headers = emptyMap(),
+                body = "protected".toByteArray(),
+                timing = SourceNetworkTiming(now, now + 1),
+                traceId = request.traceId,
+            ))
+        }
+        val browser = SourceBrowserBroker { _, request ->
+            assertFalse(insideDelegate)
+            browserCalls += 1
+            SourcePlatformResult.Success(SourceBrowserResponse(
+                finalUrl = request.url,
+                value = "browser-ok",
+                traceId = request.traceId,
+            ))
+        }
+        val replay = ChromiumVBookReplayCoordinator(
+            browserDelegate = browser,
+            networkDelegate = nativeNetwork,
+            browserNetworkDelegate = browserNetwork,
+            clockMs = { now },
+        )
+        val delegate = VBookActionRuntime { manifest, _, request ->
+            delegateCalls += 1
+            insideDelegate = true
+            try {
+                val nonce = "pass-$delegateCalls"
+                when (val bootstrap = replay.networkBroker.execute(manifest, SourceNetworkRequest(
+                    sourceId = manifest.id,
+                    url = "https://example.com/bootstrap",
+                    headers = mapOf("X-Nghe-VBook-Request-Key" to "bootstrap-$nonce"),
+                    traceId = request.traceId,
+                ))) {
+                    is SourcePlatformResult.Failure -> bootstrap
+                    is SourcePlatformResult.Success -> when (val navigate = replay.browserBroker.execute(manifest, SourceBrowserRequest(
+                        sourceId = manifest.id,
+                        action = SourceBrowserAction.NAVIGATE,
+                        url = "https://example.com/session",
+                        traceId = request.traceId,
+                    ))) {
+                        is SourcePlatformResult.Failure -> navigate
+                        is SourcePlatformResult.Success -> when (val protected = replay.networkBroker.execute(manifest, SourceNetworkRequest(
+                            sourceId = manifest.id,
+                            url = "https://example.com/protected",
+                            headers = mapOf("X-Nghe-VBook-Request-Key" to "protected-$nonce"),
+                            traceId = request.traceId,
+                        ))) {
+                            is SourcePlatformResult.Failure -> protected
+                            is SourcePlatformResult.Success -> SourcePlatformResult.Success(SourceActionResponse(
+                                JsonValue.Str(protected.value.body.toString(Charsets.UTF_8)),
+                                request.traceId,
+                                0,
+                            ))
+                        }
+                    }
+                }
+            } finally {
+                insideDelegate = false
+            }
+        }
+        val runtime = ChromiumVBookBrowserReplayRuntime(
+            delegate = delegate,
+            replay = replay,
+            clockMs = { now },
+        )
+
+        val result = runtime.execute(manifest(browserShared = true), resources(), request())
+
+        val success = result as SourcePlatformResult.Success
+        assertEquals("protected", (success.value.value as JsonValue.Str).value)
+        assertEquals(3, delegateCalls)
+        assertEquals(1, nativeNetworkCalls)
+        assertEquals(1, browserCalls)
+        assertEquals(1, browserNetworkCalls)
+    }
+
     private fun request() = SourceActionRequest(
         sourceId = "vn.nghetruyen.sources.replaytest",
         action = SourceActionName.UI_ACTION,
         traceId = "replay-test-trace",
     )
 
-    private fun manifest() = SourceManifest(
+    private fun manifest(browserShared: Boolean = false) = SourceManifest(
         schemaVersion = 2,
         id = "vn.nghetruyen.sources.replaytest",
         name = "Replay Test",
@@ -160,7 +288,9 @@ class ChromiumVBookBrowserReplayRuntimeTest {
         contentType = SourceContentType.NOVEL,
         runtime = SourceRuntimePolicy(SourceRuntimeMode.VBOOK_JS_COMPAT, actionTimeoutMs = 5_000),
         origins = setOf("https://example.com"),
-        capabilities = SourceCapabilities(),
+        capabilities = SourceCapabilities(
+            cookies = if (browserShared) SourceCookieMode.BROWSER_SHARED else SourceCookieMode.NONE,
+        ),
         actions = mapOf(SourceActionName.UI_ACTION to SourceActionSpec("src/action.js", timeoutMs = 5_000)),
     )
 

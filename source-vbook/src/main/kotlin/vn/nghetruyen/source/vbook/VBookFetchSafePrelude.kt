@@ -12,9 +12,19 @@ object VBookFetchSafePrelude {
           for (var i=0;i<keys.length;i++) target[keys[i]] = source[keys[i]];
           return target;
         }
+        function __vbookSafeHeaderObject(source) {
+          var target = {}, input = source && typeof source === 'object' ? source : {}, keys = Object.keys(input);
+          for (var i=0;i<keys.length;i++) {
+            var key=String(keys[i]), value=input[keys[i]], lower=key.toLowerCase();
+            target[key]=value;
+            if (!Object.prototype.hasOwnProperty.call(target,lower)) target[lower]=value;
+          }
+          return target;
+        }
         function __vbookSafeHeaderValue(headers, wanted) {
           wanted = String(wanted || '').toLowerCase();
           headers = headers || {};
+          if (Object.prototype.hasOwnProperty.call(headers,wanted)) return headers[wanted];
           var keys = Object.keys(headers);
           for (var i=0;i<keys.length;i++) if (String(keys[i]).toLowerCase() === wanted) return headers[keys[i]];
           return undefined;
@@ -46,8 +56,8 @@ object VBookFetchSafePrelude {
             }
           }
           var nativeOptions=__vbookSafeCopyObject(options);
-          var publicHeaders=__vbookSafeCopyObject(options.headers || {});
-          var nativeHeaders=__vbookSafeCopyObject(publicHeaders);
+          var publicHeaders=__vbookSafeHeaderObject(options.headers || {});
+          var nativeHeaders=__vbookSafeCopyObject(options.headers || {});
           var requestKey='vbr-'+String(Date.now())+'-'+String(++__vbookFetchSeq);
           nativeHeaders['${VBookRawNetworkBroker.INTERNAL_REQUEST_KEY}']=requestKey;
           nativeHeaders['${VBookRawNetworkBroker.INTERNAL_TIMEOUT_MS}']=String(options.timeout===undefined||options.timeout===null?__vbookDefaultTimeoutMs:options.timeout);
@@ -62,17 +72,20 @@ object VBookFetchSafePrelude {
           catch (error) { throw new Error('VBOOK_FETCH_METADATA_ENVELOPE_INVALID:'+String(error)); }
           if (!envelope || envelope.__ngheVBookFetch !== 1) throw new Error('VBOOK_FETCH_METADATA_ENVELOPE_REQUIRED');
           var responseKey=String(envelope.responseKey || requestKey);
-          var responseHeaders=envelope.headers && typeof envelope.headers==='object' ? envelope.headers : {};
+          var responseHeaders=__vbookSafeHeaderObject(envelope.headers);
           response.headers=responseHeaders;
           response.body=String(envelope.body == null ? '' : envelope.body);
           response.statusText=String(envelope.statusText == null ? '' : envelope.statusText);
-          response.request=envelope.request && typeof envelope.request==='object' ? envelope.request : {url:url,headers:publicHeaders};
+          var requestInfo=envelope.request && typeof envelope.request==='object' ? envelope.request : {url:url,headers:publicHeaders};
+          requestInfo.url=String(requestInfo.url || url);
+          requestInfo.headers=__vbookSafeHeaderObject(requestInfo.headers || publicHeaders);
+          response.request=requestInfo;
           response.header=function(name){return __vbookSafeHeaderValue(responseHeaders,name);};
           response.text=function(charset){
             return String(__vbookSafeCachedResponse(url,nativeOptions,nativeHeaders,responseKey,'${VBookRawNetworkBroker.OP_TEXT}',charset).body || '');
           };
           response.string=response.text;
-          response.json=function(){return JSON.parse(response.text());};
+          response.json=function(charset){return JSON.parse(response.text(charset));};
           response.html=function(charset){return Html.parse(response.text(charset),response.url||url);};
           response.document=response.html;
           response.base64=function(){return String(__vbookSafeCachedResponse(url,nativeOptions,nativeHeaders,responseKey,'${VBookRawNetworkBroker.OP_BASE64}',null).body || '');};

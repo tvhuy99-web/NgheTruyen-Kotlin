@@ -42,6 +42,12 @@ data class SourceUiActionResult(
     val refresh: Boolean = false,
 )
 
+data class SourceBrowseEntry(
+    val key: String,
+    val label: String,
+    val selectable: Boolean = true,
+)
+
 data class SourceDescriptor(
     val id: String,
     val displayName: String,
@@ -54,6 +60,7 @@ data class SourceDescriptor(
     val supportsComments: Boolean = false,
     val commentCapability: SourceCommentCapability = if (supportsComments) SourceCommentCapability.PAGED else SourceCommentCapability.NONE,
     val supportsHome: Boolean = true,
+    val supportsGenre: Boolean = false,
     val supportsSuggestions: Boolean = false,
     val implementationKind: SourceImplementationKind = SourceImplementationKind.BUILT_IN,
     val uiActions: List<SourceUiActionDescriptor> = emptyList(),
@@ -89,6 +96,11 @@ interface StorySource {
     suspend fun chapter(url: String): AppResult<ChapterContent>
 
     suspend fun home(page: Int = 1): AppResult<List<StorySummary>> = search("", page)
+
+    /** Top-level browse menu. Labels are presentation only; keys are passed back to category(). */
+    suspend fun genreMenu(): AppResult<List<SourceBrowseEntry>> = AppResult.Success(
+        descriptor.categories.map { category -> SourceBrowseEntry(key = category, label = category) },
+    )
 
     suspend fun suggestions(query: String): AppResult<List<String>> = AppResult.Success(emptyList())
 

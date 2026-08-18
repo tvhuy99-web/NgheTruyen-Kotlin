@@ -6,7 +6,7 @@ package vn.nghetruyen.app.ai
  */
 object XpkUnifiedNarrationPrompt {
     const val MAX_ASSETS_PER_KIND = 200
-    private const val MAX_DESCRIPTION_CHARS = 180
+    const val MAX_DESCRIPTION_CHARS = 300
 
     fun compose(
         base: XpkVoiceCastPrompt.Bundle,
@@ -91,11 +91,11 @@ object XpkUnifiedNarrationPrompt {
         previousChapterTail: String,
         incomingAmbienceId: String?,
     ): String {
-        val allowed = tracks.map(SceneMusicTrackOption::id).toHashSet()
+        val idToAlias = tracks.mapIndexed { index, item -> item.id to (index + 1).toString() }.toMap()
         val validIncoming = incomingAmbienceId.orEmpty()
             .split('|')
             .map(String::trim)
-            .filter { it.isNotBlank() && it in allowed }
+            .mapNotNull(idToAlias::get)
             .distinct()
             .take(2)
         val incomingText = validIncoming.ifEmpty { listOf("NONE") }.joinToString(" | ")
@@ -112,15 +112,16 @@ object XpkUnifiedNarrationPrompt {
             7. Hiện tượng/hành động kéo dài không được giả lập bằng cách lặp một SFX ngắn. Nếu catalog có asset được đánh dấu continuous/ambience phù hợp, ưu tiên lớp ambience kéo dài; nếu không có thì bỏ thay vì loop một one-shot không tự nhiên.
             8. Không suy diễn từ phép so sánh, hồi tưởng hay lời kể gián tiếp. Ví dụ “kiếm khí như sấm”, “nhớ tiếng mưa năm xưa”, “giọng hắn như cuồng phong” không tự động tạo ambience sấm/mưa/gió ở hiện tại.
             9. Hai cảnh ambience liền nhau dùng cùng ambience_id và nối tiếp nhau phải được gộp thành một khoảng liên tục. Không đổi qua biến thể khác chỉ để tạo cảm giác mới nếu môi trường không thực sự thay đổi.
-            10. INCOMING_AMBIENCE_IDS là tối đa hai lớp đang hoạt động ở cuối chương trước. Đánh giá từng lớp độc lập: giữ lớp nào vẫn đúng với phần mở đầu, bỏ lớp nào không còn đúng, và chỉ thêm lớp mới khi cảnh hiện tại thực sự cần. Không tắt rồi bật lại một lớp vẫn liên tục qua ranh giới chương.
-            11. Chỉ dùng ambience_id có trong AMBIENCE_CATALOG. Không tạo ID/tên file/URI/đường dẫn; không trả volume, mood, genre, intensity, confidence, reason hay trường phụ.
+            10. INCOMING_AMBIENCE_IDS là tối đa hai mã số tạm của các lớp đang hoạt động ở cuối chương trước, đã được ánh xạ lại theo AMBIENCE_CATALOG của chính yêu cầu này. Đánh giá từng lớp độc lập: giữ lớp nào vẫn đúng với phần mở đầu, bỏ lớp nào không còn đúng, và chỉ thêm lớp mới khi cảnh hiện tại thực sự cần. Không tắt rồi bật lại một lớp vẫn liên tục qua ranh giới chương.
+            11. Chỉ dùng ambience_id dạng số có trong AMBIENCE_CATALOG. Mã số chỉ có nghĩa trong yêu cầu hiện tại; tên tệp và ID lưu trữ thật không được cung cấp. Không tạo ID/tên file/URI/đường dẫn; không trả volume, mood, genre, intensity, confidence, reason hay trường phụ.
             12. PREVIOUS_CHAPTER_TAIL chỉ dùng làm ngữ cảnh, tuyệt đối không lấy ID từ đó làm cue chương hiện tại.
+            13. Mỗi mô tả ambience được viết theo đúng ba phần “Nền | Dùng | Tránh”, tối đa $MAX_DESCRIPTION_CHARS ký tự. Dùng toàn bộ ba phần để chọn, không quyết định chỉ từ một từ khóa.
 
             INCOMING_AMBIENCE_IDS: $incomingText
             PREVIOUS_CHAPTER_TAIL:
             ${previousChapterTail.trim().ifBlank { "Không có ngữ cảnh chương trước." }.takeLast(3_500)}
 
-            AMBIENCE_CATALOG (ambience_id | tên | mô tả):
+            AMBIENCE_CATALOG (ambience_id_số | mô tả):
             ${catalog(tracks)}
         """.trimIndent()
     }
@@ -140,10 +141,11 @@ object XpkUnifiedNarrationPrompt {
         6. Chọn asset cụ thể nhất theo nguồn âm và tính chất sự kiện; tránh dùng SFX để lặp lại nền môi trường đang kéo dài.
         7. Mỗi cue xảy ra tại ĐẦU unit_id. Tối đa một SFX cho mỗi UNIT và tối đa $maxSfx cue trong chương.
         8. Giữ đúng thứ tự timeline. Tránh lặp cùng effect_id ở các UNIT gần nhau; chỉ lặp khi văn bản mô tả các sự kiện tách biệt rõ ràng chứ không phải cùng một sự kiện bị nhắc lại bằng nhiều câu.
-        9. Chỉ dùng effect_id có trong SFX_CATALOG. Không tạo ID/tên file/URI/đường dẫn; không trả volume, mood, genre, intensity, confidence, reason hay trường phụ.
+        9. Chỉ dùng effect_id dạng số có trong SFX_CATALOG. Mã số chỉ có nghĩa trong yêu cầu hiện tại; tên tệp và ID lưu trữ thật không được cung cấp. Không tạo ID/tên file/URI/đường dẫn; không trả volume, mood, genre, intensity, confidence, reason hay trường phụ.
+        10. Mỗi mô tả SFX được viết theo đúng ba phần “Sự kiện | Dùng | Tránh”, tối đa $MAX_DESCRIPTION_CHARS ký tự. Dùng toàn bộ ba phần để chọn và không tạo cue chỉ vì một từ khóa trùng khớp.
 
         MAX_SFX_CUES_THIS_CHAPTER: $maxSfx
-        SFX_CATALOG (effect_id | tên | mô tả):
+        SFX_CATALOG (effect_id_số | mô tả):
         ${catalog(tracks)}
     """.trimIndent()
 
@@ -161,15 +163,15 @@ object XpkUnifiedNarrationPrompt {
         }
         val schema = buildList {
             if (includeVoiceCast || includeSceneMusic) add("- assignments giữ schema phân vai đã nêu ở phần trên; nếu không yêu cầu phân vai thì dùng [].")
-            if (includeSceneMusic) add("- music_scenes: mỗi phần tử đúng start_id, end_id, track_id.")
-            if (includeAmbience) add("- ambience_scenes: mỗi phần tử đúng start_id, end_id, ambience_id; cho phép tối đa hai phần tử chồng nhau trên cùng UNIT để tạo hai lớp ambience tương thích.")
-            if (includeSoundEffects) add("- sfx_cues: mỗi phần tử đúng unit_id, effect_id.")
+            if (includeSceneMusic) add("- music_scenes: mỗi phần tử đúng start_id, end_id, track_id; track_id là mã số từ TRACK_CATALOG.")
+            if (includeAmbience) add("- ambience_scenes: mỗi phần tử đúng start_id, end_id, ambience_id; ambience_id là mã số từ AMBIENCE_CATALOG; cho phép tối đa hai phần tử chồng nhau trên cùng UNIT để tạo hai lớp ambience tương thích.")
+            if (includeSoundEffects) add("- sfx_cues: mỗi phần tử đúng unit_id, effect_id; effect_id là mã số từ SFX_CATALOG.")
         }
         val examples = buildList {
             if (includeVoiceCast || includeSceneMusic) add("  \"assignments\": []")
             if (includeSceneMusic) add("  \"music_scenes\": []")
-            if (includeAmbience) add("  \"ambience_scenes\": [{\"start_id\":\"UNIT_A\",\"end_id\":\"UNIT_B\",\"ambience_id\":\"RAIN\"},{\"start_id\":\"UNIT_A\",\"end_id\":\"UNIT_B\",\"ambience_id\":\"FOREST\"}]")
-            if (includeSoundEffects) add("  \"sfx_cues\": [{\"unit_id\":\"UNIT_THAT\",\"effect_id\":\"ID_HOP_LE\"}]")
+            if (includeAmbience) add("  \"ambience_scenes\": [{\"start_id\":\"UNIT_A\",\"end_id\":\"UNIT_B\",\"ambience_id\":\"1\"},{\"start_id\":\"UNIT_A\",\"end_id\":\"UNIT_B\",\"ambience_id\":\"2\"}]")
+            if (includeSoundEffects) add("  \"sfx_cues\": [{\"unit_id\":\"UNIT_THAT\",\"effect_id\":\"1\"}]")
         }
         return """
             CONTRACT JSON CUỐI CÙNG:
@@ -185,6 +187,10 @@ object XpkUnifiedNarrationPrompt {
         """.trimIndent()
     }
 
+    /**
+     * Normalization shared by prompt rendering and parser alias construction.
+     * Assets without a useful description are intentionally omitted instead of leaking the filename as fallback context.
+     */
     fun normalize(items: List<SceneMusicTrackOption>): List<SceneMusicTrackOption> = items.asSequence()
         .filter { it.id.trim().isNotBlank() }
         .distinctBy { it.id.trim() }
@@ -192,26 +198,29 @@ object XpkUnifiedNarrationPrompt {
         .map { item ->
             item.copy(
                 id = item.id.trim(),
-                title = stripAudioExtension(oneLine(item.title)).take(120),
-                description = oneLine(item.description).take(MAX_DESCRIPTION_CHARS),
+                description = takeCodePoints(oneLine(item.description), MAX_DESCRIPTION_CHARS),
             )
         }
+        .filter { it.description.isNotBlank() }
         .toList()
 
-    private fun catalog(items: List<SceneMusicTrackOption>): String = items.joinToString("\n") { item ->
-        buildString {
-            append(item.id).append(" | ").append(item.title.ifBlank { item.id })
-            if (item.description.isNotBlank()) append(" | ").append(item.description)
-        }
+    /** Request-local numeric alias -> real persisted id. Alias order exactly matches [catalog]. */
+    fun aliasToId(items: List<SceneMusicTrackOption>): Map<String, String> = linkedMapOf<String, String>().apply {
+        normalize(items).forEachIndexed { index, item -> put((index + 1).toString(), item.id) }
     }
+
+    private fun catalog(items: List<SceneMusicTrackOption>): String = items.mapIndexed { index, item ->
+        "${index + 1} | ${item.description}"
+    }.joinToString("\n")
 
     private fun oneLine(value: String): String = value
         .replace(Regex("[\\p{Cntrl}\\r\\n]+"), " ")
         .replace(Regex("\\s+"), " ")
         .trim()
 
-    private fun stripAudioExtension(value: String): String = value.replace(
-        Regex("(?i)\\.(mp3|m4a|aac|wav|ogg|flac|opus|wma|webm|aiff|aif)$"),
-        "",
-    )
+    private fun takeCodePoints(value: String, maxCodePoints: Int): String {
+        if (value.codePointCount(0, value.length) <= maxCodePoints) return value
+        val end = value.offsetByCodePoints(0, maxCodePoints)
+        return value.substring(0, end).trim()
+    }
 }

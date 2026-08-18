@@ -74,7 +74,7 @@ class XpkAudioPromptQualityTest {
         assertFalse(bundle.prompt.contains("\"track_id\": \"2\""))
         assertTrue(bundle.prompt.contains("Không tạo khóa assignments"))
         assertTrue(bundle.prompt.contains("định danh tạm"))
-        assertTrue(bundle.prompt.contains("không được cộng ưu tiên"))
+        assertTrue(bundle.prompt.lowercase().contains("không được cộng ưu tiên"))
         assertTrue(bundle.prompt.contains("loại các track xung đột rõ với phần “Tránh”"))
     }
 

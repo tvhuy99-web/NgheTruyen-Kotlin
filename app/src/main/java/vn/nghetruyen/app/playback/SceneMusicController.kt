@@ -3,13 +3,17 @@ package vn.nghetruyen.app.playback
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.MediaPlayer
+import android.media.audiofx.LoudnessEnhancer
 import android.net.Uri
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
+import vn.nghetruyen.app.NgheTruyenApplication
+import vn.nghetruyen.app.audio.PcmLoudnessEstimator
 
 /**
  * Process-local bridge from the application-level AudioDirectionRuntime to the active reader music
@@ -60,6 +64,7 @@ class SceneMusicController(
     private var duckJob: Job? = null
     private var sfxDuckJob: Job? = null
     private val pendingPlayers = linkedSetOf<MediaPlayer>()
+    private val positiveBoosts = mutableMapOf<MediaPlayer, LoudnessEnhancer>()
     private var transitionGeneration = 0L
     private var paused = false
     private var releasedController = false
@@ -69,6 +74,7 @@ class SceneMusicController(
     private var sfxDuckMultiplier = 1f
     private var duckAttackMillis = 1850
     private var duckReleaseMillis = 2050
+    private var positiveBoostUnavailableReported = false
     private val sfxDuckListener: (Float, Long) -> Unit = { factor, holdMillis ->
         duckForImportantSfx(factor, holdMillis)
     }
@@ -110,6 +116,7 @@ class SceneMusicController(
         if (current?.trackId == trackId && current.uri == uri) {
             current.baseVolume = normalizedVolume
             applyLevel(current)
+            refreshPositiveNormalizationBoost(current)
             return
         }
 
@@ -270,6 +277,7 @@ class SceneMusicController(
         next.fadeMultiplier = 1f
         active = next
         applyLevel(next)
+        refreshPositiveNormalizationBoost(next)
     }
 
     private fun startCrossfadeTransition(next: Slot, durationMillis: Int) {
@@ -277,6 +285,7 @@ class SceneMusicController(
         outgoing?.let(::release)
         outgoing = active
         active = next
+        refreshPositiveNormalizationBoost(next)
         val old = outgoing
         next.fadeMultiplier = if (durationMillis > 0 && old != null) 0f else 1f
         runCatching { next.player.start() }.onFailure {
@@ -308,6 +317,63 @@ class SceneMusicController(
             next.fadeMultiplier = 1f
             applyLevel(next)
         }
+    }
+
+    private fun refreshPositiveNormalizationBoost(slot: Slot) {
+        scope.launch(Dispatchers.IO) {
+            val application = context.applicationContext as? NgheTruyenApplication ?: return@launch
+            val track = application.container.libraryRepository.getSceneMusicTrack(slot.trackId) ?: return@launch
+            if (
+                track.normalizationVersion < PcmLoudnessEstimator.VERSION ||
+                track.normalizationError.isNotBlank() ||
+                !track.loudnessLufsEstimate.isFinite() ||
+                !track.peakDbfs.isFinite()
+            ) {
+                return@launch
+            }
+            val target = application.container.settingsRepository.snapshot().sceneMusicTargetLufs
+            val gainDb = PcmLoudnessEstimator.calculateNormalization(
+                track.loudnessLufsEstimate,
+                track.peakDbfs,
+                target,
+            ).gainDb
+            if (gainDb <= 0.001f) return@launch
+            val gainLinear = PcmLoudnessEstimator.gainDbToLinear(gainDb)
+            withContext(Dispatchers.Main.immediate) {
+                if (releasedController || (active !== slot && outgoing !== slot)) return@withContext
+                // ReaderPlaybackService already folds normalization into baseVolume until MediaPlayer's
+                // 1.0 ceiling. When it has not hit that ceiling, remove that folded positive part here
+                // and let LoudnessEnhancer apply it once. When it has hit the ceiling, the enhancer
+                // supplies the positive gain that MediaPlayer.setVolume could not represent.
+                if (slot.baseVolume < 0.999f && gainLinear > 1f) {
+                    slot.baseVolume = (slot.baseVolume / gainLinear).coerceIn(0f, 1f)
+                }
+                installPositiveBoost(slot.player, gainDb)
+                applyLevel(slot)
+            }
+        }
+    }
+
+    private fun installPositiveBoost(player: MediaPlayer, gainDb: Float) {
+        positiveBoosts.remove(player)?.let { previous ->
+            runCatching { previous.enabled = false }
+            runCatching { previous.release() }
+        }
+        val positiveDb = gainDb.coerceIn(0f, PcmLoudnessEstimator.MAX_GAIN_DB)
+        if (positiveDb <= 0.001f) return
+        val enhancer = runCatching {
+            LoudnessEnhancer(player.audioSessionId).apply {
+                setTargetGain((positiveDb * 100f).roundToInt())
+                enabled = true
+            }
+        }.getOrElse {
+            if (!positiveBoostUnavailableReported) {
+                positiveBoostUnavailableReported = true
+                onError("Thiết bị không áp dụng được gain dương của chuẩn hóa nhạc nền.")
+            }
+            return
+        }
+        positiveBoosts[player] = enhancer
     }
 
     private fun animateDuck(target: Float, durationMillis: Int) {
@@ -376,6 +442,10 @@ class SceneMusicController(
 
     private fun releasePlayer(player: MediaPlayer) {
         pendingPlayers.remove(player)
+        positiveBoosts.remove(player)?.let { enhancer ->
+            runCatching { enhancer.enabled = false }
+            runCatching { enhancer.release() }
+        }
         runCatching { player.stop() }
         runCatching { player.release() }
     }

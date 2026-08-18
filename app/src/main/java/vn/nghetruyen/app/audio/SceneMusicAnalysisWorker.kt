@@ -13,6 +13,7 @@ import androidx.work.workDataOf
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import vn.nghetruyen.app.NgheTruyenApplication
@@ -107,6 +108,8 @@ class SceneMusicAnalysisWorker(
                     ),
                 )
             }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (error: Throwable) {
             val message = error.message ?: "Không phân tích được âm thanh."
             if (runAttemptCount < MAX_RETRY_ATTEMPTS) {

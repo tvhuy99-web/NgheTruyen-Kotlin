@@ -3,8 +3,11 @@ package vn.nghetruyen.app.playback
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.MediaPlayer
+import android.media.audiofx.LoudnessEnhancer
 import android.net.Uri
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.math.roundToInt
+import kotlin.random.Random
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -16,7 +19,6 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import vn.nghetruyen.app.audio.AudioDirectionAsset
 import vn.nghetruyen.app.audio.AudioDirectionLimits
 import vn.nghetruyen.app.audio.PcmLoudnessEstimator
-import kotlin.random.Random
 
 /**
  * Voice-first ambience bus with at most two logical layers.
@@ -55,6 +57,7 @@ class SceneAmbienceController(context: Context) {
 
     private val layers = linkedMapOf<String, Layer>()
     private val fadingLayers = linkedSetOf<Layer>()
+    private val positiveBoosts = mutableMapOf<MediaPlayer, LoudnessEnhancer>()
     private val commandGeneration = AtomicLong(0L)
     @Volatile private var activeIdsSnapshot: List<String> = emptyList()
     @Volatile private var pausedSnapshot: Boolean = false
@@ -401,6 +404,7 @@ class SceneAmbienceController(context: Context) {
         player.setOnPreparedListener { prepared ->
             prepared.setOnPreparedListener(null)
             prepared.setOnErrorListener(null)
+            installPositiveBoost(prepared, asset.normalizationGainDb)
             if (continuation.isActive) continuation.resumeWith(Result.success(prepared)) else releasePlayer(prepared)
         }
         player.setOnErrorListener { failed, _, _ ->
@@ -459,8 +463,24 @@ class SceneAmbienceController(context: Context) {
     }
 
     private fun releasePlayer(player: MediaPlayer) {
+        positiveBoosts.remove(player)?.let { enhancer ->
+            runCatching { enhancer.enabled = false }
+            runCatching { enhancer.release() }
+        }
         runCatching { player.stop() }
         runCatching { player.release() }
+    }
+
+    private fun installPositiveBoost(player: MediaPlayer, gainDb: Float) {
+        val positiveDb = gainDb.coerceIn(0f, PcmLoudnessEstimator.MAX_GAIN_DB)
+        if (positiveDb <= 0.001f) return
+        val enhancer = runCatching {
+            LoudnessEnhancer(player.audioSessionId).apply {
+                setTargetGain((positiveDb * 100f).roundToInt())
+                enabled = true
+            }
+        }.getOrNull() ?: return
+        positiveBoosts[player] = enhancer
     }
 
     private fun initialPhaseMillis(duration: Int, assetId: String, layerIndex: Int): Int {
@@ -477,7 +497,8 @@ class SceneAmbienceController(context: Context) {
     }
 
     private fun effectiveVolume(asset: AudioDirectionAsset, masterVolume: Float): Float {
-        val normalization = PcmLoudnessEstimator.gainDbToLinear(asset.normalizationGainDb)
+        val attenuationDb = asset.normalizationGainDb.coerceAtMost(0f)
+        val normalization = PcmLoudnessEstimator.gainDbToLinear(attenuationDb)
         return (asset.volume * masterVolume.coerceIn(0f, 1f) * normalization)
             .coerceIn(0f, 1f)
     }

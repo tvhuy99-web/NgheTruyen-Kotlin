@@ -1,0 +1,54 @@
+name: Apply normalization UI cleanup
+
+on:
+  push:
+    branches:
+      - fix/audio-normalization-flow
+
+permissions:
+  contents: write
+
+jobs:
+  apply-cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/audio-normalization-flow
+          fetch-depth: 0
+
+      - name: Remove legacy normalization slider
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt')
+          text = path.read_text(encoding='utf-8')
+          old = '''            ReferenceFloatSettingsSlider(
+                label = "Mức chuẩn hóa nhạc",
+                value = state.sceneMusicTargetLufs,
+                minimum = -36f,
+                maximum = -18f,
+                steps = 17,
+                shown = { "%.1f LUFS".format(it) },
+                onChange = onSceneMusicTargetLufsChange,
+            )
+'''
+          if old not in text:
+              raise SystemExit('Legacy music normalization slider block was not found exactly once.')
+          if text.count(old) != 1:
+              raise SystemExit(f'Expected exactly one legacy slider block, found {text.count(old)}.')
+          path.write_text(text.replace(old, '', 1), encoding='utf-8')
+          PY
+
+      - name: Remove one-off workflow
+        run: rm .github/workflows/apply-normalization-ui-cleanup.yml
+
+      - name: Commit cleanup
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt .github/workflows/apply-normalization-ui-cleanup.yml
+          git commit -m "Remove duplicate music normalization setting"
+          git push origin HEAD:fix/audio-normalization-flow

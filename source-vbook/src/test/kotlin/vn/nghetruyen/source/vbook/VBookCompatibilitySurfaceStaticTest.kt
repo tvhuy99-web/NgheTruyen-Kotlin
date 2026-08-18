@@ -8,10 +8,13 @@ import java.nio.file.Path
 
 class VBookCompatibilitySurfaceStaticTest {
     @Test
-    fun legacyAndChromiumCompatibilitySurfaceStayWired() {
+    fun legacyChromiumAndRhinoCompatibilitySurfaceStayWired() {
         val root = repositoryRoot()
         val runtime = Files.readString(
             root.resolve("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookCompatibilityRuntime.kt"),
+        )
+        val rhinoRuntime = Files.readString(
+            root.resolve("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt"),
         )
         val chromiumPrelude = Files.readString(
             root.resolve("app/src/main/java/vn/nghetruyen/app/sourceplatform/ChromiumVBookPrelude.kt"),
@@ -22,7 +25,8 @@ class VBookCompatibilitySurfaceStaticTest {
 
         assertTrue("Html.clean legacy API must be exposed", "Html.clean=function(content,allowedTags)" in runtime)
         assertTrue("native Html.clean should be preferred when available", "__vbookNativeHtmlClean" in runtime)
-        assertTrue("Chromium fallback should use DOMParser", "new DOMParser()" in runtime)
+        assertTrue("Chromium Html.clean fallback should use DOMParser", "new DOMParser()" in runtime)
+        assertTrue("Rhino host must expose native Html.clean", "VBookHtmlCleaner.clean(content, allowed)" in rhinoRuntime)
         assertFalse("dispatcher must not prohibit every nested load", "VBOOK_RECURSIVE_LOAD_NOT_ALLOWED" in runtime)
 
         assertTrue("Chromium loader must execute classic scripts in the shared document realm", "global.document.createElement('script')" in chromiumPrelude)

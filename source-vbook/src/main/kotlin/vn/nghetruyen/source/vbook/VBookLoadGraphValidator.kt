@@ -1,5 +1,7 @@
 package vn.nghetruyen.source.vbook
 
+import org.mozilla.javascript.CompilerEnvirons
+import org.mozilla.javascript.Context
 import org.mozilla.javascript.Parser
 import org.mozilla.javascript.ast.FunctionCall
 import org.mozilla.javascript.ast.Name
@@ -27,10 +29,17 @@ data class VBookLoadDirective(
 /**
  * Parses real load(...) calls through Rhino's JavaScript AST. String/comment lookalikes are ignored,
  * while absolute source positions let runtime compilers replace only the call expression itself.
+ *
+ * vBook scripts routinely use ES6 syntax (let/const/class, arrows, template literals). The parser
+ * therefore uses the same ES6 language level as the compatibility runtime instead of Rhino's
+ * legacy parser default.
  */
 object VBookLoadDirectiveParser {
     fun parse(path: String, source: String): List<VBookLoadDirective> {
-        val root = runCatching { Parser().parse(source, path, 1) }
+        val environs = CompilerEnvirons().apply {
+            languageVersion = Context.VERSION_ES6
+        }
+        val root = runCatching { Parser(environs).parse(source, path, 1) }
             .getOrElse { error -> throw IllegalArgumentException("VBOOK_LOAD_PARSE_FAILED:$path:${error.message}", error) }
         val calls = mutableListOf<VBookLoadDirective>()
         root.visit(NodeVisitor { node ->

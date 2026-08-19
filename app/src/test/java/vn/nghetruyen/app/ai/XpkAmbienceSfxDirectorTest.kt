@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
+import vn.nghetruyen.app.audio.SfxCadence
 
 class XpkAmbienceSfxDirectorTest {
     private val units = listOf(
@@ -113,7 +114,7 @@ class XpkAmbienceSfxDirectorTest {
     }
 
     @Test
-    fun rejectsUnknownIdsThirdAmbienceLayerAndDuplicateSfxUnit() {
+    fun rejectsUnknownIdsThirdAmbienceLayerAndFourthConcurrentSfx() {
         assertFails {
             XpkAmbienceSfxDirector.parseAndValidate(
                 raw = """{"ambience_scenes":[],"sfx_cues":[{"unit_id":"P0002-U01","effect_id":"missing"}]}""",
@@ -144,13 +145,63 @@ class XpkAmbienceSfxDirectorTest {
             XpkAmbienceSfxDirector.parseAndValidate(
                 raw = """
                     {"ambience_scenes":[],"sfx_cues":[
-                      {"unit_id":"P0002-U01","effect_id":"door"},
-                      {"unit_id":"P0002-U01","effect_id":"thunder"}
+                      {"unit_id":"P0001-U01","effect_id":"a","stop_unit_id":"P0004-U01","loop_until_stop":true},
+                      {"unit_id":"P0001-U01","effect_id":"b","stop_unit_id":"P0004-U01","loop_until_stop":true},
+                      {"unit_id":"P0001-U01","effect_id":"c","stop_unit_id":"P0004-U01","loop_until_stop":true},
+                      {"unit_id":"P0002-U01","effect_id":"d"}
                     ]}
                 """.trimIndent(),
                 validUnitIds = units,
                 validAmbienceIds = emptySet(),
-                validSfxIds = setOf("door", "thunder"),
+                validSfxIds = setOf("a", "b", "c", "d"),
+                ambienceEnabled = false,
+                soundEffectsEnabled = true,
+            )
+        }
+    }
+
+    @Test
+    fun acceptsOverlapCountedRepeatAndBoundedLoop() {
+        val plan = XpkAmbienceSfxDirector.parseAndValidate(
+            raw = """
+                {"ambience_scenes":[],"sfx_cues":[
+                  {"unit_id":"P0001-U01","effect_id":"gallop","stop_unit_id":"P0004-U01","loop_until_stop":true},
+                  {"unit_id":"P0002-U01","effect_id":"neigh"},
+                  {"unit_id":"P0002-U01","effect_id":"hammer","repeat_count":5,"cadence":"FAST"}
+                ]}
+            """.trimIndent(),
+            validUnitIds = units,
+            validAmbienceIds = emptySet(),
+            validSfxIds = setOf("gallop", "neigh", "hammer"),
+            ambienceEnabled = false,
+            soundEffectsEnabled = true,
+        )
+
+        assertEquals(3, plan.soundEffectCues.size)
+        assertTrue(plan.soundEffectCues[0].loopUntilStop)
+        assertEquals("P0004-U01", plan.soundEffectCues[0].stopUnitId)
+        assertEquals(5, plan.soundEffectCues[2].repeatCount)
+        assertEquals(SfxCadence.FAST, plan.soundEffectCues[2].cadence)
+    }
+
+    @Test
+    fun rejectsInvalidLoopBoundaryAndRepeatCombination() {
+        assertFails {
+            XpkAmbienceSfxDirector.parseAndValidate(
+                raw = """{"ambience_scenes":[],"sfx_cues":[{"unit_id":"P0002-U01","effect_id":"gallop","loop_until_stop":true}]}""",
+                validUnitIds = units,
+                validAmbienceIds = emptySet(),
+                validSfxIds = setOf("gallop"),
+                ambienceEnabled = false,
+                soundEffectsEnabled = true,
+            )
+        }
+        assertFails {
+            XpkAmbienceSfxDirector.parseAndValidate(
+                raw = """{"ambience_scenes":[],"sfx_cues":[{"unit_id":"P0002-U01","effect_id":"gallop","stop_unit_id":"P0004-U01","loop_until_stop":true,"repeat_count":5}]}""",
+                validUnitIds = units,
+                validAmbienceIds = emptySet(),
+                validSfxIds = setOf("gallop"),
                 ambienceEnabled = false,
                 soundEffectsEnabled = true,
             )
@@ -206,6 +257,28 @@ class XpkAmbienceSfxDirectorTest {
             setOf("rain"),
             setOf("door"),
             ambienceEnabled = true,
+            soundEffectsEnabled = true,
+        )
+        assertEquals(original, decoded)
+    }
+
+    @Test
+    fun persistedCodecKeepsAdvancedSfxFields() {
+        val original = XpkAmbienceSfxDirector.parseAndValidate(
+            raw = """{"ambience_scenes":[],"sfx_cues":[{"unit_id":"P0001-U01","effect_id":"gallop","stop_unit_id":"P0004-U01","loop_until_stop":true},{"unit_id":"P0002-U01","effect_id":"hammer","repeat_count":5,"cadence":"SLOW"}]}""",
+            validUnitIds = units,
+            validAmbienceIds = emptySet(),
+            validSfxIds = setOf("gallop", "hammer"),
+            ambienceEnabled = false,
+            soundEffectsEnabled = true,
+        )
+        val encoded = XpkAmbienceSfxDirector.encode(original)
+        val decoded = XpkAmbienceSfxDirector.decodePersisted(
+            encoded,
+            units,
+            emptySet(),
+            setOf("gallop", "hammer"),
+            ambienceEnabled = false,
             soundEffectsEnabled = true,
         )
         assertEquals(original, decoded)

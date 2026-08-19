@@ -1,0 +1,64 @@
+name: Temporary audio category title-marker fix
+
+on:
+  push:
+    branches:
+      - fix/audio-normalization-and-category-move
+    paths:
+      - .github/workflows/temporary-audio-category-title-marker-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fix branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/audio-normalization-and-category-move
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Strip legacy type markers from moved titles too
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('app/src/main/java/vn/nghetruyen/app/ui/components/UnifiedAudioAssetManagerDialog.kt')
+          text = path.read_text(encoding='utf-8')
+
+          old_move = '''        val description = assetDescription(kind, track.tagsCsv)\n        movedTracks = movedTracks + (\n            track.id to track.copy(tagsCsv = tagsWithDescription(destination, description))\n        )\n'''
+          new_move = '''        val description = assetDescription(kind, track.tagsCsv)\n        val cleanTitle = stripAssetTypeMarkers(track.title).ifBlank { track.title }\n        movedTracks = movedTracks + (\n            track.id to track.copy(\n                title = cleanTitle,\n                tagsCsv = tagsWithDescription(destination, description),\n            )\n        )\n'''
+          assert text.count(old_move) == 1, f'Expected one staged-move block, found {text.count(old_move)}'
+          text = text.replace(old_move, new_move)
+
+          old_description = '''@Suppress("UNUSED_PARAMETER")\nprivate fun assetDescription(kind: AudioAssetKind, tagsCsv: String): String =\n    tagsCsv.replace(audioAssetTypeMarkerRegex, "")\n        .trim()\n        .trim(',', ';')\n        .trim()\n'''
+          new_description = '''private fun stripAssetTypeMarkers(value: String): String =\n    value.replace(audioAssetTypeMarkerRegex, "")\n        .trim()\n        .trim(',', ';')\n        .trim()\n\n@Suppress("UNUSED_PARAMETER")\nprivate fun assetDescription(kind: AudioAssetKind, tagsCsv: String): String =\n    stripAssetTypeMarkers(tagsCsv)\n'''
+          assert text.count(old_description) == 1, f'Expected one description helper, found {text.count(old_description)}'
+          text = text.replace(old_description, new_description)
+
+          path.write_text(text, encoding='utf-8')
+
+      - name: Commit targeted title-marker fix and remove temporary workflow
+        shell: bash
+        run: |
+          rm .github/workflows/temporary-audio-category-title-marker-fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/vn/nghetruyen/app/ui/components/UnifiedAudioAssetManagerDialog.kt .github/workflows/temporary-audio-category-title-marker-fix.yml
+          git commit -m "Handle title markers when moving audio categories"
+          git push origin HEAD:fix/audio-normalization-and-category-move
+
+      - name: Compile debug Kotlin
+        shell: bash
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:compileDebugKotlin --no-daemon

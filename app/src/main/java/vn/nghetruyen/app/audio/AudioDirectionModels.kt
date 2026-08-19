@@ -29,9 +29,29 @@ data class AmbienceScene(
     val ambienceId: String,
 )
 
+enum class SfxCadence(val intervalMillis: Long) {
+    VERY_FAST(180L),
+    FAST(320L),
+    NORMAL(550L),
+    SLOW(900L),
+}
+
+/**
+ * Foreground sound event anchored to the narration UNIT timeline.
+ *
+ * [stopUnitId] is an exclusive boundary: playback must be silent for this cue as soon as that UNIT
+ * starts. This lets a long source file follow a shorter story action without physically trimming the
+ * asset. [repeatCount] + [cadence] model counted actions such as five hammer strikes.
+ * [loopUntilStop] is reserved for inherently repeatable foreground actions such as galloping and
+ * requires a stop boundary.
+ */
 data class SoundEffectCue(
     val unitId: String,
     val effectId: String,
+    val stopUnitId: String? = null,
+    val repeatCount: Int = 1,
+    val cadence: SfxCadence = SfxCadence.NORMAL,
+    val loopUntilStop: Boolean = false,
 )
 
 data class AmbienceSfxPlan(
@@ -41,6 +61,8 @@ data class AmbienceSfxPlan(
 
 object AudioDirectionLimits {
     const val MAX_CONCURRENT_AMBIENCE = 2
+    const val MAX_CONCURRENT_SFX = 3
+    const val MAX_SFX_REPEAT_COUNT = 16
     const val MIN_AMBIENCE_SCENE_UNITS = 2
 }
 

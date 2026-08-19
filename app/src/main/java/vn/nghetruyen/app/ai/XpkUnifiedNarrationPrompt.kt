@@ -70,7 +70,7 @@ object XpkUnifiedNarrationPrompt {
                 add("AMBIENCE biểu diễn nguồn âm vật lý kéo dài của môi trường/cảnh. Khoảng im lặng ambience nghĩa là không có ambience_scene phủ UNIT đó; tuyệt đối không xuất ambience_id=\"NONE\".")
             }
             if (includeSoundEffects) {
-                add("SFX biểu diễn một sự kiện âm thanh cụ thể, ngắn, foreground và thực sự xảy ra. Không có SFX nghĩa là không tạo cue; tuyệt đối không xuất effect_id=\"NONE\".")
+                add("SFX biểu diễn sự kiện hoặc hành động foreground thực sự xảy ra; cue có thể one-shot, lặp theo số nhịp hoặc kéo dài đến một ranh giới UNIT rõ ràng. Không có SFX nghĩa là không tạo cue; tuyệt đối không xuất effect_id=\"NONE\".")
             }
             if (includeAmbience && includeSoundEffects) {
                 add("AMBIENCE và SFX quyết định độc lập nhưng phải tương thích. Không nhân đôi cùng một nguồn âm giữa hai lớp; chỉ cho phép cả hai khi có một nền kéo dài và một sự kiện foreground riêng biệt, ví dụ mưa nền + một tia sét đánh gần.")
@@ -175,8 +175,8 @@ object XpkUnifiedNarrationPrompt {
             5. Ambience phải có độ bền tối thiểu: không tạo một cảnh ambience chỉ cho một UNIT thoáng qua, trừ khi toàn bộ timeline chỉ có một UNIT. Một câu nhắc tới mưa, gió, rừng, tiếng người... chưa đủ để bật/tắt lớp môi trường.
             6. Chỉ đổi hoặc dừng tại UNIT đầu tiên nơi môi trường thực sự thay đổi hoặc nguồn âm có bằng chứng kết thúc. Nếu các UNIT sau không nhắc lại nguồn âm nhưng không gian/cảnh vẫn liên tục và không có bằng chứng nó dừng, tiếp tục giữ ambience.
             7. Nếu một lớp vẫn còn đúng khi lớp kia thay đổi, giữ lớp còn đúng liên tục thay vì tắt rồi bật lại. Ví dụ rừng + mưa chuyển sang làng + mưa thì giữ mưa, chỉ thay rừng bằng làng.
-            8. Phân biệt nền kéo dài với sự kiện tức thời. Mưa, gió, tiếng rừng, biển, đám đông, tiếng máy chạy đều, vó ngựa kéo dài hoặc sấm rền xa có thể là ambience. Sét đánh gần, cửa sập, kiếm va, cây gãy... là SFX one-shot.
-            9. Hiện tượng/hành động kéo dài không được giả lập bằng cách lặp một SFX ngắn. Nếu không có ambience phù hợp thì bỏ lớp thay vì loop một one-shot không tự nhiên.
+            8. Phân biệt nền môi trường với hành động tiền cảnh. Mưa, gió, tiếng rừng, biển, đám đông hoặc sấm rền xa có thể là ambience. Ngựa đang phi, búa đang nện, kiếm va, sét đánh gần... là SFX gắn với hành động dù hành động kéo dài nhiều UNIT.
+            9. Không biến một hành động tiền cảnh thành ambience chỉ vì nó kéo dài. Việc lặp SFX chỉ do MODULE SFX quyết định và phải có ranh giới dừng rõ ràng.
             10. Không suy diễn từ phép so sánh, hồi tưởng, dự đoán hay lời kể gián tiếp. “Kiếm khí như sấm”, “nhớ tiếng mưa năm xưa”, “giọng hắn như cuồng phong” không tạo ambience ở hiện tại.
             11. Hai cảnh ambience liền nhau dùng cùng ambience_id và nối tiếp nhau phải được gộp. Không đổi qua biến thể khác chỉ để tạo cảm giác mới nếu môi trường không thực sự thay đổi.
             12. INCOMING_AMBIENCE_IDS là tối đa hai mã số tạm của các lớp đang hoạt động ở cuối chương trước, đã ánh xạ theo AMBIENCE_CATALOG hiện tại. Đánh giá từng lớp độc lập; không ưu tiên giữ chỉ vì continuity.
@@ -192,21 +192,26 @@ object XpkUnifiedNarrationPrompt {
     }
 
     private fun sfxPromptBlock(tracks: List<PromptAsset>, maxSfx: Int): String = """
-        MODULE SFX — HIỆU ỨNG ÂM THANH ONE-SHOT:
-        Mục tiêu: chỉ nhấn những sự kiện âm thanh cụ thể, ngắn và có giá trị kể chuyện; thưa nhưng đúng quan trọng hơn nhiều hiệu ứng.
+        MODULE SFX — HIỆU ỨNG ÂM THANH TIỀN CẢNH:
+        Mục tiêu: nhấn đúng các sự kiện/hành động có âm thanh và cho phép chúng sống đúng bằng nhịp của câu chuyện, không phụ thuộc độ dài vật lý của file.
 
-        1. Chỉ tạo SFX khi ngữ cảnh cho thấy sự kiện âm thanh thực sự xảy ra ở hiện tại của cảnh và đáng chú ý với người nghe/nhân vật. Không kích hoạt chỉ vì thấy từ khóa.
-        2. Không tạo SFX cho phép so sánh, ẩn dụ, hồi tưởng, dự đoán, phủ định hoặc lời kể về âm thanh không xảy ra ở cảnh hiện tại.
-        3. SFX là one-shot theo sự kiện. Không loop SFX thông thường. Nguồn âm kéo dài nhiều UNIT thuộc ambience/continuous khi có asset phù hợp.
-        4. Phân biệt nền với điểm nhấn: mưa + gió + sấm rền xa có thể là ambience; một tia sét đánh gần hoặc tiếng nổ ngay tại hành động là SFX.
-        5. Không mô phỏng mọi động tác và không gắn hiệu ứng cho hành động im lặng/không quan trọng. Nếu catalog không có âm thanh đủ sát, bỏ cue.
-        6. Chọn asset cụ thể nhất theo nguồn âm và tính chất sự kiện; tránh dùng SFX để lặp lại nền môi trường đang kéo dài.
-        7. Một sự kiện vật lý chỉ được tạo tối đa một cue, kể cả khi nhiều câu/UNIT tiếp tục mô tả hậu quả hoặc nhắc lại cùng sự kiện. Không dùng effect_id khác để phát lại cùng một sự kiện.
-        8. Mỗi cue xảy ra tại ĐẦU unit_id. Tối đa một SFX cho mỗi UNIT. MAX_SFX_CUES_THIS_CHAPTER chỉ là TRẦN an toàn, không phải quota hay mục tiêu; 0 SFX hoàn toàn hợp lệ.
-        9. Giữ đúng thứ tự timeline. Chỉ lặp một effect_id khi có các sự kiện tách biệt rõ ràng thực sự xảy ra nhiều lần.
-        10. Không có SFX được biểu diễn bằng việc không tạo cue. Tuyệt đối không trả effect_id="NONE" hoặc một cue giả để biểu diễn im lặng.
-        11. Chỉ dùng effect_id dạng số có trong SFX_CATALOG. Mã số chỉ có nghĩa trong request hiện tại; không tạo ID/tên file/URI/đường dẫn và không trả trường phụ.
-        12. Mỗi mô tả SFX theo “Sự kiện | Dùng | Tránh”, tối đa $MAX_DESCRIPTION_CHARS ký tự. Dùng cả ba phần; phần “Tránh” xung đột rõ là lý do loại asset.
+        1. Chỉ tạo SFX khi sự kiện âm thanh thực sự xảy ra ở hiện tại của cảnh và có giá trị kể chuyện. Không kích hoạt chỉ vì thấy từ khóa.
+        2. Không tạo SFX cho so sánh, ẩn dụ, hồi tưởng, dự đoán, phủ định hoặc âm thanh chỉ được kể lại.
+        3. Có ba kiểu cue hợp lệ: ONE-SHOT (mặc định); COUNTED REPEAT cho hành động đếm được; ACTION LOOP cho hành động tiền cảnh kéo dài.
+        4. ONE-SHOT: repeat_count=1, loop_until_stop=false. Dùng cho cửa sập, một tiếng nổ, một tiếng hí, một nhát kiếm... Có thể thêm stop_unit_id nếu cần chặn một file nguồn quá dài.
+        5. COUNTED REPEAT: repeat_count từ 2 đến 16, loop_until_stop=false và cadence là VERY_FAST/FAST/NORMAL/SLOW. Nếu truyện nói rõ “đập năm phát” thì dùng repeat_count=5; không tạo 5 cue rời cho cùng chuỗi hành động.
+        6. ACTION LOOP: loop_until_stop=true, repeat_count=1 và BẮT BUỘC có stop_unit_id. Dùng cho hành động tiền cảnh có tính lặp tự nhiên như ngựa phi, bánh xe quay hoặc thao tác lặp liên tục. Nếu file ngắn hơn hành động thì runtime được loop; nếu file dài hơn hành động thì runtime dừng tại ranh giới, KHÔNG cần cắt file.
+        7. stop_unit_id là RANH GIỚI LOẠI TRỪ: đó là UNIT đầu tiên nơi cue không còn được nghe. Nó phải nằm sau unit_id. Không để ACTION LOOP chạy đến hết file/chương khi hành động đã kết thúc.
+        8. Một UNIT có thể bắt đầu 0, 1, 2 hoặc tối đa 3 SFX độc lập. Cho phép chồng khi câu chuyện thực sự có nhiều nguồn cùng lúc, ví dụ ngựa phi + ngựa hí; không tạo lớp thừa chỉ để đạt số lượng.
+        9. Giữ đúng thứ tự timeline. Nhiều cue có cùng unit_id được phép và sẽ bắt đầu đồng thời; tổng số cue đang sống trên cùng UNIT, kể cả cue có stop_unit_id từ trước, không được vượt 3.
+        10. Chọn asset cụ thể nhất. Không dùng ambience để thay một hành động tiền cảnh, và không loop các one-shot không có tính lặp tự nhiên như vụ nổ, tiếng hét, cửa sập hoặc đồ vật vỡ.
+        11. Không có SFX được biểu diễn bằng việc không tạo cue. Tuyệt đối không trả effect_id="NONE". MAX_SFX_CUES_THIS_CHAPTER là trần an toàn, không phải quota.
+        12. Chỉ dùng effect_id dạng số trong SFX_CATALOG. Không tạo ID/tên file/URI/đường dẫn. Các trường duy nhất được phép: unit_id, effect_id, stop_unit_id, repeat_count, cadence, loop_until_stop.
+        13. Mỗi mô tả SFX theo “Sự kiện | Dùng | Tránh”, tối đa $MAX_DESCRIPTION_CHARS ký tự. Nếu phần “Tránh” xung đột rõ với cảnh thì loại asset.
+
+        Ví dụ logic (effect_id phải thay bằng mã có thật trong catalog):
+        - Ngựa phi từ P042 đến trước P047 và hí ở P044: cue gallop unit_id=P042, stop_unit_id=P047, loop_until_stop=true; thêm cue neigh one-shot tại P044. Hai âm được phép chồng.
+        - “Hắn nện búa năm phát”: một cue tại UNIT bắt đầu với repeat_count=5 và cadence phù hợp nhịp mô tả.
 
         MAX_SFX_CUES_THIS_CHAPTER: $maxSfx
         SFX_CATALOG (effect_id_số | mô tả):
@@ -229,7 +234,7 @@ object XpkUnifiedNarrationPrompt {
             if (includeVoiceCast) add("- \"assignments\": giữ đúng schema phân vai đã nêu ở phần trên và phải có đủ mọi DIALOGUE ID.")
             if (includeSceneMusic) add("- \"music_scenes\": mỗi phần tử đúng start_id, end_id, track_id; track_id là mã số từ TRACK_CATALOG; mảng phải phủ kín timeline và không được rỗng khi timeline có UNIT.")
             if (includeAmbience) add("- \"ambience_scenes\": mỗi phần tử đúng start_id, end_id, ambience_id; ambience_id là mã số từ AMBIENCE_CATALOG; mảng [] hợp lệ khi không cần ambience.")
-            if (includeSoundEffects) add("- \"sfx_cues\": mỗi phần tử đúng unit_id, effect_id; effect_id là mã số từ SFX_CATALOG; mảng [] hợp lệ khi không có sự kiện đáng phát.")
+            if (includeSoundEffects) add("- \"sfx_cues\": mỗi phần tử bắt buộc có unit_id, effect_id và chỉ được thêm stop_unit_id, repeat_count, cadence, loop_until_stop; effect_id là mã số từ SFX_CATALOG; mảng [] hợp lệ khi không có sự kiện đáng phát.")
         }
         val quotedKeys = keys.joinToString(", ") { "\"$it\"" }
         val silenceRules = buildList {

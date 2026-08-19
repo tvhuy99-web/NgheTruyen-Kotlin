@@ -104,8 +104,12 @@ fun UnifiedAudioAssetManagerDialog(
         if (destination == kind) return
         stopPreview()
         val description = assetDescription(kind, track.tagsCsv)
+        val cleanTitle = stripAssetTypeMarkers(track.title).ifBlank { track.title }
         movedTracks = movedTracks + (
-            track.id to track.copy(tagsCsv = tagsWithDescription(destination, description))
+            track.id to track.copy(
+                title = cleanTitle,
+                tagsCsv = tagsWithDescription(destination, description),
+            )
         )
         draft = draft.filterNot { it.id == track.id }
             .mapIndexed { index, row -> row.copy(orderIndex = index) }
@@ -675,12 +679,15 @@ private val audioAssetTypeMarkerRegex = Regex(
     """(?i)(?:type\s*[:=]\s*(?:sfx[_-]?continuous|continuous|sfx|sound[_-]?effect|ambience|environment|music)|\[(?:continuous|sfx[_-]?continuous|sfx|ambience|environment|music)])""",
 )
 
-@Suppress("UNUSED_PARAMETER")
-private fun assetDescription(kind: AudioAssetKind, tagsCsv: String): String =
-    tagsCsv.replace(audioAssetTypeMarkerRegex, "")
+private fun stripAssetTypeMarkers(value: String): String =
+    value.replace(audioAssetTypeMarkerRegex, "")
         .trim()
         .trim(',', ';')
         .trim()
+
+@Suppress("UNUSED_PARAMETER")
+private fun assetDescription(kind: AudioAssetKind, tagsCsv: String): String =
+    stripAssetTypeMarkers(tagsCsv)
 
 private fun tagsWithDescription(kind: AudioAssetKind, description: String): String {
     val marker = typeMarker(kind)

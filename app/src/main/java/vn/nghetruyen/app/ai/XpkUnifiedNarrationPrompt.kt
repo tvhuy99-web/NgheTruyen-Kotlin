@@ -25,16 +25,11 @@ object XpkUnifiedNarrationPrompt {
 
     private val shuffleSerial = AtomicLong(0L)
 
-    /**
-     * Build exactly one request-local shuffled catalog. Production callers must reuse the returned
-     * bundle for both prompt rendering and response alias decoding so randomization cannot desync ids.
-     */
     fun buildCatalog(items: List<SceneMusicTrackOption>, salt: String = ""): CatalogBundle {
         val shuffled = shuffleAssets(normalize(items), salt)
         return catalogBundle(shuffled)
     }
 
-    /** Compatibility helper for deterministic tests/legacy callers. Production uses [buildCatalog]. */
     fun aliasToId(items: List<SceneMusicTrackOption>): Map<String, String> = sequentialCatalog(items).aliasToId
 
     fun compose(
@@ -52,9 +47,6 @@ object XpkUnifiedNarrationPrompt {
         sfxCatalog: CatalogBundle? = null,
     ): String {
         if (!includeAmbience && !includeSoundEffects) return base.prompt
-
-        // Direct composition stays deterministic. The production service explicitly passes one
-        // request-local shuffled bundle for each enabled kind and reuses it in the response parser.
         val ambience = if (includeAmbience) ambienceCatalog ?: sequentialCatalog(ambienceTracks)
         else CatalogBundle(emptyList(), emptyMap())
         val sfx = if (includeSoundEffects) sfxCatalog ?: sequentialCatalog(soundEffectTracks)
@@ -107,12 +99,8 @@ object XpkUnifiedNarrationPrompt {
         } else ""
 
         val blocks = buildList {
-            if (includeAmbience) {
-                add(ambiencePromptBlock(ambience.items, incomingAmbienceId))
-            }
-            if (includeSoundEffects) {
-                add(sfxPromptBlock(sfx.items, ((base.unitIds.size + 3) / 4).coerceIn(4, 48)))
-            }
+            if (includeAmbience) add(ambiencePromptBlock(ambience.items, incomingAmbienceId))
+            if (includeSoundEffects) add(sfxPromptBlock(sfx.items, ((base.unitIds.size + 3) / 4).coerceIn(4, 48)))
         }
         val timelineBlock = if (includeSceneMusic) {
             "TIMELINE: dùng đúng TIMELINE XPK đã nêu ở phần phân vai/nhạc phía trên; không dùng ID ngoài chương hiện tại."
@@ -176,7 +164,7 @@ object XpkUnifiedNarrationPrompt {
             6. Chỉ đổi hoặc dừng tại UNIT đầu tiên nơi môi trường thực sự thay đổi hoặc nguồn âm có bằng chứng kết thúc. Nếu các UNIT sau không nhắc lại nguồn âm nhưng không gian/cảnh vẫn liên tục và không có bằng chứng nó dừng, tiếp tục giữ ambience.
             7. Nếu một lớp vẫn còn đúng khi lớp kia thay đổi, giữ lớp còn đúng liên tục thay vì tắt rồi bật lại. Ví dụ rừng + mưa chuyển sang làng + mưa thì giữ mưa, chỉ thay rừng bằng làng.
             8. Phân biệt nền môi trường với hành động tiền cảnh. Mưa, gió, tiếng rừng, biển, đám đông hoặc sấm rền xa có thể là ambience. Ngựa đang phi, búa đang nện, kiếm va, sét đánh gần... là SFX gắn với hành động dù hành động kéo dài nhiều UNIT.
-            9. Không biến một hành động tiền cảnh thành ambience chỉ vì nó kéo dài. Việc lặp SFX chỉ do MODULE SFX quyết định và phải có ranh giới dừng rõ ràng.
+            9. Không biến một hành động tiền cảnh thành ambience chỉ vì nó kéo dài. Việc lặp hiệu ứng tiền cảnh chỉ do quy tắc SFX quyết định và phải có ranh giới dừng rõ ràng.
             10. Không suy diễn từ phép so sánh, hồi tưởng, dự đoán hay lời kể gián tiếp. “Kiếm khí như sấm”, “nhớ tiếng mưa năm xưa”, “giọng hắn như cuồng phong” không tạo ambience ở hiện tại.
             11. Hai cảnh ambience liền nhau dùng cùng ambience_id và nối tiếp nhau phải được gộp. Không đổi qua biến thể khác chỉ để tạo cảm giác mới nếu môi trường không thực sự thay đổi.
             12. INCOMING_AMBIENCE_IDS là tối đa hai mã số tạm của các lớp đang hoạt động ở cuối chương trước, đã ánh xạ theo AMBIENCE_CATALOG hiện tại. Đánh giá từng lớp độc lập; không ưu tiên giữ chỉ vì continuity.
@@ -205,7 +193,7 @@ object XpkUnifiedNarrationPrompt {
         8. Một UNIT có thể bắt đầu 0, 1, 2 hoặc tối đa 3 SFX độc lập. Cho phép chồng khi câu chuyện thực sự có nhiều nguồn cùng lúc, ví dụ ngựa phi + ngựa hí; không tạo lớp thừa chỉ để đạt số lượng.
         9. Giữ đúng thứ tự timeline. Nhiều cue có cùng unit_id được phép và sẽ bắt đầu đồng thời; tổng số cue đang sống trên cùng UNIT, kể cả cue có stop_unit_id từ trước, không được vượt 3.
         10. Chọn asset cụ thể nhất. Không dùng ambience để thay một hành động tiền cảnh, và không loop các one-shot không có tính lặp tự nhiên như vụ nổ, tiếng hét, cửa sập hoặc đồ vật vỡ.
-        11. Không có SFX được biểu diễn bằng việc không tạo cue. Tuyệt đối không trả effect_id="NONE". MAX_SFX_CUES_THIS_CHAPTER là trần an toàn, không phải quota.
+        11. Không có SFX được biểu diễn bằng việc không tạo cue. Tuyệt đối không trả effect_id="NONE". MAX_SFX_CUES_THIS_CHAPTER chỉ là TRẦN an toàn, không phải quota.
         12. Chỉ dùng effect_id dạng số trong SFX_CATALOG. Không tạo ID/tên file/URI/đường dẫn. Các trường duy nhất được phép: unit_id, effect_id, stop_unit_id, repeat_count, cadence, loop_until_stop.
         13. Mỗi mô tả SFX theo “Sự kiện | Dùng | Tránh”, tối đa $MAX_DESCRIPTION_CHARS ký tự. Nếu phần “Tránh” xung đột rõ với cảnh thì loại asset.
 
@@ -254,44 +242,29 @@ object XpkUnifiedNarrationPrompt {
         """.trimIndent()
     }
 
-    /** Assets without a useful description are omitted instead of leaking filename semantics. */
     fun normalize(items: List<SceneMusicTrackOption>): List<SceneMusicTrackOption> = items.asSequence()
         .filter { it.id.trim().isNotBlank() }
         .distinctBy { it.id.trim() }
         .take(MAX_ASSETS_PER_KIND)
-        .map { item ->
-            item.copy(
-                id = item.id.trim(),
-                description = takeCodePoints(oneLine(item.description), MAX_DESCRIPTION_CHARS),
-            )
-        }
+        .map { item -> item.copy(id = item.id.trim(), description = takeCodePoints(oneLine(item.description), MAX_DESCRIPTION_CHARS)) }
         .filter { it.description.isNotBlank() }
         .toList()
 
     private fun sequentialCatalog(items: List<SceneMusicTrackOption>): CatalogBundle = catalogBundle(normalize(items))
 
     private fun catalogBundle(items: List<SceneMusicTrackOption>): CatalogBundle {
-        val promptItems = items.mapIndexed { index, item ->
-            PromptAsset(item.id, item.description, (index + 1).toString())
-        }
-        return CatalogBundle(
-            items = promptItems,
-            aliasToId = promptItems.associate { it.promptId to it.id },
-        )
+        val promptItems = items.mapIndexed { index, item -> PromptAsset(item.id, item.description, (index + 1).toString()) }
+        return CatalogBundle(promptItems, promptItems.associate { it.promptId to it.id })
     }
 
-    private fun catalog(items: List<PromptAsset>): String = items.joinToString("\n") { item ->
-        "${item.promptId} | ${item.description}"
-    }
+    private fun catalog(items: List<PromptAsset>): String = items.joinToString("\n") { "${it.promptId} | ${it.description}" }
 
     private fun shuffleAssets(rows: List<SceneMusicTrackOption>, salt: String): List<SceneMusicTrackOption> {
         if (rows.size < 2) return rows
         val out = rows.toMutableList()
         var seed = System.currentTimeMillis() / 1000L + shuffleSerial.incrementAndGet() * 130363L
         seed += Math.floorMod(System.nanoTime(), 2147483647L)
-        salt.toByteArray(Charsets.UTF_8).forEach { byte ->
-            seed = (seed * 131L + (byte.toInt() and 0xff)) % 2147483647L
-        }
+        salt.toByteArray(Charsets.UTF_8).forEach { byte -> seed = (seed * 131L + (byte.toInt() and 0xff)) % 2147483647L }
         seed = abs(seed) % 2147483647L
         if (seed == 0L) seed = 1L
         var state = seed

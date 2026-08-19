@@ -6,13 +6,15 @@ import vn.nghetruyen.app.audio.AmbienceScene
 import vn.nghetruyen.app.audio.AmbienceSfxPlan
 import vn.nghetruyen.app.audio.AudioDirectionLimits
 import vn.nghetruyen.app.audio.SoundEffectCue
+import vn.nghetruyen.app.audio.SfxCadence
 
 /**
  * Validator/persistence codec for the Ambience and SFX portions of the unified XPK chapter plan.
  * Prompt composition lives only in [XpkUnifiedNarrationPrompt] so there is no second AI contract.
  *
  * Ambience keeps the v1 persisted schema (one ambience_id per row), but two rows may overlap to
- * express two compatible logical ambience layers. This keeps existing exports/backups readable.
+ * express two compatible logical ambience layers. Existing two-field SFX cues remain readable;
+ * rhythm/span fields are optional extensions of that persisted schema.
  */
 object XpkAmbienceSfxDirector {
     const val ENGINE = "xpk-audio-direction-v1"
@@ -81,23 +83,72 @@ object XpkAmbienceSfxDirector {
         val maxSfx = maxSfxForUnits(validUnitIds.size)
         require(sfxArray.length() <= maxSfx) { "AI trả quá nhiều SFX cho một chương." }
         val soundEffectCues = mutableListOf<SoundEffectCue>()
-        val usedUnits = hashSetOf<String>()
+        val usedSignatures = hashSetOf<String>()
         var previousSfxIndex = -1
         for (index in 0 until sfxArray.length()) {
             val row = sfxArray.getJSONObject(index)
-            require(row.keys().asSequence().toSet() == setOf("unit_id", "effect_id")) {
+            val rowKeys = row.keys().asSequence().toSet()
+            val allowedKeys = setOf(
+                "unit_id",
+                "effect_id",
+                "stop_unit_id",
+                "repeat_count",
+                "cadence",
+                "loop_until_stop",
+            )
+            require("unit_id" in rowKeys && "effect_id" in rowKeys && rowKeys.all { it in allowedKeys }) {
                 "sfx_cues[$index] có trường không hợp lệ."
             }
             val unitId = row.getString("unit_id").trim()
             val effectId = row.getString("effect_id").trim()
             val unitIndex = order[unitId] ?: error("sfx_cues[$index] dùng unit_id không tồn tại.")
+            val stopUnitId = row.optString("stop_unit_id", "").trim().takeIf(String::isNotBlank)
+            val stopIndex = stopUnitId?.let {
+                order[it] ?: error("sfx_cues[$index] dùng stop_unit_id không tồn tại.")
+            }
+            val repeatCount = row.optInt("repeat_count", 1)
+            val cadenceName = row.optString("cadence", SfxCadence.NORMAL.name).trim().uppercase()
+            val cadence = SfxCadence.values().firstOrNull { it.name == cadenceName }
+                ?: error("sfx_cues[$index] dùng cadence không hợp lệ.")
+            val loopUntilStop = row.optBoolean("loop_until_stop", false)
+
             require(soundEffectsEnabled) { "AI trả SFX trong khi lớp SFX đang tắt." }
             require(effectId in validSfxIds) { "sfx_cues[$index] dùng effect_id không tồn tại." }
             require(unitIndex >= previousSfxIndex) { "sfx_cues sai thứ tự timeline." }
-            require(usedUnits.add(unitId)) { "Mỗi UNIT chỉ được có tối đa một SFX." }
-            soundEffectCues += SoundEffectCue(unitId, effectId)
+            require(stopIndex == null || stopIndex > unitIndex) {
+                "sfx_cues[$index] phải dừng ở một UNIT nằm sau unit_id; stop_unit_id là ranh giới loại trừ."
+            }
+            require(repeatCount in 1..AudioDirectionLimits.MAX_SFX_REPEAT_COUNT) {
+                "sfx_cues[$index] có repeat_count ngoài giới hạn."
+            }
+            require(!loopUntilStop || stopUnitId != null) {
+                "sfx_cues[$index] loop_until_stop bắt buộc có stop_unit_id."
+            }
+            require(!loopUntilStop || repeatCount == 1) {
+                "sfx_cues[$index] không được vừa loop_until_stop vừa repeat_count > 1."
+            }
+
+            val cue = SoundEffectCue(
+                unitId = unitId,
+                effectId = effectId,
+                stopUnitId = stopUnitId,
+                repeatCount = repeatCount,
+                cadence = cadence,
+                loopUntilStop = loopUntilStop,
+            )
+            val signature = listOf(
+                unitId,
+                effectId,
+                stopUnitId.orEmpty(),
+                repeatCount.toString(),
+                cadence.name,
+                loopUntilStop.toString(),
+            ).joinToString("|")
+            require(usedSignatures.add(signature)) { "sfx_cues[$index] lặp lại đúng cùng một cue." }
+            soundEffectCues += cue
             previousSfxIndex = unitIndex
         }
+        validateSfxConcurrency(soundEffectCues, order, validUnitIds.size)
 
         if (!ambienceEnabled) require(ambienceScenes.isEmpty())
         if (!soundEffectsEnabled) require(soundEffectCues.isEmpty())
@@ -123,7 +174,17 @@ object XpkAmbienceSfxDirector {
             "sfx_cues",
             JSONArray().also { array ->
                 plan.soundEffectCues.forEach { cue ->
-                    array.put(JSONObject().put("unit_id", cue.unitId).put("effect_id", cue.effectId))
+                    array.put(
+                        JSONObject()
+                            .put("unit_id", cue.unitId)
+                            .put("effect_id", cue.effectId)
+                            .also { row ->
+                                cue.stopUnitId?.let { row.put("stop_unit_id", it) }
+                                if (cue.repeatCount != 1) row.put("repeat_count", cue.repeatCount)
+                                if (cue.cadence != SfxCadence.NORMAL) row.put("cadence", cue.cadence.name)
+                                if (cue.loopUntilStop) row.put("loop_until_stop", true)
+                            },
+                    )
                 }
             },
         )
@@ -192,6 +253,25 @@ object XpkAmbienceSfxDirector {
         return merged
             .sortedWith(compareBy<IndexedAmbience> { it.start }.thenBy { it.end }.thenBy { it.ambienceId })
             .map { row -> AmbienceScene(validUnitIds[row.start], validUnitIds[row.end], row.ambienceId) }
+    }
+
+    private fun validateSfxConcurrency(
+        cues: List<SoundEffectCue>,
+        order: Map<String, Int>,
+        unitCount: Int,
+    ) {
+        if (cues.isEmpty()) return
+        val active = IntArray(unitCount)
+        cues.forEachIndexed { cueIndex, cue ->
+            val start = order.getValue(cue.unitId)
+            val stopExclusive = cue.stopUnitId?.let(order::getValue) ?: (start + 1)
+            for (unit in start until stopExclusive.coerceAtMost(unitCount)) {
+                active[unit] += 1
+                require(active[unit] <= AudioDirectionLimits.MAX_CONCURRENT_SFX) {
+                    "sfx_cues[$cueIndex] làm vượt quá ${AudioDirectionLimits.MAX_CONCURRENT_SFX} SFX đồng thời trên một UNIT."
+                }
+            }
+        }
     }
 
     private fun maxSfxForUnits(unitCount: Int): Int = ((unitCount + 3) / 4).coerceIn(4, 48)

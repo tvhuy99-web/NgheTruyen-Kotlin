@@ -20,6 +20,7 @@ import vn.nghetruyen.app.audio.AudioDirectionAsset
 import vn.nghetruyen.app.audio.AudioDirectionLimits
 import vn.nghetruyen.app.audio.AudioDirectionPreferences
 import vn.nghetruyen.app.audio.PcmLoudnessEstimator
+import vn.nghetruyen.app.audio.SoundEffectCue
 import vn.nghetruyen.app.data.repository.LibraryRepository
 
 /**
@@ -37,6 +38,8 @@ class AudioDirectionRuntime(
     private val preferences: AudioDirectionPreferences,
     private val narrationPlanCoordinator: NarrationPlanCoordinator,
 ) {
+    private data class RuntimeSfxCue(val key: String, val cue: SoundEffectCue)
+
     private val mutex = Mutex()
     private val ambienceController = SceneAmbienceController(context)
     private val sfxController = SceneSfxController(context)
@@ -51,9 +54,11 @@ class AudioDirectionRuntime(
     private var assetsById: Map<String, AudioDirectionAsset> = emptyMap()
     private var ambienceVariantsById: Map<String, List<AudioDirectionAsset>> = emptyMap()
     private var ambienceByUnitId: Map<String, List<String>> = emptyMap()
-    private var sfxByUnitId: Map<String, String> = emptyMap()
+    private var sfxByUnitId: Map<String, List<RuntimeSfxCue>> = emptyMap()
+    private var sfxCueByKey: Map<String, RuntimeSfxCue> = emptyMap()
+    private var boundedSfxCueKeys: Set<String> = emptySet()
+    private var allowedBoundedSfxKeysByUnitId: Map<String, Set<String>> = emptyMap()
     private var lastTriggeredSfxKey = ""
-    private var lastSfxAtMillis = 0L
     private val lastEffectAtMillis = linkedMapOf<String, Long>()
     private var lastSettings: AudioDirectionPreferences.Snapshot? = null
     private var validatedFastKey = ""
@@ -108,18 +113,21 @@ class AudioDirectionRuntime(
         if (!settings.ambienceEnabled && !settings.soundEffectsEnabled) {
             ambienceController.stop()
             sfxController.stopAll()
+            lastTriggeredSfxKey = ""
             if (forcePreferences) clearPreparedPlan()
             return
         }
         if (snapshot.chapterId.isBlank() || snapshot.speechChunks.none { it.unitId.isNotBlank() }) {
             ambienceController.stop()
             sfxController.stopAll()
+            lastTriggeredSfxKey = ""
             return
         }
 
         if (!snapshot.isPlaying) {
             ambienceController.pause()
             sfxController.stopAll()
+            lastTriggeredSfxKey = ""
             if (planningSwitchChanged) clearPreparedPlan()
             return
         }
@@ -128,6 +136,7 @@ class AudioDirectionRuntime(
         if (!prepared) {
             ambienceController.stop()
             sfxController.stopAll()
+            lastTriggeredSfxKey = ""
             return
         }
 
@@ -306,11 +315,35 @@ class AudioDirectionRuntime(
             }
         }
         ambienceByUnitId = ambienceMap.mapValues { (_, ids) -> ids.toList() }
-        sfxByUnitId = newPlan.soundEffectCues.associate { it.unitId to it.effectId }
+
+        sfxController.stopAll()
+        val runtimeCues = newPlan.soundEffectCues.mapIndexed { index, cue ->
+            RuntimeSfxCue(
+                key = "$chapterId:${cue.unitId}:${cue.effectId}:$index",
+                cue = cue,
+            )
+        }
+        sfxByUnitId = runtimeCues.groupBy { it.cue.unitId }
+        sfxCueByKey = runtimeCues.associateBy(RuntimeSfxCue::key)
+        val boundedKeys = linkedSetOf<String>()
+        val allowedByUnit = linkedMapOf<String, MutableSet<String>>()
+        runtimeCues.forEach { runtimeCue ->
+            val cue = runtimeCue.cue
+            val stopUnitId = cue.stopUnitId ?: return@forEach
+            val start = order[cue.unitId] ?: return@forEach
+            val stopExclusive = order[stopUnitId] ?: return@forEach
+            if (stopExclusive <= start) return@forEach
+            boundedKeys += runtimeCue.key
+            for (index in start until stopExclusive) {
+                allowedByUnit.getOrPut(validUnits[index]) { linkedSetOf() } += runtimeCue.key
+            }
+        }
+        boundedSfxCueKeys = boundedKeys
+        allowedBoundedSfxKeysByUnitId = allowedByUnit.mapValues { (_, keys) -> keys.toSet() }
+
         preparedChapterId = chapterId
         preparedSignature = signature
         lastTriggeredSfxKey = ""
-        lastSfxAtMillis = 0L
         lastEffectAtMillis.clear()
     }
 
@@ -350,31 +383,75 @@ class AudioDirectionRuntime(
     ) {
         if (!settings.soundEffectsEnabled) {
             sfxController.stopAll()
+            lastTriggeredSfxKey = ""
             return
         }
-        val effectId = sfxByUnitId[unitId] ?: return
         val triggerKey = "$chapterId:$unitId"
         if (triggerKey == lastTriggeredSfxKey) return
         lastTriggeredSfxKey = triggerKey
 
-        val now = System.currentTimeMillis()
-        if (now - lastSfxAtMillis < settings.minimumSfxGapMillis) return
-        val sameEffectLast = lastEffectAtMillis[effectId] ?: 0L
-        if (now - sameEffectLast < settings.sameEffectCooldownMillis) return
+        // stopUnitId is exclusive. Stop only the cue whose action ended, never unrelated overlapping SFX.
+        val allowedBoundedKeys = allowedBoundedSfxKeysByUnitId[unitId].orEmpty()
+        boundedSfxCueKeys.asSequence()
+            .filterNot(allowedBoundedKeys::contains)
+            .forEach(sfxController::stopCue)
 
-        val asset = assetsById[effectId]?.takeIf { it.kind == AudioAssetKind.SFX } ?: return
-        lastSfxAtMillis = now
-        lastEffectAtMillis[effectId] = now
+        val maxConcurrent = minOf(
+            settings.maxConcurrentSfx,
+            AudioDirectionLimits.MAX_CONCURRENT_SFX,
+        ).coerceAtLeast(1)
+        val candidates = mutableListOf<RuntimeSfxCue>()
+
+        // Resume a looping foreground action after pause/seek when playback lands inside its span.
+        allowedBoundedKeys.asSequence()
+            .mapNotNull(sfxCueByKey::get)
+            .filter { runtimeCue ->
+                runtimeCue.cue.loopUntilStop &&
+                    runtimeCue.cue.unitId != unitId &&
+                    !sfxController.isCueActive(runtimeCue.key)
+            }
+            .forEach(candidates::add)
+
+        sfxByUnitId[unitId].orEmpty().forEach { runtimeCue ->
+            if (candidates.none { it.key == runtimeCue.key }) candidates += runtimeCue
+        }
+        if (candidates.isEmpty()) return
+
+        val now = System.currentTimeMillis()
+        var startedAny = false
+        candidates.take(maxConcurrent).forEach { runtimeCue ->
+            if (sfxController.isCueActive(runtimeCue.key)) return@forEach
+            val cue = runtimeCue.cue
+            val asset = assetsById[cue.effectId]?.takeIf { it.kind == AudioAssetKind.SFX } ?: return@forEach
+            val explicitlyRhythmic = cue.repeatCount > 1 || cue.loopUntilStop
+            val sameEffectLast = lastEffectAtMillis[cue.effectId] ?: 0L
+            val cooldown = maxOf(settings.minimumSfxGapMillis, settings.sameEffectCooldownMillis)
+            if (!explicitlyRhythmic && now - sameEffectLast < cooldown) return@forEach
+
+            val started = sfxController.play(
+                asset = asset,
+                masterVolume = 1f,
+                maxConcurrent = maxConcurrent,
+                cueKey = runtimeCue.key,
+                loopUntilStopped = cue.loopUntilStop,
+                repeatCount = cue.repeatCount,
+                repeatIntervalMillis = cue.cadence.intervalMillis,
+            )
+            if (started) {
+                startedAny = true
+                lastEffectAtMillis[cue.effectId] = now
+            }
+        }
+        if (!startedAny) return
+
         if (lastEffectAtMillis.size > MAX_EFFECT_HISTORY) {
             val cutoff = now - settings.sameEffectCooldownMillis * 2
             lastEffectAtMillis.entries.removeAll { it.value < cutoff }
         }
 
-        // SFX cues are intentionally sparse and semantic; each accepted cue is therefore treated as
-        // an important foreground event and briefly ducks the two background buses, never narration.
+        // One batch may contain 2-3 concurrent foreground sources. Duck background once; narration stays untouched.
         ambienceController.duckForImportantSfx(SFX_DUCK_FACTOR, SFX_DUCK_HOLD_MS)
         SceneMusicSfxDuckBus.duck(SFX_DUCK_FACTOR, SFX_DUCK_HOLD_MS)
-        sfxController.play(asset, 1f, settings.maxConcurrentSfx)
     }
 
     private fun buildAmbienceVariants(allAssets: List<AudioDirectionAsset>): Map<String, List<AudioDirectionAsset>> {
@@ -407,8 +484,10 @@ class AudioDirectionRuntime(
         ambienceVariantsById = emptyMap()
         ambienceByUnitId = emptyMap()
         sfxByUnitId = emptyMap()
+        sfxCueByKey = emptyMap()
+        boundedSfxCueKeys = emptySet()
+        allowedBoundedSfxKeysByUnitId = emptyMap()
         lastTriggeredSfxKey = ""
-        lastSfxAtMillis = 0L
         lastEffectAtMillis.clear()
         validatedFastKey = ""
         validatedFastAtMillis = 0L

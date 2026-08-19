@@ -784,11 +784,9 @@ fun ReaderScreen(
                     val settings = app.container.settingsRepository
                     settings.setBackgroundMusicEnabled(musicEnabled)
                     settings.setSceneMusicPlaybackMode(musicMode)
-                    settings.setSceneMusicTargetLufs(musicTargetLufs)
                     settings.setBackgroundMusicDuckFactor(10.0.pow(-musicDuckDb / 20.0).toFloat())
                     settings.setBackgroundMusicAttackMillis(musicAttackMs)
                     settings.setBackgroundMusicReleaseMillis(musicReleaseMs)
-                    musicTracks.forEach { SceneMusicAnalysisWorker.enqueue(context, it.id, musicTargetLufs) }
                     ReaderPlaybackService.command(context, ReaderPlaybackService.ACTION_REFRESH)
                     onMessage("Đã lưu cài đặt nhạc nền."); showMusicDialog = false
                 }

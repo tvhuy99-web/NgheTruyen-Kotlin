@@ -7,7 +7,7 @@ import android.content.SharedPreferences
  * Runtime switches for the AI sound-director layers that do not already have an application setting.
  *
  * Scene music keeps using AppSettings.autoSceneMusicEnabled so the existing switch remains the
- * authoritative music switch. Ambience and one-shot sound effects are deliberately opt-in and
+ * authoritative music switch. Ambience and foreground sound effects are deliberately opt-in and
  * default to OFF on every install/restore that has never written these keys.
  *
  * The application installs one process-wide [shared] instance during Application.onCreate. This
@@ -68,7 +68,7 @@ class AudioDirectionPreferences(context: Context) {
             sameEffectCooldownMillis = preferences.getLong(KEY_SAME_EFFECT_COOLDOWN_MS, DEFAULT_SAME_EFFECT_COOLDOWN_MS)
                 .coerceIn(1_000L, 30_000L),
             maxConcurrentSfx = preferences.getInt(KEY_MAX_CONCURRENT_SFX, DEFAULT_MAX_CONCURRENT_SFX)
-                .coerceIn(1, 4),
+                .coerceIn(1, AudioDirectionLimits.MAX_CONCURRENT_SFX),
         )
         latestSnapshot = value
         return value
@@ -138,7 +138,10 @@ class AudioDirectionPreferences(context: Context) {
     }
 
     fun setMaxConcurrentSfx(value: Int) {
-        preferences.edit().putInt(KEY_MAX_CONCURRENT_SFX, value.coerceIn(1, 4)).apply()
+        preferences.edit().putInt(
+            KEY_MAX_CONCURRENT_SFX,
+            value.coerceIn(1, AudioDirectionLimits.MAX_CONCURRENT_SFX),
+        ).apply()
         snapshot()
     }
 
@@ -189,6 +192,6 @@ class AudioDirectionPreferences(context: Context) {
         const val DEFAULT_AMBIENCE_LOOP_OVERLAP_MAX_MS = 2_200
         const val DEFAULT_MIN_SFX_GAP_MS = 2_200L
         const val DEFAULT_SAME_EFFECT_COOLDOWN_MS = 6_000L
-        const val DEFAULT_MAX_CONCURRENT_SFX = 2
+        const val DEFAULT_MAX_CONCURRENT_SFX = 3
     }
 }

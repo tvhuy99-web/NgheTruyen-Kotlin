@@ -31,8 +31,8 @@ data class AiAuxiliaryJsonResult(
 )
 
 /**
- * Canonical XPK chapter-director transport. Voice, scene music, ambience and SFX share one prompt,
- * one provider request, one quota reservation and one response parser.
+ * Canonical XPK chapter-director transport. Voice, scene music, ambience, SFX and Mode-3
+ * Freesound requirements share one prompt, one provider request, one quota reservation and one parser.
  */
 class XpkNarrationAiServices(
     context: Context,
@@ -118,14 +118,22 @@ class XpkNarrationAiServices(
                 "sceneMusic" to request.includeSceneMusic.toString(),
                 "ambience" to request.includeAmbience.toString(),
                 "sfx" to request.includeSoundEffects.toString(),
+                "freesoundAuto" to request.includeFreesoundAudioRequirements.toString(),
+                "freesoundKinds" to request.freesoundRequirementKinds.joinToString(",") { it.name },
                 "inputChars" to request.rawText.length.toString(),
             ),
         )
         val rawText = request.rawText.trim()
         if (rawText.isBlank()) return failure("AI_EMPTY_INPUT", "Chương không có nội dung để lập kế hoạch kể chuyện.")
         if (rawText.length > MAX_PLAN_CHARS) return failure("AI_INPUT_TOO_LARGE", "Chương quá dài để lập kế hoạch kể chuyện trong một lượt.")
-        if (!request.includeVoiceCast && !request.includeSceneMusic && !request.includeAmbience && !request.includeSoundEffects) {
+        if (
+            !request.includeVoiceCast && !request.includeSceneMusic && !request.includeAmbience &&
+            !request.includeSoundEffects && !request.includeFreesoundAudioRequirements
+        ) {
             return failure("AI_PLAN_EMPTY", "Không có hạng mục kể chuyện nào được yêu cầu.")
+        }
+        if (request.includeFreesoundAudioRequirements && request.freesoundRequirementKinds.isEmpty()) {
+            return failure("AI_FREESOUND_KINDS_EMPTY", "Chế độ Freesound tự động chưa bật lớp âm thanh nào.")
         }
         if (request.includeSceneMusic && request.tracks.isEmpty()) {
             return failure("AI_TRACKS_EMPTY", "Chưa có tệp nhạc cảnh đang bật.")
@@ -202,7 +210,7 @@ class XpkNarrationAiServices(
             tracks = request.tracks,
             context = request.context,
             profileSettingsById = profileSettingsById,
-            includeAudioDirection = request.includeAmbience || request.includeSoundEffects,
+            includeAudioDirection = request.includeAmbience || request.includeSoundEffects || request.includeFreesoundAudioRequirements,
         )
         val validSceneTrackIds = if (request.includeSceneMusic) bundle.sceneTrackIds else emptyList()
         val ambienceAliasToId = if (request.includeAmbience) ambienceCatalog.aliasToId else emptyMap()
@@ -222,7 +230,8 @@ class XpkNarrationAiServices(
 
         if (
             request.includeVoiceCast && bundle.dialogueIds.isEmpty() &&
-            !request.includeSceneMusic && !request.includeAmbience && !request.includeSoundEffects
+            !request.includeSceneMusic && !request.includeAmbience && !request.includeSoundEffects &&
+            !request.includeFreesoundAudioRequirements
         ) {
             return AppResult.Success(
                 NarrationPlan(
@@ -245,6 +254,8 @@ class XpkNarrationAiServices(
             incomingAmbienceId = request.context.incomingAmbienceId,
             ambienceCatalog = ambienceCatalog.takeIf { request.includeAmbience },
             sfxCatalog = sfxCatalog.takeIf { request.includeSoundEffects },
+            includeFreesoundAudioRequirements = request.includeFreesoundAudioRequirements,
+            freesoundRequirementKinds = request.freesoundRequirementKinds,
         )
         if (prompt.length > MAX_PROMPT_CHARS) {
             return failure("AI_INPUT_TOO_LARGE", "Bản chép đạo diễn âm thanh vượt giới hạn gửi AI.")
@@ -266,6 +277,8 @@ class XpkNarrationAiServices(
                         includeSceneMusic = request.includeSceneMusic,
                         includeAmbience = request.includeAmbience,
                         includeSoundEffects = request.includeSoundEffects,
+                        includeFreesoundAudioRequirements = request.includeFreesoundAudioRequirements,
+                        freesoundRequirementKinds = request.freesoundRequirementKinds,
                         speedLimitPct = config.expressionSpeedLimitPct.toFloat(),
                         pitchLimitPct = config.expressionPitchLimitPct.toFloat(),
                         volumeLimitPct = config.expressionVolumeLimitPct.toFloat(),
@@ -301,6 +314,8 @@ class XpkNarrationAiServices(
                             "sceneMusic" to request.includeSceneMusic.toString(),
                             "ambience" to request.includeAmbience.toString(),
                             "sfx" to request.includeSoundEffects.toString(),
+                            "freesoundAuto" to request.includeFreesoundAudioRequirements.toString(),
+                            "freesoundRequirements" to it.freesoundRequirements.size.toString(),
                         ),
                     )
                     AppResult.Success(it)

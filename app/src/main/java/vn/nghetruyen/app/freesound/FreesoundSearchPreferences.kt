@@ -104,14 +104,15 @@ class FreesoundSearchPreferences(context: Context) {
             if (raw.isNullOrBlank()) return emptyList()
             return runCatching {
                 val array = JSONArray(raw)
-                val values = buildList<String> {
+                buildList<String> {
                     for (index in 0 until array.length()) {
-                        add(array.optString(index))
+                        val value = array.optString(index).trim().take(FreesoundSearchRequest.MAX_QUERY_LENGTH)
+                        if (value.isNotBlank() && none { it.equals(value, ignoreCase = true) }) {
+                            add(value)
+                        }
+                        if (size >= MAX_RECENT_QUERIES) break
                     }
                 }
-                values.fold(emptyList<String>()) { acc, value ->
-                    mergeRecentQueries(value, acc)
-                }.reversed().take(MAX_RECENT_QUERIES)
             }.getOrDefault(emptyList())
         }
 

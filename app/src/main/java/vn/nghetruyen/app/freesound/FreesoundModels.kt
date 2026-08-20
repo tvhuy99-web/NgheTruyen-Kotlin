@@ -2,7 +2,7 @@ package vn.nghetruyen.app.freesound
 
 enum class FreesoundCategory(
     val label: String,
-    internal val filter: String?,
+    internal val recommendedDurationFilter: String?,
 ) {
     ALL("Tất cả", null),
     MUSIC("Nhạc nền", "duration:[30 TO 900]"),
@@ -10,20 +10,40 @@ enum class FreesoundCategory(
     SFX("Hiệu ứng âm thanh", "duration:[0.1 TO 15]"),
 }
 
+enum class FreesoundDuration(
+    val label: String,
+) {
+    RECOMMENDED("Phù hợp loại đang quản lý"),
+    ALL("Tất cả thời lượng"),
+    SHORT("Ngắn: 0–15 giây"),
+    MEDIUM("Trung bình: 15–60 giây"),
+    LONG("Dài: 1–5 phút"),
+    VERY_LONG("Rất dài: trên 5 phút"),
+    ;
+
+    internal fun apiFilter(category: FreesoundCategory): String? = when (this) {
+        RECOMMENDED -> category.recommendedDurationFilter
+        ALL -> null
+        SHORT -> "duration:[0 TO 15]"
+        MEDIUM -> "duration:[15 TO 60]"
+        LONG -> "duration:[60 TO 300]"
+        VERY_LONG -> "duration:[300 TO *]"
+    }
+}
+
 enum class FreesoundSort(
     val label: String,
     internal val apiValue: String,
 ) {
     RELEVANCE("Liên quan nhất", "score"),
-    TOP_RATED("Đánh giá cao", "rating_desc"),
-    MOST_DOWNLOADED("Tải nhiều", "downloads_desc"),
-    LONGEST("Dài nhất", "duration_desc"),
     SHORTEST("Ngắn nhất", "duration_asc"),
+    LONGEST("Dài nhất", "duration_desc"),
 }
 
 data class FreesoundSearchRequest(
     val query: String,
     val category: FreesoundCategory = FreesoundCategory.ALL,
+    val duration: FreesoundDuration = FreesoundDuration.RECOMMENDED,
     val sort: FreesoundSort = FreesoundSort.RELEVANCE,
     val page: Int = 1,
     val pageSize: Int = DEFAULT_PAGE_SIZE,
@@ -44,19 +64,10 @@ data class FreesoundSearchRequest(
 data class FreesoundSound(
     val id: Int,
     val name: String,
-    val username: String,
-    val license: String,
+    val description: String,
     val durationSeconds: Double,
-    val tags: List<String>,
     val previewHqMp3: String?,
     val previewHqOgg: String?,
-    val avgRating: Double,
-    val numRatings: Int,
-    val numDownloads: Int,
-    val webUrl: String?,
-    val fileType: String,
-    val channels: Int,
-    val sampleRate: Int,
 ) {
     val preferredPreviewUrl: String?
         get() = previewHqOgg ?: previewHqMp3

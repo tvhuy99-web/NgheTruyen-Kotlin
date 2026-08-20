@@ -7,6 +7,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: agent-mode-runtime-fix-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   fix:
     if: github.actor != 'github-actions[bot]'
@@ -31,6 +35,24 @@ jobs:
 
       - name: Apply consolidated mode isolation patch
         run: python3 .github/scripts/agent_mode_runtime_fix.py
+
+      - name: Normalize duplicate imports after overlapping one-shot fixes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt')
+          lines = path.read_text().splitlines()
+          seen = set()
+          out = []
+          for line in lines:
+              if line.startswith('import '):
+                  if line in seen:
+                      continue
+                  seen.add(line)
+              out.append(line)
+          path.write_text('\n'.join(out) + '\n')
+          PY
 
       - name: Verify strict source invariants
         shell: bash

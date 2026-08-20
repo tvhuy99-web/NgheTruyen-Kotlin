@@ -466,38 +466,71 @@ class NarrationPlanCoordinator(
             val sfxTracks = if (AudioAssetKind.SFX in kinds) {
                 enabled.filter { AudioAssetClassifier.classify(it) == AudioAssetKind.SFX }
             } else emptyList()
-            var candidate = AmbienceSfxPlan(
-                ambienceScenes = if (AudioAssetKind.AMBIENCE in kinds) FreesoundAutoPlanBuilder.ambienceScenes(resolved.resolved) else emptyList(),
-                soundEffectCues = if (AudioAssetKind.SFX in kinds) FreesoundAutoPlanBuilder.soundEffectCues(resolved.resolved) else emptyList(),
-            )
-            var validated: AmbienceSfxPlan? = null
-            while (validated == null) {
-                validated = runCatching {
+
+            var ambienceCandidate = if (AudioAssetKind.AMBIENCE in kinds) {
+                FreesoundAutoPlanBuilder.ambienceScenes(resolved.resolved)
+            } else emptyList()
+            val originalAmbienceCount = ambienceCandidate.size
+            var validatedAmbience = AmbienceSfxPlan()
+            while (true) {
+                val parsed = runCatching {
                     XpkAmbienceSfxDirector.parseAndValidate(
-                        XpkAmbienceSfxDirector.encode(candidate),
+                        XpkAmbienceSfxDirector.encode(AmbienceSfxPlan(ambienceScenes = ambienceCandidate)),
                         validUnitIds = unitIds,
                         validAmbienceIds = ambienceTracks.map(SceneMusicTrackEntity::id).toSet(),
-                        validSfxIds = sfxTracks.map(SceneMusicTrackEntity::id).toSet(),
+                        validSfxIds = emptySet(),
                         ambienceEnabled = AudioAssetKind.AMBIENCE in kinds,
+                        soundEffectsEnabled = false,
+                    )
+                }.getOrNull()
+                if (parsed != null) {
+                    validatedAmbience = parsed
+                    break
+                }
+                if (ambienceCandidate.isEmpty()) break
+                ambienceCandidate = ambienceCandidate.dropLast(1)
+            }
+            if (validatedAmbience.ambienceScenes.size < originalAmbienceCount) {
+                warnings += "Đã loại ${originalAmbienceCount - validatedAmbience.ambienceScenes.size} cue AMBIENCE không hợp lệ; SFX được giữ nguyên."
+            }
+
+            var sfxCandidate = if (AudioAssetKind.SFX in kinds) {
+                FreesoundAutoPlanBuilder.soundEffectCues(resolved.resolved)
+            } else emptyList()
+            val originalSfxCount = sfxCandidate.size
+            var validatedSfx = AmbienceSfxPlan()
+            while (true) {
+                val parsed = runCatching {
+                    XpkAmbienceSfxDirector.parseAndValidate(
+                        XpkAmbienceSfxDirector.encode(AmbienceSfxPlan(soundEffectCues = sfxCandidate)),
+                        validUnitIds = unitIds,
+                        validAmbienceIds = emptySet(),
+                        validSfxIds = sfxTracks.map(SceneMusicTrackEntity::id).toSet(),
+                        ambienceEnabled = false,
                         soundEffectsEnabled = AudioAssetKind.SFX in kinds,
                     )
                 }.getOrNull()
-                if (validated != null) break
-                candidate = when {
-                    candidate.soundEffectCues.isNotEmpty() -> candidate.copy(soundEffectCues = candidate.soundEffectCues.dropLast(1))
-                    candidate.ambienceScenes.isNotEmpty() -> candidate.copy(ambienceScenes = candidate.ambienceScenes.dropLast(1))
-                    else -> AmbienceSfxPlan()
+                if (parsed != null) {
+                    validatedSfx = parsed
+                    break
                 }
-                if (candidate.ambienceScenes.isEmpty() && candidate.soundEffectCues.isEmpty()) {
-                    validated = AmbienceSfxPlan()
-                }
+                if (sfxCandidate.isEmpty()) break
+                sfxCandidate = sfxCandidate.dropLast(1)
             }
+            if (validatedSfx.soundEffectCues.size < originalSfxCount) {
+                warnings += "Đã loại ${originalSfxCount - validatedSfx.soundEffectCues.size} cue SFX không hợp lệ; AMBIENCE được giữ nguyên."
+            }
+
+            val validated = AmbienceSfxPlan(
+                ambienceScenes = validatedAmbience.ambienceScenes,
+                soundEffectCues = validatedSfx.soundEffectCues,
+            )
             runCatching {
                 persistAudioDirectionPlan(
                     content = content,
                     ambienceTracks = ambienceTracks,
                     soundEffectTracks = sfxTracks,
-                    plan = validated ?: AmbienceSfxPlan(),
+                    plan = validated,
                     error = "",
                     ambienceEnabled = AudioAssetKind.AMBIENCE in kinds,
                     soundEffectsEnabled = AudioAssetKind.SFX in kinds,
@@ -814,7 +847,6 @@ class NarrationPlanCoordinator(
         return ChapterAiWorkflow.sha256(source?.paragraphs ?: content.paragraphs)
     }
 
-    // Keep this formula identical to ReaderPlaybackService so saved XPK scene plans are loadable now.
     private suspend fun musicSourceHash(content: ChapterContent, tracks: List<SceneMusicTrackEntity>): String {
         val source = library.loadCachedChapter(content.chapter.id)
         val sourceParagraphs = source?.paragraphs ?: content.paragraphs

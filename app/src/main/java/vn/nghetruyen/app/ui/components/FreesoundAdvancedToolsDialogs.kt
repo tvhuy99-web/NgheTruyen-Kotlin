@@ -26,6 +26,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -39,6 +41,7 @@ import vn.nghetruyen.app.freesound.FreesoundAiKeywordPlan
 import vn.nghetruyen.app.freesound.FreesoundAiKeywordSuggestion
 import vn.nghetruyen.app.freesound.FreesoundCategory
 import vn.nghetruyen.app.freesound.FreesoundDuration
+import vn.nghetruyen.app.freesound.FreesoundExactDuplicateAnalyzer
 import vn.nghetruyen.app.freesound.FreesoundImporter
 import vn.nghetruyen.app.freesound.FreesoundImportResult
 import vn.nghetruyen.app.freesound.FreesoundLibraryAnalyzer
@@ -49,7 +52,9 @@ import vn.nghetruyen.app.freesound.FreesoundSearchPage
 import vn.nghetruyen.app.freesound.FreesoundSearchRequest
 import vn.nghetruyen.app.freesound.FreesoundSearchResult
 import vn.nghetruyen.app.freesound.FreesoundSemanticPlan
-import vn.nghetruyen.app.freesound.FreesoundSort
+import vn.nghetruyen.app.freesound.FreesoundSemanticSearchEngine
+import vn.nghetruyen.app.freesound.FreesoundSemanticSearchHit
+import vn.nghetruyen.app.freesound.FreesoundSemanticSearchResult
 import vn.nghetruyen.app.freesound.FreesoundSound
 import vn.nghetruyen.app.playback.PlaybackQueueStore
 import vn.nghetruyen.app.playback.ReaderPlaybackService
@@ -58,7 +63,9 @@ import vn.nghetruyen.app.playback.ReaderPlaybackService
 fun FreesoundAdvancedToolsDialog(
     kind: AudioAssetKind,
     tracks: List<SceneMusicTrackEntity>,
+    normalizationTargetLufs: Float,
     onUseQuery: (String) -> Unit,
+    onImported: (FreesoundImportResult) -> Unit,
     onStageRemoveTrack: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -74,14 +81,35 @@ fun FreesoundAdvancedToolsDialog(
             libraryRepository = application.container.libraryRepository,
         )
     }
+    val semanticEngine = remember(application) {
+        FreesoundSemanticSearchEngine(application.container.freesoundClient)
+    }
+    val previewPlayer = remember { FreesoundPreviewPlayer() }
+    val importer = remember(application) {
+        FreesoundImporter(
+            context = context,
+            repository = application.container.libraryRepository,
+            existingTracksProvider = { application.container.database.sceneMusicTrackDao().listAll() },
+        )
+    }
 
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
     var chapterPlan by remember { mutableStateOf<FreesoundAiKeywordPlan?>(null) }
     var semanticInput by remember { mutableStateOf("") }
     var semanticPlan by remember { mutableStateOf<FreesoundSemanticPlan?>(null) }
+    var semanticHits by remember { mutableStateOf<List<FreesoundSemanticSearchHit>>(emptyList()) }
+    var semanticPreviewId by remember { mutableStateOf<Int?>(null) }
+    var semanticImportingId by remember { mutableStateOf<Int?>(null) }
     var gaps by remember { mutableStateOf<List<FreesoundLibraryGap>>(emptyList()) }
     var duplicatePairs by remember { mutableStateOf<List<FreesoundNearDuplicate>>(emptyList()) }
+    var duplicateTracks by remember { mutableStateOf<Map<String, SceneMusicTrackEntity>>(emptyMap()) }
+
+    fun endPreview() {
+        previewPlayer.stop()
+        semanticPreviewId = null
+        ReaderPlaybackService.command(context, ReaderPlaybackService.ACTION_MUSIC_PREVIEW_END)
+    }
 
     fun analyzeChapter() {
         if (busy) return
@@ -92,7 +120,7 @@ fun FreesoundAdvancedToolsDialog(
         }
         val fullChapter = snapshot.paragraphs.joinToString("\n\n")
         busy = true
-        status = "Đang gửi toàn bộ chương (${fullChapter.length} ký tự) đến AI đang dùng cho phân vai…"
+        status = "Đang gửi toàn bộ chương (${fullChapter.length} ký tự) để tìm ${advancedKindLabel(kind).lowercase()}…"
         scope.launch {
             when (
                 val result = assistant.analyzeWholeChapter(
@@ -105,7 +133,7 @@ fun FreesoundAdvancedToolsDialog(
             ) {
                 is AppResult.Success -> {
                     chapterPlan = result.value
-                    status = "AI ${result.value.provider} / ${result.value.model}: ${result.value.suggestions.size} từ khóa từ toàn chương."
+                    status = "AI ${result.value.provider} / ${result.value.model}: ${result.value.suggestions.size} từ khóa ${advancedKindLabel(kind).lowercase()} từ toàn chương."
                 }
                 is AppResult.Failure -> status = result.message
             }
@@ -117,20 +145,49 @@ fun FreesoundAdvancedToolsDialog(
         if (busy || semanticInput.isBlank()) return
         val snapshot = PlaybackQueueStore.state.value
         busy = true
-        status = "AI đang chuyển mô tả tiếng Việt thành truy vấn Freesound…"
+        endPreview()
+        semanticHits = emptyList()
+        status = "Đang phân tích mô tả tiếng Việt và tìm gộp trên Freesound…"
         scope.launch {
+            val aiResult = assistant.expandVietnameseSearch(
+                storyId = snapshot.storyId,
+                naturalLanguageQuery = semanticInput,
+                kind = kind,
+            )
+            val queries = when (aiResult) {
+                is AppResult.Success -> {
+                    semanticPlan = aiResult.value
+                    aiResult.value.queries
+                }
+                is AppResult.Failure -> {
+                    val fallback = FreesoundSemanticSearchEngine.fallbackQueries(semanticInput, kind)
+                    semanticPlan = FreesoundSemanticPlan("LOCAL_FALLBACK", "", fallback)
+                    fallback
+                }
+            }
+            if (queries.isEmpty()) {
+                status = (aiResult as? AppResult.Failure)?.message ?: "Không tạo được truy vấn tìm kiếm."
+                busy = false
+                return@launch
+            }
             when (
-                val result = assistant.expandVietnameseSearch(
-                    storyId = snapshot.storyId,
-                    naturalLanguageQuery = semanticInput,
-                    kind = kind,
+                val merged = semanticEngine.search(
+                    queries = queries,
+                    category = kind.toAdvancedFreesoundCategory(),
+                    duration = FreesoundDuration.RECOMMENDED,
+                    maxResults = 40,
                 )
             ) {
-                is AppResult.Success -> {
-                    semanticPlan = result.value
-                    status = "AI ${result.value.provider} / ${result.value.model}: ${result.value.queries.size} truy vấn gợi ý."
+                is FreesoundSemanticSearchResult.Failure -> status = merged.message
+                is FreesoundSemanticSearchResult.Success -> {
+                    semanticHits = merged.hits
+                    val source = if (aiResult is AppResult.Success) {
+                        "AI ${aiResult.value.provider} / ${aiResult.value.model}"
+                    } else {
+                        "fallback cục bộ vì AI không khả dụng"
+                    }
+                    status = "Đã hợp nhất ${merged.queries.size} truy vấn từ $source: ${merged.hits.size} kết quả${if (merged.failedQueries > 0) ", ${merged.failedQueries} truy vấn lỗi" else ""}."
                 }
-                is AppResult.Failure -> status = result.message
             }
             busy = false
         }
@@ -146,20 +203,65 @@ fun FreesoundAdvancedToolsDialog(
     }
 
     fun inspectDuplicates() {
-        duplicatePairs = FreesoundLibraryAnalyzer.findNearDuplicates(tracks)
-        status = if (duplicatePairs.isEmpty()) {
-            "Không phát hiện cặp âm thanh gần trùng đáng tin cậy."
-        } else {
-            "Phát hiện ${duplicatePairs.size} cặp gần trùng. Mọi thao tác bỏ tệp chỉ là bản nháp cho đến khi LƯU DANH SÁCH."
+        if (busy) return
+        busy = true
+        status = "Đang quét toàn bộ thư viện và tính SHA-256 cho các tệp đọc được…"
+        scope.launch {
+            val databaseTracks = application.container.database.sceneMusicTrackDao().listAll()
+            val effectiveAll = databaseTracks
+                .filter { AudioAssetClassifier.classify(it) != kind } + tracks
+            duplicateTracks = effectiveAll.associateBy(SceneMusicTrackEntity::id)
+
+            val exactGroups = FreesoundExactDuplicateAnalyzer.find(context, effectiveAll)
+            val exactPairs = buildList {
+                exactGroups.forEach { group ->
+                    val ids = group.trackIds
+                    for (firstIndex in 0 until ids.lastIndex) {
+                        for (secondIndex in firstIndex + 1 until ids.size) {
+                            add(
+                                FreesoundNearDuplicate(
+                                    firstTrackId = ids[firstIndex],
+                                    secondTrackId = ids[secondIndex],
+                                    score = 1.0,
+                                    reason = "Nội dung file giống hệt (SHA-256)",
+                                ),
+                            )
+                        }
+                    }
+                }
+            }
+            val exactKeys = exactPairs.mapTo(hashSetOf()) {
+                setOf(it.firstTrackId, it.secondTrackId)
+            }
+            val nearPairs = FreesoundLibraryAnalyzer.findNearDuplicates(effectiveAll, maxResults = 80)
+                .filter { setOf(it.firstTrackId, it.secondTrackId) !in exactKeys }
+            val currentIds = tracks.mapTo(hashSetOf(), SceneMusicTrackEntity::id)
+            duplicatePairs = (exactPairs + nearPairs)
+                .filter { it.firstTrackId in currentIds || it.secondTrackId in currentIds }
+                .take(80)
+            status = if (duplicatePairs.isEmpty()) {
+                "Không phát hiện tệp trùng chính xác hoặc cặp gần trùng liên quan đến ${advancedKindLabel(kind).lowercase()}."
+            } else {
+                "Phát hiện ${duplicatePairs.size} cặp. SHA-256 = trùng chính xác; các cặp còn lại chỉ là gợi ý gần trùng. Bỏ tệp vẫn chỉ là bản nháp đến khi LƯU DANH SÁCH."
+            }
+            busy = false
         }
     }
 
-    LaunchedEffect(status) {
-        status?.takeIf(String::isNotBlank)?.let(view::announceForAccessibility)
+    LaunchedEffect(status, busy) {
+        status?.takeIf(String::isNotBlank)?.let { message ->
+            if (!busy || !message.startsWith("Đang quét toàn bộ")) view.announceForAccessibility(message)
+        }
+    }
+    DisposableEffect(previewPlayer) {
+        onDispose {
+            previewPlayer.release()
+            ReaderPlaybackService.command(context, ReaderPlaybackService.ACTION_MUSIC_PREVIEW_END)
+        }
     }
 
     AlertDialog(
-        onDismissRequest = { if (!busy) onDismiss() },
+        onDismissRequest = { if (!busy && semanticImportingId == null) onDismiss() },
         title = { Text("CÔNG CỤ FREESOUND NÂNG CAO — ${advancedKindLabel(kind).uppercase()}") },
         text = {
             Column(
@@ -168,16 +270,16 @@ fun FreesoundAdvancedToolsDialog(
             ) {
                 Button(
                     onClick = ::analyzeChapter,
-                    enabled = !busy,
+                    enabled = !busy && semanticImportingId == null,
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text(if (busy) "ĐANG XỬ LÝ…" else "AI PHÂN TÍCH TOÀN CHƯƠNG") }
                 Text(
-                    "Chức năng này gửi toàn bộ chương đang đọc đến đúng provider/model AI mà cấu hình phân vai của truyện đang dùng.",
+                    "Gửi toàn bộ chương đến đúng provider/model AI của truyện, nhưng chỉ yêu cầu từ khóa cho ${advancedKindLabel(kind).lowercase()} đang quản lý; không quét hai danh mục còn lại.",
                     style = MaterialTheme.typography.bodySmall,
                 )
 
                 chapterPlan?.let { plan ->
-                    Text("TỪ KHÓA TỪ TOÀN CHƯƠNG", fontWeight = FontWeight.SemiBold)
+                    Text("TỪ KHÓA ${advancedKindLabel(kind).uppercase()} TỪ TOÀN CHƯƠNG", fontWeight = FontWeight.SemiBold)
                     plan.suggestions.forEach { suggestion ->
                         AdvancedKeywordRow(
                             suggestion = suggestion,
@@ -196,18 +298,79 @@ fun FreesoundAdvancedToolsDialog(
                     placeholder = { Text("Ví dụ: tiếng sấm cực lớn rất gần, khô và đột ngột") },
                     minLines = 2,
                     maxLines = 4,
-                    enabled = !busy,
+                    enabled = !busy && semanticImportingId == null,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Button(
                     onClick = ::semanticSearch,
-                    enabled = !busy && semanticInput.isNotBlank(),
+                    enabled = !busy && semanticImportingId == null && semanticInput.isNotBlank(),
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text("AI TẠO TRUY VẤN FREESOUND") }
-                semanticPlan?.queries?.forEach { query ->
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(query, modifier = Modifier.weight(1f))
-                        TextButton(onClick = { onUseQuery(query) }) { Text("TÌM") }
+                ) { Text("TÌM NGỮ NGHĨA TRÊN FREESOUND") }
+                semanticPlan?.queries?.takeIf { it.isNotEmpty() }?.let { queries ->
+                    Text("Truy vấn đã hợp nhất: ${queries.joinToString(" • ")}", style = MaterialTheme.typography.bodySmall)
+                }
+                semanticHits.forEach { hit ->
+                    val sound = hit.sound
+                    HorizontalDivider(Modifier.padding(vertical = 3.dp))
+                    Column(
+                        Modifier.fillMaxWidth().semantics {
+                            contentDescription = "Kết quả ngữ nghĩa ${sound.name}, khớp ${hit.matchedQueries} truy vấn"
+                        },
+                    ) {
+                        Text(sound.name, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "${formatAdvancedDuration(sound.durationSeconds)} • khớp ${hit.matchedQueries} truy vấn",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        if (sound.description.isNotBlank()) Text(sound.description.take(300), style = MaterialTheme.typography.bodySmall)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    if (semanticPreviewId == sound.id) {
+                                        endPreview()
+                                        return@Button
+                                    }
+                                    val url = sound.preferredPreviewUrl ?: return@Button
+                                    endPreview()
+                                    ReaderPlaybackService.command(context, ReaderPlaybackService.ACTION_MUSIC_PREVIEW_BEGIN)
+                                    semanticPreviewId = sound.id
+                                    previewPlayer.play(
+                                        soundId = sound.id,
+                                        previewUrl = url,
+                                        onStarted = { semanticPreviewId = sound.id },
+                                        onStopped = { endPreview() },
+                                        onError = {
+                                            endPreview()
+                                            status = "Không nghe thử được ${sound.name}."
+                                        },
+                                    )
+                                },
+                                enabled = !busy && semanticImportingId == null && sound.preferredPreviewUrl != null,
+                                modifier = Modifier.weight(1f).semantics {
+                                    contentDescription = if (semanticPreviewId == sound.id) "Dừng nghe ${sound.name}" else "Nghe thử ${sound.name}"
+                                },
+                            ) { Text(if (semanticPreviewId == sound.id) "DỪNG NGHE" else "NGHE THỬ") }
+                            Button(
+                                onClick = {
+                                    if (semanticImportingId != null) return@Button
+                                    endPreview()
+                                    semanticImportingId = sound.id
+                                    scope.launch {
+                                        importer.importPreview(sound, kind, normalizationTargetLufs)
+                                            .onSuccess {
+                                                onImported(it)
+                                                status = "Đã nhập và chuẩn hóa ${it.title}."
+                                            }
+                                            .onFailure { status = it.message ?: "Không nhập/chuẩn hóa được âm thanh." }
+                                        semanticImportingId = null
+                                    }
+                                },
+                                enabled = !busy && semanticImportingId == null && sound.preferredPreviewUrl != null,
+                                modifier = Modifier.weight(1f).semantics {
+                                    contentDescription = "Nhập và chuẩn hóa ${sound.name}"
+                                },
+                            ) { Text(if (semanticImportingId == sound.id) "ĐANG NHẬP / CHUẨN HÓA…" else "NHẬP") }
+                        }
                     }
                 }
 
@@ -215,12 +378,12 @@ fun FreesoundAdvancedToolsDialog(
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = ::inspectCoverage,
-                        enabled = !busy,
+                        enabled = !busy && semanticImportingId == null,
                         modifier = Modifier.weight(1f),
                     ) { Text("KIỂM TRA THIẾU") }
                     Button(
                         onClick = ::inspectDuplicates,
-                        enabled = !busy && tracks.size >= 2,
+                        enabled = !busy && semanticImportingId == null,
                         modifier = Modifier.weight(1f),
                     ) { Text("TÌM GẦN TRÙNG") }
                 }
@@ -239,36 +402,45 @@ fun FreesoundAdvancedToolsDialog(
                 }
 
                 if (duplicatePairs.isNotEmpty()) {
-                    Text("CÁC CẶP GẦN TRÙNG", fontWeight = FontWeight.SemiBold)
+                    Text("TRÙNG CHÍNH XÁC / GẦN TRÙNG", fontWeight = FontWeight.SemiBold)
+                    val currentIds = tracks.mapTo(hashSetOf(), SceneMusicTrackEntity::id)
                     duplicatePairs.forEach { pair ->
-                        val first = tracks.firstOrNull { it.id == pair.firstTrackId }
-                        val second = tracks.firstOrNull { it.id == pair.secondTrackId }
+                        val first = duplicateTracks[pair.firstTrackId]
+                        val second = duplicateTracks[pair.secondTrackId]
                         if (first != null && second != null) {
                             Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                                 Text("${(pair.score * 100).toInt()}% • ${pair.reason}", fontWeight = FontWeight.SemiBold)
-                                Text("A: ${first.title}")
-                                Text("B: ${second.title}")
+                                Text("A: ${first.title} (${advancedKindLabel(AudioAssetClassifier.classify(first))})")
+                                Text("B: ${second.title} (${advancedKindLabel(AudioAssetClassifier.classify(second))})")
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Button(
-                                        onClick = {
-                                            onStageRemoveTrack(second.id)
-                                            duplicatePairs = duplicatePairs.filterNot {
-                                                it.firstTrackId == second.id || it.secondTrackId == second.id
-                                            }
-                                            status = "Đã đánh dấu bỏ ‘${second.title}’. Nhấn LƯU DANH SÁCH để xác nhận."
-                                        },
-                                        modifier = Modifier.weight(1f),
-                                    ) { Text("GIỮ A / BỎ B") }
-                                    Button(
-                                        onClick = {
-                                            onStageRemoveTrack(first.id)
-                                            duplicatePairs = duplicatePairs.filterNot {
-                                                it.firstTrackId == first.id || it.secondTrackId == first.id
-                                            }
-                                            status = "Đã đánh dấu bỏ ‘${first.title}’. Nhấn LƯU DANH SÁCH để xác nhận."
-                                        },
-                                        modifier = Modifier.weight(1f),
-                                    ) { Text("GIỮ B / BỎ A") }
+                                    if (second.id in currentIds) {
+                                        Button(
+                                            onClick = {
+                                                onStageRemoveTrack(second.id)
+                                                duplicatePairs = duplicatePairs.filterNot {
+                                                    it.firstTrackId == second.id || it.secondTrackId == second.id
+                                                }
+                                                status = "Đã đánh dấu bỏ ‘${second.title}’. Nhấn LƯU DANH SÁCH để xác nhận."
+                                            },
+                                            modifier = Modifier.weight(1f).semantics {
+                                                contentDescription = "Giữ ${first.title}, đánh dấu bỏ ${second.title}"
+                                            },
+                                        ) { Text("GIỮ A / BỎ B") }
+                                    }
+                                    if (first.id in currentIds) {
+                                        Button(
+                                            onClick = {
+                                                onStageRemoveTrack(first.id)
+                                                duplicatePairs = duplicatePairs.filterNot {
+                                                    it.firstTrackId == first.id || it.secondTrackId == first.id
+                                                }
+                                                status = "Đã đánh dấu bỏ ‘${first.title}’. Nhấn LƯU DANH SÁCH để xác nhận."
+                                            },
+                                            modifier = Modifier.weight(1f).semantics {
+                                                contentDescription = "Giữ ${second.title}, đánh dấu bỏ ${first.title}"
+                                            },
+                                        ) { Text("GIỮ B / BỎ A") }
+                                    }
                                 }
                             }
                         }
@@ -280,7 +452,7 @@ fun FreesoundAdvancedToolsDialog(
         },
         confirmButton = {},
         dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !busy) { Text("ĐÓNG") }
+            TextButton(onClick = onDismiss, enabled = !busy && semanticImportingId == null) { Text("ĐÓNG") }
         },
     )
 }
@@ -299,7 +471,10 @@ private fun AdvancedKeywordRow(
         )
         if (suggestion.reason.isNotBlank()) Text(suggestion.reason, style = MaterialTheme.typography.bodySmall)
         Text("Mức phủ thư viện: ${(coverage * 100).toInt()}%", style = MaterialTheme.typography.bodySmall)
-        TextButton(onClick = { onUseQuery(suggestion.query) }) { Text("TÌM TRÊN FREESOUND") }
+        TextButton(
+            onClick = { onUseQuery(suggestion.query) },
+            modifier = Modifier.semantics { contentDescription = "Tìm ${suggestion.query} trên Freesound" },
+        ) { Text("TÌM TRÊN FREESOUND") }
     }
 }
 
@@ -331,6 +506,9 @@ fun FreesoundSimilarAssetDialog(
             libraryRepository = application.container.libraryRepository,
         )
     }
+    val semanticEngine = remember(application) {
+        FreesoundSemanticSearchEngine(application.container.freesoundClient)
+    }
     val remoteSoundId = remember(track.uri) { FreesoundImporter.soundIdFromManagedUri(track.uri) }
     val category = kind.toAdvancedFreesoundCategory()
     val chapterStoryId = PlaybackQueueStore.state.value.storyId
@@ -349,41 +527,43 @@ fun FreesoundSimilarAssetDialog(
 
     suspend fun semanticSimilar(): FreesoundSearchPage? {
         val localDescription = FreesoundLibraryAnalyzer.description(track.tagsCsv)
+        val sourceText = "${track.title}. $localDescription".trim()
+        val aiResult = assistant.expandVietnameseSearch(
+            storyId = chapterStoryId,
+            naturalLanguageQuery = sourceText,
+            kind = kind,
+        )
+        val queries = when (aiResult) {
+            is AppResult.Success -> aiResult.value.queries
+            is AppResult.Failure -> FreesoundSemanticSearchEngine.fallbackQueries(sourceText, kind)
+        }
+        if (queries.isEmpty()) {
+            status = (aiResult as? AppResult.Failure)?.message ?: "Không tạo được truy vấn tương tự."
+            return null
+        }
         return when (
-            val semantic = assistant.expandVietnameseSearch(
-                storyId = chapterStoryId,
-                naturalLanguageQuery = "${track.title}. $localDescription",
-                kind = kind,
+            val merged = semanticEngine.search(
+                queries = queries,
+                category = category,
+                duration = FreesoundDuration.RECOMMENDED,
+                maxResults = 24,
             )
         ) {
-            is AppResult.Failure -> {
-                status = semantic.message
+            is FreesoundSemanticSearchResult.Failure -> {
+                status = merged.message
                 null
             }
-            is AppResult.Success -> {
-                val merged = linkedMapOf<Int, FreesoundSound>()
-                semantic.value.queries.take(4).forEach { query ->
-                    when (
-                        val result = application.container.freesoundClient.search(
-                            FreesoundSearchRequest(
-                                query = query,
-                                category = category,
-                                duration = FreesoundDuration.RECOMMENDED,
-                                sort = FreesoundSort.RELEVANCE,
-                                page = 1,
-                                pageSize = 12,
-                            ),
-                        )
-                    ) {
-                        is FreesoundSearchResult.Success -> result.page.results.forEach { sound -> merged.putIfAbsent(sound.id, sound) }
-                        is FreesoundSearchResult.Failure -> Unit
-                    }
+            is FreesoundSemanticSearchResult.Success -> {
+                status = if (aiResult is AppResult.Success) {
+                    "Đã dùng AI tạo ${merged.queries.size} truy vấn và hợp nhất ${merged.hits.size} kết quả."
+                } else {
+                    "AI không khả dụng; đã fallback từ tên + mô tả và hợp nhất ${merged.hits.size} kết quả."
                 }
                 FreesoundSearchPage(
-                    count = merged.size,
+                    count = merged.hits.size,
                     page = 1,
-                    pageSize = merged.size.coerceAtLeast(1),
-                    results = merged.values.take(24),
+                    pageSize = merged.hits.size.coerceAtLeast(1),
+                    results = merged.hits.map(FreesoundSemanticSearchHit::sound),
                     hasNext = false,
                     hasPrevious = false,
                 )
@@ -415,15 +595,14 @@ fun FreesoundSimilarAssetDialog(
             }
         } else {
             page = semanticSimilar()
-            if (page?.results?.isNotEmpty() == true) {
-                status = "Đã dùng AI tạo truy vấn tương tự từ tên và mô tả của tệp local."
-            }
         }
         loading = false
     }
 
     LaunchedEffect(track.id) { loadSimilar(1) }
-    LaunchedEffect(status) { status.takeIf(String::isNotBlank)?.let(view::announceForAccessibility) }
+    LaunchedEffect(status, loading) {
+        if (!loading) status.takeIf(String::isNotBlank)?.let(view::announceForAccessibility)
+    }
     DisposableEffect(previewPlayer) {
         onDispose {
             previewPlayer.release()
@@ -470,7 +649,9 @@ fun FreesoundSimilarAssetDialog(
                                 )
                             },
                             enabled = importingId == null && sound.preferredPreviewUrl != null,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).semantics {
+                                contentDescription = if (previewId == sound.id) "Dừng nghe ${sound.name}" else "Nghe thử ${sound.name}"
+                            },
                         ) { Text(if (previewId == sound.id) "DỪNG NGHE" else "NGHE THỬ") }
                         Button(
                             onClick = {
@@ -480,15 +661,17 @@ fun FreesoundSimilarAssetDialog(
                                     importer.importPreview(sound, kind, normalizationTargetLufs)
                                         .onSuccess {
                                             onImported(it)
-                                            status = "Đã nhập ${it.title}."
+                                            status = "Đã nhập và chuẩn hóa ${it.title}."
                                         }
-                                        .onFailure { status = it.message ?: "Không nhập được âm thanh." }
+                                        .onFailure { status = it.message ?: "Không nhập/chuẩn hóa được âm thanh." }
                                     importingId = null
                                 }
                             },
                             enabled = importingId == null && sound.preferredPreviewUrl != null,
-                            modifier = Modifier.weight(1f),
-                        ) { Text(if (importingId == sound.id) "ĐANG NHẬP…" else "NHẬP") }
+                            modifier = Modifier.weight(1f).semantics {
+                                contentDescription = "Nhập và chuẩn hóa ${sound.name}"
+                            },
+                        ) { Text(if (importingId == sound.id) "ĐANG NHẬP / CHUẨN HÓA…" else "NHẬP") }
                     }
                 }
                 if (remoteSoundId != null && page != null) {

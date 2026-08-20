@@ -51,6 +51,11 @@ fun StoryAudioSourceModeSelector(
         scope.launch {
             withContext(Dispatchers.IO) {
                 store.set(mode)
+                if (mode != StoryAudioSourceMode.LOCAL_MANUAL) {
+                    // The manual background-music toggle is hidden in AI modes. Keep the shared
+                    // runtime gate open so Mode 2/3 music plans cannot be disabled by stale Mode-1 state.
+                    application.container.settingsRepository.setBackgroundMusicEnabled(true)
+                }
                 // Standard runtime transforms are source-mode specific. Remove only AUDIO transforms;
                 // voice-cast transforms remain untouched. The Mode-3 requirement marker is retained so
                 // switching back can reuse its query/cache without another AI call when still current.

@@ -20,6 +20,35 @@ class FreesoundImporterTest {
     }
 
     @Test
+    fun importerUsesExactOggThenMp3FallbackOrder() {
+        val sound = FreesoundSound(
+            id = 77,
+            name = "Thunder",
+            description = "",
+            durationSeconds = 3.0,
+            previewHqMp3 = "https://cdn.example/77-hq.mp3",
+            previewHqOgg = "https://cdn.example/77-hq.ogg",
+        )
+        assertEquals(
+            listOf("https://cdn.example/77-hq.ogg", "https://cdn.example/77-hq.mp3"),
+            FreesoundImporter.previewCandidatesForImport(sound),
+        )
+    }
+
+    @Test
+    fun previewPlayerInfersMp3FallbackFromOggWithoutDroppingQuery() {
+        assertEquals(
+            "https://cdn.example/77-hq.mp3?token=x",
+            FreesoundPreviewPlayer.inferredMp3Fallback("https://cdn.example/77-hq.ogg?token=x"),
+        )
+        assertNull(FreesoundPreviewPlayer.inferredMp3Fallback("https://cdn.example/77-hq.mp3"))
+        assertEquals(
+            listOf("https://cdn.example/77-hq.ogg", "https://cdn.example/77-hq.mp3"),
+            FreesoundPreviewPlayer.previewCandidates("https://cdn.example/77-hq.ogg"),
+        )
+    }
+
+    @Test
     fun titleMatchesManualImportStyleByRemovingAudioExtension() {
         assertEquals("Thunder Strike", FreesoundImporter.titleForImport(" Thunder Strike.wav ", "fallback"))
         assertEquals("Forest Night", FreesoundImporter.titleForImport("Forest Night.ogg", "fallback"))

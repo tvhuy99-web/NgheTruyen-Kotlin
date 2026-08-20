@@ -1,0 +1,471 @@
+name: Freesound Stage 1 Apply
+
+on:
+  push:
+    branches:
+      - agent/freesound-stage-1
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    if: startsWith(github.event.head_commit.message, 'Bootstrap Freesound stage 1')
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v6
+        with:
+          ref: agent/freesound-stage-1
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Implement Freesound stage 1
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p app/src/main/java/vn/nghetruyen/app/freesound
+          mkdir -p app/src/main/java/vn/nghetruyen/app/ui/components
+          mkdir -p app/src/test/java/vn/nghetruyen/app/freesound
+
+          cat > app/src/main/java/vn/nghetruyen/app/freesound/FreesoundCredentialStore.kt <<'KOTLIN'
+          package vn.nghetruyen.app.freesound
+
+          import android.content.Context
+          import android.security.keystore.KeyGenParameterSpec
+          import android.security.keystore.KeyProperties
+          import android.util.Base64
+          import java.security.KeyStore
+          import javax.crypto.Cipher
+          import javax.crypto.KeyGenerator
+          import javax.crypto.SecretKey
+          import javax.crypto.spec.GCMParameterSpec
+
+          class FreesoundCredentialStore(context: Context) {
+              private val preferences = context.applicationContext.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
+
+              @Synchronized
+              fun hasApiKey(): Boolean = !apiKey().isNullOrBlank()
+
+              @Synchronized
+              fun apiKey(): String? {
+                  val payload = preferences.getString(KEY_API, null) ?: return null
+                  return runCatching { decrypt(payload) }
+                      .onFailure { preferences.edit().remove(KEY_API).apply() }
+                      .getOrNull()
+                      ?.takeIf(String::isNotBlank)
+              }
+
+              @Synchronized
+              fun saveApiKey(value: String) {
+                  val clean = value.trim()
+                  require(clean.length in MIN_KEY_LENGTH..MAX_KEY_LENGTH) { "Khóa API Freesound không hợp lệ." }
+                  preferences.edit().putString(KEY_API, encrypt(clean)).apply()
+              }
+
+              @Synchronized
+              fun clearApiKey() {
+                  preferences.edit().remove(KEY_API).apply()
+              }
+
+              private fun encrypt(value: String): String {
+                  val cipher = Cipher.getInstance(TRANSFORMATION)
+                  cipher.init(Cipher.ENCRYPT_MODE, secretKey())
+                  cipher.updateAAD(AAD)
+                  val encrypted = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
+                  return Base64.encodeToString(cipher.iv + encrypted, Base64.NO_WRAP)
+              }
+
+              private fun decrypt(payload: String): String {
+                  val bytes = Base64.decode(payload, Base64.NO_WRAP)
+                  require(bytes.size > IV_BYTES) { "Dữ liệu khóa Freesound không hợp lệ." }
+                  val cipher = Cipher.getInstance(TRANSFORMATION)
+                  cipher.init(
+                      Cipher.DECRYPT_MODE,
+                      secretKey(),
+                      GCMParameterSpec(TAG_BITS, bytes.copyOfRange(0, IV_BYTES)),
+                  )
+                  cipher.updateAAD(AAD)
+                  return String(cipher.doFinal(bytes.copyOfRange(IV_BYTES, bytes.size)), Charsets.UTF_8)
+              }
+
+              private fun secretKey(): SecretKey {
+                  val keyStore = KeyStore.getInstance(KEYSTORE).apply { load(null) }
+                  (keyStore.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
+                  return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE).run {
+                      init(
+                          KeyGenParameterSpec.Builder(
+                              KEY_ALIAS,
+                              KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
+                          )
+                              .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                              .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                              .setRandomizedEncryptionRequired(true)
+                              .build(),
+                      )
+                      generateKey()
+                  }
+              }
+
+              companion object {
+                  const val MIN_KEY_LENGTH = 8
+                  const val MAX_KEY_LENGTH = 4096
+                  private const val PREFERENCES = "encrypted_freesound_credentials_v1"
+                  private const val KEY_API = "api_key"
+                  private const val KEYSTORE = "AndroidKeyStore"
+                  private const val KEY_ALIAS = "vn.nghetruyen.freesound.credentials.v1"
+                  private const val TRANSFORMATION = "AES/GCM/NoPadding"
+                  private const val IV_BYTES = 12
+                  private const val TAG_BITS = 128
+                  private val AAD = "vn.nghetruyen.freesound.api-key.v1".toByteArray(Charsets.UTF_8)
+              }
+          }
+          KOTLIN
+
+          cat > app/src/main/java/vn/nghetruyen/app/freesound/FreesoundClient.kt <<'KOTLIN'
+          package vn.nghetruyen.app.freesound
+
+          import java.util.concurrent.TimeUnit
+          import kotlinx.coroutines.Dispatchers
+          import kotlinx.coroutines.withContext
+          import okhttp3.HttpUrl.Companion.toHttpUrl
+          import okhttp3.OkHttpClient
+          import okhttp3.Request
+
+          data class FreesoundConnectionResult(
+              val success: Boolean,
+              val message: String,
+              val httpCode: Int? = null,
+          )
+
+          class FreesoundClient(
+              private val credentialStore: FreesoundCredentialStore,
+              private val httpClient: OkHttpClient = defaultHttpClient(),
+          ) {
+              suspend fun testConnection(): FreesoundConnectionResult = withContext(Dispatchers.IO) {
+                  val apiKey = credentialStore.apiKey()
+                      ?: return@withContext FreesoundConnectionResult(
+                          success = false,
+                          message = "Chưa lưu khóa API Freesound.",
+                      )
+
+                  val url = SEARCH_URL.toHttpUrl().newBuilder()
+                      .addQueryParameter("query", "test")
+                      .addQueryParameter("page_size", "1")
+                      .addQueryParameter("fields", "id")
+                      .build()
+                  val request = Request.Builder()
+                      .url(url)
+                      .header("Authorization", "Token $apiKey")
+                      .header("Accept", "application/json")
+                      .header("User-Agent", USER_AGENT)
+                      .get()
+                      .build()
+
+                  runCatching {
+                      httpClient.newCall(request).execute().use { response ->
+                          resultForHttpCode(response.code)
+                      }
+                  }.getOrElse {
+                      FreesoundConnectionResult(
+                          success = false,
+                          message = "Không thể kết nối Freesound. Hãy kiểm tra mạng rồi thử lại.",
+                      )
+                  }
+              }
+
+              companion object {
+                  private const val SEARCH_URL = "https://freesound.org/apiv2/search/"
+                  private const val USER_AGENT = "NgheTruyen-Android/Freesound"
+
+                  internal fun resultForHttpCode(code: Int): FreesoundConnectionResult = when (code) {
+                      in 200..299 -> FreesoundConnectionResult(
+                          success = true,
+                          message = "Kết nối Freesound thành công.",
+                          httpCode = code,
+                      )
+                      401, 403 -> FreesoundConnectionResult(
+                          success = false,
+                          message = "Khóa API Freesound không hợp lệ hoặc đã bị từ chối.",
+                          httpCode = code,
+                      )
+                      429 -> FreesoundConnectionResult(
+                          success = false,
+                          message = "Freesound đang giới hạn số yêu cầu. Hãy thử lại sau.",
+                          httpCode = code,
+                      )
+                      else -> FreesoundConnectionResult(
+                          success = false,
+                          message = "Freesound trả về lỗi HTTP $code.",
+                          httpCode = code,
+                      )
+                  }
+
+                  private fun defaultHttpClient(): OkHttpClient = OkHttpClient.Builder()
+                      .connectTimeout(10, TimeUnit.SECONDS)
+                      .readTimeout(15, TimeUnit.SECONDS)
+                      .writeTimeout(15, TimeUnit.SECONDS)
+                      .callTimeout(20, TimeUnit.SECONDS)
+                      .build()
+              }
+          }
+          KOTLIN
+
+          cat > app/src/main/java/vn/nghetruyen/app/ui/components/FreesoundSettingsCard.kt <<'KOTLIN'
+          package vn.nghetruyen.app.ui.components
+
+          import androidx.compose.foundation.layout.Arrangement
+          import androidx.compose.foundation.layout.Column
+          import androidx.compose.foundation.layout.Row
+          import androidx.compose.foundation.layout.fillMaxWidth
+          import androidx.compose.foundation.layout.padding
+          import androidx.compose.material3.Button
+          import androidx.compose.material3.Card
+          import androidx.compose.material3.MaterialTheme
+          import androidx.compose.material3.OutlinedTextField
+          import androidx.compose.material3.Text
+          import androidx.compose.material3.TextButton
+          import androidx.compose.runtime.Composable
+          import androidx.compose.runtime.LaunchedEffect
+          import androidx.compose.runtime.getValue
+          import androidx.compose.runtime.mutableStateOf
+          import androidx.compose.runtime.remember
+          import androidx.compose.runtime.rememberCoroutineScope
+          import androidx.compose.runtime.setValue
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.platform.LocalContext
+          import androidx.compose.ui.platform.LocalView
+          import androidx.compose.ui.text.font.FontWeight
+          import androidx.compose.ui.text.input.PasswordVisualTransformation
+          import androidx.compose.ui.unit.dp
+          import kotlinx.coroutines.launch
+          import vn.nghetruyen.app.NgheTruyenApplication
+          import vn.nghetruyen.app.freesound.FreesoundCredentialStore
+
+          @Composable
+          fun FreesoundSettingsCard(modifier: Modifier = Modifier) {
+              val context = LocalContext.current
+              val view = LocalView.current
+              val application = context.applicationContext as NgheTruyenApplication
+              val credentialStore = application.container.freesoundCredentialStore
+              val client = application.container.freesoundClient
+              val scope = rememberCoroutineScope()
+
+              var apiKeyDraft by remember { mutableStateOf("") }
+              var hasStoredKey by remember(credentialStore) { mutableStateOf(credentialStore.hasApiKey()) }
+              var testing by remember { mutableStateOf(false) }
+              var statusMessage by remember { mutableStateOf<String?>(null) }
+
+              LaunchedEffect(statusMessage) {
+                  statusMessage?.takeIf(String::isNotBlank)?.let(view::announceForAccessibility)
+              }
+
+              Card(modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 5.dp)) {
+                  Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                      Text("FREESOUND", fontWeight = FontWeight.SemiBold)
+                      Text(
+                          if (hasStoredKey) "Trạng thái: Đã cấu hình" else "Trạng thái: Chưa cấu hình",
+                          style = MaterialTheme.typography.bodyMedium,
+                      )
+                      Text(
+                          "Chỉ cần Khóa bí mật/khóa API của khách hàng. Mã khách hàng chưa cần dùng.",
+                          style = MaterialTheme.typography.bodySmall,
+                      )
+                      OutlinedTextField(
+                          value = apiKeyDraft,
+                          onValueChange = { apiKeyDraft = it.take(FreesoundCredentialStore.MAX_KEY_LENGTH) },
+                          label = { Text("Khóa API Freesound") },
+                          placeholder = {
+                              Text(if (hasStoredKey) "Đã lưu — nhập khóa mới để thay thế" else "Nhập khóa API")
+                          },
+                          visualTransformation = PasswordVisualTransformation(),
+                          singleLine = true,
+                          enabled = !testing,
+                          modifier = Modifier.fillMaxWidth(),
+                      )
+                      Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                          Button(
+                              onClick = {
+                                  runCatching { credentialStore.saveApiKey(apiKeyDraft) }
+                                      .onSuccess {
+                                          apiKeyDraft = ""
+                                          hasStoredKey = true
+                                          statusMessage = "Đã lưu khóa API Freesound trên thiết bị."
+                                      }
+                                      .onFailure {
+                                          statusMessage = it.message ?: "Không lưu được khóa API Freesound."
+                                      }
+                              },
+                              enabled = !testing && apiKeyDraft.trim().length >= FreesoundCredentialStore.MIN_KEY_LENGTH,
+                              modifier = Modifier.weight(1f),
+                          ) { Text("LƯU KHÓA") }
+                          Button(
+                              onClick = {
+                                  testing = true
+                                  statusMessage = null
+                                  scope.launch {
+                                      try {
+                                          statusMessage = client.testConnection().message
+                                      } finally {
+                                          testing = false
+                                          hasStoredKey = credentialStore.hasApiKey()
+                                      }
+                                  }
+                              },
+                              enabled = !testing && hasStoredKey,
+                              modifier = Modifier.weight(1f),
+                          ) { Text(if (testing) "ĐANG KIỂM TRA…" else "KIỂM TRA") }
+                      }
+                      TextButton(
+                          onClick = {
+                              credentialStore.clearApiKey()
+                              apiKeyDraft = ""
+                              hasStoredKey = false
+                              statusMessage = "Đã xóa khóa API Freesound khỏi thiết bị."
+                          },
+                          enabled = !testing && hasStoredKey,
+                          modifier = Modifier.fillMaxWidth(),
+                      ) { Text("XÓA KHÓA") }
+                      statusMessage?.let { message ->
+                          Text(message, style = MaterialTheme.typography.bodySmall)
+                      }
+                  }
+              }
+          }
+          KOTLIN
+
+          cat > app/src/test/java/vn/nghetruyen/app/freesound/FreesoundClientTest.kt <<'KOTLIN'
+          package vn.nghetruyen.app.freesound
+
+          import org.junit.Assert.assertEquals
+          import org.junit.Assert.assertFalse
+          import org.junit.Assert.assertTrue
+          import org.junit.Test
+
+          class FreesoundClientTest {
+              @Test
+              fun successCodesAreAccepted() {
+                  val result = FreesoundClient.resultForHttpCode(200)
+                  assertTrue(result.success)
+                  assertEquals(200, result.httpCode)
+              }
+
+              @Test
+              fun authenticationFailuresAreReportedWithoutCredentialDetails() {
+                  listOf(401, 403).forEach { code ->
+                      val result = FreesoundClient.resultForHttpCode(code)
+                      assertFalse(result.success)
+                      assertEquals(code, result.httpCode)
+                      assertTrue(result.message.contains("Khóa API Freesound"))
+                  }
+              }
+
+              @Test
+              fun rateLimitIsReported() {
+                  val result = FreesoundClient.resultForHttpCode(429)
+                  assertFalse(result.success)
+                  assertEquals(429, result.httpCode)
+                  assertTrue(result.message.contains("giới hạn"))
+              }
+
+              @Test
+              fun unexpectedHttpErrorsAreReported() {
+                  val result = FreesoundClient.resultForHttpCode(503)
+                  assertFalse(result.success)
+                  assertEquals(503, result.httpCode)
+                  assertTrue(result.message.contains("503"))
+              }
+          }
+          KOTLIN
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected exactly one anchor in {path}, found {count}: {old[:100]!r}")
+              p.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          app_container = "app/src/main/java/vn/nghetruyen/app/AppContainer.kt"
+          replace_once(
+              app_container,
+              "import vn.nghetruyen.app.following.FollowingUpdateScheduler\nimport vn.nghetruyen.app.playback.TtsVoiceCatalog",
+              "import vn.nghetruyen.app.following.FollowingUpdateScheduler\nimport vn.nghetruyen.app.freesound.FreesoundClient\nimport vn.nghetruyen.app.freesound.FreesoundCredentialStore\nimport vn.nghetruyen.app.playback.TtsVoiceCatalog",
+          )
+          replace_once(
+              app_container,
+              "    val followingUpdateScheduler: FollowingUpdateScheduler by lazy { FollowingUpdateScheduler(appContext) }\n    val ttsVoiceCatalog: TtsVoiceCatalog by lazy { TtsVoiceCatalog(appContext) }",
+              "    val followingUpdateScheduler: FollowingUpdateScheduler by lazy { FollowingUpdateScheduler(appContext) }\n    val freesoundCredentialStore: FreesoundCredentialStore by lazy { FreesoundCredentialStore(appContext) }\n    val freesoundClient: FreesoundClient by lazy { FreesoundClient(freesoundCredentialStore) }\n    val ttsVoiceCatalog: TtsVoiceCatalog by lazy { TtsVoiceCatalog(appContext) }",
+          )
+
+          personal = "app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt"
+          replace_once(
+              personal,
+              "import vn.nghetruyen.app.ui.components.ReferenceActionButton\nimport vn.nghetruyen.app.ui.components.ReferenceGray",
+              "import vn.nghetruyen.app.ui.components.FreesoundSettingsCard\nimport vn.nghetruyen.app.ui.components.ReferenceActionButton\nimport vn.nghetruyen.app.ui.components.ReferenceGray",
+          )
+          replace_once(
+              personal,
+              '        "settings_music" -> "Nhạc nền và nhạc cảnh"\n        "settings_following" -> "Theo dõi chương mới"',
+              '        "settings_music" -> "Nhạc nền và nhạc cảnh"\n        "settings_audio_sources" -> "Nguồn âm thanh trực tuyến"\n        "settings_following" -> "Theo dõi chương mới"',
+          )
+          replace_once(
+              personal,
+              '        "settings_following" -> PersonalSubPage("THEO DÕI CHƯƠNG MỚI") {',
+              '        "settings_audio_sources" -> PersonalSubPage("NGUỒN ÂM THANH TRỰC TUYẾN") {\n            FreesoundSettingsCard()\n        }\n        "settings_following" -> PersonalSubPage("THEO DÕI CHƯƠNG MỚI") {',
+          )
+          replace_once(
+              personal,
+              '            "settings_music" to "NHẠC NỀN & NHẠC CẢNH",\n            "settings_following" to "THEO DÕI CHƯƠNG MỚI",',
+              '            "settings_music" to "NHẠC NỀN & NHẠC CẢNH",\n            "settings_audio_sources" to "NGUỒN ÂM THANH TRỰC TUYẾN",\n            "settings_following" to "THEO DÕI CHƯƠNG MỚI",',
+          )
+          PY
+
+          git diff --check
+          git diff -- app/src/main/java/vn/nghetruyen/app/AppContainer.kt \
+            app/src/main/java/vn/nghetruyen/app/freesound/FreesoundCredentialStore.kt \
+            app/src/main/java/vn/nghetruyen/app/freesound/FreesoundClient.kt \
+            app/src/main/java/vn/nghetruyen/app/ui/components/FreesoundSettingsCard.kt \
+            app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt \
+            app/src/test/java/vn/nghetruyen/app/freesound/FreesoundClientTest.kt
+
+      - name: Compile and run unit tests
+        run: ./gradlew --no-daemon --stacktrace :app:compileDebugKotlin :app:testDebugUnitTest
+
+      - name: Commit stage 1 implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- \
+            app/src/main/java/vn/nghetruyen/app/AppContainer.kt \
+            app/src/main/java/vn/nghetruyen/app/freesound/FreesoundCredentialStore.kt \
+            app/src/main/java/vn/nghetruyen/app/freesound/FreesoundClient.kt \
+            app/src/main/java/vn/nghetruyen/app/ui/components/FreesoundSettingsCard.kt \
+            app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt \
+            app/src/test/java/vn/nghetruyen/app/freesound/FreesoundClientTest.kt
+          git diff --cached --check
+          git commit -m "Implement Freesound stage 1 foundation"
+          git push origin HEAD:agent/freesound-stage-1

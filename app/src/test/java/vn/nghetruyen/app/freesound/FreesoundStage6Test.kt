@@ -39,8 +39,9 @@ class FreesoundStage6Test {
 
     @Test
     fun vietnameseAndEnglishTextNormalizeForCoverageComparison() {
-        assertEquals("tieng sam rat lon", FreesoundLibraryAnalyzer.normalize("Tiếng sấm rất lớn"))
+        assertEquals("tieng thunder rat lon", FreesoundLibraryAnalyzer.normalize("Tiếng sấm rất lớn"))
         assertTrue(FreesoundLibraryAnalyzer.tokens("forest night ambience").contains("forest"))
+        assertTrue(FreesoundLibraryAnalyzer.tokens("mưa trong rừng").containsAll(setOf("rain", "forest")))
         assertTrue(FreesoundLibraryAnalyzer.jaccard(setOf("rain", "storm"), setOf("rain", "storm")) > 0.99)
     }
 
@@ -58,10 +59,11 @@ class FreesoundStage6Test {
 
     @Test
     fun sparseLibraryReportsCoverageGaps() {
-        val tracks = listOf(track("a", "Rain ambience", "type:ambience, steady forest rain"))
+        val tracks = listOf(track("a", "Mưa trong rừng", "type:ambience, mưa đều trong rừng"))
         val gaps = FreesoundLibraryAnalyzer.findMissingTopics(AudioAssetKind.AMBIENCE, tracks)
         assertTrue(gaps.isNotEmpty())
         assertFalse(gaps.any { it.query == "rain ambience" })
+        assertFalse(gaps.any { it.query == "forest ambience" })
         assertTrue(gaps.any { it.query == "cave ambience" })
     }
 

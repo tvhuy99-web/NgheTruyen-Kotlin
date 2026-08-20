@@ -62,6 +62,23 @@ class FreesoundClientTest {
     }
 
     @Test
+    fun categoryDurationFiltersMatchPlaybackRoles() {
+        val music = FreesoundClient.buildSearchUrl(
+            FreesoundSearchRequest("fantasy", category = FreesoundCategory.MUSIC),
+        )
+        val ambience = FreesoundClient.buildSearchUrl(
+            FreesoundSearchRequest("forest", category = FreesoundCategory.AMBIENCE),
+        )
+        val sfx = FreesoundClient.buildSearchUrl(
+            FreesoundSearchRequest("sword", category = FreesoundCategory.SFX),
+        )
+
+        assertEquals("duration:[30 TO 900]", music.queryParameter("filter"))
+        assertEquals("duration:[10 TO 300]", ambience.queryParameter("filter"))
+        assertEquals("duration:[0.1 TO 15]", sfx.queryParameter("filter"))
+    }
+
+    @Test
     fun allCategoryDoesNotAddDurationFilter() {
         val url = FreesoundClient.buildSearchUrl(
             FreesoundSearchRequest(
@@ -86,7 +103,7 @@ class FreesoundClientTest {
     }
 
     @Test
-    fun searchResponseParsesMetadataAndHqPreview() {
+    fun searchResponseParsesMetadataAndPrefersHigherQualityOggPreview() {
         val payload = """
             {
               "count": 41,
@@ -138,13 +155,36 @@ class FreesoundClientTest {
         assertEquals("fieldrecorder", sound.username)
         assertEquals(8.75, sound.durationSeconds, 0.001)
         assertEquals(listOf("thunder", "storm"), sound.tags)
-        assertEquals("https://cdn.freesound.org/previews/123/123-hq.mp3", sound.preferredPreviewUrl)
+        assertEquals("https://cdn.freesound.org/previews/123/123-hq.ogg", sound.preferredPreviewUrl)
         assertEquals(4.8, sound.avgRating, 0.001)
         assertEquals(27, sound.numRatings)
         assertEquals(9012, sound.numDownloads)
         assertEquals("wav", sound.fileType)
         assertEquals(2, sound.channels)
         assertEquals(48000, sound.sampleRate)
+    }
+
+    @Test
+    fun mp3PreviewIsUsedWhenOggIsMissing() {
+        val sound = FreesoundSound(
+            id = 1,
+            name = "preview",
+            username = "u",
+            license = "CC0",
+            durationSeconds = 1.0,
+            tags = emptyList(),
+            previewHqMp3 = "https://cdn.freesound.org/a.mp3",
+            previewHqOgg = null,
+            avgRating = 0.0,
+            numRatings = 0,
+            numDownloads = 0,
+            webUrl = null,
+            fileType = "mp3",
+            channels = 1,
+            sampleRate = 44100,
+        )
+
+        assertEquals("https://cdn.freesound.org/a.mp3", sound.preferredPreviewUrl)
     }
 
     @Test

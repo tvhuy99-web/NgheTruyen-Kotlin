@@ -236,8 +236,8 @@ class FreesoundAutoAudioResolver(
             val effectiveQuery = searchQueryForRetry(need.query, retryAttempt)
             val searchStrategy = when {
                 retryAttempt <= 1 -> "EXACT"
-                retryAttempt == 2 -> "RELAXED_3_TERMS"
-                else -> "RELAXED_2_TERMS"
+                retryAttempt == 2 -> "RELAXED_2_TERMS"
+                else -> "RELAXED_1_TERM"
             }
             diagnostics += "CLIENT_SEARCH_START index=${index + 1} kind=${need.kind.name} query=${need.query.take(160)} effectiveQuery=${effectiveQuery.take(160)} strategy=$searchStrategy"
             liveDiagnostic(traceId, "FREESOUND_CLIENT_SEARCH_START", attributes = baseAttributes + mapOf(
@@ -448,7 +448,7 @@ class FreesoundAutoAudioResolver(
                 .map(String::trim)
                 .filter { it.length >= 2 && it !in RETRY_QUERY_STOPWORDS }
             if (tokens.isEmpty()) return original
-            val keep = if (retryAttempt == 2) 3 else 2
+            val keep = if (retryAttempt == 2) 2 else 1
             return tokens.takeLast(keep.coerceAtMost(tokens.size)).joinToString(" ").ifBlank { original }
         }
 

@@ -53,7 +53,7 @@ object FreesoundAutoRequirementCodec {
                     AudioAssetKind.valueOf(row.optString("kind").trim().uppercase(Locale.ROOT))
                 }.getOrElse { error("$JSON_KEY[$index] có kind không hợp lệ.") }
                 require(kind in enabledKinds) { "$JSON_KEY[$index] yêu cầu lớp âm thanh đang tắt." }
-                val query = oneLine(row.optString("query")).take(MAX_QUERY_CHARS)
+                val query = canonicalSearchQuery(oneLine(row.optString("query")).take(MAX_QUERY_CHARS), kind)
                 require(query.isNotBlank()) { "$JSON_KEY[$index] thiếu query Freesound." }
                 val importance = runCatching {
                     FreesoundRequirementImportance.valueOf(
@@ -138,7 +138,25 @@ object FreesoundAutoRequirementCodec {
         }
     }
 
+    internal fun canonicalSearchQuery(value: String, kind: AudioAssetKind): String {
+        val normalized = FreesoundAutoRequirementAggregator.normalizeQuery(value)
+        if (normalized.isBlank()) return ""
+        val tokens = normalized.split(' ')
+            .map(String::trim)
+            .filter { it.length >= 2 && it !in QUERY_STOPWORDS }
+            .filterNot { token -> token in QUERY_GENERIC_TERMS && token != "music" && kind == AudioAssetKind.MUSIC }
+        if (tokens.isEmpty()) return normalized.split(' ').filter(String::isNotBlank).takeLast(MAX_QUERY_TERMS).joinToString(" ")
+        return tokens.takeLast(MAX_QUERY_TERMS).joinToString(" ")
+    }
+
     private fun oneLine(value: String): String = value.replace(Regex("\\s+"), " ").trim()
+
+    private val QUERY_STOPWORDS = setOf(
+        "a", "an", "the", "with", "on", "in", "of", "to", "for", "from", "by", "into", "onto",
+        "very", "single", "one", "some", "and", "or",
+    )
+    private val QUERY_GENERIC_TERMS = setOf("sound", "audio", "effect", "ambience")
+    private const val MAX_QUERY_TERMS = 3
 }
 
 /**
@@ -179,7 +197,10 @@ object FreesoundAutoRequirementAggregator {
                 )
                 .take(limit)
                 .map { group ->
-                    val representative = group.maxByOrNull { queryTokens(normalizeQuery(it.query)).size } ?: group.first()
+                    val representative = group.minWithOrNull(
+                        compareBy<FreesoundAutoRequirement> { queryTokens(normalizeQuery(it.query)).size }
+                            .thenBy { normalizeQuery(it.query).length },
+                    ) ?: group.first()
                     FreesoundAutoSearchNeed(
                         kind = kind,
                         query = representative.query.trim(),

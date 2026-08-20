@@ -96,4 +96,26 @@ class FreesoundMode3RegressionTest {
         assertEquals(1, parsed.ambienceScenes.size)
         assertEquals(1, parsed.soundEffectCues.size)
     }
+
+    @Test
+    fun canonicalSearchQueryCapsProseToThreeUsefulTerms() {
+        val query = FreesoundAutoRequirementCodec.canonicalSearchQuery(
+            "heavy landing thud on wood",
+            AudioAssetKind.SFX,
+        )
+        assertEquals("landing thud wood", query)
+        assertTrue(query.split(' ').size <= 3)
+    }
+
+    @Test
+    fun aggregatorPrefersShorterEquivalentQuery() {
+        val long = FreesoundAutoRequirement(
+            kind = AudioAssetKind.SFX,
+            query = "metal debris wall stone crash",
+            unitId = "U1",
+        )
+        val short = long.copy(query = "debris wall stone crash", unitId = "U2")
+        val need = FreesoundAutoRequirementAggregator.aggregate(listOf(long, short)).single()
+        assertEquals("debris wall stone crash", need.query)
+    }
 }

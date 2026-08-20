@@ -13,33 +13,33 @@ class FreesoundRetryQueryTest {
     }
 
     @Test
-    fun secondAttemptKeepsThreeCoreTerms() {
+    fun secondAttemptKeepsTwoBroadCoreTerms() {
         assertEquals(
-            "chinese flute music",
+            "flute music",
             FreesoundAutoAudioResolver.searchQueryForRetry("lighthearted comedic chinese flute music", 2),
         )
         assertEquals(
-            "landing thud wood",
+            "thud wood",
             FreesoundAutoAudioResolver.searchQueryForRetry("heavy landing thud on wood", 2),
         )
         assertEquals(
-            "coin drop wood",
+            "drop wood",
             FreesoundAutoAudioResolver.searchQueryForRetry("single gold coin drop on wood", 2),
         )
     }
 
     @Test
-    fun thirdAttemptKeepsTwoBroadCoreTerms() {
+    fun thirdAttemptKeepsOneBroadestCoreTerm() {
         assertEquals(
-            "flute music",
+            "music",
             FreesoundAutoAudioResolver.searchQueryForRetry("lighthearted comedic chinese flute music", 3),
         )
         assertEquals(
-            "debris crash",
+            "crash",
             FreesoundAutoAudioResolver.searchQueryForRetry("wall breaking debris crash", 3),
         )
         assertEquals(
-            "thud wood",
+            "wood",
             FreesoundAutoAudioResolver.searchQueryForRetry("heavy landing thud on wood", 3),
         )
     }

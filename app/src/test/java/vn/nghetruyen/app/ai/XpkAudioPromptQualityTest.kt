@@ -182,4 +182,39 @@ class XpkAudioPromptQualityTest {
             "Sword File.wav",
         ).forEach { leaked -> assertFalse(prompt.contains(leaked)) }
     }
+
+    @Test
+    fun freesoundPromptRequiresShortSearchableQueries() {
+        val base = XpkVoiceCastPrompt.build(
+            title = "Freesound",
+            body = "Gió rít qua rừng. Một khối đá đổ sập.",
+            profiles = emptyList(),
+            storyNote = "",
+            expressiveAdjustment = false,
+            speedLimitPct = 0,
+            pitchLimitPct = 0,
+            volumeLimitPct = 0,
+            expressionPrompt = "",
+            includeVoiceCast = false,
+            includeSceneMusic = false,
+            includeAudioDirection = true,
+        )
+        val prompt = XpkUnifiedNarrationPrompt.compose(
+            base = base,
+            title = "Freesound",
+            includeVoiceCast = false,
+            includeSceneMusic = false,
+            includeAmbience = false,
+            includeSoundEffects = false,
+            ambienceTracks = emptyList(),
+            soundEffectTracks = emptyList(),
+            includeFreesoundAudioRequirements = true,
+            freesoundRequirementKinds = setOf(vn.nghetruyen.app.audio.AudioAssetKind.MUSIC, vn.nghetruyen.app.audio.AudioAssetKind.AMBIENCE, vn.nghetruyen.app.audio.AudioAssetKind.SFX),
+        )
+        assertTrue(prompt.contains("ưu tiên 2 từ"))
+        assertTrue(prompt.contains("không quá 3 search term"))
+        assertTrue(prompt.contains("Freesound mặc định coi các term là bắt buộc"))
+        assertTrue(prompt.contains("debris crash"))
+        assertTrue(prompt.contains("forest wind"))
+    }
 }

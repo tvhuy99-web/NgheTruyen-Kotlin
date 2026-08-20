@@ -95,6 +95,7 @@ class FreesoundImporter(
                 context = appContext,
                 trackId = track.id,
                 targetLufs = normalizationTargetLufs,
+                fastFreesound = true,
             )
             awaitNormalization(workId, track.id)
             marker?.delete()
@@ -252,6 +253,7 @@ class FreesoundImporter(
                 context = appContext,
                 trackId = trackId,
                 targetLufs = normalizationTargetLufs,
+                fastFreesound = true,
             )
             awaitNormalization(workId, trackId)
             markerFile.delete()
@@ -326,7 +328,7 @@ class FreesoundImporter(
         private const val NORMALIZING_SUFFIX = ".normalizing"
         private const val FREE_SPACE_RESERVE_BYTES = 4L * 1024L * 1024L
         private const val UNKNOWN_LENGTH_REQUIRED_BYTES = 12L * 1024L * 1024L
-        private const val NORMALIZATION_POLL_MS = 300L
+        private const val NORMALIZATION_POLL_MS = 120L
         private const val NORMALIZATION_TIMEOUT_MS = 10L * 60L * 1_000L
         private val importMutex = Mutex()
         private val managedSoundIdRegex = Regex(

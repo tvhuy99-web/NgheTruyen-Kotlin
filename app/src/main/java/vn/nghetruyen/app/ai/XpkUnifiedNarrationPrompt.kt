@@ -172,16 +172,18 @@ object XpkUnifiedNarrationPrompt {
             MODULE FREESOUND AUTO — CHỈ XÁC ĐỊNH NHU CẦU TÌM KIẾM:
             Các lớp được phép trong lượt này: $kindNames.
 
-            1. Không chọn asset local, Freesound ID, tên file, tác giả, license, URL, timestamp hoặc metadata nguồn. Chỉ tạo query tiếng Anh ngắn, cụ thể và hữu ích cho Freesound Search.
-            2. Chỉ trả kind thuộc danh sách được phép. Không tạo nhu cầu cho lớp đang tắt.
-            3. MUSIC: tối đa ${FreesoundAutoRequirementAggregator.MAX_MUSIC_SEARCHES} query khác nhau. Chỉ tạo khi nhạc thực sự hỗ trợ một vùng kể chuyện đủ bền. Mỗi usage dùng start_id và end_id. Không cần phủ kín chương; khoảng không có MUSIC sẽ được ứng dụng xử lý là im lặng.
-            4. AMBIENCE: tối đa ${FreesoundAutoRequirementAggregator.MAX_AMBIENCE_SEARCHES} query khác nhau. Mỗi usage dùng start_id và end_id; chỉ dùng cho nguồn âm môi trường kéo dài. Cho phép tối đa hai lớp tương thích chồng nhau.
-            5. SFX: tối đa ${FreesoundAutoRequirementAggregator.MAX_SFX_SEARCHES} query khác nhau. Mỗi usage dùng unit_id; có thể thêm stop_unit_id, repeat_count, cadence và loop_until_stop theo cùng quy tắc SFX hiện tại.
-            6. Nếu cùng một loại âm thanh được dùng nhiều lần, giữ CHÍNH XÁC cùng chuỗi query ở các usage để ứng dụng chỉ tìm/tải một asset rồi tái sử dụng.
-            7. Query nên mô tả nguồn âm nghe được, ví dụ “close dry thunder strike”, “night forest wind ambience”, “dark cultivation tension music”; không chép nguyên câu truyện và không nhét tên nhân vật riêng nếu không giúp tìm âm thanh.
-            8. importance chỉ là REQUIRED hoặc OPTIONAL. REQUIRED dành cho âm thanh có vai trò nghe rõ ràng đối với cảnh; không lạm dụng REQUIRED.
-            9. Không tối đa hóa số query. Một chương ít âm thanh có thể trả mảng rỗng.
-            10. Với MUSIC/AMBIENCE, object chỉ có kind, query, importance, start_id, end_id. Với SFX, object bắt buộc có kind, query, importance, unit_id và chỉ thêm stop_unit_id, repeat_count, cadence, loop_until_stop khi cần.
+            1. Không chọn asset local, Freesound ID, tên file, tác giả, license, URL, timestamp hoặc metadata nguồn. Chỉ tạo query tiếng Anh dạng từ khóa tìm kiếm.
+            2. MỖI query ưu tiên 2 từ, chỉ dùng 3 từ khi từ thứ ba thực sự giúp phân biệt. Tuyệt đối không viết câu tự nhiên dài và không quá 3 search term hữu ích. Freesound mặc định coi các term là bắt buộc, vì vậy mỗi từ thừa đều làm giảm mạnh khả năng có kết quả.
+            3. Viết query bằng từ tiếng Anh phổ biến mà người đăng âm thanh thực tế có khả năng dùng trong tên/tag/mô tả. Dùng chữ thường, không tên nhân vật, địa danh hư cấu, thuật ngữ cốt truyện hoặc khái niệm trừu tượng không nghe được.
+            4. Đặt từ khóa âm học/nguồn âm quan trọng nhất trước. Bỏ a/an/the, with/on/in/of/to/for, very, single, sound, audio, effect và các từ trang trí không giúp tìm kiếm.
+            5. MUSIC: tối đa ${FreesoundAutoRequirementAggregator.MAX_MUSIC_SEARCHES} query khác nhau. Query ưu tiên mood + nhạc cụ/phong cách nghe được, ví dụ “tense guqin”, “sad flute”, “epic drums”. Tránh query kiểu “dark cultivation tension music” hoặc mô tả tình tiết truyện. Mỗi usage dùng start_id và end_id; không cần phủ kín chương.
+            6. AMBIENCE: tối đa ${FreesoundAutoRequirementAggregator.MAX_AMBIENCE_SEARCHES} query khác nhau. Query ưu tiên nguồn âm vật lý kéo dài + môi trường khi cần, ví dụ “forest wind”, “heavy rain”, “cave water”. Không thêm từ ambience/sound/audio nếu hai từ đã đủ. Mỗi usage dùng start_id và end_id; cho phép tối đa hai lớp tương thích chồng nhau.
+            7. SFX: tối đa ${FreesoundAutoRequirementAggregator.MAX_SFX_SEARCHES} query khác nhau. Query ưu tiên vật/chất liệu + hành động âm học ngắn, ví dụ “debris crash”, “wood thud”, “brush writing”, “sword clash”. Mỗi usage dùng unit_id; chỉ thêm stop_unit_id, repeat_count, cadence và loop_until_stop khi thật sự cần.
+            8. Nếu cùng một loại âm thanh được dùng nhiều lần, giữ CHÍNH XÁC cùng chuỗi query ở các usage để ứng dụng chỉ tìm/tải một asset rồi tái sử dụng.
+            9. Nếu 2 từ đã mô tả đúng nguồn âm thì KHÔNG thêm từ thứ ba. Khi phân vân giữa từ mô tả cảm xúc/cốt truyện và từ mô tả âm nghe được, luôn chọn từ mô tả âm nghe được.
+            10. importance chỉ là REQUIRED hoặc OPTIONAL. REQUIRED chỉ dành cho âm thanh có vai trò nghe rõ ràng đối với cảnh; không lạm dụng REQUIRED.
+            11. Không tối đa hóa số query. Một chương ít âm thanh có thể trả mảng rỗng.
+            12. Với MUSIC/AMBIENCE, object chỉ có kind, query, importance, start_id, end_id. Với SFX, object bắt buộc có kind, query, importance, unit_id và chỉ thêm stop_unit_id, repeat_count, cadence, loop_until_stop khi cần.
         """.trimIndent()
     }
 

@@ -51,6 +51,7 @@ class SceneMusicAnalysisWorker(
         val target = (requestedTarget.takeIf(Float::isFinite) ?: defaultTarget)
             .coerceIn(PcmLoudnessEstimator.MIN_TARGET_LUFS, maxTarget)
         val forceRemeasure = inputData.getBoolean(KEY_FORCE_REMEASURE, false)
+        val fastFreesound = inputData.getBoolean(KEY_FAST_FREESOUND, false)
 
         if (forceRemeasure) {
             invalidateStoredNormalization(trackId, target)
@@ -93,6 +94,7 @@ class SceneMusicAnalysisWorker(
                     targetSampleRate = 44_100,
                     targetChannels = 2,
                     destination = temp,
+                    maxDecodeDurationUs = if (fastFreesound) fastAnalysisDurationUs(kind) else null,
                 )
                 val analysis = PcmLoudnessEstimator.analyze(temp)
                 val normalization = PcmLoudnessEstimator.calculateNormalization(
@@ -191,6 +193,7 @@ class SceneMusicAnalysisWorker(
         private const val KEY_TRACK_ID = "track_id"
         private const val KEY_TARGET_LUFS = "target_lufs"
         private const val KEY_FORCE_REMEASURE = "force_remeasure"
+        private const val KEY_FAST_FREESOUND = "fast_freesound"
         private const val KEY_LOUDNESS = "loudness_lufs"
         private const val KEY_PEAK = "peak_dbfs"
         private const val KEY_GAIN_DB = "normalization_gain_db"
@@ -200,15 +203,23 @@ class SceneMusicAnalysisWorker(
         private const val RETRY_BACKOFF_SECONDS = 10L
         private val analysisMutex = Mutex()
 
+        internal fun fastAnalysisDurationUs(kind: AudioAssetKind): Long = when (kind) {
+            AudioAssetKind.MUSIC -> 45_000_000L
+            AudioAssetKind.AMBIENCE -> 30_000_000L
+            AudioAssetKind.SFX -> 15_000_000L
+        }
+
         fun enqueue(
             context: Context,
             trackId: String,
             targetLufs: Float? = null,
             forceRemeasure: Boolean = false,
+            fastFreesound: Boolean = false,
         ): UUID {
             val data = Data.Builder()
                 .putString(KEY_TRACK_ID, trackId)
                 .putBoolean(KEY_FORCE_REMEASURE, forceRemeasure)
+                .putBoolean(KEY_FAST_FREESOUND, fastFreesound)
             targetLufs?.takeIf(Float::isFinite)?.let { data.putFloat(KEY_TARGET_LUFS, it) }
             val request = OneTimeWorkRequestBuilder<SceneMusicAnalysisWorker>()
                 .setInputData(data.build())

@@ -29,7 +29,10 @@ import vn.nghetruyen.app.playback.ReaderPlaybackService
 
 /** One selector owns the mutually-exclusive story-audio source mode; three switches cannot conflict. */
 @Composable
-fun StoryAudioSourceModeSelector(modifier: Modifier = Modifier) {
+fun StoryAudioSourceModeSelector(
+    modifier: Modifier = Modifier,
+    onModeChanged: (StoryAudioSourceMode) -> Unit = {},
+) {
     val context = LocalContext.current
     val application = context.applicationContext as NgheTruyenApplication
     val store = application.container.storyAudioSourceModeStore
@@ -61,6 +64,7 @@ fun StoryAudioSourceModeSelector(modifier: Modifier = Modifier) {
             }
             current = mode
             changing = false
+            onModeChanged(mode)
             ReaderPlaybackService.command(context, ReaderPlaybackService.ACTION_REFRESH)
         }
     }
@@ -95,7 +99,7 @@ fun StoryAudioSourceModeSelector(modifier: Modifier = Modifier) {
         Text(current.description, style = MaterialTheme.typography.bodySmall)
         if (current == StoryAudioSourceMode.AI_FREESOUND) {
             Text(
-                "Freesound chỉ dùng để tìm và tải trước. Khi đọc truyện, ứng dụng phát file local đã chuẩn hóa; nếu Freesound lỗi sẽ fallback local rồi im lặng.",
+                "Freesound chỉ dùng để tìm và tải trước. Khi đọc truyện, Mode 3 chỉ phát các file local đã được resolve cho kế hoạch AI hiện tại; không dùng playlist tuần tự/ngẫu nhiên của Mode 1. Asset không resolve được thì lớp tương ứng giữ im lặng.",
                 style = MaterialTheme.typography.bodySmall,
             )
         }

@@ -46,6 +46,7 @@ import vn.nghetruyen.app.audio.AudioDirectionPreferences
 import vn.nghetruyen.app.audio.PcmLoudnessEstimator
 import vn.nghetruyen.app.audio.SceneMusicAnalysisWorker
 import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
+import vn.nghetruyen.app.freesound.FreesoundImporter
 import vn.nghetruyen.app.playback.ReaderPlaybackService
 
 /**
@@ -128,7 +129,12 @@ fun UnifiedAudioAssetManagerDialog(
             val app = application
             CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
                 val dao = app.container.database.sceneMusicTrackDao()
-                idsToDelete.forEach { dao.delete(it) }
+                idsToDelete.forEach { id ->
+                    dao.get(id)?.let { track ->
+                        FreesoundImporter.deleteManagedFile(context, track.uri)
+                    }
+                    dao.delete(id)
+                }
             }
         }
         onDismiss()
@@ -292,7 +298,10 @@ fun UnifiedAudioAssetManagerDialog(
                                     }
                                     val keepIds = (normalized.asSequence() + movedRows.asSequence())
                                         .mapTo(hashSetOf()) { it.id }
-                                    existingKind.filter { it.id !in keepIds }.forEach { dao.delete(it.id) }
+                                    existingKind.filter { it.id !in keepIds }.forEach { track ->
+                                        FreesoundImporter.deleteManagedFile(context, track.uri)
+                                        dao.delete(track.id)
+                                    }
                                     dao.upsertAll(normalized + movedRows)
 
                                     if (movedRows.isNotEmpty()) {
@@ -326,6 +335,10 @@ fun UnifiedAudioAssetManagerDialog(
     if (showFreesoundDialog) {
         FreesoundSearchDialog(
             kind = kind,
+            normalizationTargetLufs = normalizationTarget,
+            onImported = { result ->
+                transientAddedIds = transientAddedIds + result.trackId
+            },
             onDismiss = { showFreesoundDialog = false },
         )
     }

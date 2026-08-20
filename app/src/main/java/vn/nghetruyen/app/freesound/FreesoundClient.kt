@@ -64,8 +64,9 @@ class FreesoundClient(
                 if (!response.isSuccessful) {
                     return@use searchFailureForHttpCode(response.code)
                 }
-                val body = response.body.string()
-                FreesoundSearchResult.Success(parseSearchPage(body, normalized))
+                FreesoundSearchResult.Success(
+                    parseSearchPage(response.body.string(), normalized),
+                )
             }
         }.getOrElse {
             FreesoundSearchResult.Failure(
@@ -77,8 +78,7 @@ class FreesoundClient(
     companion object {
         private const val SEARCH_URL = "https://freesound.org/apiv2/search/"
         private const val USER_AGENT = "NgheTruyen-Android/Freesound"
-        private const val SEARCH_FIELDS =
-            "id,name,tags,username,license,duration,previews,avg_rating,num_ratings,num_downloads,url,type,channels,samplerate"
+        private const val SEARCH_FIELDS = "id,name,description,duration,previews"
 
         internal fun resultForHttpCode(code: Int): FreesoundConnectionResult = when (code) {
             in 200..299 -> FreesoundConnectionResult(
@@ -111,7 +111,9 @@ class FreesoundClient(
             return SEARCH_URL.toHttpUrl().newBuilder()
                 .addQueryParameter("query", normalized.query)
                 .apply {
-                    normalized.category.filter?.let { addQueryParameter("filter", it) }
+                    normalized.duration.apiFilter(normalized.category)?.let {
+                        addQueryParameter("filter", it)
+                    }
                 }
                 .addQueryParameter("sort", normalized.sort.apiValue)
                 .addQueryParameter("page", normalized.page.toString())
@@ -133,40 +135,18 @@ class FreesoundClient(
                         val id = item.optInt("id", -1)
                         if (id <= 0) continue
                         val previews = item.optJSONObject("previews")
-                        val tagsJson = item.optJSONArray("tags")
-                        val tags = buildList {
-                            if (tagsJson != null) {
-                                for (tagIndex in 0 until tagsJson.length()) {
-                                    tagsJson.optString(tagIndex)
-                                        .trim()
-                                        .takeIf(String::isNotBlank)
-                                        ?.let(::add)
-                                }
-                            }
-                        }
                         add(
                             FreesoundSound(
                                 id = id,
-                                name = item.optString("name").ifBlank { "Sound #$id" },
-                                username = item.optString("username").ifBlank { "Không rõ" },
-                                license = item.optString("license").ifBlank { "Không rõ" },
+                                name = item.optString("name").trim().ifBlank { "Sound #$id" },
+                                description = item.optString("description").trim().take(4_000),
                                 durationSeconds = item.optDouble("duration", 0.0).coerceAtLeast(0.0),
-                                tags = tags,
                                 previewHqMp3 = previews?.optString("preview-hq-mp3")
                                     ?.trim()
                                     ?.takeIf { it.startsWith("https://", ignoreCase = true) },
                                 previewHqOgg = previews?.optString("preview-hq-ogg")
                                     ?.trim()
                                     ?.takeIf { it.startsWith("https://", ignoreCase = true) },
-                                avgRating = item.optDouble("avg_rating", 0.0).coerceIn(0.0, 5.0),
-                                numRatings = item.optInt("num_ratings", 0).coerceAtLeast(0),
-                                numDownloads = item.optInt("num_downloads", 0).coerceAtLeast(0),
-                                webUrl = item.optString("url")
-                                    .trim()
-                                    .takeIf { it.startsWith("https://", ignoreCase = true) },
-                                fileType = item.optString("type").ifBlank { "?" },
-                                channels = item.optInt("channels", 0).coerceAtLeast(0),
-                                sampleRate = item.optInt("samplerate", 0).coerceAtLeast(0),
                             ),
                         )
                     }

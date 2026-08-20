@@ -78,7 +78,7 @@ class FreesoundImporterTest {
             val audio = File(directory, "freesound_77_8ad49d6c-7b14-4cc1-a4d7-817e30dad079.ogg").apply {
                 writeBytes(byteArrayOf(1))
             }
-            val uri = audio.toURI().toString()
+            val uri = "file://${audio.absolutePath}"
             assertEquals(77, FreesoundImporter.soundIdFromManagedUri(uri))
 
             File("${audio.absolutePath}.normalizing").writeText("normalizing")

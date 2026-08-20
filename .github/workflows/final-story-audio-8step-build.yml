@@ -65,6 +65,23 @@ jobs:
         shell: bash
         run: python3 .github/scripts/final_story_audio_runtime_delta.py
 
+      - name: Fix generated nullable music plan check
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt')
+          text = path.read_text()
+          old = '''            musicPlan?.sourceSha256 == musicSourceHash &&
+            scenePlanMatchesCurrentSourceMode(musicPlan.transformedText)'''
+          new = '''            musicPlan != null &&
+            musicPlan.sourceSha256 == musicSourceHash &&
+            scenePlanMatchesCurrentSourceMode(musicPlan.transformedText)'''
+          if text.count(old) != 1:
+              raise SystemExit(f'Expected one nullable music-plan pattern, found {text.count(old)}')
+          path.write_text(text.replace(old, new, 1))
+          PY
+
       - name: Verify eight-step invariants
         shell: bash
         run: |
@@ -89,6 +106,7 @@ jobs:
               'Audio runtime plans from empty Mode 3 library': 'mustPrepareFreesound' in runtime,
               'Music runtime is mode-aware': 'StoryAudioModeRouter.allowsManualPlaylist(storyAudioSourceMode)' in service,
               'Music plan validates mode ownership': 'scenePlanMatchesCurrentSourceMode' in service,
+              'Music plan nullable guard is explicit': 'musicPlan != null &&' in service,
               'Mode 3 music only uses managed Freesound': 'FreesoundImporter.soundIdFromManagedUri(track.uri)' in service,
               'Intentional silence is handled': 'XpkSceneMusicParity.SILENCE_TRACK_ID' in service,
               'AI audio can prepare without voice cast': 'planAudioWithoutVoice' in service,
@@ -129,6 +147,7 @@ jobs:
           rm -f .github/scripts/final_story_audio_8step_fix.py
           rm -f .github/scripts/final_story_audio_runtime_delta.py
           rm -f .github/workflows/final-story-audio-8step-build.yml
+          rm -f .github/final-story-audio-run.txt
 
       - name: Commit verified source fixes
         shell: bash
@@ -139,6 +158,7 @@ jobs:
             app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt \
             app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt \
             app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt \
+            .github/final-story-audio-run.txt \
             .github/scripts/agent_mode_runtime_fix.py \
             .github/scripts/audio_mode_isolation_fix.py \
             .github/scripts/final_story_audio_8step_fix.py \

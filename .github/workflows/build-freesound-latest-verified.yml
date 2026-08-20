@@ -95,7 +95,7 @@ jobs:
               if count != expected:
                   raise SystemExit(f"{path}: expected {expected} occurrences, found {count}: {old[:120]!r}")
               write(path, text.replace(old, new))
-'''
+          '''
           old_helpers = textwrap.dedent(old_helpers)
 
           new_helpers = r'''def _indent_width(line):
@@ -170,7 +170,7 @@ jobs:
 
           def replace_count(path, old, new, expected):
               _replace_flexible(path, old, new, expected)
-'''
+          '''
           new_helpers = textwrap.dedent(new_helpers)
 
           if old_helpers not in script:

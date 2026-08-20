@@ -20,6 +20,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import vn.nghetruyen.app.audio.AudioAssetKind
+import vn.nghetruyen.app.audio.PcmLoudnessEstimator
 import vn.nghetruyen.app.audio.SceneMusicAnalysisWorker
 import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
 import vn.nghetruyen.app.data.repository.LibraryRepository
@@ -61,15 +62,49 @@ class FreesoundImporter(
             }
 
             val matches = duplicateCheck.getOrThrow().filter { soundIdFromManagedUri(it.uri) == sound.id }
-            val existing = matches.firstOrNull { managedFileExists(appContext, it.uri) }
-            if (existing != null) {
-                return@withLock Result.failure(FreesoundDuplicateException(sound.id))
+            val existingFileTrack = matches.firstOrNull { managedFileExists(appContext, it.uri) }
+            if (existingFileTrack != null) {
+                if (hasValidNormalization(existingFileTrack)) {
+                    return@withLock Result.failure(FreesoundDuplicateException(sound.id))
+                }
+                return@withLock resumeExistingNormalization(
+                    track = existingFileTrack,
+                    normalizationTargetLufs = normalizationTargetLufs,
+                )
             }
             matches.forEach { stale ->
                 runCatching { repository.deleteSceneMusicTrack(stale.id) }
+                deleteManagedFile(appContext, stale.uri)
             }
 
             importPreviewLocked(sound, kind, normalizationTargetLufs)
+        }
+    }
+
+    private suspend fun resumeExistingNormalization(
+        track: SceneMusicTrackEntity,
+        normalizationTargetLufs: Float,
+    ): Result<FreesoundImportResult> {
+        return try {
+            val workId = SceneMusicAnalysisWorker.enqueue(
+                context = appContext,
+                trackId = track.id,
+                targetLufs = normalizationTargetLufs,
+            )
+            awaitNormalization(workId, track.id)
+            Result.success(
+                FreesoundImportResult(
+                    trackId = track.id,
+                    uri = track.uri,
+                    title = track.title,
+                ),
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Throwable) {
+            runCatching { repository.deleteSceneMusicTrack(track.id) }
+            deleteManagedFile(appContext, track.uri)
+            Result.failure(error)
         }
     }
 
@@ -186,7 +221,16 @@ class FreesoundImporter(
             val info = runCatching { workManager.getWorkInfoById(workId).get() }.getOrNull()
                 ?: throw FreesoundNormalizationException("Không đọc được trạng thái chuẩn hóa của tệp vừa nhập.")
             when (info.state) {
-                WorkInfo.State.SUCCEEDED -> return
+                WorkInfo.State.SUCCEEDED -> {
+                    val latest = repository.getSceneMusicTrack(trackId)
+                        ?: throw FreesoundNormalizationException("Tệp vừa chuẩn hóa không còn trong thư viện.")
+                    if (!hasValidNormalization(latest)) {
+                        throw FreesoundNormalizationException(
+                            latest.normalizationError.ifBlank { "Chuẩn hóa kết thúc nhưng dữ liệu loudness chưa hợp lệ." },
+                        )
+                    }
+                    return
+                }
                 WorkInfo.State.FAILED -> {
                     val storedError = repository.getSceneMusicTrack(trackId)?.normalizationError.orEmpty().trim()
                     throw FreesoundNormalizationException(
@@ -217,6 +261,13 @@ class FreesoundImporter(
         private val managedSoundIdRegex = Regex(
             """(?i)(?:^|/)audio/freesound/(?:music|ambience|sfx)/freesound_(\d+)_[-0-9a-f]+\.(?:ogg|mp3)$""",
         )
+
+        internal fun hasValidNormalization(track: SceneMusicTrackEntity): Boolean =
+            track.normalizationVersion >= PcmLoudnessEstimator.VERSION &&
+                track.normalizationError.isBlank() &&
+                track.loudnessLufsEstimate.isFinite() &&
+                track.peakDbfs.isFinite() &&
+                track.normalizationGainDb.isFinite()
 
         internal fun extensionForPreviewUrl(url: String): String {
             val clean = url.substringBefore('?').substringBefore('#').lowercase(Locale.ROOT)

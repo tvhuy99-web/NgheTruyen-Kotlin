@@ -45,6 +45,7 @@ import vn.nghetruyen.app.audio.AudioDirectionPreferences
 import vn.nghetruyen.app.audio.PcmLoudnessEstimator
 import vn.nghetruyen.app.audio.SceneMusicAnalysisWorker
 import vn.nghetruyen.app.audio.StoryAudioSourceMode
+import vn.nghetruyen.app.freesound.FreesoundImporter
 import vn.nghetruyen.app.playback.PlaybackQueueStore
 import vn.nghetruyen.app.playback.ReaderPlaybackService
 
@@ -146,7 +147,10 @@ fun AudioDirectionLayerSwitches(
         val sfxTarget = normalizationSfxDraft
             .coerceIn(PcmLoudnessEstimator.MIN_TARGET_LUFS, PcmLoudnessEstimator.MAX_TARGET_LUFS)
         val runKinds = normalizationKinds
-        val runTracks = tracks.filter { AudioAssetClassifier.classify(it) in runKinds }
+    val eligibleTracks = if (sourceMode == StoryAudioSourceMode.AI_FREESOUND) {
+        tracks.filter { FreesoundImporter.soundIdFromManagedUri(it.uri) != null }
+    } else tracks
+    val runTracks = eligibleTracks.filter { AudioAssetClassifier.classify(it) in runKinds }
 
         normalizationSaving = true
         normalizationPersistenceError = null
@@ -370,7 +374,7 @@ fun AudioDirectionLayerSwitches(
                 HorizontalDivider(Modifier.padding(vertical = 6.dp))
                 AudioManagerButton(
                     label = "CHUẨN HÓA / BẢO TRÌ FILE ÂM THANH MODE 3",
-                    enabled = tracks.isNotEmpty(),
+            enabled = tracks.any { FreesoundImporter.soundIdFromManagedUri(it.uri) != null },
                     onClick = { openNormalization(AudioAssetKind.entries.toSet()) },
                 )
                 Text("Mode 3 chỉ phát các file Freesound đã resolve cho kế hoạch hiện tại. Nếu một nhu cầu không resolve được, lớp tương ứng giữ im lặng; không dùng kho local làm fallback.")

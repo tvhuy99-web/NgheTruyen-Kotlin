@@ -32,8 +32,9 @@ class FreesoundStage5Test {
         assertTrue(fields.contains("description"))
         assertTrue(fields.contains("duration"))
         assertTrue(fields.contains("previews"))
-        assertFalse(fields.contains("license"))
-        assertFalse(fields.contains("username"))
+        assertTrue(fields.contains("license"))
+    assertTrue(fields.contains("username"))
+    assertTrue(fields.contains("url"))
     }
 
     @Test

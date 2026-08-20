@@ -65,8 +65,9 @@ class FreesoundClientTest {
         assertTrue(fields.contains("description"))
         assertTrue(fields.contains("duration"))
         assertTrue(fields.contains("previews"))
-        assertFalse(fields.contains("username"))
-        assertFalse(fields.contains("license"))
+        assertTrue(fields.contains("username"))
+    assertTrue(fields.contains("license"))
+    assertTrue(fields.contains("url"))
     }
 
     @Test
@@ -136,6 +137,9 @@ class FreesoundClientTest {
                   "name": "Thunder Strike.wav",
                   "description": "A loud close thunder strike.",
                   "duration": 8.75,
+                "username": "fieldrecorder",
+                "license": "Creative Commons 0",
+                "url": "https://freesound.org/people/fieldrecorder/sounds/123/",
                   "previews": {
                     "preview-hq-mp3": "https://cdn.freesound.org/previews/123/123-hq.mp3",
                     "preview-hq-ogg": "https://cdn.freesound.org/previews/123/123-hq.ogg"
@@ -166,7 +170,10 @@ class FreesoundClientTest {
         assertEquals("Thunder Strike.wav", sound.name)
         assertEquals("A loud close thunder strike.", sound.description)
         assertEquals(8.75, sound.durationSeconds, 0.001)
-        assertEquals("https://cdn.freesound.org/previews/123/123-hq.ogg", sound.preferredPreviewUrl)
+        assertEquals("https://cdn.freesound.org/previews/123/123-hq.mp3", sound.preferredPreviewUrl)
+    assertEquals("fieldrecorder", sound.username)
+    assertEquals("Creative Commons 0", sound.license)
+    assertEquals("https://freesound.org/people/fieldrecorder/sounds/123/", sound.webUrl)
     }
 
     @Test

@@ -25,6 +25,7 @@ import vn.nghetruyen.app.audio.StoryAudioModeRouter
 import vn.nghetruyen.app.audio.StoryAudioSourceMode
 import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
 import vn.nghetruyen.app.data.repository.LibraryRepository
+import vn.nghetruyen.app.freesound.FreesoundImporter
 
 /**
  * Playback consumer for the unified XPK chapter plan. This class never calls an AI provider itself:
@@ -167,7 +168,7 @@ class AudioDirectionRuntime(
         }
 
         var rawTracks = libraryRepository.listEnabledSceneMusicTracks()
-        var allAssets = buildRuntimeAssets(rawTracks, settings)
+        var allAssets = buildRuntimeAssets(rawTracks, settings, sourceMode)
         var activeAudioAssets = activeAudioAssets(allAssets, settings)
         updateRuntimeAssets(allAssets)
 
@@ -217,7 +218,7 @@ class AudioDirectionRuntime(
             // pass must immediately consume that new library state instead of keeping the pre-download
             // snapshot until a later paragraph/revalidation.
             rawTracks = libraryRepository.listEnabledSceneMusicTracks()
-            allAssets = buildRuntimeAssets(rawTracks, settings)
+            allAssets = buildRuntimeAssets(rawTracks, settings, sourceMode)
             activeAudioAssets = activeAudioAssets(allAssets, settings)
             updateRuntimeAssets(allAssets)
             signature = buildPlanSignature(
@@ -244,7 +245,14 @@ class AudioDirectionRuntime(
     private fun buildRuntimeAssets(
         rawTracks: List<SceneMusicTrackEntity>,
         settings: AudioDirectionPreferences.Snapshot,
-    ): List<AudioDirectionAsset> = rawTracks.map { track ->
+        sourceMode: StoryAudioSourceMode,
+    ): List<AudioDirectionAsset> = rawTracks
+        .asSequence()
+        .filter { track ->
+            !StoryAudioModeRouter.usesAiFreesound(sourceMode) ||
+                FreesoundImporter.soundIdFromManagedUri(track.uri) != null
+        }
+        .map { track ->
         val asset = AudioAssetClassifier.toAsset(track)
         if (asset.kind == AudioAssetKind.MUSIC) {
             asset
@@ -270,7 +278,7 @@ class AudioDirectionRuntime(
             }
             asset.copy(normalizationGainDb = gainDb)
         }
-    }.filter { it.id.isNotBlank() && it.uri.isNotBlank() }
+    }.filter { it.id.isNotBlank() && it.uri.isNotBlank() }.toList()
 
     private fun activeAudioAssets(
         allAssets: List<AudioDirectionAsset>,

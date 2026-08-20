@@ -282,8 +282,8 @@ fun FreesoundSearchDialog(
         queueErrors = emptyMap()
 
         scope.launch {
+        try {
             pendingQueueStore.save(kind, candidates, autoResume = true)
-            try {
                 for ((index, sound) in candidates.withIndex()) {
                     if (sound.id in existingAssets) {
                         queueStates = queueStates + (sound.id to FreesoundImportQueueStatus.DUPLICATE)
@@ -332,6 +332,14 @@ fun FreesoundSearchDialog(
                         }
                     }
                 }
+            } catch (error: Throwable) {
+                val message = error.message ?: "Không lưu/khôi phục được hàng đợi Freesound."
+                queueStates = queueStates.mapValues { (_, state) ->
+                    if (state == FreesoundImportQueueStatus.QUEUED || state == FreesoundImportQueueStatus.IMPORTING) {
+                        FreesoundImportQueueStatus.FAILED
+                    } else state
+                }
+                status = message
             } finally {
                 queueRunning = false
                 val summary = summarizeFreesoundQueue(queueStates.values)

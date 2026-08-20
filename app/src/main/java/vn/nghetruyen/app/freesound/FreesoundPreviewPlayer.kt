@@ -123,17 +123,7 @@ class FreesoundPreviewPlayer {
         internal fun previewCandidates(previewUrl: String): List<String> {
             val primary = previewUrl.trim().takeIf { it.startsWith("https://", ignoreCase = true) }
                 ?: return emptyList()
-            val fallback = inferredMp3Fallback(primary)
-            return listOfNotNull(primary, fallback).distinct()
-        }
-
-        internal fun inferredMp3Fallback(previewUrl: String): String? {
-            val fragmentIndex = previewUrl.indexOf('#').let { if (it < 0) previewUrl.length else it }
-            val queryIndex = previewUrl.indexOf('?').let { if (it < 0) previewUrl.length else it }
-            val suffixIndex = minOf(fragmentIndex, queryIndex)
-            val path = previewUrl.substring(0, suffixIndex)
-            if (!path.endsWith(".ogg", ignoreCase = true)) return null
-            return path.dropLast(4) + ".mp3" + previewUrl.substring(suffixIndex)
+            return listOf(primary)
         }
     }
 }

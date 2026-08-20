@@ -68,9 +68,12 @@ data class FreesoundSound(
     val durationSeconds: Double,
     val previewHqMp3: String?,
     val previewHqOgg: String?,
+    val username: String = "",
+    val license: String = "",
+    val webUrl: String = "",
 ) {
     val preferredPreviewUrl: String?
-        get() = previewHqOgg ?: previewHqMp3
+        get() = previewHqMp3 ?: previewHqOgg
 }
 
 data class FreesoundSearchPage(

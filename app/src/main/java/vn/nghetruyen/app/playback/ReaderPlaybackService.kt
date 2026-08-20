@@ -1911,7 +1911,7 @@ class ReaderPlaybackService : Service() {
                     PlaybackQueueStore.setNarrationAutomation(
                         stage = NarrationAutomationStage.CURRENT_APPLYING,
                         progress = 0.85f,
-                        message = "Đã phân vai $assignmentCount mục. Đang áp dụng giọng${if (shouldPlanAutoSceneMusic()) " và nhạc cảnh" else ""}."
+                        message = "Đã phân vai $assignmentCount mục. Đang áp dụng giọng${if (shouldPlanAutoStoryAudio()) " và âm thanh truyện" else ""}."
                     )
                     val configured = applyConfiguredVoice(useStoryProfile = true)
                     withContext(Dispatchers.Main) {
@@ -1920,12 +1920,38 @@ class ReaderPlaybackService : Service() {
                         narrationPlanningChapterId = ""
                         voiceSettingsReady = configured
                         val musicApplied = hasSceneMusicPlan()
+                        val mode3 = StoryAudioModeRouter.usesAiFreesound(storyAudioSourceMode)
+                        val warning = warnings.firstOrNull()?.takeIf(String::isNotBlank)
+                        val audioStatus = when {
+                            !mode3 -> if (musicApplied) " và đã áp dụng nhạc cảnh" else ""
+                            planResult == null -> " • Mode 3 chưa tạo được kế hoạch âm thanh"
+                            planResult.freesoundRetryRequired ->
+                                " • Freesound đang lỗi tạm thời; sẽ thử resolve lại"
+                            planResult.freesoundResolvedAssets > 0 ->
+                                " • Freesound đã resolve ${planResult.freesoundResolvedAssets} tệp"
+                            shouldPlanAutoStoryAudio() -> " • Freesound chưa resolve được tệp nào"
+                            else -> " • các lớp âm thanh Mode 3 đang tắt"
+                        }
                         PlaybackQueueStore.setNarrationAutomation(
                             stage = NarrationAutomationStage.CURRENT_READY,
                             progress = 1f,
-                            message = "Đã phân vai xong $assignmentCount mục${if (musicApplied) " và đã áp dụng nhạc cảnh" else ""}. Đang bắt đầu phát.",
+                            message = "Đã phân vai xong $assignmentCount mục$audioStatus. Đang bắt đầu phát." +
+                                warning?.let { " • ${it.take(140)}" }.orEmpty(),
                         )
-                        transitionMessage = null
+                        if (mode3) {
+                            diagnostic(
+                                "FREESOUND_AUTO_PLAN_APPLIED",
+                                if (planResult?.freesoundRetryRequired == true || warning != null) DiagnosticSeverity.WARN else DiagnosticSeverity.INFO,
+                                mapOf(
+                                    "resolvedAssets" to (planResult?.freesoundResolvedAssets ?: 0).toString(),
+                                    "retryRequired" to (planResult?.freesoundRetryRequired ?: false).toString(),
+                                    "musicApplied" to musicApplied.toString(),
+                                    "audioPlanCreated" to (planResult?.audioPlanCreated ?: false).toString(),
+                                    "warning" to warning.orEmpty().take(180),
+                                ),
+                            )
+                        }
+                        transitionMessage = warning?.take(180)
                         if (configured && pendingPlay) {
                             pendingPlay = false
                             play()

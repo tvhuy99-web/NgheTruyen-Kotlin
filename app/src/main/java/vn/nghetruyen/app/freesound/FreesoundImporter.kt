@@ -37,6 +37,7 @@ class FreesoundDuplicateException(
 
 class FreesoundNormalizationException(
     message: String,
+    val retryable: Boolean = false,
 ) : IllegalStateException(message)
 
 class FreesoundImporter(
@@ -107,11 +108,17 @@ class FreesoundImporter(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Throwable) {
+        if (error is FreesoundNormalizationException && error.retryable) {
+            // The download is already valid. Keep it plus the marker so a later Mode-3
+            // resolve can resume normalization instead of downloading the same sound again.
+            Result.failure(error)
+        } else {
             runCatching { repository.deleteSceneMusicTrack(track.id) }
             deleteManagedFile(appContext, track.uri)
             marker?.delete()
             Result.failure(error)
         }
+    }
     }
 
     private suspend fun importPreviewLocked(
@@ -141,6 +148,7 @@ class FreesoundImporter(
             if (attempt.isSuccess) return attempt
             val error = attempt.exceptionOrNull()
             if (error is CancellationException) throw error
+            if (error is FreesoundNormalizationException && error.retryable) return attempt
             lastError = error
         }
 
@@ -225,7 +233,14 @@ class FreesoundImporter(
 
             val uri = Uri.fromFile(finalFile).toString()
             val title = titleForImport(sound.name, "Âm thanh Freesound ${sound.id}")
-            val tagsCsv = tagsForImport(kind, sound.description)
+            val tagsCsv = tagsForImport(
+        kind = kind,
+        description = sound.description,
+        soundId = sound.id,
+        username = sound.username,
+        license = sound.license,
+        sourceUrl = sound.webUrl,
+    )
             val trackId = repository.saveSceneMusicTrack(
                 title = title,
                 uri = uri,
@@ -268,7 +283,10 @@ class FreesoundImporter(
         val deadline = System.currentTimeMillis() + NORMALIZATION_TIMEOUT_MS
         while (true) {
             val info = runCatching { workManager.getWorkInfoById(workId).get() }.getOrNull()
-                ?: throw FreesoundNormalizationException("Không đọc được trạng thái chuẩn hóa của tệp vừa nhập.")
+        ?: throw FreesoundNormalizationException(
+            "Không đọc được trạng thái chuẩn hóa của tệp vừa nhập; tệp đã được giữ để thử lại.",
+            retryable = true,
+        )
             when (info.state) {
                 WorkInfo.State.SUCCEEDED -> {
                     val latest = repository.getSceneMusicTrack(trackId)
@@ -286,12 +304,15 @@ class FreesoundImporter(
                         storedError.ifBlank { "Chuẩn hóa âm thanh Freesound thất bại." },
                     )
                 }
-                WorkInfo.State.CANCELLED -> throw FreesoundNormalizationException("Chuẩn hóa âm thanh Freesound đã bị hủy.")
+                WorkInfo.State.CANCELLED -> throw FreesoundNormalizationException("Chuẩn hóa âm thanh Freesound đã bị hủy; tệp đã được giữ để thử lại.", retryable = true)
                 else -> Unit
             }
             if (System.currentTimeMillis() >= deadline) {
                 SceneMusicAnalysisWorker.cancel(appContext, workId)
-                throw FreesoundNormalizationException("Chuẩn hóa âm thanh Freesound quá thời gian cho phép.")
+                throw FreesoundNormalizationException(
+            "Chuẩn hóa âm thanh Freesound quá thời gian cho phép; tệp đã được giữ để thử lại.",
+            retryable = true,
+        )
             }
             delay(NORMALIZATION_POLL_MS)
         }
@@ -339,14 +360,28 @@ class FreesoundImporter(
             return withoutExtension.ifBlank { fallback }.take(120)
         }
 
-        internal fun tagsForImport(kind: AudioAssetKind, description: String): String {
+                internal fun tagsForImport(
+            kind: AudioAssetKind,
+            description: String,
+            soundId: Int? = null,
+            username: String = "",
+            license: String = "",
+            sourceUrl: String = "",
+        ): String {
             val marker = when (kind) {
                 AudioAssetKind.MUSIC -> "type:music"
                 AudioAssetKind.AMBIENCE -> "type:ambience"
                 AudioAssetKind.SFX -> "type:sfx"
             }
-            val clean = description.trim().take(300)
-            return if (clean.isBlank()) marker else "$marker, $clean"
+            val pieces = mutableListOf(marker)
+            description.trim().take(300).takeIf(String::isNotBlank)?.let(pieces::add)
+            soundId?.takeIf { it > 0 }?.let { pieces += "freesound_id:$it" }
+            username.trim().take(120).takeIf(String::isNotBlank)?.let { pieces += "freesound_user:$it" }
+            license.trim().take(240).takeIf(String::isNotBlank)?.let { pieces += "freesound_license:$it" }
+            sourceUrl.trim()
+                .takeIf { it.startsWith("https://freesound.org/", ignoreCase = true) }
+                ?.let { pieces += "freesound_url:$it" }
+            return pieces.joinToString(", ")
         }
 
         /** Returns a completed local Freesound id. In-progress normalization is intentionally hidden from UI duplicate checks. */

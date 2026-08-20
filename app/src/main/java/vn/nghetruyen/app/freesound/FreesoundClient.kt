@@ -178,7 +178,7 @@ class FreesoundClient(
         private const val SEARCH_URL = "https://freesound.org/apiv2/search/"
         private const val API_BASE_URL = "https://freesound.org/apiv2/"
         private const val USER_AGENT = "NgheTruyen-Android/Freesound"
-        private const val SEARCH_FIELDS = "id,name,description,duration,previews"
+        private const val SEARCH_FIELDS = "id,url,name,description,duration,previews,username,license"
         private const val CACHE_MAX_ENTRIES = 48
         private const val CACHE_TTL_MS = 5L * 60L * 1_000L
         private const val RATE_WINDOW_MS = 60_000L
@@ -277,6 +277,11 @@ class FreesoundClient(
                                 previewHqOgg = previews?.optString("preview-hq-ogg")
                                     ?.trim()
                                     ?.takeIf { it.startsWith("https://", ignoreCase = true) },
+                                username = item.optString("username").trim().take(120),
+                                license = item.optString("license").trim().take(240),
+                                webUrl = item.optString("url").trim()
+                                    .takeIf { it.startsWith("https://freesound.org/", ignoreCase = true) }
+                                    .orEmpty(),
                             ),
                         )
                     }

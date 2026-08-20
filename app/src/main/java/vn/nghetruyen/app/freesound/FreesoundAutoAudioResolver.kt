@@ -16,6 +16,12 @@ import vn.nghetruyen.app.data.settings.SettingsRepository
 
 private enum class FreesoundAutoResolutionSource { CACHE, FREESOUND, UNRESOLVED }
 
+internal data class FreesoundAutoSearchOutcome(
+    val sound: FreesoundSound?,
+    val failureMessage: String? = null,
+    val retryable: Boolean = false,
+)
+
 data class FreesoundAutoResolvedNeed(
     val need: FreesoundAutoSearchNeed,
     val trackId: String?,
@@ -26,6 +32,7 @@ data class FreesoundAutoResolveResult(
     val resolved: List<FreesoundAutoResolvedNeed>,
     val warnings: List<String>,
     val importedTrackIds: Set<String>,
+    val retryableFailure: Boolean = false,
 ) {
     val resolvedCount: Int get() = resolved.count { !it.trackId.isNullOrBlank() }
 }
@@ -86,6 +93,7 @@ class FreesoundAutoAudioResolver(
         val warnings = mutableListOf<String>()
         val imported = linkedSetOf<String>()
         val resolutions = mutableListOf<FreesoundAutoResolvedNeed>()
+        var retryableFailure = false
 
         for (need in needs) {
             val currentTracks = runCatching { existingTracksProvider() }.getOrDefault(emptyList())
@@ -103,7 +111,12 @@ class FreesoundAutoAudioResolver(
                 queryCache.remove(need.kind, need.query)
             }
 
-            val remote = searchBest(need)
+                    val search = searchBest(need)
+            val remote = search.sound
+            if (!search.failureMessage.isNullOrBlank()) {
+                warnings += "Freesound ‘${need.query}’: ${search.failureMessage}"
+                retryableFailure = retryableFailure || search.retryable
+            }
             var resolvedTrack: SceneMusicTrackEntity? = null
             if (remote != null) {
                 val import = importer.importPreview(
@@ -115,30 +128,43 @@ class FreesoundAutoAudioResolver(
                     val result = import.getOrThrow()
                     imported += result.trackId
                     resolvedTrack = runCatching { existingTracksProvider() }.getOrDefault(emptyList())
-                        .firstOrNull { it.id == result.trackId }
+                        .firstOrNull { it.id == result.trackId && it.enabled }
                 } else if (import.exceptionOrNull() is FreesoundDuplicateException) {
                     resolvedTrack = runCatching { existingTracksProvider() }.getOrDefault(emptyList())
                         .firstOrNull { track ->
+                            track.enabled &&
+                                FreesoundImporter.managedFileExists(appContext, track.uri) &&
                             FreesoundImporter.soundIdFromManagedUri(track.uri) == remote.id &&
                                 AudioAssetClassifier.classify(track) == need.kind
                         }
+                } else {
+                    val error = import.exceptionOrNull()
+                    val message = error?.message?.takeIf(String::isNotBlank)
+                        ?: "Không nhập/chuẩn hóa được preview đã chọn."
+                    warnings += "Freesound ‘${need.query}’: $message"
+                    if (error is FreesoundNormalizationException && error.retryable) retryableFailure = true
                 }
             }
 
-            if (resolvedTrack != null && FreesoundImporter.soundIdFromManagedUri(resolvedTrack.uri) != null) {
+            if (resolvedTrack != null && resolvedTrack.enabled &&
+                FreesoundImporter.managedFileExists(appContext, resolvedTrack.uri) &&
+                FreesoundImporter.soundIdFromManagedUri(resolvedTrack.uri) != null
+            ) {
                 queryCache.put(need.kind, need.query, resolvedTrack.id)
                 resolutions += FreesoundAutoResolvedNeed(need, resolvedTrack.id, FreesoundAutoResolutionSource.FREESOUND.name)
                 continue
             }
 
             resolutions += FreesoundAutoResolvedNeed(need, null, FreesoundAutoResolutionSource.UNRESOLVED.name)
+    if (search.failureMessage.isNullOrBlank() && remote == null) {
             val prefix = if (need.importance == FreesoundRequirementImportance.REQUIRED) "Âm thanh quan trọng" else "Âm thanh tùy chọn"
-            warnings += "$prefix ‘${need.query}’ chưa tìm được trên Freesound; khoảng đó sẽ im lặng ở lớp tương ứng."
+        warnings += "$prefix ‘${need.query}’ chưa tìm thấy kết quả đủ phù hợp trên Freesound; khoảng đó sẽ im lặng ở lớp tương ứng."
+    }
         }
-        return FreesoundAutoResolveResult(resolutions, warnings.distinct(), imported)
+        return FreesoundAutoResolveResult(resolutions, warnings.distinct(), imported, retryableFailure)
     }
 
-    private suspend fun searchBest(need: FreesoundAutoSearchNeed): FreesoundSound? {
+        private suspend fun searchBest(need: FreesoundAutoSearchNeed): FreesoundAutoSearchOutcome {
         val request = FreesoundSearchRequest(
             query = need.query,
             category = need.kind.toFreesoundCategory(),
@@ -148,13 +174,20 @@ class FreesoundAutoAudioResolver(
             pageSize = SEARCH_PAGE_SIZE,
         )
         return when (val result = client.search(request)) {
-            is FreesoundSearchResult.Failure -> null
-            is FreesoundSearchResult.Success -> result.page.results
+            is FreesoundSearchResult.Failure -> FreesoundAutoSearchOutcome(
+                sound = null,
+                failureMessage = result.message,
+                retryable = result.httpCode == null || result.httpCode in setOf(401, 403, 429) ||
+                    (result.httpCode ?: 0) >= 500,
+            )
+            is FreesoundSearchResult.Success -> FreesoundAutoSearchOutcome(
+                sound = result.page.results
                 .mapIndexed { index, sound -> sound to scoreCandidate(need.query, sound, index) }
                 .filter { it.first.preferredPreviewUrl != null }
                 .maxByOrNull { it.second }
                 ?.takeIf { it.second >= REMOTE_MIN_SCORE }
-                ?.first
+                    ?.first,
+            )
         }
     }
 

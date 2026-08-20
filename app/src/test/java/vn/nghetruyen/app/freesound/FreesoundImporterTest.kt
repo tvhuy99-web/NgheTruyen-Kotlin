@@ -36,16 +36,12 @@ class FreesoundImporterTest {
     }
 
     @Test
-    fun previewPlayerInfersMp3FallbackFromOggWithoutDroppingQuery() {
+        fun previewPlayerUsesOnlyTheRealUrlReturnedByFreesound() {
         assertEquals(
-            "https://cdn.example/77-hq.mp3?token=x",
-            FreesoundPreviewPlayer.inferredMp3Fallback("https://cdn.example/77-hq.ogg?token=x"),
+            listOf("https://cdn.example/77-hq.ogg?token=x"),
+            FreesoundPreviewPlayer.previewCandidates("https://cdn.example/77-hq.ogg?token=x"),
         )
-        assertNull(FreesoundPreviewPlayer.inferredMp3Fallback("https://cdn.example/77-hq.mp3"))
-        assertEquals(
-            listOf("https://cdn.example/77-hq.ogg", "https://cdn.example/77-hq.mp3"),
-            FreesoundPreviewPlayer.previewCandidates("https://cdn.example/77-hq.ogg"),
-        )
+        assertTrue(FreesoundPreviewPlayer.previewCandidates("http://example.invalid/a.mp3").isEmpty())
     }
 
     @Test
@@ -70,6 +66,19 @@ class FreesoundImporterTest {
             "type:sfx",
             FreesoundImporter.tagsForImport(AudioAssetKind.SFX, "   "),
         )
+
+            val provenance = FreesoundImporter.tagsForImport(
+            kind = AudioAssetKind.SFX,
+            description = "Close thunder",
+            soundId = 123,
+            username = "fieldrecorder",
+            license = "Creative Commons 0",
+            sourceUrl = "https://freesound.org/people/fieldrecorder/sounds/123/",
+        )
+        assertTrue(provenance.contains("freesound_id:123"))
+        assertTrue(provenance.contains("freesound_user:fieldrecorder"))
+        assertTrue(provenance.contains("freesound_license:Creative Commons 0"))
+        assertTrue(provenance.contains("freesound_url:https://freesound.org/people/fieldrecorder/sounds/123/"))
 
         val longDescription = "x".repeat(500)
         val tags = FreesoundImporter.tagsForImport(AudioAssetKind.SFX, longDescription)

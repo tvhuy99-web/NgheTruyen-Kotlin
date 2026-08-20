@@ -53,7 +53,10 @@ class FreesoundPendingQueueStore(context: Context) {
                                 .put("description", sound.description.take(4_000))
                                 .put("duration", sound.durationSeconds)
                                 .put("preview_hq_mp3", sound.previewHqMp3 ?: JSONObject.NULL)
-                                .put("preview_hq_ogg", sound.previewHqOgg ?: JSONObject.NULL),
+                            .put("preview_hq_ogg", sound.previewHqOgg ?: JSONObject.NULL)
+                            .put("username", sound.username)
+                            .put("license", sound.license)
+                            .put("web_url", sound.webUrl),
                         )
                     }
                 },
@@ -90,6 +93,11 @@ class FreesoundPendingQueueStore(context: Context) {
                             durationSeconds = row.optDouble("duration", 0.0).coerceAtLeast(0.0),
                             previewHqMp3 = mp3,
                             previewHqOgg = ogg,
+                            username = row.optString("username").trim().take(120),
+                            license = row.optString("license").trim().take(240),
+                            webUrl = row.optString("web_url").trim()
+                                .takeIf { it.startsWith("https://freesound.org/", ignoreCase = true) }
+                                .orEmpty(),
                         ),
                     )
                 }

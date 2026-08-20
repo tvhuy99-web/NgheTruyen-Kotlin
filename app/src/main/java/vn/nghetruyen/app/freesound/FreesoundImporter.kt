@@ -61,10 +61,11 @@ class FreesoundImporter(
                 )
             }
 
-            val matches = duplicateCheck.getOrThrow().filter { soundIdFromManagedUri(it.uri) == sound.id }
+            val matches = duplicateCheck.getOrThrow().filter { rawSoundIdFromManagedUri(it.uri) == sound.id }
             val existingFileTrack = matches.firstOrNull { managedFileExists(appContext, it.uri) }
             if (existingFileTrack != null) {
                 if (hasValidNormalization(existingFileTrack)) {
+                    normalizationMarker(existingFileTrack.uri)?.delete()
                     return@withLock Result.failure(FreesoundDuplicateException(sound.id))
                 }
                 return@withLock resumeExistingNormalization(
@@ -85,13 +86,17 @@ class FreesoundImporter(
         track: SceneMusicTrackEntity,
         normalizationTargetLufs: Float,
     ): Result<FreesoundImportResult> {
+        val marker = normalizationMarker(track.uri)
         return try {
+            marker?.parentFile?.mkdirs()
+            marker?.writeText("normalizing", Charsets.UTF_8)
             val workId = SceneMusicAnalysisWorker.enqueue(
                 context = appContext,
                 trackId = track.id,
                 targetLufs = normalizationTargetLufs,
             )
             awaitNormalization(workId, track.id)
+            marker?.delete()
             Result.success(
                 FreesoundImportResult(
                     trackId = track.id,
@@ -104,6 +109,7 @@ class FreesoundImporter(
         } catch (error: Throwable) {
             runCatching { repository.deleteSceneMusicTrack(track.id) }
             deleteManagedFile(appContext, track.uri)
+            marker?.delete()
             Result.failure(error)
         }
     }
@@ -130,6 +136,7 @@ class FreesoundImporter(
             "freesound_${sound.id}_${UUID.randomUUID()}.$extension",
         )
         val partFile = File(directory, "${finalFile.name}.part")
+        val markerFile = File("${finalFile.absolutePath}$NORMALIZING_SUFFIX")
         var savedTrackId: String? = null
 
         try {
@@ -176,6 +183,7 @@ class FreesoundImporter(
                 partFile.delete()
             }
             validateDownloadedAudio(finalFile)
+            markerFile.writeText("normalizing", Charsets.UTF_8)
 
             val uri = Uri.fromFile(finalFile).toString()
             val title = titleForImport(sound.name, "Âm thanh Freesound ${sound.id}")
@@ -193,6 +201,7 @@ class FreesoundImporter(
                 targetLufs = normalizationTargetLufs,
             )
             awaitNormalization(workId, trackId)
+            markerFile.delete()
 
             return Result.success(
                 FreesoundImportResult(
@@ -205,11 +214,13 @@ class FreesoundImporter(
             savedTrackId?.let { runCatching { repository.deleteSceneMusicTrack(it) } }
             partFile.delete()
             finalFile.delete()
+            markerFile.delete()
             throw cancelled
         } catch (error: Throwable) {
             savedTrackId?.let { runCatching { repository.deleteSceneMusicTrack(it) } }
             partFile.delete()
             finalFile.delete()
+            markerFile.delete()
             return Result.failure(error)
         }
     }
@@ -253,6 +264,7 @@ class FreesoundImporter(
         internal const val MAX_PREVIEW_BYTES = 64L * 1024L * 1024L
         internal const val MAX_BATCH_SIZE = 50
         private const val MANAGED_ROOT = "audio/freesound"
+        private const val NORMALIZING_SUFFIX = ".normalizing"
         private const val FREE_SPACE_RESERVE_BYTES = 4L * 1024L * 1024L
         private const val UNKNOWN_LENGTH_REQUIRED_BYTES = 12L * 1024L * 1024L
         private const val NORMALIZATION_POLL_MS = 300L
@@ -293,9 +305,23 @@ class FreesoundImporter(
             return if (clean.isBlank()) marker else "$marker, $clean"
         }
 
+        /** Returns a completed local Freesound id. In-progress normalization is intentionally hidden from UI duplicate checks. */
         internal fun soundIdFromManagedUri(uri: String): Int? {
+            val id = rawSoundIdFromManagedUri(uri) ?: return null
+            if (normalizationMarker(uri)?.isFile == true) return null
+            return id
+        }
+
+        private fun rawSoundIdFromManagedUri(uri: String): Int? {
             val clean = uri.substringBefore('?').substringBefore('#')
             return managedSoundIdRegex.find(clean)?.groupValues?.getOrNull(1)?.toIntOrNull()
+        }
+
+        private fun normalizationMarker(uri: String): File? {
+            val parsed = runCatching { Uri.parse(uri) }.getOrNull() ?: return null
+            if (!parsed.scheme.equals("file", ignoreCase = true)) return null
+            val path = parsed.path ?: return null
+            return File("$path$NORMALIZING_SUFFIX")
         }
 
         fun managedFileExists(context: Context, uri: String): Boolean {
@@ -305,6 +331,7 @@ class FreesoundImporter(
 
         fun deleteManagedFile(context: Context, uri: String): Boolean {
             val candidate = managedFile(context, uri) ?: return false
+            normalizationMarker(uri)?.delete()
             return !candidate.exists() || candidate.delete()
         }
 

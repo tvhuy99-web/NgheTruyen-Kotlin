@@ -42,6 +42,7 @@ import kotlinx.coroutines.launch
 import vn.nghetruyen.app.NgheTruyenApplication
 import vn.nghetruyen.app.audio.AudioAssetClassifier
 import vn.nghetruyen.app.audio.AudioAssetKind
+import vn.nghetruyen.app.audio.AudioAssetManagerJournalStore
 import vn.nghetruyen.app.audio.AudioDirectionPreferences
 import vn.nghetruyen.app.audio.PcmLoudnessEstimator
 import vn.nghetruyen.app.audio.SceneMusicAnalysisWorker
@@ -66,6 +67,7 @@ fun UnifiedAudioAssetManagerDialog(
     val repository = application.container.libraryRepository
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
+    val managerJournal = remember(context) { AudioAssetManagerJournalStore(context) }
     val normalizationTarget = normalizationTargetLufs
         .coerceIn(PcmLoudnessEstimator.MIN_TARGET_LUFS, PcmLoudnessEstimator.MAX_TARGET_LUFS)
 
@@ -76,6 +78,7 @@ fun UnifiedAudioAssetManagerDialog(
     var draft by remember(kind) { mutableStateOf(initialRows) }
     var movedTracks by remember(kind) { mutableStateOf<Map<String, SceneMusicTrackEntity>>(emptyMap()) }
     var transientAddedIds by remember(kind) { mutableStateOf<Set<String>>(emptySet()) }
+    var journalLoaded by remember(kind) { mutableStateOf(false) }
     val baselineIds = remember(kind) { initialRows.mapTo(linkedSetOf()) { it.id } }
     var search by remember(kind) { mutableStateOf("") }
     var selectedTrackId by remember(kind) { mutableStateOf<String?>(null) }
@@ -124,18 +127,31 @@ fun UnifiedAudioAssetManagerDialog(
 
     fun cancelLibrary() {
         stopPreview()
-        val idsToDelete = transientAddedIds.toSet()
-        if (idsToDelete.isNotEmpty()) {
-            val app = application
-            CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-                val dao = app.container.database.sceneMusicTrackDao()
-                idsToDelete.forEach { id ->
-                    dao.get(id)?.let { track -> FreesoundImporter.deleteManagedFile(context, track.uri) }
-                    dao.delete(id)
-                }
+        val stateIds = transientAddedIds.toSet()
+        val app = application
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            val dao = app.container.database.sceneMusicTrackDao()
+            val idsToDelete = stateIds + managerJournal.load(kind)
+            idsToDelete.forEach { id ->
+                dao.get(id)?.let { track -> FreesoundImporter.deleteManagedFile(context, track.uri) }
+                dao.delete(id)
             }
+            managerJournal.clear(kind)
         }
         onDismiss()
+    }
+
+    LaunchedEffect(kind) {
+        val recovered = managerJournal.load(kind)
+        if (recovered.isNotEmpty()) {
+            transientAddedIds = transientAddedIds + recovered
+            notify("Đã khôi phục ${recovered.size} tệp chưa lưu từ phiên quản lý trước.")
+        }
+        journalLoaded = true
+    }
+
+    LaunchedEffect(kind, transientAddedIds, journalLoaded) {
+        if (journalLoaded) managerJournal.save(kind, transientAddedIds)
     }
 
     DisposableEffect(kind) {
@@ -316,6 +332,7 @@ fun UnifiedAudioAssetManagerDialog(
                                         }
                                     }
 
+                                    managerJournal.clear(kind)
                                     transientAddedIds = emptySet()
                                     movedTracks = emptyMap()
                                     notify("Đã lưu ${kindDisplayName(kind).lowercase()}.")

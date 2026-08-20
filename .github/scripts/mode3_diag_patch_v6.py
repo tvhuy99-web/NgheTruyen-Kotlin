@@ -13,6 +13,13 @@ def replace_once(path, old, new):
         raise SystemExit(f"{path}: expected exactly 1 occurrence, found {count}: {old[:100]!r}")
     write(path, text.replace(old, new, 1))
 
+def replace_first(path, old, new, expected_count):
+    text = read(path)
+    count = text.count(old)
+    if count != expected_count:
+        raise SystemExit(f"{path}: expected {expected_count} occurrences before first replacement, found {count}: {old[:100]!r}")
+    write(path, text.replace(old, new, 1))
+
 # FreesoundAutoAudioResolver: detailed trace + safer persistent cache.
 path = "app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt"
 text = read(path)
@@ -288,7 +295,7 @@ replace_once(
 
         if (!voiceNeeded && !musicNeeded && !audioNeeded && !freesoundNeeded) {""",
 )
-replace_once(
+replace_first(
     path,
     """                freesoundResolvedAssets = restoredFreesound.resolvedAssets,
         freesoundRetryRequired = restoredFreesound.retryableFailure,
@@ -297,6 +304,7 @@ replace_once(
                 freesoundRetryRequired = restoredFreesound.retryableFailure,
                 freesoundDiagnostics = (freesoundDiagnostics + restoredFreesound.diagnostics + "COORDINATOR_REUSE no new AI/Freesound work required").distinct(),
             )""",
+    expected_count=2,
 )
 replace_once(
     path,

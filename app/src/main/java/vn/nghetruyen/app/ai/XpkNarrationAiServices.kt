@@ -24,6 +24,12 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlin.math.min
 
+data class AiAuxiliaryJsonResult(
+    val content: String,
+    val provider: String,
+    val model: String,
+)
+
 /**
  * Canonical XPK chapter-director transport. Voice, scene music, ambience and SFX share one prompt,
  * one provider request, one quota reservation and one response parser.
@@ -62,6 +68,43 @@ class XpkNarrationAiServices(
         return when (val result = planNarration(request)) {
             is AppResult.Failure -> result
             is AppResult.Success -> AppResult.Success(result.value.voiceCast)
+        }
+    }
+
+    /**
+     * Auxiliary structured-JSON entry point that deliberately reuses the exact transport,
+     * provider/model resolution, credentials, endpoint fallback, timeout and quota governor
+     * used by production narration/voice-cast planning.
+     */
+    suspend fun completeAuxiliaryJson(
+        storyId: String,
+        prompt: String,
+    ): AppResult<AiAuxiliaryJsonResult> {
+        val clean = prompt.trim()
+        if (clean.isBlank()) return failure("AI_EMPTY_INPUT", "Yêu cầu AI đang trống.")
+        if (clean.length > MAX_PROMPT_CHARS) {
+            return failure("AI_INPUT_TOO_LARGE", "Yêu cầu AI vượt giới hạn gửi trong một lượt.")
+        }
+        val config = resolveConfiguration(storyId)
+        validateConfiguration(config)?.let { return it }
+        diagnostic(
+            "AI_AUXILIARY_JSON_START",
+            attributes = mapOf(
+                "storyId" to storyId,
+                "provider" to config.provider.name,
+                "model" to config.model,
+                "inputChars" to clean.length.toString(),
+            ),
+        )
+        return when (val response = chat(clean, config)) {
+            is AppResult.Failure -> response
+            is AppResult.Success -> AppResult.Success(
+                AiAuxiliaryJsonResult(
+                    content = response.value,
+                    provider = config.provider.name,
+                    model = config.model,
+                ),
+            )
         }
     }
 

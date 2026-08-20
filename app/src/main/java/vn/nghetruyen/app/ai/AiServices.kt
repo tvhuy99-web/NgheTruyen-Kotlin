@@ -1,8 +1,10 @@
 package vn.nghetruyen.app.ai
 
 import vn.nghetruyen.app.audio.AmbienceScene
+import vn.nghetruyen.app.audio.AudioAssetKind
 import vn.nghetruyen.app.audio.SoundEffectCue
 import vn.nghetruyen.app.core.common.AppResult
+import vn.nghetruyen.app.freesound.FreesoundAutoRequirement
 
 data class TranslationRequest(
     val storyId: String,
@@ -102,6 +104,9 @@ data class NarrationPlanRequest(
     val includeSceneMusic: Boolean = true,
     val includeAmbience: Boolean = false,
     val includeSoundEffects: Boolean = false,
+    /** Mode 3 only: ask the SAME narration request for English Freesound search needs. */
+    val includeFreesoundAudioRequirements: Boolean = false,
+    val freesoundRequirementKinds: Set<AudioAssetKind> = emptySet(),
     val tracks: List<SceneMusicTrackOption> = emptyList(),
     val ambienceTracks: List<SceneMusicTrackOption> = emptyList(),
     val soundEffectTracks: List<SceneMusicTrackOption> = emptyList(),
@@ -116,6 +121,7 @@ data class NarrationPlan(
     val ambienceScenes: List<AmbienceScene> = emptyList(),
     val soundEffectCues: List<SoundEffectCue> = emptyList(),
     val audioDirectionError: String = "",
+    val freesoundRequirements: List<FreesoundAutoRequirement> = emptyList(),
 )
 
 interface TranslationEngine {

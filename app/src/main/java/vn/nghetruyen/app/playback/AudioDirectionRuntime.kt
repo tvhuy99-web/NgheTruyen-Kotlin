@@ -21,6 +21,9 @@ import vn.nghetruyen.app.audio.AudioDirectionLimits
 import vn.nghetruyen.app.audio.AudioDirectionPreferences
 import vn.nghetruyen.app.audio.PcmLoudnessEstimator
 import vn.nghetruyen.app.audio.SoundEffectCue
+import vn.nghetruyen.app.audio.StoryAudioModeRouter
+import vn.nghetruyen.app.audio.StoryAudioSourceMode
+import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
 import vn.nghetruyen.app.data.repository.LibraryRepository
 
 /**
@@ -152,7 +155,8 @@ class AudioDirectionRuntime(
         force: Boolean,
     ): Boolean {
         val now = System.currentTimeMillis()
-        val fastKey = buildFastKey(snapshot, settings)
+        val sourceMode = narrationPlanCoordinator.storyAudioSourceMode()
+        val fastKey = buildFastKey(snapshot, settings, sourceMode)
         if (!force &&
             preparedChapterId == snapshot.chapterId &&
             preparedSignature.isNotBlank() &&
@@ -162,58 +166,20 @@ class AudioDirectionRuntime(
             return true
         }
 
-        val rawTracks = libraryRepository.listEnabledSceneMusicTracks()
-        val rawTracksById = rawTracks.associateBy { it.id }
-        val allAssets = rawTracks.map { track ->
-            val asset = AudioAssetClassifier.toAsset(track)
-            if (asset.kind == AudioAssetKind.MUSIC) {
-                asset
-            } else {
-                val targetLufs = when (asset.kind) {
-                    AudioAssetKind.AMBIENCE -> settings.ambienceNormalizationTargetLufs
-                    AudioAssetKind.SFX -> settings.soundEffectsNormalizationTargetLufs
-                    AudioAssetKind.MUSIC -> track.normalizationTargetLufs
-                }
-                val gainDb = if (
-                    track.normalizationVersion >= PcmLoudnessEstimator.VERSION &&
-                    track.normalizationError.isBlank() &&
-                    track.loudnessLufsEstimate.isFinite() &&
-                    track.peakDbfs.isFinite()
-                ) {
-                    PcmLoudnessEstimator.calculateNormalization(
-                        track.loudnessLufsEstimate,
-                        track.peakDbfs,
-                        targetLufs,
-                    ).gainDb
-                } else {
-                    0f
-                }
-                asset.copy(normalizationGainDb = gainDb)
-            }
-        }.filter { it.id.isNotBlank() && it.uri.isNotBlank() }
-        val activeAudioAssets = allAssets.filter { asset ->
-            (settings.ambienceEnabled && asset.kind == AudioAssetKind.AMBIENCE) ||
-                (settings.soundEffectsEnabled && asset.kind == AudioAssetKind.SFX)
-        }
-        assetsById = allAssets.associateBy(AudioDirectionAsset::id)
-        ambienceVariantsById = buildAmbienceVariants(allAssets)
+        var rawTracks = libraryRepository.listEnabledSceneMusicTracks()
+        var allAssets = buildRuntimeAssets(rawTracks, settings)
+        var activeAudioAssets = activeAudioAssets(allAssets, settings)
+        updateRuntimeAssets(allAssets)
 
         val validUnits = snapshot.speechChunks.map { it.unitId }.filter(String::isNotBlank)
-        val signatureParts = ArrayList<String>(activeAudioAssets.size * 5 + 5)
-        signatureParts += "content=${paragraphFingerprint(snapshot)}"
-        activeAudioAssets.forEach { asset ->
-            val row = rawTracksById[asset.id]
-            signatureParts += asset.id
-            signatureParts += asset.title
-            signatureParts += asset.description
-            signatureParts += asset.kind.name
-            signatureParts += row?.updatedAt?.toString().orEmpty()
-        }
-        signatureParts += "chapter=${snapshot.chapterId}"
-        signatureParts += "ambience=${settings.ambienceEnabled}"
-        signatureParts += "sfx=${settings.soundEffectsEnabled}"
-        signatureParts += "timeline=${validUnits.joinToString(",")}"
-        val signature = ChapterAiWorkflow.sha256(signatureParts)
+        var signature = buildPlanSignature(
+            snapshot = snapshot,
+            settings = settings,
+            sourceMode = sourceMode,
+            rawTracks = rawTracks,
+            activeAudioAssets = activeAudioAssets,
+            validUnits = validUnits,
+        )
 
         if (!force && preparedChapterId == snapshot.chapterId && preparedSignature == signature) {
             markFastValidation(fastKey, now)
@@ -223,7 +189,7 @@ class AudioDirectionRuntime(
             return false
         }
 
-        if (activeAudioAssets.isEmpty()) {
+        if (activeAudioAssets.isEmpty() && !StoryAudioModeRouter.usesAiFreesound(sourceMode)) {
             clearFailure()
             installPlan(snapshot.chapterId, signature, validUnits, AmbienceSfxPlan())
             markFastValidation(fastKey, now)
@@ -237,7 +203,8 @@ class AudioDirectionRuntime(
         }
 
         var plan = narrationPlanCoordinator.loadAudioDirectionPlan(content)
-        if (force || plan == null) {
+        val mustPrepareFreesound = StoryAudioModeRouter.usesAiFreesound(sourceMode) && activeAudioAssets.isEmpty()
+        if (force || plan == null || mustPrepareFreesound) {
             val outcome = runCatching {
                 narrationPlanCoordinator.ensureActivePlans(content = content, force = force)
             }.getOrNull()
@@ -245,6 +212,22 @@ class AudioDirectionRuntime(
                 markFailure(signature)
                 return false
             }
+
+            // Mode 3 can download and normalize assets during ensureActivePlans(). The first playback
+            // pass must immediately consume that new library state instead of keeping the pre-download
+            // snapshot until a later paragraph/revalidation.
+            rawTracks = libraryRepository.listEnabledSceneMusicTracks()
+            allAssets = buildRuntimeAssets(rawTracks, settings)
+            activeAudioAssets = activeAudioAssets(allAssets, settings)
+            updateRuntimeAssets(allAssets)
+            signature = buildPlanSignature(
+                snapshot = snapshot,
+                settings = settings,
+                sourceMode = sourceMode,
+                rawTracks = rawTracks,
+                activeAudioAssets = activeAudioAssets,
+                validUnits = validUnits,
+            )
             plan = narrationPlanCoordinator.loadAudioDirectionPlan(content)
         }
         if (plan == null) {
@@ -258,15 +241,88 @@ class AudioDirectionRuntime(
         return true
     }
 
+    private fun buildRuntimeAssets(
+        rawTracks: List<SceneMusicTrackEntity>,
+        settings: AudioDirectionPreferences.Snapshot,
+    ): List<AudioDirectionAsset> = rawTracks.map { track ->
+        val asset = AudioAssetClassifier.toAsset(track)
+        if (asset.kind == AudioAssetKind.MUSIC) {
+            asset
+        } else {
+            val targetLufs = when (asset.kind) {
+                AudioAssetKind.AMBIENCE -> settings.ambienceNormalizationTargetLufs
+                AudioAssetKind.SFX -> settings.soundEffectsNormalizationTargetLufs
+                AudioAssetKind.MUSIC -> track.normalizationTargetLufs
+            }
+            val gainDb = if (
+                track.normalizationVersion >= PcmLoudnessEstimator.VERSION &&
+                track.normalizationError.isBlank() &&
+                track.loudnessLufsEstimate.isFinite() &&
+                track.peakDbfs.isFinite()
+            ) {
+                PcmLoudnessEstimator.calculateNormalization(
+                    track.loudnessLufsEstimate,
+                    track.peakDbfs,
+                    targetLufs,
+                ).gainDb
+            } else {
+                0f
+            }
+            asset.copy(normalizationGainDb = gainDb)
+        }
+    }.filter { it.id.isNotBlank() && it.uri.isNotBlank() }
+
+    private fun activeAudioAssets(
+        allAssets: List<AudioDirectionAsset>,
+        settings: AudioDirectionPreferences.Snapshot,
+    ): List<AudioDirectionAsset> = allAssets.filter { asset ->
+        (settings.ambienceEnabled && asset.kind == AudioAssetKind.AMBIENCE) ||
+            (settings.soundEffectsEnabled && asset.kind == AudioAssetKind.SFX)
+    }
+
+    private fun updateRuntimeAssets(allAssets: List<AudioDirectionAsset>) {
+        assetsById = allAssets.associateBy(AudioDirectionAsset::id)
+        ambienceVariantsById = buildAmbienceVariants(allAssets)
+    }
+
+    private fun buildPlanSignature(
+        snapshot: PlaybackSnapshot,
+        settings: AudioDirectionPreferences.Snapshot,
+        sourceMode: StoryAudioSourceMode,
+        rawTracks: List<SceneMusicTrackEntity>,
+        activeAudioAssets: List<AudioDirectionAsset>,
+        validUnits: List<String>,
+    ): String {
+        val rawTracksById = rawTracks.associateBy { it.id }
+        val signatureParts = ArrayList<String>(activeAudioAssets.size * 5 + 6)
+        signatureParts += "content=${paragraphFingerprint(snapshot)}"
+        activeAudioAssets.forEach { asset ->
+            val row = rawTracksById[asset.id]
+            signatureParts += asset.id
+            signatureParts += asset.title
+            signatureParts += asset.description
+            signatureParts += asset.kind.name
+            signatureParts += row?.updatedAt?.toString().orEmpty()
+        }
+        signatureParts += "chapter=${snapshot.chapterId}"
+        signatureParts += "mode=${sourceMode.name}"
+        signatureParts += "ambience=${settings.ambienceEnabled}"
+        signatureParts += "sfx=${settings.soundEffectsEnabled}"
+        signatureParts += "timeline=${validUnits.joinToString(",")}"
+        return ChapterAiWorkflow.sha256(signatureParts)
+    }
+
     private fun buildFastKey(
         snapshot: PlaybackSnapshot,
         settings: AudioDirectionPreferences.Snapshot,
-    ): String = buildString(96) {
+        sourceMode: StoryAudioSourceMode,
+    ): String = buildString(112) {
         append(snapshot.chapterId)
         append('|').append(System.identityHashCode(snapshot.paragraphs))
         append(':').append(snapshot.paragraphs.size)
         append('|').append(System.identityHashCode(snapshot.speechChunks))
         append(':').append(snapshot.speechChunks.size)
+        append('|').append(sourceMode.name)
         append('|').append(settings.ambienceEnabled)
         append('|').append(settings.soundEffectsEnabled)
         append('|').append(settings.ambienceNormalizationTargetLufs)
@@ -390,7 +446,6 @@ class AudioDirectionRuntime(
         if (triggerKey == lastTriggeredSfxKey) return
         lastTriggeredSfxKey = triggerKey
 
-        // stopUnitId is exclusive. Stop only the cue whose action ended, never unrelated overlapping SFX.
         val allowedBoundedKeys = allowedBoundedSfxKeysByUnitId[unitId].orEmpty()
         boundedSfxCueKeys.asSequence()
             .filterNot(allowedBoundedKeys::contains)
@@ -402,7 +457,6 @@ class AudioDirectionRuntime(
         ).coerceAtLeast(1)
         val candidates = mutableListOf<RuntimeSfxCue>()
 
-        // Resume a looping foreground action after pause/seek when playback lands inside its span.
         allowedBoundedKeys.asSequence()
             .mapNotNull(sfxCueByKey::get)
             .filter { runtimeCue ->
@@ -449,7 +503,6 @@ class AudioDirectionRuntime(
             lastEffectAtMillis.entries.removeAll { it.value < cutoff }
         }
 
-        // One batch may contain 2-3 concurrent foreground sources. Duck background once; narration stays untouched.
         ambienceController.duckForImportantSfx(SFX_DUCK_FACTOR, SFX_DUCK_HOLD_MS)
         SceneMusicSfxDuckBus.duck(SFX_DUCK_FACTOR, SFX_DUCK_HOLD_MS)
     }

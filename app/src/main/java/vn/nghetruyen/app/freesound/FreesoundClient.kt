@@ -48,35 +48,60 @@ class FreesoundClient(
 
     suspend fun search(request: FreesoundSearchRequest): FreesoundSearchResult = withContext(Dispatchers.IO) {
         val normalized = request.normalized()
-        val apiKey = credentialStore.apiKey()
-            ?: return@withContext FreesoundSearchResult.Failure("Chưa lưu khóa API Freesound.")
+        executeSoundListRequest(
+            url = buildSearchUrl(normalized),
+            request = normalized,
+            networkFailureMessage = "Không thể tìm trên Freesound. Hãy kiểm tra mạng rồi thử lại.",
+        )
+    }
 
+    suspend fun similar(
+        soundId: Int,
+        request: FreesoundSearchRequest,
+    ): FreesoundSearchResult = withContext(Dispatchers.IO) {
+        if (soundId <= 0) {
+            return@withContext FreesoundSearchResult.Failure("ID âm thanh Freesound không hợp lệ.")
+        }
+        val normalized = request.normalized()
+        executeSoundListRequest(
+            url = buildSimilarUrl(soundId, normalized),
+            request = normalized,
+            networkFailureMessage = "Không thể tìm âm thanh tương tự. Hãy kiểm tra mạng rồi thử lại.",
+        )
+    }
+
+    private fun executeSoundListRequest(
+        url: HttpUrl,
+        request: FreesoundSearchRequest,
+        networkFailureMessage: String,
+    ): FreesoundSearchResult {
+        val apiKey = credentialStore.apiKey()
+            ?: return FreesoundSearchResult.Failure("Chưa lưu khóa API Freesound.")
         val httpRequest = Request.Builder()
-            .url(buildSearchUrl(normalized))
+            .url(url)
             .header("Authorization", "Token $apiKey")
             .header("Accept", "application/json")
             .header("User-Agent", USER_AGENT)
             .get()
             .build()
 
-        runCatching {
+        return runCatching {
             httpClient.newCall(httpRequest).execute().use { response ->
                 if (!response.isSuccessful) {
                     return@use searchFailureForHttpCode(response.code)
                 }
                 FreesoundSearchResult.Success(
-                    parseSearchPage(response.body.string(), normalized),
+                    parseSearchPage(response.body.string(), request),
                 )
             }
         }.getOrElse {
-            FreesoundSearchResult.Failure(
-                message = "Không thể tìm trên Freesound. Hãy kiểm tra mạng rồi thử lại.",
-            )
+            FreesoundSearchResult.Failure(message = networkFailureMessage)
         }
     }
 
     companion object {
         private const val SEARCH_URL = "https://freesound.org/apiv2/search/"
+        private const val API_BASE_URL = "https://freesound.org/apiv2/"
         private const val USER_AGENT = "NgheTruyen-Android/Freesound"
         private const val SEARCH_FIELDS = "id,name,description,duration,previews"
 
@@ -116,6 +141,29 @@ class FreesoundClient(
                     }
                 }
                 .addQueryParameter("sort", normalized.sort.apiValue)
+                .addQueryParameter("page", normalized.page.toString())
+                .addQueryParameter("page_size", normalized.pageSize.toString())
+                .addQueryParameter("fields", fields)
+                .build()
+        }
+
+        internal fun buildSimilarUrl(
+            soundId: Int,
+            request: FreesoundSearchRequest,
+            fields: String = SEARCH_FIELDS,
+        ): HttpUrl {
+            require(soundId > 0)
+            val normalized = request.normalized()
+            return API_BASE_URL.toHttpUrl().newBuilder()
+                .addPathSegment("sounds")
+                .addPathSegment(soundId.toString())
+                .addPathSegment("similar")
+                .addPathSegment("")
+                .apply {
+                    normalized.duration.apiFilter(normalized.category)?.let {
+                        addQueryParameter("filter", it)
+                    }
+                }
                 .addQueryParameter("page", normalized.page.toString())
                 .addQueryParameter("page_size", normalized.pageSize.toString())
                 .addQueryParameter("fields", fields)

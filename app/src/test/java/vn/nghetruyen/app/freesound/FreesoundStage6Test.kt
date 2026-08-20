@@ -76,6 +76,14 @@ class FreesoundStage6Test {
     }
 
     @Test
+    fun exactHashScanSkipsFilesWithUniqueKnownSizes() {
+        val selected = FreesoundExactDuplicateAnalyzer.candidateSizesToHash(
+            listOf(10L, 20L, 20L, 30L, -1L, 40L),
+        )
+        assertEquals(setOf(20L, -1L), selected)
+    }
+
+    @Test
     fun sparseLibraryReportsCoverageGaps() {
         val tracks = listOf(track("a", "Mưa trong rừng", "type:ambience, mưa đều trong rừng"))
         val gaps = FreesoundLibraryAnalyzer.findMissingTopics(AudioAssetKind.AMBIENCE, tracks)

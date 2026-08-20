@@ -221,6 +221,9 @@ fun AudioDirectionLayerSwitches(
     }
 
     Column(modifier = modifier.fillMaxWidth()) {
+        StoryAudioSourceModeSelector()
+        HorizontalDivider(Modifier.padding(vertical = 8.dp))
+
         AudioLayerSwitchRow(
             title = "Nhạc cảnh AI",
             checked = musicEnabled,

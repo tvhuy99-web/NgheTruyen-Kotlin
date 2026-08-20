@@ -89,3 +89,35 @@ sealed interface FreesoundSearchResult {
         val httpCode: Int? = null,
     ) : FreesoundSearchResult
 }
+
+enum class FreesoundImportQueueStatus {
+    QUEUED,
+    IMPORTING,
+    IMPORTED,
+    FAILED,
+    DUPLICATE,
+    CANCELLED,
+}
+
+data class FreesoundImportQueueSummary(
+    val queued: Int,
+    val importing: Int,
+    val imported: Int,
+    val failed: Int,
+    val duplicate: Int,
+    val cancelled: Int,
+) {
+    val total: Int
+        get() = queued + importing + imported + failed + duplicate + cancelled
+}
+
+internal fun summarizeFreesoundQueue(
+    states: Collection<FreesoundImportQueueStatus>,
+): FreesoundImportQueueSummary = FreesoundImportQueueSummary(
+    queued = states.count { it == FreesoundImportQueueStatus.QUEUED },
+    importing = states.count { it == FreesoundImportQueueStatus.IMPORTING },
+    imported = states.count { it == FreesoundImportQueueStatus.IMPORTED },
+    failed = states.count { it == FreesoundImportQueueStatus.FAILED },
+    duplicate = states.count { it == FreesoundImportQueueStatus.DUPLICATE },
+    cancelled = states.count { it == FreesoundImportQueueStatus.CANCELLED },
+)

@@ -15,11 +15,29 @@ class FreesoundPreviewPlayer {
         onError: () -> Unit,
     ) {
         stop()
-        if (!previewUrl.startsWith("https://", ignoreCase = true)) {
+        val candidates = previewCandidates(previewUrl)
+        if (candidates.isEmpty()) {
             onError()
             return
         }
         activeSoundId = soundId
+        playAttempt(soundId, candidates, 0, onStarted, onStopped, onError)
+    }
+
+    private fun playAttempt(
+        soundId: Int,
+        candidates: List<String>,
+        index: Int,
+        onStarted: () -> Unit,
+        onStopped: () -> Unit,
+        onError: () -> Unit,
+    ) {
+        if (activeSoundId != soundId) return
+        if (index !in candidates.indices) {
+            activeSoundId = null
+            onError()
+            return
+        }
         val mediaPlayer = MediaPlayer().apply {
             setAudioAttributes(
                 AudioAttributes.Builder()
@@ -32,55 +50,90 @@ class FreesoundPreviewPlayer {
                     runCatching { prepared.start() }
                         .onSuccess { onStarted() }
                         .onFailure {
-                            releaseIfCurrent(prepared)
-                            onError()
+                            fallbackOrFail(prepared, soundId, candidates, index, onStarted, onStopped, onError)
                         }
                 }
             }
             setOnCompletionListener { completed ->
                 if (activeSoundId == soundId && player === completed) {
-                    releaseIfCurrent(completed)
+                    releaseAttempt(completed)
+                    activeSoundId = null
                     onStopped()
                 }
             }
             setOnErrorListener { failed, _, _ ->
                 if (activeSoundId == soundId && player === failed) {
-                    releaseIfCurrent(failed)
-                    onError()
+                    fallbackOrFail(failed, soundId, candidates, index, onStarted, onStopped, onError)
+                } else {
+                    runCatching { failed.release() }
                 }
                 true
             }
         }
         player = mediaPlayer
         runCatching {
-            mediaPlayer.setDataSource(previewUrl)
+            mediaPlayer.setDataSource(candidates[index])
             mediaPlayer.prepareAsync()
         }.onFailure {
-            releaseIfCurrent(mediaPlayer)
+            fallbackOrFail(mediaPlayer, soundId, candidates, index, onStarted, onStopped, onError)
+        }
+    }
+
+    private fun fallbackOrFail(
+        failed: MediaPlayer,
+        soundId: Int,
+        candidates: List<String>,
+        index: Int,
+        onStarted: () -> Unit,
+        onStopped: () -> Unit,
+        onError: () -> Unit,
+    ) {
+        releaseAttempt(failed)
+        if (activeSoundId != soundId) return
+        if (index + 1 < candidates.size) {
+            playAttempt(soundId, candidates, index + 1, onStarted, onStopped, onError)
+        } else {
+            activeSoundId = null
             onError()
         }
     }
 
     fun stop() {
+        activeSoundId = null
         releaseCurrent()
     }
 
     fun release() {
-        releaseCurrent()
+        stop()
     }
 
-    private fun releaseIfCurrent(candidate: MediaPlayer) {
-        if (player === candidate) releaseCurrent()
-        else runCatching { candidate.release() }
+    private fun releaseAttempt(candidate: MediaPlayer) {
+        if (player === candidate) player = null
+        runCatching { if (candidate.isPlaying) candidate.stop() }
+        runCatching { candidate.reset() }
+        runCatching { candidate.release() }
     }
 
     private fun releaseCurrent() {
-        activeSoundId = null
-        player?.let { current ->
-            runCatching { if (current.isPlaying) current.stop() }
-            runCatching { current.reset() }
-            runCatching { current.release() }
-        }
+        player?.let(::releaseAttempt)
         player = null
+    }
+
+    companion object {
+        internal fun previewCandidates(previewUrl: String): List<String> {
+            val primary = previewUrl.trim().takeIf { it.startsWith("https://", ignoreCase = true) }
+                ?: return emptyList()
+            val fallback = inferredMp3Fallback(primary)
+            return listOfNotNull(primary, fallback).distinct()
+        }
+
+        internal fun inferredMp3Fallback(previewUrl: String): String? {
+            val fragmentIndex = previewUrl.indexOf('#').let { if (it < 0) previewUrl.length else it }
+            val queryIndex = previewUrl.indexOf('?').let { if (it < 0) previewUrl.length else it }
+            val suffixIndex = minOf(fragmentIndex, queryIndex)
+            val path = previewUrl.substring(0, suffixIndex)
+            if (!path.endsWith(".ogg", ignoreCase = true)) return null
+            return path.dropLast(4) + ".mp3" + previewUrl.substring(suffixIndex)
+        }
     }
 }

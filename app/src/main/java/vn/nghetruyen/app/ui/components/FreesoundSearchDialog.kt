@@ -36,6 +36,8 @@ import vn.nghetruyen.app.NgheTruyenApplication
 import vn.nghetruyen.app.audio.AudioAssetKind
 import vn.nghetruyen.app.freesound.FreesoundCategory
 import vn.nghetruyen.app.freesound.FreesoundDuration
+import vn.nghetruyen.app.freesound.FreesoundImporter
+import vn.nghetruyen.app.freesound.FreesoundImportResult
 import vn.nghetruyen.app.freesound.FreesoundPreviewPlayer
 import vn.nghetruyen.app.freesound.FreesoundSearchPage
 import vn.nghetruyen.app.freesound.FreesoundSearchRequest
@@ -47,6 +49,8 @@ import vn.nghetruyen.app.playback.ReaderPlaybackService
 @Composable
 fun FreesoundSearchDialog(
     kind: AudioAssetKind,
+    normalizationTargetLufs: Float,
+    onImported: (FreesoundImportResult) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -54,6 +58,9 @@ fun FreesoundSearchDialog(
     val application = context.applicationContext as NgheTruyenApplication
     val credentialStore = application.container.freesoundCredentialStore
     val client = application.container.freesoundClient
+    val importer = remember(application) {
+        FreesoundImporter(context, application.container.libraryRepository)
+    }
     val scope = rememberCoroutineScope()
     val previewPlayer = remember { FreesoundPreviewPlayer() }
     val category = remember(kind) { kind.toFreesoundCategory() }
@@ -68,6 +75,8 @@ fun FreesoundSearchDialog(
     var status by remember { mutableStateOf<String?>(null) }
     var previewLoadingId by remember { mutableStateOf<Int?>(null) }
     var previewPlayingId by remember { mutableStateOf<Int?>(null) }
+    var importingId by remember { mutableStateOf<Int?>(null) }
+    var importedIds by remember(kind) { mutableStateOf<Set<Int>>(emptySet()) }
 
     val hasApiKey = credentialStore.hasApiKey()
 
@@ -88,7 +97,7 @@ fun FreesoundSearchDialog(
     }
 
     fun runSearch(targetPage: Int) {
-        if (!hasApiKey || searching || query.isBlank()) return
+        if (!hasApiKey || searching || importingId != null || query.isBlank()) return
         stopPreview()
         searching = true
         status = "Đang tìm trên Freesound…"
@@ -121,6 +130,30 @@ fun FreesoundSearchDialog(
         }
     }
 
+    fun importSound(sound: FreesoundSound) {
+        if (importingId != null || sound.id in importedIds) return
+        stopPreview()
+        importingId = sound.id
+        status = "Đang nhập ${sound.name}…"
+        scope.launch {
+            try {
+                importer.importPreview(
+                    sound = sound,
+                    kind = kind,
+                    normalizationTargetLufs = normalizationTargetLufs,
+                ).onSuccess { result ->
+                    importedIds = importedIds + sound.id
+                    onImported(result)
+                    status = "Đã nhập ${result.title} vào ${category.label.lowercase()}."
+                }.onFailure { error ->
+                    status = error.message ?: "Không nhập được âm thanh từ Freesound."
+                }
+            } finally {
+                importingId = null
+            }
+        }
+    }
+
     DisposableEffect(previewPlayer) {
         onDispose {
             previewPlayer.release()
@@ -133,7 +166,7 @@ fun FreesoundSearchDialog(
     }
 
     AlertDialog(
-        onDismissRequest = ::close,
+        onDismissRequest = { if (importingId == null) close() },
         title = { Text("TÌM TRÊN FREESOUND — ${category.label.uppercase()}") },
         text = {
             Column(
@@ -157,7 +190,7 @@ fun FreesoundSearchDialog(
                     label = { Text("Từ khóa") },
                     placeholder = { Text(searchHint(kind)) },
                     singleLine = true,
-                    enabled = !searching,
+                    enabled = !searching && importingId == null,
                     modifier = Modifier.fillMaxWidth(),
                 )
 
@@ -165,7 +198,7 @@ fun FreesoundSearchDialog(
                 Box(Modifier.fillMaxWidth()) {
                     Button(
                         onClick = { durationExpanded = true },
-                        enabled = !searching,
+                        enabled = !searching && importingId == null,
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("${duration.label} ▼") }
                     DropdownMenu(
@@ -188,7 +221,7 @@ fun FreesoundSearchDialog(
                 Box(Modifier.fillMaxWidth()) {
                     Button(
                         onClick = { sortExpanded = true },
-                        enabled = !searching,
+                        enabled = !searching && importingId == null,
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("${sort.label} ▼") }
                     DropdownMenu(
@@ -209,7 +242,7 @@ fun FreesoundSearchDialog(
 
                 Button(
                     onClick = { runSearch(1) },
-                    enabled = !searching && query.isNotBlank(),
+                    enabled = !searching && importingId == null && query.isNotBlank(),
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text(if (searching) "ĐANG TÌM…" else "TÌM") }
 
@@ -227,6 +260,9 @@ fun FreesoundSearchDialog(
                             sound = sound,
                             previewLoading = previewLoadingId == sound.id,
                             previewPlaying = previewPlayingId == sound.id,
+                            importing = importingId == sound.id,
+                            imported = sound.id in importedIds,
+                            busy = importingId != null || searching,
                             onPreview = {
                                 val previewUrl = sound.preferredPreviewUrl
                                 if (previewUrl == null) {
@@ -265,6 +301,7 @@ fun FreesoundSearchDialog(
                                     )
                                 }
                             },
+                            onImport = { importSound(sound) },
                         )
                     }
                     if (page.results.isNotEmpty()) {
@@ -272,12 +309,12 @@ fun FreesoundSearchDialog(
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(
                                 onClick = { runSearch(page.page - 1) },
-                                enabled = !searching && page.hasPrevious,
+                                enabled = !searching && importingId == null && page.hasPrevious,
                                 modifier = Modifier.weight(1f),
                             ) { Text("TRANG TRƯỚC") }
                             Button(
                                 onClick = { runSearch(page.page + 1) },
-                                enabled = !searching && page.hasNext,
+                                enabled = !searching && importingId == null && page.hasNext,
                                 modifier = Modifier.weight(1f),
                             ) { Text("TRANG SAU") }
                         }
@@ -287,7 +324,10 @@ fun FreesoundSearchDialog(
         },
         confirmButton = {},
         dismissButton = {
-            TextButton(onClick = ::close) { Text("ĐÓNG") }
+            TextButton(
+                onClick = ::close,
+                enabled = importingId == null,
+            ) { Text(if (importingId == null) "ĐÓNG" else "ĐANG NHẬP…") }
         },
     )
 }
@@ -297,7 +337,11 @@ private fun FreesoundSearchResultRow(
     sound: FreesoundSound,
     previewLoading: Boolean,
     previewPlaying: Boolean,
+    importing: Boolean,
+    imported: Boolean,
+    busy: Boolean,
     onPreview: () -> Unit,
+    onImport: () -> Unit,
 ) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(sound.name, fontWeight = FontWeight.SemiBold)
@@ -305,19 +349,34 @@ private fun FreesoundSearchResultRow(
         if (sound.description.isNotBlank()) {
             Text(sound.description, style = MaterialTheme.typography.bodySmall)
         }
-        Button(
-            onClick = onPreview,
-            enabled = sound.preferredPreviewUrl != null,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(
-                when {
-                    previewLoading -> "ĐANG TẢI PREVIEW…"
-                    previewPlaying -> "DỪNG NGHE THỬ"
-                    sound.preferredPreviewUrl == null -> "KHÔNG CÓ PREVIEW HQ"
-                    else -> "NGHE THỬ HQ"
-                },
-            )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = onPreview,
+                enabled = !busy && sound.preferredPreviewUrl != null,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(
+                    when {
+                        previewLoading -> "ĐANG TẢI…"
+                        previewPlaying -> "DỪNG NGHE"
+                        sound.preferredPreviewUrl == null -> "KHÔNG PREVIEW"
+                        else -> "NGHE THỬ"
+                    },
+                )
+            }
+            Button(
+                onClick = onImport,
+                enabled = !busy && !imported && sound.preferredPreviewUrl != null,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(
+                    when {
+                        importing -> "ĐANG NHẬP…"
+                        imported -> "ĐÃ NHẬP"
+                        else -> "NHẬP"
+                    },
+                )
+            }
         }
     }
 }

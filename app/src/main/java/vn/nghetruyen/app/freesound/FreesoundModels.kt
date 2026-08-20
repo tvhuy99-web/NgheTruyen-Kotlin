@@ -59,7 +59,7 @@ data class FreesoundSound(
     val sampleRate: Int,
 ) {
     val preferredPreviewUrl: String?
-        get() = previewHqMp3 ?: previewHqOgg
+        get() = previewHqOgg ?: previewHqMp3
 }
 
 data class FreesoundSearchPage(

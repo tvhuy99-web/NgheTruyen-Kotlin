@@ -46,6 +46,24 @@ class FreesoundStage6Test {
     }
 
     @Test
+    fun localSemanticFallbackUsesVietnameseNormalizationAndCurrentKindOnly() {
+        val ambience = FreesoundSemanticSearchEngine.fallbackQueries(
+            "mưa lớn trong rừng ban đêm",
+            AudioAssetKind.AMBIENCE,
+        )
+        assertTrue(ambience.isNotEmpty())
+        assertTrue(ambience.first().contains("rain"))
+        assertTrue(ambience.first().contains("forest"))
+        assertTrue(ambience.first().contains("ambience"))
+        assertFalse(ambience.any { it.contains("music") || it.contains("sound effect") })
+
+        val sfx = FreesoundSemanticSearchEngine.fallbackQueries("tiếng sấm rất lớn", AudioAssetKind.SFX)
+        assertTrue(sfx.first().contains("thunder"))
+        assertTrue(sfx.first().contains("sound effect"))
+        assertFalse(sfx.any { it.contains("ambience") || it.contains("music") })
+    }
+
+    @Test
     fun exactTitleDuplicatesAreDetected() {
         val tracks = listOf(
             track("a", "Thunder Strike", "type:sfx, loud close thunder"),

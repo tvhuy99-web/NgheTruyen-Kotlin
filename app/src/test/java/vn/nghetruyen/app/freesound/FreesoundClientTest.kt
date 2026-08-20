@@ -41,12 +41,13 @@ class FreesoundClientTest {
     }
 
     @Test
-    fun sfxSearchUsesDurationFilterSortAndPaginationWithoutTokenInUrl() {
+    fun managerSearchUsesDurationSortPaginationAndNeverPlacesTokenInUrl() {
         val url = FreesoundClient.buildSearchUrl(
             FreesoundSearchRequest(
                 query = " sword clash ",
                 category = FreesoundCategory.SFX,
-                sort = FreesoundSort.MOST_DOWNLOADED,
+                duration = FreesoundDuration.RECOMMENDED,
+                sort = FreesoundSort.SHORTEST,
                 page = 3,
                 pageSize = 20,
             ),
@@ -54,15 +55,22 @@ class FreesoundClientTest {
 
         assertEquals("sword clash", url.queryParameter("query"))
         assertEquals("duration:[0.1 TO 15]", url.queryParameter("filter"))
-        assertEquals("downloads_desc", url.queryParameter("sort"))
+        assertEquals("duration_asc", url.queryParameter("sort"))
         assertEquals("3", url.queryParameter("page"))
         assertEquals("20", url.queryParameter("page_size"))
         assertNull(url.queryParameter("token"))
-        assertTrue(url.queryParameter("fields")!!.contains("previews"))
+
+        val fields = url.queryParameter("fields")!!
+        assertTrue(fields.contains("name"))
+        assertTrue(fields.contains("description"))
+        assertTrue(fields.contains("duration"))
+        assertTrue(fields.contains("previews"))
+        assertFalse(fields.contains("username"))
+        assertFalse(fields.contains("license"))
     }
 
     @Test
-    fun categoryDurationFiltersMatchPlaybackRoles() {
+    fun recommendedDurationMatchesEachAudioManager() {
         val music = FreesoundClient.buildSearchUrl(
             FreesoundSearchRequest("fantasy", category = FreesoundCategory.MUSIC),
         )
@@ -79,11 +87,24 @@ class FreesoundClientTest {
     }
 
     @Test
-    fun allCategoryDoesNotAddDurationFilter() {
+    fun explicitDurationFilterOverridesManagerRecommendation() {
         val url = FreesoundClient.buildSearchUrl(
             FreesoundSearchRequest(
                 query = "rain",
-                category = FreesoundCategory.ALL,
+                category = FreesoundCategory.AMBIENCE,
+                duration = FreesoundDuration.SHORT,
+            ),
+        )
+        assertEquals("duration:[0 TO 15]", url.queryParameter("filter"))
+    }
+
+    @Test
+    fun allDurationDoesNotAddFilter() {
+        val url = FreesoundClient.buildSearchUrl(
+            FreesoundSearchRequest(
+                query = "rain",
+                category = FreesoundCategory.AMBIENCE,
+                duration = FreesoundDuration.ALL,
             ),
         )
         assertNull(url.queryParameter("filter"))
@@ -103,7 +124,7 @@ class FreesoundClientTest {
     }
 
     @Test
-    fun searchResponseParsesMetadataAndPrefersHigherQualityOggPreview() {
+    fun searchResponseParsesOnlyNeededFieldsAndPrefersOggPreview() {
         val payload = """
             {
               "count": 41,
@@ -113,21 +134,12 @@ class FreesoundClientTest {
                 {
                   "id": 123,
                   "name": "Thunder Strike.wav",
-                  "username": "fieldrecorder",
-                  "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+                  "description": "A loud close thunder strike.",
                   "duration": 8.75,
-                  "tags": ["thunder", "storm"],
                   "previews": {
                     "preview-hq-mp3": "https://cdn.freesound.org/previews/123/123-hq.mp3",
                     "preview-hq-ogg": "https://cdn.freesound.org/previews/123/123-hq.ogg"
-                  },
-                  "avg_rating": 4.8,
-                  "num_ratings": 27,
-                  "num_downloads": 9012,
-                  "url": "https://freesound.org/s/123/",
-                  "type": "wav",
-                  "channels": 2,
-                  "samplerate": 48000
+                  }
                 },
                 {
                   "id": -1,
@@ -152,16 +164,9 @@ class FreesoundClientTest {
         val sound = page.results.single()
         assertEquals(123, sound.id)
         assertEquals("Thunder Strike.wav", sound.name)
-        assertEquals("fieldrecorder", sound.username)
+        assertEquals("A loud close thunder strike.", sound.description)
         assertEquals(8.75, sound.durationSeconds, 0.001)
-        assertEquals(listOf("thunder", "storm"), sound.tags)
         assertEquals("https://cdn.freesound.org/previews/123/123-hq.ogg", sound.preferredPreviewUrl)
-        assertEquals(4.8, sound.avgRating, 0.001)
-        assertEquals(27, sound.numRatings)
-        assertEquals(9012, sound.numDownloads)
-        assertEquals("wav", sound.fileType)
-        assertEquals(2, sound.channels)
-        assertEquals(48000, sound.sampleRate)
     }
 
     @Test
@@ -169,19 +174,10 @@ class FreesoundClientTest {
         val sound = FreesoundSound(
             id = 1,
             name = "preview",
-            username = "u",
-            license = "CC0",
+            description = "",
             durationSeconds = 1.0,
-            tags = emptyList(),
             previewHqMp3 = "https://cdn.freesound.org/a.mp3",
             previewHqOgg = null,
-            avgRating = 0.0,
-            numRatings = 0,
-            numDownloads = 0,
-            webUrl = null,
-            fileType = "mp3",
-            channels = 1,
-            sampleRate = 44100,
         )
 
         assertEquals("https://cdn.freesound.org/a.mp3", sound.preferredPreviewUrl)
@@ -198,6 +194,8 @@ class FreesoundClientTest {
                 {
                   "id": 55,
                   "name": "Unsafe preview",
+                  "description": "test",
+                  "duration": 1.0,
                   "previews": {
                     "preview-hq-mp3": "http://example.invalid/audio.mp3"
                   }

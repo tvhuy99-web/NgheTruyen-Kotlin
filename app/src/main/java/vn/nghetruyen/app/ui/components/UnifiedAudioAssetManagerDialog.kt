@@ -87,6 +87,7 @@ fun UnifiedAudioAssetManagerDialog(
     var bulkUpdates by remember(kind) { mutableStateOf<Map<String, String>>(emptyMap()) }
     var bulkErrors by remember(kind) { mutableStateOf<List<String>>(emptyList()) }
     var showClearAllConfirm by remember(kind) { mutableStateOf(false) }
+    var showFreesoundDialog by remember(kind) { mutableStateOf(false) }
     var previewPlayer by remember(kind) { mutableStateOf<MediaPlayer?>(null) }
 
     fun notify(message: String) {
@@ -215,10 +216,17 @@ fun UnifiedAudioAssetManagerDialog(
                         modifier = Modifier.weight(1f),
                     ) { Text("THÊM TỆP") }
                     Button(
-                        onClick = { bulkText = ""; showBulkDialog = true },
+                        onClick = {
+                            stopPreview()
+                            showFreesoundDialog = true
+                        },
                         modifier = Modifier.weight(1f),
-                    ) { Text("DÁN MÔ TẢ") }
+                    ) { Text("TÌM TRÊN FREESOUND") }
                 }
+                Button(
+                    onClick = { bulkText = ""; showBulkDialog = true },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("DÁN MÔ TẢ") }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Button(
                         onClick = {
@@ -314,6 +322,13 @@ fun UnifiedAudioAssetManagerDialog(
             }
         },
     )
+
+    if (showFreesoundDialog) {
+        FreesoundSearchDialog(
+            kind = kind,
+            onDismiss = { showFreesoundDialog = false },
+        )
+    }
 
     selectedTrackId?.let { selectedId ->
         draft.firstOrNull { it.id == selectedId }?.let { track ->

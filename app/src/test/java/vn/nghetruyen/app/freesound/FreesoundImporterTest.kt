@@ -1,5 +1,7 @@
 package vn.nghetruyen.app.freesound
 
+import java.io.File
+import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -66,6 +68,24 @@ class FreesoundImporterTest {
                 "file:///data/user/0/vn.nghetruyen.app/files/audio/freesound/sfx/freesound_9_8ad49d6c-7b14-4cc1-a4d7-817e30dad079.ogg",
             ),
         )
+    }
+
+    @Test
+    fun normalizingMarkerTemporarilyHidesRemoteIdFromUiDuplicateChecks() {
+        val root = Files.createTempDirectory("freesound-marker-test").toFile()
+        try {
+            val directory = File(root, "audio/freesound/sfx").apply { mkdirs() }
+            val audio = File(directory, "freesound_77_8ad49d6c-7b14-4cc1-a4d7-817e30dad079.ogg").apply {
+                writeBytes(byteArrayOf(1))
+            }
+            val uri = audio.toURI().toString()
+            assertEquals(77, FreesoundImporter.soundIdFromManagedUri(uri))
+
+            File("${audio.absolutePath}.normalizing").writeText("normalizing")
+            assertNull(FreesoundImporter.soundIdFromManagedUri(uri))
+        } finally {
+            root.deleteRecursively()
+        }
     }
 
     @Test

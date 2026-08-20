@@ -1,0 +1,156 @@
+name: Final Story Audio 8-Step Fix + APK v3
+
+on:
+  push:
+    branches: [agent/freesound-stage-1]
+    paths: [.github/workflows/final-story-audio-8step-build-v3.yml]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: final-story-audio-8step-v3-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fix-test-build:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/freesound-stage-1
+          fetch-depth: 0
+
+      - name: Publish run id
+        shell: bash
+        run: |
+          printf 'RUN_ID=%s\nRUN_ATTEMPT=%s\nTRIGGER_SHA=%s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$GITHUB_SHA" > .github/final-story-audio-run-v3.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- .github/final-story-audio-run-v3.txt
+          git commit -m "Record corrected final audio build run [skip ci]"
+          git push origin HEAD:agent/freesound-stage-1
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Bootstrap Gradle wrapper
+        shell: bash
+        run: |
+          chmod +x gradlew scripts/bootstrap-wrapper.sh
+          ./scripts/bootstrap-wrapper.sh
+
+      - name: Apply final runtime source fixes
+        shell: bash
+        run: |
+          python3 .github/scripts/final_story_audio_runtime_delta.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt')
+          text = p.read_text()
+          old = '            musicPlan?.sourceSha256 == musicSourceHash &&'
+          new = '            musicPlan != null &&\n            musicPlan.sourceSha256 == musicSourceHash &&'
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f'nullable music-plan token count={count}')
+          p.write_text(text.replace(old, new, 1))
+          PY
+
+      - name: Verify all eight-step invariants
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          reader = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt').read_text()
+          switches = Path('app/src/main/java/vn/nghetruyen/app/ui/components/AudioDirectionLayerSwitches.kt').read_text()
+          service = Path('app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt').read_text()
+          runtime = Path('app/src/main/java/vn/nghetruyen/app/playback/AudioDirectionRuntime.kt').read_text()
+          coordinator = Path('app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt').read_text()
+          ai = Path('app/src/main/java/vn/nghetruyen/app/ai/XpkNarrationAiServices.kt').read_text()
+          resolver = Path('app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt').read_text()
+          checks = {
+            'reader range': 'valueRange = minimum..maximum' in reader,
+            'mode1 manual UI': 'if (manualMode)' in reader and 'Bật nhạc nền thủ công' in reader,
+            'mode3 UI no local fallback': 'không dùng kho local làm fallback' in switches,
+            'AI contract isolation': 'AI_AUDIO_SOURCE_MODE_MIXED' in ai,
+            'resolver unresolved to silence': 'FreesoundAutoResolutionSource.UNRESOLVED' in resolver and 'LOCAL_FALLBACK' not in resolver,
+            'managed Freesound cache': 'FreesoundImporter.soundIdFromManagedUri' in resolver,
+            'empty Mode3 library still plans': 'mustPrepareFreesound' in runtime,
+            'music mode-aware': 'StoryAudioModeRouter.allowsManualPlaylist(storyAudioSourceMode)' in service,
+            'music source ownership': 'scenePlanMatchesCurrentSourceMode' in service,
+            'music nullable safe': 'musicPlan != null &&' in service,
+            'Mode3 music managed only': 'FreesoundImporter.soundIdFromManagedUri(track.uri)' in service,
+            'intentional silence': 'XpkSceneMusicParity.SILENCE_TRACK_ID' in service,
+            'audio without voice cast': 'planAudioWithoutVoice' in service,
+            'Mode3 coordinator managed assets': 'FreesoundImporter.soundIdFromManagedUri(it.uri)' in coordinator,
+            'Mode3 cache v2': 'freesound-auto-audio-v2' in coordinator,
+            'independent ambience/sfx validation': 'SFX được giữ nguyên' in coordinator and 'AMBIENCE được giữ nguyên' in coordinator,
+          }
+          for name, ok in checks.items(): print(('OK   ' if ok else 'FAIL ') + name)
+          failed = [name for name, ok in checks.items() if not ok]
+          if failed: raise SystemExit('Invariant failures: ' + ', '.join(failed))
+          PY
+
+      - name: Run app unit tests
+        shell: bash
+        run: ./gradlew --no-daemon --stacktrace :app:testDebugUnitTest
+
+      - name: Build debug APK
+        shell: bash
+        run: ./gradlew --no-daemon --stacktrace :app:assembleDebug
+
+      - name: Verify and stage APK
+        shell: bash
+        run: |
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          "${ANDROID_HOME}/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
+          mkdir -p dist
+          cp "$APK" dist/NgheTruyen-Freesound-8step-debug.apk
+          sha256sum dist/NgheTruyen-Freesound-8step-debug.apk | tee dist/NgheTruyen-Freesound-8step-debug.apk.sha256
+
+      - name: Commit verified source and clean one-shot files
+        shell: bash
+        run: |
+          rm -f .github/scripts/agent_mode_runtime_fix.py
+          rm -f .github/scripts/audio_mode_isolation_fix.py
+          rm -f .github/scripts/final_story_audio_8step_fix.py
+          rm -f .github/scripts/final_story_audio_runtime_delta.py
+          rm -f .github/workflows/final-story-audio-8step-build.yml
+          rm -f .github/workflows/final-story-audio-8step-build-v3.yml
+          rm -f .github/final-story-audio-run.txt
+          rm -f .github/final-story-audio-run-v3.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt
+          git add -- app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt
+          git add -- app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt
+          git add -- .github/scripts/agent_mode_runtime_fix.py .github/scripts/audio_mode_isolation_fix.py .github/scripts/final_story_audio_8step_fix.py .github/scripts/final_story_audio_runtime_delta.py
+          git add -- .github/workflows/final-story-audio-8step-build.yml .github/workflows/final-story-audio-8step-build-v3.yml
+          git add -- .github/final-story-audio-run.txt .github/final-story-audio-run-v3.txt
+          git commit -m "Complete verified eight-step story audio runtime fix [skip ci]"
+          git push origin HEAD:agent/freesound-stage-1
+
+      - name: Upload verified APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NgheTruyen-Freesound-8step-debug-apk
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            dist/NgheTruyen-Freesound-8step-debug.apk
+            dist/NgheTruyen-Freesound-8step-debug.apk.sha256

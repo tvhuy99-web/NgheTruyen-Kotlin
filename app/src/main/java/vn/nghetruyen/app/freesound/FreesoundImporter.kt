@@ -8,11 +8,14 @@ import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import vn.nghetruyen.app.audio.AudioAssetKind
 import vn.nghetruyen.app.audio.SceneMusicAnalysisWorker
+import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
 import vn.nghetruyen.app.data.repository.LibraryRepository
 
 data class FreesoundImportResult(
@@ -21,9 +24,14 @@ data class FreesoundImportResult(
     val title: String,
 )
 
+class FreesoundDuplicateException(
+    val soundId: Int,
+) : IllegalStateException("Âm thanh Freesound #$soundId đã có trong thư viện.")
+
 class FreesoundImporter(
     context: Context,
     private val repository: LibraryRepository,
+    private val existingTracksProvider: suspend () -> List<SceneMusicTrackEntity>,
     private val httpClient: OkHttpClient = defaultHttpClient(),
 ) {
     private val appContext = context.applicationContext
@@ -33,16 +41,35 @@ class FreesoundImporter(
         kind: AudioAssetKind,
         normalizationTargetLufs: Float,
     ): Result<FreesoundImportResult> = withContext(Dispatchers.IO) {
+        importMutex.withLock {
+            val duplicateCheck = runCatching { existingTracksProvider() }
+            if (duplicateCheck.isFailure) {
+                return@withLock Result.failure(
+                    duplicateCheck.exceptionOrNull() ?: IllegalStateException("Không kiểm tra được thư viện hiện tại."),
+                )
+            }
+            if (duplicateCheck.getOrThrow().any { soundIdFromManagedUri(it.uri) == sound.id }) {
+                return@withLock Result.failure(FreesoundDuplicateException(sound.id))
+            }
+            importPreviewLocked(sound, kind, normalizationTargetLufs)
+        }
+    }
+
+    private suspend fun importPreviewLocked(
+        sound: FreesoundSound,
+        kind: AudioAssetKind,
+        normalizationTargetLufs: Float,
+    ): Result<FreesoundImportResult> {
         val previewUrl = sound.preferredPreviewUrl
-            ?: return@withContext Result.failure(IllegalArgumentException("Âm thanh này không có preview HQ khả dụng."))
+            ?: return Result.failure(IllegalArgumentException("Âm thanh này không có preview HQ khả dụng."))
         if (!previewUrl.startsWith("https://", ignoreCase = true)) {
-            return@withContext Result.failure(IllegalArgumentException("Địa chỉ preview Freesound không an toàn."))
+            return Result.failure(IllegalArgumentException("Địa chỉ preview Freesound không an toàn."))
         }
 
         val extension = extensionForPreviewUrl(previewUrl)
         val directory = managedDirectory(appContext, kind)
         if (!directory.isDirectory && !directory.mkdirs()) {
-            return@withContext Result.failure(IllegalStateException("Không tạo được thư mục lưu âm thanh Freesound."))
+            return Result.failure(IllegalStateException("Không tạo được thư mục lưu âm thanh Freesound."))
         }
 
         val finalFile = File(
@@ -117,7 +144,7 @@ class FreesoundImporter(
                 throw error
             }
 
-            Result.success(
+            return Result.success(
                 FreesoundImportResult(
                     trackId = trackId,
                     uri = uri,
@@ -133,14 +160,19 @@ class FreesoundImporter(
             savedTrackId?.let { runCatching { repository.deleteSceneMusicTrack(it) } }
             partFile.delete()
             finalFile.delete()
-            Result.failure(error)
+            return Result.failure(error)
         }
     }
 
     companion object {
         private const val USER_AGENT = "NgheTruyen-Android/Freesound"
         internal const val MAX_PREVIEW_BYTES = 64L * 1024L * 1024L
+        internal const val MAX_BATCH_SIZE = 50
         private const val MANAGED_ROOT = "audio/freesound"
+        private val importMutex = Mutex()
+        private val managedSoundIdRegex = Regex(
+            """(?i)(?:^|/)audio/freesound/(?:music|ambience|sfx)/freesound_(\d+)_[-0-9a-f]+\.(?:ogg|mp3)$""",
+        )
 
         internal fun extensionForPreviewUrl(url: String): String {
             val clean = url.substringBefore('?').substringBefore('#').lowercase(Locale.ROOT)
@@ -164,6 +196,11 @@ class FreesoundImporter(
             }
             val clean = description.trim().take(300)
             return if (clean.isBlank()) marker else "$marker, $clean"
+        }
+
+        internal fun soundIdFromManagedUri(uri: String): Int? {
+            val clean = uri.substringBefore('?').substringBefore('#')
+            return managedSoundIdRegex.find(clean)?.groupValues?.getOrNull(1)?.toIntOrNull()
         }
 
         fun deleteManagedFile(context: Context, uri: String): Boolean {

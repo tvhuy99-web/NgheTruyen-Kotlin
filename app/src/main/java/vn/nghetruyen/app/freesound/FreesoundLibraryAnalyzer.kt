@@ -24,7 +24,7 @@ object FreesoundLibraryAnalyzer {
     private val audioExtensionRegex = Regex("(?i)\\.(?:wav|wave|mp3|ogg|flac|aac|m4a|aiff|aif|opus)$")
     private val nonWordRegex = Regex("[^a-z0-9]+")
     private val stopWords = setOf(
-        "a", "an", "and", "audio", "background", "effect", "effects", "for", "in", "of", "sound", "sounds", "the", "with",
+        "a", "an", "and", "audio", "ambience", "background", "effect", "effects", "environment", "for", "in", "music", "of", "sfx", "sound", "sounds", "the", "with",
         "am", "anh", "cai", "cac", "cho", "cua", "la", "mot", "nhung", "tieng", "trong", "va", "voi",
     )
     private val vietnameseSemanticPhrases = listOf(

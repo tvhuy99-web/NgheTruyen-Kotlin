@@ -21,6 +21,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - uses: gradle/actions/setup-gradle@v6
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
       - name: Apply consolidated mode isolation patch
         run: python3 .github/scripts/agent_mode_runtime_fix.py
@@ -33,7 +40,7 @@ jobs:
           ! grep -q 'KHO NHẠC ĐÃ TẢI / FALLBACK' app/src/main/java/vn/nghetruyen/app/ui/components/AudioDirectionLayerSwitches.kt
           grep -q 'StoryAudioModeRouter.allowsManualPlaylist(storyAudioSourceMode)' app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt
           grep -q 'requestedTrackId == XpkSceneMusicParity.SILENCE_TRACK_ID' app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt
-          grep -q 'val planVoice = currentStoryAutoVoiceCastEnabled' app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt
+          grep -q 'val planAudio = shouldPlanAutoStoryAudio()' app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt
           grep -q 'mode=${sourceMode.name}' app/src/main/java/vn/nghetruyen/app/playback/AudioDirectionRuntime.kt
           grep -q 'usesAiFreesound(sourceMode)' app/src/main/java/vn/nghetruyen/app/playback/AudioDirectionRuntime.kt
           ! grep -q 'LOCAL_FALLBACK' app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt

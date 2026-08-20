@@ -1,0 +1,189 @@
+name: Build corrected Freesound latest APK
+
+on:
+  push:
+    branches:
+      - agent/freesound-stage-1
+    paths:
+      - ".github/workflows/build-freesound-latest-v5.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-freesound-latest-v5
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: agent/freesound-stage-1
+          fetch-depth: 0
+
+      - name: Record run start
+        shell: bash
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          {
+            echo "RUN_ID=${GITHUB_RUN_ID}"
+            echo "RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT}"
+            echo "TRIGGER_SHA=${GITHUB_SHA}"
+            echo "STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > MODE3_RUN_START_V5.txt
+          git add -- MODE3_RUN_START_V5.txt
+          git commit -m "Record corrected Freesound build start"
+          git push origin HEAD:agent/freesound-stage-1
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Patch, test and build
+        id: verify
+        shell: bash
+        run: |
+          set +e
+          rm -f /tmp/extractor.py /tmp/mode3_patch.py /tmp/prepare.log /tmp/patch.log /tmp/test.log /tmp/build.log /tmp/result_v5.txt
+
+          python3 - <<'PY' > /tmp/prepare.log 2>&1
+          from pathlib import Path
+          import subprocess
+          import textwrap
+
+          orchestrator = Path('.github/workflows/build-freesound-latest-verified.yml').read_text(encoding='utf-8')
+          start = "          python3 - <<'PY' > /tmp/extract.log 2>&1\n"
+          end = "\n          PY\n"
+          if start not in orchestrator:
+              raise SystemExit('Không tìm thấy extractor đã sửa trong build-freesound-latest-verified.yml')
+          block = orchestrator.split(start, 1)[1]
+          if end not in block:
+              raise SystemExit('Extractor không có điểm kết thúc hợp lệ.')
+          extractor = textwrap.dedent(block.split(end, 1)[0])
+          Path('/tmp/extractor.py').write_text(extractor + '\n', encoding='utf-8')
+          subprocess.run(['python3', '/tmp/extractor.py'], check=True)
+
+          patch_file = Path('/tmp/mode3_patch.py')
+          patch = patch_file.read_text(encoding='utf-8')
+          old_guard = (
+              "text = read(path)\n"
+              "if text.count(insert_after) != 1:\n"
+              "    raise SystemExit(\"FreesoundImporterTest.kt provenance insertion anchor mismatch\")\n"
+              "write(path, text.replace(insert_after, insert_after + \"\\n\" + addition, 1))\n"
+          )
+          new_guard = "replace_once(path, insert_after, insert_after + \"\\n\" + addition)\n"
+          if old_guard not in patch:
+              raise SystemExit('Không tìm thấy provenance guard cũ để chuyển sang matcher linh hoạt.')
+          patch_file.write_text(patch.replace(old_guard, new_guard, 1), encoding='utf-8')
+          PY
+          PREPARE_STATUS=$?
+
+          PATCH_STATUS=99
+          TEST_STATUS=99
+          BUILD_STATUS=99
+          if [ "$PREPARE_STATUS" -eq 0 ]; then
+            python3 /tmp/mode3_patch.py > /tmp/patch.log 2>&1
+            PATCH_STATUS=$?
+          fi
+          if [ "$PATCH_STATUS" -eq 0 ]; then
+            ./gradlew --no-daemon --stacktrace :app:testDebugUnitTest > /tmp/test.log 2>&1
+            TEST_STATUS=$?
+          fi
+          if [ "$TEST_STATUS" -eq 0 ]; then
+            ./gradlew --no-daemon --stacktrace :app:assembleDebug > /tmp/build.log 2>&1
+            BUILD_STATUS=$?
+          fi
+
+          SUCCESS=false
+          if [ "$PREPARE_STATUS" -eq 0 ] && [ "$PATCH_STATUS" -eq 0 ] && [ "$TEST_STATUS" -eq 0 ] && [ "$BUILD_STATUS" -eq 0 ] && [ -f app/build/outputs/apk/debug/app-debug.apk ]; then
+            SUCCESS=true
+          fi
+
+          {
+            echo "RUN_ID=${GITHUB_RUN_ID}"
+            echo "RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT}"
+            echo "TRIGGER_SHA=${GITHUB_SHA}"
+            echo "SUCCESS=${SUCCESS}"
+            echo "PREPARE_STATUS=${PREPARE_STATUS}"
+            echo "PATCH_STATUS=${PATCH_STATUS}"
+            echo "TEST_STATUS=${TEST_STATUS}"
+            echo "BUILD_STATUS=${BUILD_STATUS}"
+            echo "ARTIFACT_NAME=NgheTruyen-freesound-latest-v5-debug"
+            echo
+            echo "=== PREPARE LOG ==="
+            tail -n 160 /tmp/prepare.log 2>/dev/null || true
+            echo
+            echo "=== PATCH LOG ==="
+            tail -n 220 /tmp/patch.log 2>/dev/null || true
+            echo
+            echo "=== TEST LOG ==="
+            tail -n 280 /tmp/test.log 2>/dev/null || true
+            echo
+            echo "=== BUILD LOG ==="
+            tail -n 300 /tmp/build.log 2>/dev/null || true
+          } > /tmp/result_v5.txt
+
+          echo "success=${SUCCESS}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload APK
+        if: steps.verify.outputs.success == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: NgheTruyen-freesound-latest-v5-debug
+          retention-days: 30
+          if-no-files-found: error
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Commit verified fixes or error report
+        if: always()
+        shell: bash
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ "${{ steps.verify.outputs.success }}" = "true" ]; then
+            git diff --name-only -- app/src/main app/src/test | while IFS= read -r file; do
+              [ -n "$file" ] && git add -- "$file"
+            done
+            git ls-files --others --exclude-standard -- app/src/main app/src/test | while IFS= read -r file; do
+              [ -n "$file" ] && git add -- "$file"
+            done
+          else
+            git reset --hard HEAD
+          fi
+          cp /tmp/result_v5.txt MODE3_BUILD_RESULT_V5.txt
+          git add -- MODE3_BUILD_RESULT_V5.txt
+          if ! git diff --cached --quiet; then
+            if [ "${{ steps.verify.outputs.success }}" = "true" ]; then
+              git commit -m "Fix and verify latest Freesound runtime"
+            else
+              git commit -m "Record corrected Freesound build failure"
+            fi
+            git push origin HEAD:agent/freesound-stage-1
+          fi
+
+      - name: Mark failed verification
+        if: steps.verify.outputs.success != 'true'
+        run: exit 1

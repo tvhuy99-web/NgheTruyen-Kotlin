@@ -1,0 +1,182 @@
+name: One-shot story audio runtime isolation
+
+on:
+  push:
+    branches: [agent/freesound-stage-1]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Patch mode-specific UI and runtime
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def once(text, old, new, label):
+              n = text.count(old)
+              if n != 1:
+                  raise SystemExit(f'{label}: expected one match, found {n}')
+              return text.replace(old, new, 1)
+
+          # ReaderScreen owns the outer manual playlist controls. Hide them outside Mode 1.
+          p = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt')
+          t = p.read_text()
+          if 'import vn.nghetruyen.app.audio.StoryAudioSourceMode\n' not in t:
+              t = once(t, 'import vn.nghetruyen.app.audio.AudioAssetKind\n',
+                       'import vn.nghetruyen.app.audio.AudioAssetKind\nimport vn.nghetruyen.app.audio.StoryAudioSourceMode\n',
+                       'ReaderScreen mode import')
+          if 'var storyAudioSourceMode by remember' not in t:
+              t = once(t, '    var musicReleaseMs by remember { mutableIntStateOf(2050) }\n',
+                       '    var musicReleaseMs by remember { mutableIntStateOf(2050) }\n    var storyAudioSourceMode by remember { mutableStateOf(app.container.storyAudioSourceModeStore.get()) }\n',
+                       'ReaderScreen mode state')
+          if 'storyAudioSourceMode = app.container.storyAudioSourceModeStore.get()' not in t:
+              t = once(t, '            musicReleaseMs = settings.backgroundMusicReleaseMillis\n',
+                       '            musicReleaseMs = settings.backgroundMusicReleaseMillis\n            storyAudioSourceMode = app.container.storyAudioSourceModeStore.get()\n',
+                       'ReaderScreen mode refresh')
+
+          start = t.find('                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {\n                    Text("Bật nhạc nền", Modifier.weight(1f))')
+          end_line = '                ReaderFloatSlider("Giảm nhạc khi giọng đọc phát", musicDuckDb, 0f, 24f, steps = 23, shown = { "%.0f dB".format(it) }) { musicDuckDb = it }\n'
+          end = t.find(end_line, start)
+          if start < 0 or end < 0:
+              raise SystemExit('ReaderScreen music UI markers not found')
+          end += len(end_line)
+          block = '''                if (storyAudioSourceMode == StoryAudioSourceMode.LOCAL_MANUAL) {\n                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {\n                        Text("Bật nhạc nền thủ công", Modifier.weight(1f))\n                        Switch(musicEnabled, { musicEnabled = it })\n                    }\n                    HorizontalDivider(Modifier.padding(vertical = 8.dp))\n                }\n                vn.nghetruyen.app.ui.components.AudioDirectionLayerSwitches(\n                    musicTrackCount = musicTracks.size,\n                    onManageMusic = {\n                        val rows = musicTracks.sortedWith(compareBy<SceneMusicTrackEntity> { it.orderIndex }.thenBy { it.title.lowercase() })\n                        musicLibraryDraft = rows.mapIndexed { index, row -> row.copy(orderIndex = index) }\n                        musicLibraryBaselineIds = rows.mapTo(linkedSetOf()) { it.id }\n                        musicSearch = ""\n                        showMusicLibrary = true\n                    },\n                    modifier = Modifier.fillMaxWidth(),\n                    onSourceModeChanged = { mode ->\n                        storyAudioSourceMode = mode\n                        if (mode != StoryAudioSourceMode.LOCAL_MANUAL) musicEnabled = true\n                    },\n                )\n                if (storyAudioSourceMode == StoryAudioSourceMode.LOCAL_MANUAL) {\n                    HorizontalDivider(Modifier.padding(vertical = 8.dp))\n                    Text("Chế độ phát", fontWeight = FontWeight.SemiBold)\n                    Button(onClick = { musicModeExpanded = true }, modifier = Modifier.fillMaxWidth()) {\n                        Text(if (musicMode == SceneMusicPlaybackMode.SHUFFLE) "Phát ngẫu nhiên" else "Phát lần lượt")\n                    }\n                    DropdownMenu(expanded = musicModeExpanded, onDismissRequest = { musicModeExpanded = false }) {\n                        DropdownMenuItem(text = { Text("Phát lần lượt") }, onClick = { musicMode = SceneMusicPlaybackMode.SEQUENTIAL; musicModeExpanded = false })\n                        DropdownMenuItem(text = { Text("Phát ngẫu nhiên") }, onClick = { musicMode = SceneMusicPlaybackMode.SHUFFLE; musicModeExpanded = false })\n                    }\n                }\n                ReaderFloatSlider("Giảm nhạc khi giọng đọc phát", musicDuckDb, 0f, 24f, steps = 23, shown = { "%.0f dB".format(it) }) { musicDuckDb = it }\n'''
+          t = t[:start] + block + t[end:]
+          t = once(t,
+                   '                if (musicEnabled && activeCount == 0) onMessage("Hãy bật ít nhất một bài trong danh sách nhạc trước.")\n',
+                   '                if (storyAudioSourceMode == StoryAudioSourceMode.LOCAL_MANUAL && musicEnabled && activeCount == 0) onMessage("Hãy bật ít nhất một bài trong danh sách nhạc trước.")\n',
+                   'ReaderScreen manual track validation')
+          t = once(t,
+                   '                    settings.setBackgroundMusicEnabled(musicEnabled)\n                    settings.setSceneMusicPlaybackMode(musicMode)\n',
+                   '                    settings.setBackgroundMusicEnabled(if (storyAudioSourceMode == StoryAudioSourceMode.LOCAL_MANUAL) musicEnabled else true)\n                    if (storyAudioSourceMode == StoryAudioSourceMode.LOCAL_MANUAL) settings.setSceneMusicPlaybackMode(musicMode)\n',
+                   'ReaderScreen save mode')
+          p.write_text(t)
+
+          # Mode 3 must not expose Mode-2/local fallback managers.
+          p = Path('app/src/main/java/vn/nghetruyen/app/ui/components/AudioDirectionLayerSwitches.kt')
+          t = p.read_text()
+          start = t.find('                HorizontalDivider(Modifier.padding(vertical = 6.dp))\n                AudioManagerButton(\n                    label = "CHUẨN HÓA / BẢO TRÌ FILE ÂM THANH MODE 3"')
+          end_marker = '                AudioManagerButton(\n                    label = "KHO SFX ĐÃ TẢI / FALLBACK (${tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.SFX }})",\n                    onClick = { managerKind = AudioAssetKind.SFX },\n                )\n'
+          end = t.find(end_marker, start)
+          if start < 0 or end < 0:
+              raise SystemExit('Mode-3 manager block not found')
+          end += len(end_marker)
+          t = t[:start] + '                Text("File Freesound được tải và chuẩn hóa tự động theo kế hoạch; Mode 3 không mở kho local của Mode 1/2 để chọn thay thế.")\n' + t[end:]
+          p.write_text(t)
+
+          # Reader playback: manual playlist/plain URI is Mode 1 only; Mode 2/3 consume AI plans only.
+          p = Path('app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt')
+          t = p.read_text()
+          if 'import vn.nghetruyen.app.audio.StoryAudioModeRouter\n' not in t:
+              t = once(t, 'import vn.nghetruyen.app.audio.PcmLoudnessEstimator\n',
+                       'import vn.nghetruyen.app.audio.PcmLoudnessEstimator\nimport vn.nghetruyen.app.audio.StoryAudioModeRouter\nimport vn.nghetruyen.app.audio.StoryAudioSourceMode\n',
+                       'ReaderPlayback imports')
+          if 'private var storyAudioSourceMode = StoryAudioSourceMode.AI_LOCAL' not in t:
+              t = once(t, '    private var sceneMusicPlaybackMode = SceneMusicPlaybackMode.SEQUENTIAL\n',
+                       '    private var sceneMusicPlaybackMode = SceneMusicPlaybackMode.SEQUENTIAL\n    private var storyAudioSourceMode = StoryAudioSourceMode.AI_LOCAL\n',
+                       'ReaderPlayback mode state')
+          t = once(t,
+                   '        val settings = container.settingsRepository.snapshot()\n        applyRuntimeSettings(settings)\n        val storyId = PlaybackQueueStore.state.value.storyId\n',
+                   '''        val settings = container.settingsRepository.snapshot()\n        applyRuntimeSettings(settings)\n        val previousAudioSourceMode = storyAudioSourceMode\n        storyAudioSourceMode = container.narrationPlanCoordinator.storyAudioSourceMode()\n        if (previousAudioSourceMode != storyAudioSourceMode) {\n            narrationPlanJob?.cancel()\n            narrationPlanningChapterId = ""\n            narrationPreparedChapterId = ""\n            backgroundMusicShuffleBag.clear()\n        }\n        val storyId = PlaybackQueueStore.state.value.storyId\n''',
+                   'ReaderPlayback refresh mode')
+          t = once(t,
+                   '''        val previousTrackIds = backgroundMusicTracks.map(SceneMusicTrackEntity::id)\n        backgroundMusicTracks = orderedMusicTracks\n        if (previousTrackIds != orderedMusicTracks.map(SceneMusicTrackEntity::id)) backgroundMusicShuffleBag.clear()\n        val musicPlanUsable = backgroundMusicEnabled && autoSceneMusicEnabled && musicPlan?.sourceSha256 == musicSourceHash\n''',
+                   '''        val previousTrackIds = backgroundMusicTracks.map(SceneMusicTrackEntity::id)\n        backgroundMusicTracks = if (StoryAudioModeRouter.allowsManualPlaylist(storyAudioSourceMode)) orderedMusicTracks else emptyList()\n        if (previousTrackIds != backgroundMusicTracks.map(SceneMusicTrackEntity::id)) backgroundMusicShuffleBag.clear()\n        val musicPlanUsable = !StoryAudioModeRouter.allowsManualPlaylist(storyAudioSourceMode) &&\n            backgroundMusicEnabled && autoSceneMusicEnabled && musicPlan?.sourceSha256 == musicSourceHash\n''',
+                   'ReaderPlayback playlist gate')
+          t = once(t,
+                   '''                    configureBackgroundMusic(\n                        settings.backgroundMusicUri,\n                        settings.backgroundMusicEnabled,\n                        settings.backgroundMusicVolume,\n                        settings.backgroundMusicDuckFactor,\n                    )\n''',
+                   '''                    if (StoryAudioModeRouter.allowsManualPlaylist(storyAudioSourceMode)) {\n                        configureBackgroundMusic(\n                            settings.backgroundMusicUri,\n                            settings.backgroundMusicEnabled,\n                            settings.backgroundMusicVolume,\n                            settings.backgroundMusicDuckFactor,\n                        )\n                    } else {\n                        configureBackgroundMusic(null, false, 0f, settings.backgroundMusicDuckFactor)\n                    }\n''',
+                   'ReaderPlayback legacy URI gate')
+          t = once(t,
+                   '    private fun shouldPlanAutoSceneMusic(): Boolean = backgroundMusicEnabled && autoSceneMusicEnabled\n',
+                   '    private fun shouldPlanAutoSceneMusic(): Boolean = !StoryAudioModeRouter.allowsManualPlaylist(storyAudioSourceMode) && backgroundMusicEnabled && autoSceneMusicEnabled\n',
+                   'ReaderPlayback plan gate')
+
+          start = t.find('    private fun prepareCurrentNarrationBeforePlayback(snapshot: PlaybackSnapshot): Boolean {')
+          end = t.find('    private fun maybePrefetchNarrationPlans(', start)
+          if start < 0 or end < 0:
+              raise SystemExit('ReaderPlayback preparation function not found')
+          replacement = '''    private fun prepareCurrentNarrationBeforePlayback(snapshot: PlaybackSnapshot): Boolean {\n        val planVoice = currentStoryAutoVoiceCastEnabled\n        val planMusic = shouldPlanAutoSceneMusic()\n        if ((!planVoice && !planMusic) || snapshot.chapterId.isBlank()) return false\n        if (narrationPreparedChapterId == snapshot.chapterId) return false\n        pendingPlay = true\n        PlaybackQueueStore.setPlaying(false)\n        if (narrationPlanningChapterId == snapshot.chapterId && narrationPlanJob?.isActive == true) return true\n\n        narrationPlanningChapterId = snapshot.chapterId\n        narrationPlanJob?.cancel()\n        narrationPlanJob = serviceScope.launch {\n            var attempt = 0\n            while (PlaybackQueueStore.state.value.chapterId == snapshot.chapterId) {\n                if (planVoice && !currentStoryAutoVoiceCastEnabled) break\n                if (!planVoice && !shouldPlanAutoSceneMusic()) break\n                attempt += 1\n                val taskLabel = when {\n                    planVoice && planMusic -> "phân vai và lập nhạc cảnh"\n                    planVoice -> "phân vai"\n                    else -> "lập nhạc cảnh AI"\n                }\n                PlaybackQueueStore.setNarrationAutomation(\n                    stage = NarrationAutomationStage.CURRENT_PLANNING,\n                    progress = 0.35f,\n                    message = if (attempt == 1) "Đang $taskLabel cho chương hiện tại." else "Đang thử $taskLabel lại lần $attempt.",\n                )\n                transitionMessage = "Đang chuẩn bị kế hoạch kể chuyện…"\n                withContext(Dispatchers.Main) { updateMediaState(); updateNotification() }\n\n                val content = container.libraryRepository.loadCachedChapter(snapshot.chapterId)\n                val planningAttempt = if (content == null) {\n                    Result.failure(IllegalStateException("Không tải được chương để chuẩn bị kế hoạch."))\n                } else {\n                    runCatching {\n                        container.narrationPlanCoordinator.ensurePlans(\n                            content = content,\n                            voice = planVoice,\n                            music = planMusic,\n                            activeTrackId = sceneMusicController.activeTrackId,\n                        )\n                    }\n                }\n                val planResult = planningAttempt.getOrNull()\n                val warnings = planResult?.warnings ?: listOf(planningAttempt.exceptionOrNull()?.message ?: "Không chuẩn bị được kế hoạch kể chuyện.")\n                val assignmentCount = if (!planVoice || content == null) 0 else container.narrationPlanCoordinator.voicePlanAssignmentCount(content)\n                val voiceReady = !planVoice || assignmentCount > 0\n\n                if (planResult != null && voiceReady) {\n                    val configured = applyConfiguredVoice(useStoryProfile = true)\n                    withContext(Dispatchers.Main) {\n                        if (PlaybackQueueStore.state.value.chapterId != snapshot.chapterId) return@withContext\n                        narrationPreparedChapterId = snapshot.chapterId\n                        narrationPlanningChapterId = ""\n                        voiceSettingsReady = configured\n                        val musicApplied = hasSceneMusicPlan()\n                        PlaybackQueueStore.setNarrationAutomation(\n                            stage = NarrationAutomationStage.CURRENT_READY,\n                            progress = 1f,\n                            message = when {\n                                planVoice -> "Đã phân vai xong $assignmentCount mục${if (musicApplied) " và đã áp dụng nhạc cảnh" else ""}. Đang bắt đầu phát."\n                                musicApplied -> "Đã áp dụng nhạc cảnh AI. Đang bắt đầu phát."\n                                else -> "Không có nhạc cảnh phù hợp; lớp MUSIC giữ im lặng."\n                            },\n                        )\n                        transitionMessage = null\n                        if (configured && pendingPlay) { pendingPlay = false; play() } else { updateMediaState(); updateNotification() }\n                    }\n                    return@launch\n                }\n\n                if (!planVoice) {\n                    val configured = applyConfiguredVoice(useStoryProfile = true)\n                    withContext(Dispatchers.Main) {\n                        if (PlaybackQueueStore.state.value.chapterId != snapshot.chapterId) return@withContext\n                        narrationPreparedChapterId = snapshot.chapterId\n                        narrationPlanningChapterId = ""\n                        voiceSettingsReady = configured\n                        PlaybackQueueStore.setNarrationAutomation(\n                            stage = NarrationAutomationStage.CURRENT_READY,\n                            progress = 1f,\n                            message = "Không tạo được nhạc cảnh AI; tiếp tục phát với lớp MUSIC im lặng.",\n                        )\n                        transitionMessage = warnings.firstOrNull()?.take(180)\n                        if (configured && pendingPlay) { pendingPlay = false; play() } else { updateMediaState(); updateNotification() }\n                    }\n                    return@launch\n                }\n\n                val castDisabled = warnings.any { it.contains("phân vai TTS đang tắt", ignoreCase = true) }\n                if (castDisabled) {\n                    withContext(Dispatchers.Main) {\n                        narrationPlanningChapterId = ""\n                        pendingPlay = false\n                        PlaybackQueueStore.setPlaying(false)\n                        PlaybackQueueStore.setNarrationAutomation(\n                            stage = NarrationAutomationStage.FAILED,\n                            progress = 1f,\n                            message = "Phân vai TTS đang tắt cho truyện này. Chưa tự động phát.",\n                        )\n                        transitionMessage = warnings.firstOrNull()?.take(180)\n                        updateMediaState(); updateNotification()\n                    }\n                    return@launch\n                }\n\n                val warningSuffix = warnings.firstOrNull()?.takeIf(String::isNotBlank)?.let { " ${it.take(120)}" }.orEmpty()\n                withContext(Dispatchers.Main) {\n                    if (PlaybackQueueStore.state.value.chapterId != snapshot.chapterId) return@withContext\n                    PlaybackQueueStore.setPlaying(false)\n                    PlaybackQueueStore.setNarrationAutomation(\n                        stage = NarrationAutomationStage.FAILED,\n                        progress = 1f,\n                        message = "Phân vai chưa thành công. Sẽ tự thử lại sau 5 giây.$warningSuffix",\n                    )\n                    transitionMessage = "Phân vai chưa thành công; đang chờ thử lại."\n                    updateMediaState(); updateNotification()\n                }\n                delay(NARRATION_RETRY_DELAY_MS)\n            }\n            narrationPlanningChapterId = ""\n        }\n        return true\n    }\n\n'''
+          t = t[:start] + replacement + t[end:]
+          p.write_text(t)
+
+          # Ambience/SFX must invoke Mode 3 even before any Freesound file exists, then rebuild assets after import.
+          p = Path('app/src/main/java/vn/nghetruyen/app/playback/AudioDirectionRuntime.kt')
+          t = p.read_text()
+          if 'import vn.nghetruyen.app.audio.StoryAudioModeRouter\n' not in t:
+              t = once(t, 'import vn.nghetruyen.app.audio.SoundEffectCue\n',
+                       'import vn.nghetruyen.app.audio.SoundEffectCue\nimport vn.nghetruyen.app.audio.StoryAudioModeRouter\n',
+                       'AudioDirectionRuntime import')
+          t = once(t,
+                   '        val now = System.currentTimeMillis()\n        val fastKey = buildFastKey(snapshot, settings)\n',
+                   '        val now = System.currentTimeMillis()\n        val sourceMode = narrationPlanCoordinator.storyAudioSourceMode()\n        val fastKey = buildFastKey(snapshot, settings)\n',
+                   'AudioDirectionRuntime mode')
+          t = once(t,
+                   '        if (activeAudioAssets.isEmpty()) {\n',
+                   '        if (activeAudioAssets.isEmpty() && !StoryAudioModeRouter.usesAiFreesound(sourceMode)) {\n',
+                   'AudioDirectionRuntime empty-assets gate')
+          t = once(t,
+                   '''            if (outcome == null) {\n                markFailure(signature)\n                return false\n            }\n            plan = narrationPlanCoordinator.loadAudioDirectionPlan(content)\n''',
+                   '''            if (outcome == null) {\n                markFailure(signature)\n                return false\n            }\n            if (StoryAudioModeRouter.usesAiFreesound(sourceMode) && outcome.freesoundResolvedAssets > 0) {\n                clearPreparedPlan()\n                return ensurePlan(snapshot, settings, force = false)\n            }\n            plan = narrationPlanCoordinator.loadAudioDirectionPlan(content)\n''',
+                   'AudioDirectionRuntime post-import rebuild')
+          p.write_text(t)
+
+          # Mode 3 resolution order is Freesound cache -> Freesound -> silence, never a Mode-2 local substitute.
+          p = Path('app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt')
+          t = p.read_text()
+          t = t.replace('private enum class FreesoundAutoResolutionSource { CACHE, FREESOUND, LOCAL_FALLBACK, UNRESOLVED }',
+                        'private enum class FreesoundAutoResolutionSource { CACHE, FREESOUND, UNRESOLVED }')
+          t = t.replace(' * network search/import -> semantic local fallback -> silence. This keeps Freesound as the primary\n * source without downloading the same need again in later chapters.\n',
+                        ' * network search/import -> silence. Mode 3 never substitutes a normal Mode-2 local-library asset.\n * Previously resolved Freesound assets may still be reused from the query cache.\n')
+          fs = t.find('            val fallbackTracks = runCatching { existingTracksProvider() }')
+          fe_marker = '            }\n        }\n        return FreesoundAutoResolveResult(resolutions, warnings.distinct(), imported)\n'
+          fe = t.find(fe_marker, fs)
+          if fs < 0 or fe < 0:
+              raise SystemExit('Freesound local fallback block not found')
+          unresolved = '''            resolutions += FreesoundAutoResolvedNeed(need, null, FreesoundAutoResolutionSource.UNRESOLVED.name)\n            val prefix = if (need.importance == FreesoundRequirementImportance.REQUIRED) "Âm thanh quan trọng" else "Âm thanh tùy chọn"\n            warnings += "$prefix ‘${need.query}’ chưa tìm được trên Freesound; khoảng đó sẽ im lặng ở lớp tương ứng."\n'''
+          t = t[:fs] + unresolved + t[fe:]
+          t = t.replace('        private const val LOCAL_FALLBACK_MIN_SCORE = 0.62\n', '')
+          p.write_text(t)
+          PY
+
+      - name: Verify source invariants
+        shell: bash
+        run: |
+          grep -q 'storyAudioSourceMode == StoryAudioSourceMode.LOCAL_MANUAL' app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt
+          grep -q 'StoryAudioModeRouter.allowsManualPlaylist(storyAudioSourceMode)' app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt
+          grep -q 'usesAiFreesound(sourceMode)' app/src/main/java/vn/nghetruyen/app/playback/AudioDirectionRuntime.kt
+          ! grep -q 'LOCAL_FALLBACK' app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt
+          ! grep -q 'KHO NHẠC ĐÃ TẢI / FALLBACK' app/src/main/java/vn/nghetruyen/app/ui/components/AudioDirectionLayerSwitches.kt
+
+      - name: Unit tests and debug compile
+        run: ./gradlew --no-daemon testDebugUnitTest assembleDebug
+
+      - name: Commit verified runtime fixes
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- \
+            app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt \
+            app/src/main/java/vn/nghetruyen/app/ui/components/AudioDirectionLayerSwitches.kt \
+            app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt \
+            app/src/main/java/vn/nghetruyen/app/playback/AudioDirectionRuntime.kt \
+            app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt
+          git diff --cached --quiet && exit 0
+          git commit -m 'Fix story audio mode runtime isolation'
+          git push origin HEAD:agent/freesound-stage-1

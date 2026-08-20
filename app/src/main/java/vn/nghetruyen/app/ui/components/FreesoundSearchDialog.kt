@@ -29,6 +29,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -42,6 +44,7 @@ import vn.nghetruyen.app.freesound.FreesoundDuration
 import vn.nghetruyen.app.freesound.FreesoundImporter
 import vn.nghetruyen.app.freesound.FreesoundImportQueueStatus
 import vn.nghetruyen.app.freesound.FreesoundImportResult
+import vn.nghetruyen.app.freesound.FreesoundPendingQueueStore
 import vn.nghetruyen.app.freesound.FreesoundPreviewPlayer
 import vn.nghetruyen.app.freesound.FreesoundSearchPage
 import vn.nghetruyen.app.freesound.FreesoundSearchPreferences
@@ -75,6 +78,7 @@ fun FreesoundSearchDialog(
     val previewPlayer = remember { FreesoundPreviewPlayer() }
     val category = remember(kind) { kind.toFreesoundCategory() }
     val searchPreferences = remember(context) { FreesoundSearchPreferences(context) }
+    val pendingQueueStore = remember(context) { FreesoundPendingQueueStore(context) }
     val savedSearch = remember(kind) { searchPreferences.snapshot(category) }
     val importer = remember(application) {
         FreesoundImporter(
@@ -164,8 +168,8 @@ fun FreesoundSearchDialog(
         }
     }
 
-    suspend fun loadExistingAssets(): Map<Int, ExistingFreesoundAsset> {
-        return application.container.database.sceneMusicTrackDao().listAll().mapNotNull { track ->
+    suspend fun loadExistingAssets(): Map<Int, ExistingFreesoundAsset> =
+        application.container.database.sceneMusicTrackDao().listAll().mapNotNull { track ->
             val soundId = FreesoundImporter.soundIdFromManagedUri(track.uri) ?: return@mapNotNull null
             if (!FreesoundImporter.managedFileExists(context, track.uri)) return@mapNotNull null
             soundId to ExistingFreesoundAsset(
@@ -175,7 +179,6 @@ fun FreesoundSearchDialog(
                 kind = AudioAssetClassifier.classify(track),
             )
         }.toMap()
-    }
 
     fun rememberKeywordSearch() {
         searchPreferences.rememberSearch(category, query, duration, sort)
@@ -279,6 +282,7 @@ fun FreesoundSearchDialog(
         queueErrors = emptyMap()
 
         scope.launch {
+            pendingQueueStore.save(kind, candidates, autoResume = true)
             try {
                 for ((index, sound) in candidates.withIndex()) {
                     if (sound.id in existingAssets) {
@@ -296,7 +300,7 @@ fun FreesoundSearchDialog(
                     }
 
                     queueStates = queueStates + (sound.id to FreesoundImportQueueStatus.IMPORTING)
-                    status = "Đang nhập ${index + 1}/${candidates.size}: ${sound.name}"
+                    status = "Đang tải và chuẩn hóa ${index + 1}/${candidates.size}: ${sound.name}"
                     importer.importPreview(
                         sound = sound,
                         kind = kind,
@@ -323,17 +327,26 @@ fun FreesoundSearchDialog(
                         } else {
                             queueStates = queueStates + (sound.id to FreesoundImportQueueStatus.FAILED)
                             queueErrors = queueErrors + (
-                                sound.id to (error.message ?: "Không nhập được âm thanh từ Freesound.")
+                                sound.id to (error.message ?: "Không nhập hoặc chuẩn hóa được âm thanh từ Freesound.")
                             )
                         }
                     }
                 }
             } finally {
                 queueRunning = false
-                stopQueueRequested = false
                 val summary = summarizeFreesoundQueue(queueStates.values)
+                val pendingIds = queueStates.filterValues {
+                    it == FreesoundImportQueueStatus.FAILED || it == FreesoundImportQueueStatus.CANCELLED
+                }.keys
+                val pending = pendingIds.mapNotNull(queueSounds::get)
+                if (pending.isEmpty()) {
+                    pendingQueueStore.clear(kind)
+                } else {
+                    pendingQueueStore.save(kind, pending, autoResume = false)
+                }
+                stopQueueRequested = false
                 status = buildString {
-                    append("Hàng đợi hoàn tất: ${summary.imported} đã nhập")
+                    append("Hàng đợi hoàn tất: ${summary.imported} đã nhập và chuẩn hóa")
                     if (summary.duplicate > 0) append(" • ${summary.duplicate} đã có")
                     if (summary.failed > 0) append(" • ${summary.failed} lỗi")
                     if (summary.cancelled > 0) append(" • ${summary.cancelled} đã dừng")
@@ -345,7 +358,7 @@ fun FreesoundSearchDialog(
 
     fun retryFailed() {
         val failed = queueStates
-            .filterValues { it == FreesoundImportQueueStatus.FAILED }
+            .filterValues { it == FreesoundImportQueueStatus.FAILED || it == FreesoundImportQueueStatus.CANCELLED }
             .keys
             .mapNotNull(queueSounds::get)
         startImportQueue(failed)
@@ -356,6 +369,21 @@ fun FreesoundSearchDialog(
         runCatching { loadExistingAssets() }
             .onSuccess { existingAssets = it }
             .onFailure { status = "Không kiểm tra được các âm thanh Freesound đã có trong thư viện." }
+        pendingQueueStore.load(kind)?.let { pending ->
+            val remaining = pending.sounds.filter { it.id !in existingAssets }
+            if (remaining.isEmpty()) {
+                pendingQueueStore.clear(kind)
+            } else if (pending.autoResume) {
+                selectedSounds = remaining.associateBy(FreesoundSound::id)
+                status = "Đã khôi phục hàng đợi Freesound bị gián đoạn; đang tiếp tục ${remaining.size} tệp."
+                startImportQueue(remaining)
+            } else {
+                selectedSounds = remaining.associateBy(FreesoundSound::id)
+                queueSounds = remaining.associateBy(FreesoundSound::id)
+                queueStates = remaining.associate { it.id to FreesoundImportQueueStatus.CANCELLED }
+                status = "Đã khôi phục ${remaining.size} tệp chưa hoàn tất. Nhấn NHẬP ĐÃ CHỌN để tiếp tục."
+            }
+        }
     }
 
     DisposableEffect(previewPlayer) {
@@ -365,8 +393,11 @@ fun FreesoundSearchDialog(
         }
     }
 
-    LaunchedEffect(status) {
-        status?.takeIf(String::isNotBlank)?.let(view::announceForAccessibility)
+    LaunchedEffect(status, queueRunning) {
+        status?.takeIf(String::isNotBlank)?.let { message ->
+            val noisyQueueProgress = queueRunning && message.startsWith("Đang tải và chuẩn hóa ")
+            if (!noisyQueueProgress) view.announceForAccessibility(message)
+        }
     }
 
     AlertDialog(
@@ -501,7 +532,10 @@ fun FreesoundSearchDialog(
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("NHẬP ĐÃ CHỌN (${selectedSounds.size})") }
                     TextButton(
-                        onClick = { selectedSounds = emptyMap() },
+                        onClick = {
+                            selectedSounds = emptyMap()
+                            scope.launch { pendingQueueStore.clear(kind) }
+                        },
                         enabled = !queueRunning,
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("BỎ CHỌN TẤT CẢ") }
@@ -511,7 +545,7 @@ fun FreesoundSearchDialog(
                     Text(
                         buildString {
                             append("Hàng đợi: ${queueSummary.queued} chờ")
-                            if (queueSummary.importing > 0) append(" • ${queueSummary.importing} đang nhập")
+                            if (queueSummary.importing > 0) append(" • ${queueSummary.importing} tải/chuẩn hóa")
                             if (queueSummary.imported > 0) append(" • ${queueSummary.imported} xong")
                             if (queueSummary.failed > 0) append(" • ${queueSummary.failed} lỗi")
                             if (queueSummary.duplicate > 0) append(" • ${queueSummary.duplicate} đã có")
@@ -523,16 +557,19 @@ fun FreesoundSearchDialog(
                         Button(
                             onClick = {
                                 stopQueueRequested = true
-                                status = "Sẽ dừng hàng đợi sau tệp đang nhập."
+                                scope.launch {
+                                    pendingQueueStore.save(kind, queueSounds.values, autoResume = false)
+                                }
+                                status = "Sẽ dừng hàng đợi sau tệp đang tải/chuẩn hóa."
                             },
                             enabled = !stopQueueRequested,
                             modifier = Modifier.fillMaxWidth(),
                         ) { Text(if (stopQueueRequested) "ĐANG DỪNG SAU TỆP HIỆN TẠI…" else "DỪNG HÀNG ĐỢI") }
-                    } else if (queueSummary.failed > 0) {
+                    } else if (queueSummary.failed + queueSummary.cancelled > 0) {
                         Button(
                             onClick = ::retryFailed,
                             modifier = Modifier.fillMaxWidth(),
-                        ) { Text("THỬ LẠI ${queueSummary.failed} TỆP LỖI") }
+                        ) { Text("THỬ LẠI ${queueSummary.failed + queueSummary.cancelled} TỆP") }
                     }
                 }
 
@@ -676,7 +713,12 @@ private fun FreesoundSearchResultRow(
     onSimilar: () -> Unit,
     onOpenExisting: () -> Unit,
 ) {
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(
+        Modifier.fillMaxWidth().semantics {
+            contentDescription = "Kết quả ${sound.name}, ${formatDuration(sound.durationSeconds)}"
+        },
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
         Text(sound.name, fontWeight = FontWeight.SemiBold)
         Text(formatDuration(sound.durationSeconds), style = MaterialTheme.typography.bodySmall)
         if (sound.description.isNotBlank()) {
@@ -699,7 +741,9 @@ private fun FreesoundSearchResultRow(
             Button(
                 onClick = onPreview,
                 enabled = !busy && sound.preferredPreviewUrl != null,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).semantics {
+                    contentDescription = if (previewPlaying) "Dừng nghe ${sound.name}" else "Nghe thử ${sound.name}"
+                },
             ) {
                 Text(
                     when {
@@ -713,7 +757,13 @@ private fun FreesoundSearchResultRow(
             Button(
                 onClick = if (existingAsset != null) onOpenExisting else onImport,
                 enabled = !busy && (existingAsset != null || sound.preferredPreviewUrl != null),
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).semantics {
+                    contentDescription = if (existingAsset != null) {
+                        "Mở âm thanh đã có ${sound.name}"
+                    } else {
+                        "Nhập và chuẩn hóa ${sound.name}"
+                    }
+                },
             ) {
                 Text(
                     if (existingAsset != null) {
@@ -721,7 +771,7 @@ private fun FreesoundSearchResultRow(
                     } else {
                         when (queueStatus) {
                             FreesoundImportQueueStatus.QUEUED -> "ĐANG CHỜ"
-                            FreesoundImportQueueStatus.IMPORTING -> "ĐANG NHẬP…"
+                            FreesoundImportQueueStatus.IMPORTING -> "ĐANG NHẬP / CHUẨN HÓA…"
                             FreesoundImportQueueStatus.IMPORTED -> "ĐÃ NHẬP"
                             FreesoundImportQueueStatus.FAILED -> "NHẬP LẠI"
                             FreesoundImportQueueStatus.DUPLICATE -> "ĐÃ CÓ"
@@ -736,12 +786,16 @@ private fun FreesoundSearchResultRow(
             Button(
                 onClick = onSelect,
                 enabled = !busy && existingAsset == null && sound.preferredPreviewUrl != null,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).semantics {
+                    contentDescription = if (selected) "Bỏ chọn ${sound.name}" else "Chọn ${sound.name}"
+                },
             ) { Text(if (selected) "BỎ CHỌN" else "CHỌN") }
             Button(
                 onClick = onSimilar,
                 enabled = !busy,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).semantics {
+                    contentDescription = "Tìm âm thanh tương tự ${sound.name}"
+                },
             ) { Text("TÌM TƯƠNG TỰ") }
         }
     }
@@ -774,8 +828,8 @@ private fun formatDuration(seconds: Double): String {
 
 private fun queueStatusLabel(status: FreesoundImportQueueStatus): String = when (status) {
     FreesoundImportQueueStatus.QUEUED -> "Chờ nhập"
-    FreesoundImportQueueStatus.IMPORTING -> "Đang nhập"
-    FreesoundImportQueueStatus.IMPORTED -> "Đã nhập"
+    FreesoundImportQueueStatus.IMPORTING -> "Đang tải và chuẩn hóa"
+    FreesoundImportQueueStatus.IMPORTED -> "Đã nhập và chuẩn hóa"
     FreesoundImportQueueStatus.FAILED -> "Lỗi"
     FreesoundImportQueueStatus.DUPLICATE -> "Đã có trong thư viện"
     FreesoundImportQueueStatus.CANCELLED -> "Đã dừng"

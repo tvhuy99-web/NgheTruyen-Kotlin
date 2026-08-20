@@ -41,6 +41,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import vn.nghetruyen.app.MainActivity
 import vn.nghetruyen.app.ai.ChapterAiWorkflow
+import vn.nghetruyen.app.ai.XpkSceneMusicParity
 import vn.nghetruyen.app.ai.XpkVoiceCastSplitter
 import vn.nghetruyen.app.NgheTruyenApplication
 import vn.nghetruyen.app.R
@@ -61,10 +62,15 @@ import vn.nghetruyen.app.ui.reference.ReferenceVoiceRoleExtras
 import vn.nghetruyen.app.audio.Pcm16WaveConverter
 import vn.nghetruyen.app.audio.AudioAssetClassifier
 import vn.nghetruyen.app.audio.AudioAssetKind
+import vn.nghetruyen.app.audio.AudioDirectionPreferences
+import vn.nghetruyen.app.audio.StoryAudioModeRouter
+import vn.nghetruyen.app.audio.StoryAudioSourceMode
 import vn.nghetruyen.app.audio.SonicPcmProcessor
 import vn.nghetruyen.app.audio.PcmLoudnessEstimator
 import vn.nghetruyen.source.diagnostics.DiagnosticCategory
 import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
+import vn.nghetruyen.app.freesound.FreesoundImporter
+import org.json.JSONObject
 import java.io.File
 import java.util.ArrayDeque
 import java.util.Locale
@@ -196,6 +202,7 @@ class ReaderPlaybackService : Service() {
     private var backgroundMusicVolume: Float = 0.18f
     private var backgroundMusicDuckFactor: Float = 0.63095734f
     private var backgroundMusicEnabled = false
+    private var storyAudioSourceMode = StoryAudioSourceMode.AI_LOCAL
     private var backgroundMusicAttackMillis = 1850
     private var backgroundMusicReleaseMillis = 2050
     private var backgroundMusicTracks: List<SceneMusicTrackEntity> = emptyList()
@@ -1795,9 +1802,64 @@ class ReaderPlaybackService : Service() {
         return candidate.chapter.index == snapshot.chapterIndex + 1
     }
 
-    private fun shouldPlanAutoSceneMusic(): Boolean = backgroundMusicEnabled && autoSceneMusicEnabled
+    private fun shouldPlanAutoSceneMusic(): Boolean =
+        !StoryAudioModeRouter.usesManualLocal(storyAudioSourceMode) && autoSceneMusicEnabled
+
+    private fun shouldPlanAutoStoryAudio(): Boolean {
+        if (StoryAudioModeRouter.usesManualLocal(storyAudioSourceMode)) return false
+        val audio = AudioDirectionPreferences.currentSnapshot()
+        return autoSceneMusicEnabled || audio.ambienceEnabled || audio.soundEffectsEnabled
+    }
 
     private fun prepareCurrentNarrationBeforePlayback(snapshot: PlaybackSnapshot): Boolean {
+        val planAudioWithoutVoice = !currentStoryAutoVoiceCastEnabled && shouldPlanAutoStoryAudio()
+        if (planAudioWithoutVoice && snapshot.chapterId.isNotBlank()) {
+            if (narrationPreparedChapterId == snapshot.chapterId) return false
+            pendingPlay = true
+            PlaybackQueueStore.setPlaying(false)
+            if (narrationPlanningChapterId == snapshot.chapterId && narrationPlanJob?.isActive == true) return true
+            narrationPlanningChapterId = snapshot.chapterId
+            narrationPlanJob?.cancel()
+            narrationPlanJob = serviceScope.launch {
+                PlaybackQueueStore.setNarrationAutomation(
+                    stage = NarrationAutomationStage.CURRENT_PLANNING,
+                    progress = 0.35f,
+                    message = "Đang chuẩn bị âm thanh AI cho chương hiện tại.",
+                )
+                val content = container.libraryRepository.loadCachedChapter(snapshot.chapterId)
+                val planResult = if (content == null) null else runCatching {
+                    container.narrationPlanCoordinator.ensurePlans(
+                        content = content,
+                        voice = false,
+                        music = shouldPlanAutoSceneMusic(),
+                        activeTrackId = sceneMusicController.activeTrackId,
+                    )
+                }.getOrNull()
+                val configured = applyConfiguredVoice(useStoryProfile = true)
+                withContext(Dispatchers.Main) {
+                    if (PlaybackQueueStore.state.value.chapterId != snapshot.chapterId) return@withContext
+                    narrationPreparedChapterId = snapshot.chapterId
+                    narrationPlanningChapterId = ""
+                    voiceSettingsReady = configured
+                    val warning = planResult?.warnings?.firstOrNull()?.takeIf(String::isNotBlank)
+                    PlaybackQueueStore.setNarrationAutomation(
+                        stage = NarrationAutomationStage.CURRENT_READY,
+                        progress = 1f,
+                        message = warning?.let { "Âm thanh AI đã chuẩn bị với cảnh báo: ${it.take(120)}" }
+                            ?: "Đã chuẩn bị âm thanh AI cho chương hiện tại.",
+                    )
+                    transitionMessage = null
+                    if (configured && pendingPlay) {
+                        pendingPlay = false
+                        play()
+                    } else {
+                        updateMediaState()
+                        updateNotification()
+                    }
+                }
+            }
+            return true
+        }
         if (!currentStoryAutoVoiceCastEnabled || snapshot.chapterId.isBlank()) return false
         if (narrationPreparedChapterId == snapshot.chapterId) return false
         pendingPlay = true
@@ -1922,7 +1984,9 @@ class ReaderPlaybackService : Service() {
         sourceId: String,
         parentChapterId: String,
     ) {
-        if (!prefetchNarrationPlansEnabled || !currentStoryAutoVoiceCastEnabled) return
+        val planVoice = currentStoryAutoVoiceCastEnabled
+        val planAudio = shouldPlanAutoStoryAudio()
+        if (!prefetchNarrationPlansEnabled || (!planVoice && !planAudio)) return
         narrationPrefetchJob?.cancel()
         narrationPrefetchJob = serviceScope.launch {
             var current: ChapterContent? = content
@@ -1931,14 +1995,14 @@ class ReaderPlaybackService : Service() {
                 val attempt = runCatching {
                     container.narrationPlanCoordinator.ensurePlans(
                         content = chapter,
-                        voice = true,
+                        voice = planVoice,
                         music = shouldPlanAutoSceneMusic(),
                         activeTrackId = if (offset == 0) sceneMusicController.activeTrackId else null,
                     )
                 }
                 val result = attempt.getOrNull()
                 if (offset == 0) {
-                    val assignmentCount = if (result == null) {
+                    val assignmentCount = if (!planVoice || result == null) {
                         0
                     } else {
                         try {
@@ -1954,15 +2018,14 @@ class ReaderPlaybackService : Service() {
                             0
                         }
                     }
-                    val failed = result == null || assignmentCount <= 0 || (
-                        result.warnings.isNotEmpty() && !result.voicePlanCreated && !result.musicPlanCreated
-                    )
+                    val failed = result == null || (planVoice && assignmentCount <= 0)
                     val musicLabel = if (shouldPlanAutoSceneMusic()) " + nhạc cảnh" else ""
                     val baseMessage = when {
-                        result == null -> "Không phân vai trước được chương tiếp theo: ${chapter.chapter.title}."
+                        result == null -> "Không chuẩn bị AI trước được chương tiếp theo: ${chapter.chapter.title}."
+                        !planVoice -> "Đã chuẩn bị âm thanh AI cho chương tiếp theo: ${chapter.chapter.title}."
                         assignmentCount <= 0 -> "Phân vai trước chưa tạo được mục giọng hợp lệ: ${chapter.chapter.title}."
                         failed -> "Phân vai trước chương tiếp theo chưa thành công: ${chapter.chapter.title}."
-                        result.voicePlanCreated || result.musicPlanCreated ->
+                        result.voicePlanCreated || result.musicPlanCreated || result.audioPlanCreated || result.freesoundPlanCreated ->
                             "Đã phân vai $assignmentCount mục$musicLabel cho chương tiếp theo: ${chapter.chapter.title}."
                         else -> "Chương tiếp theo đã có $assignmentCount mục phân vai$musicLabel hợp lệ: ${chapter.chapter.title}."
                     }
@@ -2101,6 +2164,7 @@ class ReaderPlaybackService : Service() {
     private suspend fun applyConfiguredVoice(useStoryProfile: Boolean, skipEngineCheck: Boolean = false): Boolean {
         val settings = container.settingsRepository.snapshot()
         applyRuntimeSettings(settings)
+        storyAudioSourceMode = container.storyAudioSourceModeStore.get()
         val storyId = PlaybackQueueStore.state.value.storyId
         val previousStoryAutoVoiceCastEnabled = currentStoryAutoVoiceCastEnabled
         currentStoryAutoVoiceCastEnabled = if (useStoryProfile && storyId.isNotBlank()) {
@@ -2177,6 +2241,10 @@ class ReaderPlaybackService : Service() {
         val enabledMusicTracks = if (useStoryProfile && chapterId.isNotBlank()) {
             container.libraryRepository.listEnabledSceneMusicTracks()
                 .filter { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }
+                .filter { track ->
+                    !StoryAudioModeRouter.usesAiFreesound(storyAudioSourceMode) ||
+                        FreesoundImporter.soundIdFromManagedUri(track.uri) != null
+                }
         } else emptyList()
         val musicSourceHash = originalChapter?.let { chapter ->
             ChapterAiWorkflow.sha256(
@@ -2194,7 +2262,11 @@ class ReaderPlaybackService : Service() {
         val previousTrackIds = backgroundMusicTracks.map(SceneMusicTrackEntity::id)
         backgroundMusicTracks = orderedMusicTracks
         if (previousTrackIds != orderedMusicTracks.map(SceneMusicTrackEntity::id)) backgroundMusicShuffleBag.clear()
-        val musicPlanUsable = backgroundMusicEnabled && autoSceneMusicEnabled && musicPlan?.sourceSha256 == musicSourceHash
+        val musicPlanUsable = !StoryAudioModeRouter.usesManualLocal(storyAudioSourceMode) &&
+            autoSceneMusicEnabled &&
+            musicPlan != null &&
+            musicPlan.sourceSha256 == musicSourceHash &&
+            scenePlanMatchesCurrentSourceMode(musicPlan.transformedText)
         xpkSceneTrackByUnitId = if (musicPlanUsable) {
             runCatching {
                 XpkPlaybackRuntime.parseSceneTimeline(
@@ -2215,22 +2287,29 @@ class ReaderPlaybackService : Service() {
         withContext(Dispatchers.Main) {
             applyRuntimeVoice(config)
             if (!hasSceneMusicPlan()) {
-                if (backgroundMusicEnabled && backgroundMusicTracks.isNotEmpty()) {
-                    configureBackgroundMusic(null, false, 0f, settings.backgroundMusicDuckFactor)
-                    val activeId = sceneMusicController.activeTrackId
-                    if (activeId != null && backgroundMusicTracks.none { it.id == activeId }) {
+                if (StoryAudioModeRouter.allowsManualPlaylist(storyAudioSourceMode)) {
+                    if (backgroundMusicEnabled && backgroundMusicTracks.isNotEmpty()) {
+                        configureBackgroundMusic(null, false, 0f, settings.backgroundMusicDuckFactor)
+                        val activeId = sceneMusicController.activeTrackId
+                        if (activeId != null && backgroundMusicTracks.none { it.id == activeId }) {
+                            sceneMusicController.stop(clearTrack = true)
+                        }
+                        if (PlaybackQueueStore.state.value.isPlaying) ensureBackgroundPlaylist(advance = false)
+                        else sceneMusicController.pause()
+                    } else {
                         sceneMusicController.stop(clearTrack = true)
+                        activeSceneTrackId = null
+                        configureBackgroundMusic(
+                            settings.backgroundMusicUri,
+                            settings.backgroundMusicEnabled,
+                            settings.backgroundMusicVolume,
+                            settings.backgroundMusicDuckFactor,
+                        )
                     }
-                    if (PlaybackQueueStore.state.value.isPlaying) ensureBackgroundPlaylist(advance = false)
-                    else sceneMusicController.pause()
                 } else {
                     sceneMusicController.stop(clearTrack = true)
-                    configureBackgroundMusic(
-                        settings.backgroundMusicUri,
-                        settings.backgroundMusicEnabled,
-                        settings.backgroundMusicVolume,
-                        settings.backgroundMusicDuckFactor,
-                    )
+                    activeSceneTrackId = null
+                    configureBackgroundMusic(null, false, 0f, settings.backgroundMusicDuckFactor)
                 }
             } else {
                 configureBackgroundMusic(null, false, 0f, settings.backgroundMusicDuckFactor)
@@ -2320,15 +2399,32 @@ class ReaderPlaybackService : Service() {
 
     private fun hasSceneMusicPlan(): Boolean = xpkSceneTrackByUnitId.isNotEmpty() || sceneMusicCues.isNotEmpty()
 
+    private fun scenePlanMatchesCurrentSourceMode(transformedText: String): Boolean = runCatching {
+        JSONObject(transformedText).optString("audio_source_mode").trim() == storyAudioSourceMode.name
+    }.getOrDefault(false)
+
     private fun updateSceneMusicForUnit(unitId: String?, paragraphIndex: Int) {
         if (!hasSceneMusicPlan()) {
-            if (backgroundMusicEnabled && backgroundMusicTracks.isNotEmpty()) ensureBackgroundPlaylist(advance = false)
+            if (StoryAudioModeRouter.allowsManualPlaylist(storyAudioSourceMode) &&
+                backgroundMusicEnabled && backgroundMusicTracks.isNotEmpty()
+            ) {
+                ensureBackgroundPlaylist(advance = false)
+            } else if (!StoryAudioModeRouter.allowsManualPlaylist(storyAudioSourceMode)) {
+                sceneMusicController.stop(clearTrack = true)
+                activeSceneTrackId = null
+            }
             return
         }
         val canonicalPlanActive = xpkSceneTrackByUnitId.isNotEmpty()
         val legacyCue = if (canonicalPlanActive) null else sceneMusicCues.lastOrNull { it.startParagraph <= paragraphIndex }
         val requestedTrackId = if (canonicalPlanActive) unitId?.let(xpkSceneTrackByUnitId::get) else legacyCue?.trackId
         val snapshot = PlaybackQueueStore.state.value
+        if (requestedTrackId == XpkSceneMusicParity.SILENCE_TRACK_ID) {
+            sceneMusicController.stop(clearTrack = true)
+            activeSceneTrackId = null
+            transitionMessage = null
+            return
+        }
         val track = requestedTrackId?.let { selectedTrackId ->
             SceneMusicSelector.select(
                 tracks = sceneMusicTracks.values,
@@ -2455,6 +2551,7 @@ class ReaderPlaybackService : Service() {
     }
 
     private fun ensureBackgroundPlaylist(advance: Boolean): Boolean {
+        if (!StoryAudioModeRouter.allowsManualPlaylist(storyAudioSourceMode)) return false
         if (!backgroundMusicEnabled || backgroundMusicTracks.isEmpty() || hasSceneMusicPlan()) return false
         val track = chooseBackgroundPlaylistTrack(advance) ?: return false
         val tracks = backgroundMusicTracks.filter(SceneMusicTrackEntity::enabled)
@@ -2476,7 +2573,9 @@ class ReaderPlaybackService : Service() {
             looping = tracks.size == 1,
             onCompletion = if (tracks.size > 1) {
                 {
-                    if (PlaybackQueueStore.state.value.isPlaying && backgroundMusicEnabled && !hasSceneMusicPlan()) {
+                    if (StoryAudioModeRouter.allowsManualPlaylist(storyAudioSourceMode) &&
+                        PlaybackQueueStore.state.value.isPlaying && backgroundMusicEnabled && !hasSceneMusicPlan()
+                    ) {
                         ensureBackgroundPlaylist(advance = true)
                     }
                 }
@@ -2536,7 +2635,8 @@ class ReaderPlaybackService : Service() {
     }
 
     private fun updateBackgroundMusic(ducked: Boolean, pause: Boolean = false) {
-        val usesTrackLibrary = backgroundMusicEnabled && backgroundMusicTracks.isNotEmpty()
+        val usesTrackLibrary = StoryAudioModeRouter.allowsManualPlaylist(storyAudioSourceMode) &&
+            backgroundMusicEnabled && backgroundMusicTracks.isNotEmpty()
         if (hasSceneMusicPlan() || sceneMusicController.activeTrackId != null || usesTrackLibrary) {
             sceneMusicController.setDuckTiming(backgroundMusicAttackMillis, backgroundMusicReleaseMillis)
             if (pause) {

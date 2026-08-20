@@ -25,6 +25,7 @@ import vn.nghetruyen.app.freesound.FreesoundAutoAudioResolver
 import vn.nghetruyen.app.freesound.FreesoundAutoPlanBuilder
 import vn.nghetruyen.app.freesound.FreesoundAutoRequirement
 import vn.nghetruyen.app.freesound.FreesoundAutoRequirementCodec
+import vn.nghetruyen.app.freesound.FreesoundImporter
 import vn.nghetruyen.app.playback.PlaybackQueueStore
 import vn.nghetruyen.app.playback.XpkPlaybackRuntime
 import java.util.UUID
@@ -268,11 +269,14 @@ class NarrationPlanCoordinator(
         val audioSettings = AudioDirectionPreferences.currentSnapshot()
         if (!audioSettings.ambienceEnabled && !audioSettings.soundEffectsEnabled) return AmbienceSfxPlan()
         val enabledAssets = library.listEnabledSceneMusicTracks()
+        val sourceAssets = if (StoryAudioModeRouter.usesAiFreesound(sourceMode)) {
+            enabledAssets.filter { FreesoundImporter.soundIdFromManagedUri(it.uri) != null }
+        } else enabledAssets
         val ambienceTracks = if (audioSettings.ambienceEnabled) {
-            enabledAssets.filter { AudioAssetClassifier.classify(it) == AudioAssetKind.AMBIENCE }
+            sourceAssets.filter { AudioAssetClassifier.classify(it) == AudioAssetKind.AMBIENCE }
         } else emptyList()
         val soundEffectTracks = if (audioSettings.soundEffectsEnabled) {
-            enabledAssets.filter { AudioAssetClassifier.classify(it) == AudioAssetKind.SFX }
+            sourceAssets.filter { AudioAssetClassifier.classify(it) == AudioAssetKind.SFX }
         } else emptyList()
         val effectiveAmbience = audioSettings.ambienceEnabled && ambienceTracks.isNotEmpty()
         val effectiveSfx = audioSettings.soundEffectsEnabled && soundEffectTracks.isNotEmpty()
@@ -392,6 +396,7 @@ class NarrationPlanCoordinator(
 
     private suspend fun standardFreesoundPlanCurrent(content: ChapterContent, kinds: Set<AudioAssetKind>): Boolean {
         val enabled = library.listEnabledSceneMusicTracks()
+            .filter { FreesoundImporter.soundIdFromManagedUri(it.uri) != null }
         if (AudioAssetKind.MUSIC in kinds) {
             val musicTracks = enabled.filter { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }
             val cached = library.getChapterTransform(content.chapter.id, ChapterAiWorkflow.KIND_SCENE_MUSIC) ?: return false
@@ -431,6 +436,7 @@ class NarrationPlanCoordinator(
         val units = XpkVoiceCastSplitter.buildUnits(content.chapter.title, chapterBody(content))
         val unitIds = units.map { it.id }
         val enabled = library.listEnabledSceneMusicTracks()
+            .filter { FreesoundImporter.soundIdFromManagedUri(it.uri) != null }
         var musicCreated = false
         var audioCreated = false
 
@@ -917,7 +923,7 @@ class NarrationPlanCoordinator(
         const val KIND_FREESOUND_AUTO_AUDIO = "FREESOUND_AUTO_AUDIO"
         private const val VOICE_TRANSFORM_ENGINE = "xpk-unit-v8"
         private const val MUSIC_TRANSFORM_ENGINE = "xpk-ai-full-authority-v1"
-        private const val FREESOUND_AUTO_ENGINE = "freesound-auto-audio-v1"
+        private const val FREESOUND_AUTO_ENGINE = "freesound-auto-audio-v2"
         private val AUDIO_TYPE_PREFIX = Regex(
             "(?i)^(?:type\\s*[:=]\\s*(?:music|ambience|environment|sfx|sound[_-]?effect|sfx[_-]?continuous|continuous)|\\[(?:music|ambience|environment|sfx|continuous|sfx[_-]?continuous)\\])(?:\\s*[,;|]\\s*|\\s+|$)",
         )

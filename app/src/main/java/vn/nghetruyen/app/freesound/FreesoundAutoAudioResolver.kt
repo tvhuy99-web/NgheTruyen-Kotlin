@@ -233,12 +233,19 @@ class FreesoundAutoAudioResolver(
 
             clientSearches += 1
             val searchStartedNanos = System.nanoTime()
-            diagnostics += "CLIENT_SEARCH_START index=${index + 1} kind=${need.kind.name} query=${need.query.take(160)}"
+            val effectiveQuery = searchQueryForRetry(need.query, retryAttempt)
+            val searchStrategy = when {
+                retryAttempt <= 1 -> "EXACT"
+                retryAttempt == 2 -> "RELAXED_3_TERMS"
+                else -> "RELAXED_2_TERMS"
+            }
+            diagnostics += "CLIENT_SEARCH_START index=${index + 1} kind=${need.kind.name} query=${need.query.take(160)} effectiveQuery=${effectiveQuery.take(160)} strategy=$searchStrategy"
             liveDiagnostic(traceId, "FREESOUND_CLIENT_SEARCH_START", attributes = baseAttributes + mapOf(
                 "index" to (index + 1).toString(), "total" to needs.size.toString(),
                 "kind" to need.kind.name, "query" to need.query.take(180),
+                "effectiveQuery" to effectiveQuery.take(180), "strategy" to searchStrategy,
             ))
-            val search = searchBest(need)
+            val search = searchBest(need, effectiveQuery)
             val searchElapsedMs = (System.nanoTime() - searchStartedNanos) / 1_000_000L
             val remote = search.sound
             diagnostics += "CLIENT_SEARCH_DONE index=${index + 1} kind=${need.kind.name} elapsedMs=$searchElapsedMs resultCount=${search.resultCount} httpCode=${search.httpCode ?: 0} selectedSoundId=${remote?.id ?: 0} failure=${search.failureMessage.orEmpty().take(180)}"
@@ -250,6 +257,7 @@ class FreesoundAutoAudioResolver(
                     "index" to (index + 1).toString(), "kind" to need.kind.name,
                     "elapsedMs" to searchElapsedMs.toString(), "resultCount" to search.resultCount.toString(),
                     "httpCode" to (search.httpCode ?: 0).toString(), "selectedSoundId" to (remote?.id ?: 0).toString(),
+                    "effectiveQuery" to effectiveQuery.take(180), "strategy" to searchStrategy,
                     "failure" to search.failureMessage.orEmpty().take(220),
                 ),
             )
@@ -362,6 +370,19 @@ class FreesoundAutoAudioResolver(
                 "elapsedMs" to totalElapsedMs.toString(),
             ),
         )
+        if (retryRecommended && retryAttempt >= retryMax) {
+            liveDiagnostic(
+                traceId,
+                "FREESOUND_RETRY_EXHAUSTED",
+                DiagnosticSeverity.ERROR,
+                baseAttributes + mapOf(
+                    "resolved" to resolutions.count { !it.trackId.isNullOrBlank() }.toString(),
+                    "unresolved" to resolutions.count { it.trackId.isNullOrBlank() }.toString(),
+                    "unresolvedRequired" to unresolvedRequired.toString(),
+                    "requirements" to requirements.size.toString(),
+                ),
+            )
+        }
         return FreesoundAutoResolveResult(
             resolved = resolutions,
             warnings = warnings.distinct(),
@@ -371,9 +392,12 @@ class FreesoundAutoAudioResolver(
         )
     }
 
-    private suspend fun searchBest(need: FreesoundAutoSearchNeed): FreesoundAutoSearchOutcome {
+    private suspend fun searchBest(
+        need: FreesoundAutoSearchNeed,
+        effectiveQuery: String,
+    ): FreesoundAutoSearchOutcome {
         val request = FreesoundSearchRequest(
-            query = need.query,
+            query = effectiveQuery,
             category = need.kind.toFreesoundCategory(),
             duration = FreesoundDuration.RECOMMENDED,
             sort = FreesoundSort.RELEVANCE,
@@ -411,6 +435,22 @@ class FreesoundAutoAudioResolver(
     companion object {
         private const val SEARCH_PAGE_SIZE = 15
         private const val REMOTE_MIN_SCORE = 0.22
+        private val RETRY_QUERY_STOPWORDS = setOf(
+            "a", "an", "the", "on", "in", "at", "with", "and", "or", "of", "to", "from", "for", "by",
+            "into", "onto", "single", "one", "sound", "effect", "audio",
+        )
+
+        internal fun searchQueryForRetry(query: String, retryAttempt: Int): String {
+            val original = query.trim()
+            if (retryAttempt <= 1 || original.isBlank()) return original
+            val tokens = FreesoundAutoRequirementAggregator.normalizeQuery(original)
+                .split(' ')
+                .map(String::trim)
+                .filter { it.length >= 2 && it !in RETRY_QUERY_STOPWORDS }
+            if (tokens.isEmpty()) return original
+            val keep = if (retryAttempt == 2) 3 else 2
+            return tokens.takeLast(keep.coerceAtMost(tokens.size)).joinToString(" ").ifBlank { original }
+        }
 
         internal fun scoreCandidate(query: String, sound: FreesoundSound, rankIndex: Int): Double {
             val queryNorm = FreesoundAutoRequirementAggregator.normalizeQuery(query)

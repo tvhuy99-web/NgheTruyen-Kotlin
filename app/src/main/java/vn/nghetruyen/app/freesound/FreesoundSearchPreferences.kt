@@ -39,12 +39,7 @@ class FreesoundSearchPreferences(context: Context) {
         if (cleanQuery.isBlank()) return
         val key = category.name.lowercase()
         val previous = decodeRecent(prefs.getString("recent_$key", null))
-        val recent = buildList {
-            add(cleanQuery)
-            previous.forEach { candidate ->
-                if (!candidate.equals(cleanQuery, ignoreCase = true)) add(candidate)
-            }
-        }.take(MAX_RECENT_QUERIES)
+        val recent = mergeRecentQueries(cleanQuery, previous)
         prefs.edit()
             .putString("query_$key", cleanQuery)
             .putString("duration_$key", duration.name)
@@ -91,18 +86,32 @@ class FreesoundSearchPreferences(context: Context) {
             FreesoundCategory.ALL -> emptyList()
         }
 
+        internal fun mergeRecentQueries(query: String, previous: List<String>): List<String> {
+            val clean = query.trim().take(FreesoundSearchRequest.MAX_QUERY_LENGTH)
+            if (clean.isBlank()) return previous.take(MAX_RECENT_QUERIES)
+            return buildList {
+                add(clean)
+                previous.forEach { candidate ->
+                    val normalized = candidate.trim().take(FreesoundSearchRequest.MAX_QUERY_LENGTH)
+                    if (normalized.isNotBlank() && none { it.equals(normalized, ignoreCase = true) }) {
+                        add(normalized)
+                    }
+                }
+            }.take(MAX_RECENT_QUERIES)
+        }
+
         internal fun decodeRecent(raw: String?): List<String> {
             if (raw.isNullOrBlank()) return emptyList()
             return runCatching {
                 val array = JSONArray(raw)
-                buildList {
+                val values = buildList {
                     for (index in 0 until array.length()) {
-                        val value = array.optString(index).trim()
-                        if (value.isNotBlank() && none { it.equals(value, ignoreCase = true) }) {
-                            add(value.take(FreesoundSearchRequest.MAX_QUERY_LENGTH))
-                        }
+                        add(array.optString(index))
                     }
-                }.take(MAX_RECENT_QUERIES)
+                }
+                values.fold(emptyList()) { acc, value ->
+                    mergeRecentQueries(value, acc)
+                }.reversed().take(MAX_RECENT_QUERIES)
             }.getOrDefault(emptyList())
         }
 

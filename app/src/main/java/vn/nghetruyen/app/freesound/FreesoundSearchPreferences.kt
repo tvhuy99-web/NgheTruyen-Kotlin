@@ -89,7 +89,7 @@ class FreesoundSearchPreferences(context: Context) {
         internal fun mergeRecentQueries(query: String, previous: List<String>): List<String> {
             val clean = query.trim().take(FreesoundSearchRequest.MAX_QUERY_LENGTH)
             if (clean.isBlank()) return previous.take(MAX_RECENT_QUERIES)
-            return buildList {
+            return buildList<String> {
                 add(clean)
                 previous.forEach { candidate ->
                     val normalized = candidate.trim().take(FreesoundSearchRequest.MAX_QUERY_LENGTH)
@@ -104,12 +104,12 @@ class FreesoundSearchPreferences(context: Context) {
             if (raw.isNullOrBlank()) return emptyList()
             return runCatching {
                 val array = JSONArray(raw)
-                val values = buildList {
+                val values = buildList<String> {
                     for (index in 0 until array.length()) {
                         add(array.optString(index))
                     }
                 }
-                values.fold(emptyList()) { acc, value ->
+                values.fold(emptyList<String>()) { acc, value ->
                     mergeRecentQueries(value, acc)
                 }.reversed().take(MAX_RECENT_QUERIES)
             }.getOrDefault(emptyList())

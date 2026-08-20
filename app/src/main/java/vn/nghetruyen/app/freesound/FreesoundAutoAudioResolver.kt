@@ -38,6 +38,12 @@ data class FreesoundAutoResolveResult(
     val diagnostics: List<String> = emptyList(),
 ) {
     val resolvedCount: Int get() = resolved.count { !it.trackId.isNullOrBlank() }
+    val unresolvedCount: Int get() = resolved.size - resolvedCount
+    val unresolvedRequiredCount: Int get() = resolved.count {
+        it.trackId.isNullOrBlank() && it.need.importance == FreesoundRequirementImportance.REQUIRED
+    }
+    val shouldRetryIncomplete: Boolean get() =
+        retryableFailure || (resolved.isNotEmpty() && (resolvedCount == 0 || unresolvedRequiredCount > 0))
 }
 
 /** Query -> managed Freesound track cache. It stores only app-internal ids. */
@@ -89,6 +95,20 @@ class FreesoundAutoAudioResolver(
         repository = repository,
         existingTracksProvider = existingTracksProvider,
     )
+
+    suspend fun usableManagedTrackIds(kinds: Set<AudioAssetKind>): Set<String> {
+        if (kinds.isEmpty()) return emptySet()
+        return runCatching { existingTracksProvider() }.getOrDefault(emptyList())
+            .asSequence()
+            .filter { track ->
+                track.enabled &&
+                    AudioAssetClassifier.classify(track) in kinds &&
+                    FreesoundImporter.soundIdFromManagedUri(track.uri) != null &&
+                    FreesoundImporter.managedFileExists(appContext, track.uri)
+            }
+            .map(SceneMusicTrackEntity::id)
+            .toSet()
+    }
 
     suspend fun resolve(requirements: List<FreesoundAutoRequirement>): FreesoundAutoResolveResult {
         val startedNanos = System.nanoTime()
@@ -204,7 +224,12 @@ class FreesoundAutoAudioResolver(
         }
 
         val totalElapsedMs = (System.nanoTime() - startedNanos) / 1_000_000L
-        diagnostics += "RESOLVE_DONE requirements=${requirements.size} aggregated=${needs.size} resolved=${resolutions.count { !it.trackId.isNullOrBlank() }} unresolved=${resolutions.count { it.trackId.isNullOrBlank() }} queryCacheHits=$queryCacheHits clientSearches=$clientSearches importAttempts=$importAttempts imported=${imported.size} retryableFailure=$retryableFailure elapsedMs=$totalElapsedMs"
+        val unresolvedRequired = resolutions.count {
+            it.trackId.isNullOrBlank() && it.need.importance == FreesoundRequirementImportance.REQUIRED
+        }
+        val retryRecommended = retryableFailure ||
+            (resolutions.isNotEmpty() && (resolutions.none { !it.trackId.isNullOrBlank() } || unresolvedRequired > 0))
+        diagnostics += "RESOLVE_DONE requirements=${requirements.size} aggregated=${needs.size} resolved=${resolutions.count { !it.trackId.isNullOrBlank() }} unresolved=${resolutions.count { it.trackId.isNullOrBlank() }} unresolvedRequired=$unresolvedRequired queryCacheHits=$queryCacheHits clientSearches=$clientSearches importAttempts=$importAttempts imported=${imported.size} retryableFailure=$retryableFailure retryRecommended=$retryRecommended elapsedMs=$totalElapsedMs"
         return FreesoundAutoResolveResult(
             resolved = resolutions,
             warnings = warnings.distinct(),

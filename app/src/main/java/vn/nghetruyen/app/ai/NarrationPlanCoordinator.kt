@@ -144,11 +144,24 @@ class NarrationPlanCoordinator(
             loadFreesoundRequirements(content, freesoundKinds)
         } else null
         val cachedFreesoundRetryRequired = cachedFreesoundRequirements != null && freesoundResolutionRetryRequired(content)
-        if (freesoundMode) {
-            freesoundDiagnostics += "COORDINATOR_CACHE cachedRequirements=${cachedFreesoundRequirements?.size ?: 0} retryRequired=$cachedFreesoundRetryRequired force=$force"
+        val cachedFreesoundEmpty = cachedFreesoundRequirements?.isEmpty() == true
+        val cachedFreesoundEmptyRetryDue = cachedFreesoundEmpty && freesoundEmptyAiRetryDue(content)
+        if (cachedFreesoundEmpty && !cachedFreesoundEmptyRetryDue) {
+            restoredFreesound = FreesoundApplyResult(
+                musicCreated = false,
+                audioCreated = false,
+                resolvedAssets = 0,
+                warnings = listOf("AI chưa trả yêu cầu Freesound; sẽ yêu cầu AI lập lại sau thời gian chờ."),
+                retryableFailure = true,
+                diagnostics = listOf("AI_REQUIREMENTS_EMPTY_CACHE retryDue=false"),
+            )
+            warnings += restoredFreesound.warnings
         }
-        if (cachedFreesoundRequirements != null &&
-            (cachedFreesoundRetryRequired || !standardFreesoundPlanCurrent(content, freesoundKinds))
+        if (freesoundMode) {
+            freesoundDiagnostics += "COORDINATOR_CACHE cachedRequirements=${cachedFreesoundRequirements?.size ?: 0} retryRequired=$cachedFreesoundRetryRequired empty=$cachedFreesoundEmpty emptyRetryDue=$cachedFreesoundEmptyRetryDue force=$force"
+        }
+        if (cachedFreesoundRequirements != null && cachedFreesoundRequirements.isNotEmpty() &&
+            (cachedFreesoundRetryRequired || !standardFreesoundPlanCurrent(content, freesoundKinds, cachedFreesoundRequirements))
         ) {
             restoredFreesound = applyFreesoundRequirements(content, cachedFreesoundRequirements, freesoundKinds)
             warnings += restoredFreesound.warnings
@@ -158,6 +171,7 @@ class NarrationPlanCoordinator(
                     freesoundKinds,
                     cachedFreesoundRequirements,
                     retryRequired = restoredFreesound.retryableFailure,
+                    resolvedAssets = restoredFreesound.resolvedAssets,
                 )
             }.onFailure { warnings += it.message ?: "Không cập nhật được trạng thái retry Freesound." }
         }
@@ -173,7 +187,8 @@ class NarrationPlanCoordinator(
             force = force,
             expectedMode = StoryAudioSourceMode.AI_LOCAL,
         )
-        val freesoundNeeded = freesoundMode && freesoundKinds.isNotEmpty() && (force || cachedFreesoundRequirements == null)
+        val freesoundNeeded = freesoundMode && freesoundKinds.isNotEmpty() &&
+            (force || cachedFreesoundRequirements == null || cachedFreesoundEmptyRetryDue)
         if (freesoundMode) {
             freesoundDiagnostics += "COORDINATOR_NEEDS voiceNeeded=$voiceNeeded localMusicNeeded=$musicNeeded localAudioNeeded=$audioNeeded freesoundNeeded=$freesoundNeeded"
         }
@@ -278,16 +293,26 @@ class NarrationPlanCoordinator(
                 var markerCreated = false
                 if (freesoundNeeded && outcome.value.freesoundRequirementError.isBlank()) {
                     if (outcome.value.freesoundRequirements.isEmpty()) {
-                        warnings += "AI không yêu cầu MUSIC/AMBIENCE/SFX Freesound nào cho chương này; các lớp Mode 3 tương ứng sẽ im lặng."
+                        warnings += "AI không trả yêu cầu MUSIC/AMBIENCE/SFX Freesound; sẽ tự yêu cầu AI lập lại sau thời gian chờ."
+                        autoApplied = FreesoundApplyResult(
+                            musicCreated = false,
+                            audioCreated = false,
+                            resolvedAssets = 0,
+                            warnings = emptyList(),
+                            retryableFailure = true,
+                            diagnostics = listOf("AI_REQUIREMENTS_EMPTY fresh=true"),
+                        )
+                    } else {
+                        autoApplied = applyFreesoundRequirements(content, outcome.value.freesoundRequirements, freesoundKinds)
+                        warnings += autoApplied.warnings
                     }
-                    autoApplied = applyFreesoundRequirements(content, outcome.value.freesoundRequirements, freesoundKinds)
-                    warnings += autoApplied.warnings
                     runCatching {
                         persistFreesoundRequirements(
                             content,
                             freesoundKinds,
                             outcome.value.freesoundRequirements,
                             retryRequired = autoApplied.retryableFailure,
+                            resolvedAssets = autoApplied.resolvedAssets,
                         )
                     }.onSuccess { markerCreated = true }
                         .onFailure { warnings += it.message ?: "Không lưu được cache kế hoạch Freesound tự động." }
@@ -316,7 +341,8 @@ class NarrationPlanCoordinator(
         if (!audioSettings.ambienceEnabled && !audioSettings.soundEffectsEnabled) return AmbienceSfxPlan()
         val enabledAssets = library.listEnabledSceneMusicTracks()
         val sourceAssets = if (StoryAudioModeRouter.usesAiFreesound(sourceMode)) {
-            enabledAssets.filter { FreesoundImporter.soundIdFromManagedUri(it.uri) != null }
+            val usableIds = freesoundResolver.usableManagedTrackIds(setOf(AudioAssetKind.AMBIENCE, AudioAssetKind.SFX))
+            enabledAssets.filter { it.id in usableIds && FreesoundImporter.soundIdFromManagedUri(it.uri) != null }
         } else enabledAssets
         val ambienceTracks = if (audioSettings.ambienceEnabled) {
             sourceAssets.filter { AudioAssetClassifier.classify(it) == AudioAssetKind.AMBIENCE }
@@ -443,16 +469,37 @@ class NarrationPlanCoordinator(
         return !isCurrentTimelineTransform(cached.transformedText, XpkAmbienceSfxDirector.ENGINE, content)
     }
 
-    private suspend fun standardFreesoundPlanCurrent(content: ChapterContent, kinds: Set<AudioAssetKind>): Boolean {
+    private suspend fun standardFreesoundPlanCurrent(
+        content: ChapterContent,
+        kinds: Set<AudioAssetKind>,
+        requirements: List<FreesoundAutoRequirement>,
+    ): Boolean {
+        if (requirements.isEmpty()) return false
+        val neededKinds = requirements.map(FreesoundAutoRequirement::kind).toSet()
+        val usableIds = freesoundResolver.usableManagedTrackIds(kinds)
         val enabled = library.listEnabledSceneMusicTracks()
-            .filter { FreesoundImporter.soundIdFromManagedUri(it.uri) != null }
+            .filter { it.id in usableIds && FreesoundImporter.soundIdFromManagedUri(it.uri) != null }
+
         if (AudioAssetKind.MUSIC in kinds) {
             val musicTracks = enabled.filter { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }
+            if (AudioAssetKind.MUSIC in neededKinds && musicTracks.isEmpty()) return false
             val cached = library.getChapterTransform(content.chapter.id, ChapterAiWorkflow.KIND_SCENE_MUSIC) ?: return false
             if (cached.sourceSha256 != musicSourceHash(content, musicTracks)) return false
             if (!isExpectedAudioSourceMode(cached.transformedText, StoryAudioSourceMode.AI_FREESOUND)) return false
             if (!isCurrentTimelineTransform(cached.transformedText, MUSIC_TRANSFORM_ENGINE, content)) return false
+            if (AudioAssetKind.MUSIC in neededKinds) {
+                val allowed = musicTracks.map(SceneMusicTrackEntity::id).toSet()
+                val scenes = runCatching { JSONObject(cached.transformedText).optJSONArray("music_scenes") }.getOrNull()
+                    ?: return false
+                var playable = false
+                for (index in 0 until scenes.length()) {
+                    val trackId = scenes.optJSONObject(index)?.optString("track_id")?.trim().orEmpty()
+                    if (trackId in allowed) { playable = true; break }
+                }
+                if (!playable) return false
+            }
         }
+
         if (AudioAssetKind.AMBIENCE in kinds || AudioAssetKind.SFX in kinds) {
             val ambienceTracks = if (AudioAssetKind.AMBIENCE in kinds) {
                 enabled.filter { AudioAssetClassifier.classify(it) == AudioAssetKind.AMBIENCE }
@@ -460,6 +507,9 @@ class NarrationPlanCoordinator(
             val sfxTracks = if (AudioAssetKind.SFX in kinds) {
                 enabled.filter { AudioAssetClassifier.classify(it) == AudioAssetKind.SFX }
             } else emptyList()
+            if (AudioAssetKind.AMBIENCE in neededKinds && ambienceTracks.isEmpty()) return false
+            if (AudioAssetKind.SFX in neededKinds && sfxTracks.isEmpty()) return false
+
             val cached = library.getChapterTransform(content.chapter.id, KIND_AUDIO_DIRECTION) ?: return false
             val hash = audioDirectionSourceHash(
                 content,
@@ -471,6 +521,28 @@ class NarrationPlanCoordinator(
             if (cached.sourceSha256 != hash) return false
             if (!isExpectedAudioSourceMode(cached.transformedText, StoryAudioSourceMode.AI_FREESOUND)) return false
             if (!isCurrentTimelineTransform(cached.transformedText, XpkAmbienceSfxDirector.ENGINE, content)) return false
+
+            val root = runCatching { JSONObject(cached.transformedText) }.getOrNull() ?: return false
+            if (AudioAssetKind.AMBIENCE in neededKinds) {
+                val allowed = ambienceTracks.map(SceneMusicTrackEntity::id).toSet()
+                val rows = root.optJSONArray("ambience_scenes") ?: return false
+                var playable = false
+                for (index in 0 until rows.length()) {
+                    val id = rows.optJSONObject(index)?.optString("ambience_id")?.trim().orEmpty()
+                    if (id in allowed) { playable = true; break }
+                }
+                if (!playable) return false
+            }
+            if (AudioAssetKind.SFX in neededKinds) {
+                val allowed = sfxTracks.map(SceneMusicTrackEntity::id).toSet()
+                val rows = root.optJSONArray("sfx_cues") ?: return false
+                var playable = false
+                for (index in 0 until rows.length()) {
+                    val id = rows.optJSONObject(index)?.optString("effect_id")?.trim().orEmpty()
+                    if (id in allowed) { playable = true; break }
+                }
+                if (!playable) return false
+            }
         }
         return true
     }
@@ -485,8 +557,9 @@ class NarrationPlanCoordinator(
         val diagnostics = resolved.diagnostics.toMutableList()
         val units = XpkVoiceCastSplitter.buildUnits(content.chapter.title, chapterBody(content))
         val unitIds = units.map { it.id }
+        val usableIds = freesoundResolver.usableManagedTrackIds(kinds)
         val enabled = library.listEnabledSceneMusicTracks()
-            .filter { FreesoundImporter.soundIdFromManagedUri(it.uri) != null }
+            .filter { it.id in usableIds && FreesoundImporter.soundIdFromManagedUri(it.uri) != null }
         diagnostics += "PLAN_BUILD_START requirements=${requirements.size} units=${unitIds.size} managedTracks=${enabled.size} kinds=${kinds.map(AudioAssetKind::name).sorted().joinToString(",")}"
         var musicCreated = false
         var audioCreated = false
@@ -609,13 +682,17 @@ class NarrationPlanCoordinator(
             }
         }
 
-        diagnostics += "PLAN_BUILD_DONE musicCreated=$musicCreated audioCreated=$audioCreated resolvedAssets=${resolved.resolvedCount} retryableFailure=${resolved.retryableFailure}"
+        val retryRecommended = resolved.shouldRetryIncomplete
+        if (retryRecommended && requirements.isNotEmpty()) {
+            warnings += "Freesound chưa resolve đủ âm thanh quan trọng; ứng dụng sẽ tự thử lại mà không cần phân vai lại."
+        }
+        diagnostics += "PLAN_BUILD_DONE musicCreated=$musicCreated audioCreated=$audioCreated resolvedAssets=${resolved.resolvedCount} unresolved=${resolved.unresolvedCount} unresolvedRequired=${resolved.unresolvedRequiredCount} retryableFailure=${resolved.retryableFailure} retryRecommended=$retryRecommended"
         return FreesoundApplyResult(
             musicCreated = musicCreated,
             audioCreated = audioCreated,
             resolvedAssets = resolved.resolvedCount,
             warnings = warnings.distinct(),
-            retryableFailure = resolved.retryableFailure,
+            retryableFailure = retryRecommended,
             diagnostics = diagnostics.distinct(),
         )
     }
@@ -766,6 +843,7 @@ class NarrationPlanCoordinator(
         kinds: Set<AudioAssetKind>,
         requirements: List<FreesoundAutoRequirement>,
         retryRequired: Boolean = false,
+        resolvedAssets: Int = 0,
     ) {
         val appSettings = settings.snapshot()
         val (provider, model) = effectiveAiMetadata(
@@ -779,7 +857,14 @@ class NarrationPlanCoordinator(
             .put("timeline_fingerprint_version", XpkPlaybackRuntime.TIMELINE_FINGERPRINT_VERSION)
             .put("timeline_fingerprint", timelineFingerprint(content))
             .put("enabled_kinds", JSONArray(kinds.map(AudioAssetKind::name).sorted()))
-    .put("resolution_retry_required", retryRequired)
+            .put("requirement_count", requirements.size)
+            .put("resolved_asset_count", resolvedAssets.coerceAtLeast(0))
+            .put("resolution_state", when {
+                requirements.isEmpty() -> "AI_EMPTY"
+                retryRequired -> "INCOMPLETE"
+                else -> "COMPLETE"
+            })
+            .put("resolution_retry_required", retryRequired)
             .put(FreesoundAutoRequirementCodec.JSON_KEY, FreesoundAutoRequirementCodec.toJson(requirements))
             .toString()
         library.saveChapterTransform(
@@ -812,10 +897,15 @@ class NarrationPlanCoordinator(
     }
 
     private suspend fun freesoundResolutionRetryRequired(content: ChapterContent): Boolean {
-    val cached = library.getChapterTransform(content.chapter.id, KIND_FREESOUND_AUTO_AUDIO) ?: return false
-    val root = runCatching { JSONObject(cached.transformedText) }.getOrNull() ?: return false
-    return root.optBoolean("resolution_retry_required", false)
-}
+        val cached = library.getChapterTransform(content.chapter.id, KIND_FREESOUND_AUTO_AUDIO) ?: return false
+        val root = runCatching { JSONObject(cached.transformedText) }.getOrNull() ?: return false
+        return root.optBoolean("resolution_retry_required", false)
+    }
+
+    private suspend fun freesoundEmptyAiRetryDue(content: ChapterContent): Boolean {
+        val cached = library.getChapterTransform(content.chapter.id, KIND_FREESOUND_AUTO_AUDIO) ?: return true
+        return System.currentTimeMillis() - cached.updatedAt >= FREESOUND_EMPTY_AI_RETRY_COOLDOWN_MS
+    }
 
     private suspend fun buildContinuityContext(
         content: ChapterContent,
@@ -998,6 +1088,7 @@ class NarrationPlanCoordinator(
         private const val VOICE_TRANSFORM_ENGINE = "xpk-unit-v8"
         private const val MUSIC_TRANSFORM_ENGINE = "xpk-ai-full-authority-v1"
         private const val FREESOUND_AUTO_ENGINE = "freesound-auto-audio-v2"
+        private const val FREESOUND_EMPTY_AI_RETRY_COOLDOWN_MS = 60_000L
         private val AUDIO_TYPE_PREFIX = Regex(
             "(?i)^(?:type\\s*[:=]\\s*(?:music|ambience|environment|sfx|sound[_-]?effect|sfx[_-]?continuous|continuous)|\\[(?:music|ambience|environment|sfx|continuous|sfx[_-]?continuous)\\])(?:\\s*[,;|]\\s*|\\s+|$)",
         )

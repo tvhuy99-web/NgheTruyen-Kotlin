@@ -339,7 +339,8 @@ class AudioDirectionRuntime(
         .asSequence()
         .filter { track ->
             !StoryAudioModeRouter.usesAiFreesound(sourceMode) ||
-                FreesoundImporter.soundIdFromManagedUri(track.uri) != null
+                (FreesoundImporter.soundIdFromManagedUri(track.uri) != null &&
+                    FreesoundImporter.managedFileExists(appContext, track.uri))
         }
         .map { track ->
         val asset = AudioAssetClassifier.toAsset(track)
@@ -538,7 +539,8 @@ class AudioDirectionRuntime(
                     "unitId" to unitId,
                     "assetCount" to assets.size.toString(),
                     "assetIds" to assets.joinToString(",") { it.id }.take(260),
-                    "filesExist" to assets.all { FreesoundImporter.managedFileExists(appContext, it.uri) }.toString(),
+                    "filesExist" to (assets.isNotEmpty() &&
+                        assets.all { FreesoundImporter.managedFileExists(appContext, it.uri) }).toString(),
                 ),
             )
             lastAmbienceTraceState = state

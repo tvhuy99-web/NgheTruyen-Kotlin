@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import vn.nghetruyen.app.audio.AudioAssetKind
 
 class FreesoundMode3RegressionTest {
     @Test
@@ -16,6 +17,44 @@ class FreesoundMode3RegressionTest {
         )
         assertTrue(result.retryableFailure)
         assertEquals(0, result.resolvedCount)
+    }
+
+    @Test
+    fun unresolvedRequiredNeedForcesRetryEvenWithoutNetworkFailure() {
+        val need = FreesoundAutoSearchNeed(
+            kind = AudioAssetKind.AMBIENCE,
+            query = "thunder storm",
+            importance = FreesoundRequirementImportance.REQUIRED,
+            usages = emptyList(),
+        )
+        val result = FreesoundAutoResolveResult(
+            resolved = listOf(FreesoundAutoResolvedNeed(need, null, "UNRESOLVED")),
+            warnings = emptyList(),
+            importedTrackIds = emptySet(),
+            retryableFailure = false,
+        )
+        assertEquals(0, result.resolvedCount)
+        assertEquals(1, result.unresolvedRequiredCount)
+        assertTrue(result.shouldRetryIncomplete)
+    }
+
+    @Test
+    fun fullyResolvedRequiredNeedDoesNotForceRetry() {
+        val need = FreesoundAutoSearchNeed(
+            kind = AudioAssetKind.SFX,
+            query = "sword hit",
+            importance = FreesoundRequirementImportance.REQUIRED,
+            usages = emptyList(),
+        )
+        val result = FreesoundAutoResolveResult(
+            resolved = listOf(FreesoundAutoResolvedNeed(need, "track-1", "CACHE")),
+            warnings = emptyList(),
+            importedTrackIds = emptySet(),
+            retryableFailure = false,
+        )
+        assertEquals(1, result.resolvedCount)
+        assertEquals(0, result.unresolvedRequiredCount)
+        assertFalse(result.shouldRetryIncomplete)
     }
 
     @Test

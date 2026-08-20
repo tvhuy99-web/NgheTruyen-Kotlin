@@ -209,6 +209,21 @@ class ReaderPlaybackService : Service() {
                 "error" to (error?.message ?: "").take(220),
             ),
         )
+        if (result != null && result.freesoundResolvedAssets == 0) {
+            diagnostic(
+                "FREESOUND_MODE3_ZERO_AUDIO",
+                DiagnosticSeverity.WARN,
+                mapOf(
+                    "phase" to phase,
+                    "retryRequired" to result.freesoundRetryRequired.toString(),
+                    "musicPlanCreated" to result.musicPlanCreated.toString(),
+                    "audioPlanCreated" to result.audioPlanCreated.toString(),
+                    "traceCount" to result.freesoundDiagnostics.size.toString(),
+                    "firstTrace" to result.freesoundDiagnostics.firstOrNull().orEmpty().take(260),
+                    "firstWarning" to result.warnings.firstOrNull().orEmpty().take(260),
+                ),
+            )
+        }
         result?.freesoundDiagnostics.orEmpty().forEachIndexed { index, detail ->
             val stage = detail.substringBefore(' ').take(56).ifBlank { "TRACE" }
             val severity = if (

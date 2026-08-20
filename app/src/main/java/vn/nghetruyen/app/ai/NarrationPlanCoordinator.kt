@@ -640,7 +640,7 @@ class NarrationPlanCoordinator(
                 freesoundResolver.clearNetworkSearchCache()
             }
             diagnostics += "RUNTIME_RETRY_START attempt=$attempt/$MAX_FREESOUND_RUNTIME_ATTEMPTS"
-            latest = applyFreesoundRequirementsOnce(content, requirements, kinds)
+            latest = applyFreesoundRequirementsOnce(content, requirements, kinds, attempt)
             warnings += latest.warnings
             diagnostics += latest.diagnostics
             diagnostics += "RUNTIME_RETRY_RESULT attempt=$attempt resolved=${latest.resolvedAssets} retryRequired=${latest.retryableFailure}"
@@ -669,8 +669,13 @@ class NarrationPlanCoordinator(
         content: ChapterContent,
         requirements: List<FreesoundAutoRequirement>,
         kinds: Set<AudioAssetKind>,
+        retryAttempt: Int,
     ): FreesoundApplyResult {
-        val resolved = freesoundResolver.resolve(requirements)
+        val resolved = freesoundResolver.resolve(
+            requirements = requirements,
+            retryAttempt = retryAttempt,
+            retryMax = MAX_FREESOUND_RUNTIME_ATTEMPTS,
+        )
         val warnings = resolved.warnings.toMutableList()
         val diagnostics = resolved.diagnostics.toMutableList()
         val units = XpkVoiceCastSplitter.buildUnits(content.chapter.title, chapterBody(content))

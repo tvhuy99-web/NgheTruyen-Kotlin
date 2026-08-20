@@ -21,6 +21,7 @@ import vn.nghetruyen.app.ui.reference.ReferenceVoiceRoleExtras
 import vn.nghetruyen.source.diagnostics.DiagnosticCategory
 import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 import java.io.IOException
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlin.math.min
 
@@ -109,6 +110,7 @@ class XpkNarrationAiServices(
     }
 
     suspend fun planNarration(request: NarrationPlanRequest): AppResult<NarrationPlan> {
+        val narrationTraceId = "ai-narration:${UUID.randomUUID()}"
         diagnostic(
             "AI_NARRATION_PLAN_START",
             attributes = mapOf(
@@ -122,6 +124,7 @@ class XpkNarrationAiServices(
                 "freesoundKinds" to request.freesoundRequirementKinds.joinToString(",") { it.name },
                 "inputChars" to request.rawText.length.toString(),
             ),
+            traceId = narrationTraceId,
         )
         val rawText = request.rawText.trim()
         if (rawText.isBlank()) return failure("AI_EMPTY_INPUT", "Chương không có nội dung để lập kế hoạch kể chuyện.")
@@ -326,6 +329,7 @@ class XpkNarrationAiServices(
                             "freesoundAuto" to request.includeFreesoundAudioRequirements.toString(),
                             "freesoundRequirements" to it.freesoundRequirements.size.toString(),
                         ),
+                        traceId = narrationTraceId,
                     )
                     AppResult.Success(it)
                 },
@@ -602,12 +606,18 @@ class XpkNarrationAiServices(
         val body: String,
     )
 
-    private fun diagnostic(name: String, severity: DiagnosticSeverity = DiagnosticSeverity.DEBUG, attributes: Map<String, String> = emptyMap()) {
+    private fun diagnostic(
+        name: String,
+        severity: DiagnosticSeverity = DiagnosticSeverity.DEBUG,
+        attributes: Map<String, String> = emptyMap(),
+        traceId: String? = null,
+    ) {
         (appContext as? NgheTruyenApplication)?.container?.sourceDiagnostics?.mark(
             name = name,
             category = DiagnosticCategory.RUNTIME,
             severity = severity,
             sourceId = "ai",
+            traceId = traceId ?: "app:${UUID.randomUUID()}",
             attributes = attributes,
         )
     }

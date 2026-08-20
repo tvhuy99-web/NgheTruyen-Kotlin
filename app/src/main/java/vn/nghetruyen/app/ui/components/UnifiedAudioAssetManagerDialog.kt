@@ -46,7 +46,11 @@ import vn.nghetruyen.app.audio.AudioDirectionPreferences
 import vn.nghetruyen.app.audio.PcmLoudnessEstimator
 import vn.nghetruyen.app.audio.SceneMusicAnalysisWorker
 import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
+import vn.nghetruyen.app.freesound.FreesoundCategory
+import vn.nghetruyen.app.freesound.FreesoundDuration
 import vn.nghetruyen.app.freesound.FreesoundImporter
+import vn.nghetruyen.app.freesound.FreesoundSearchPreferences
+import vn.nghetruyen.app.freesound.FreesoundSort
 import vn.nghetruyen.app.playback.ReaderPlaybackService
 
 /**
@@ -89,6 +93,8 @@ fun UnifiedAudioAssetManagerDialog(
     var bulkErrors by remember(kind) { mutableStateOf<List<String>>(emptyList()) }
     var showClearAllConfirm by remember(kind) { mutableStateOf(false) }
     var showFreesoundDialog by remember(kind) { mutableStateOf(false) }
+    var showFreesoundAdvancedTools by remember(kind) { mutableStateOf(false) }
+    var similarTrack by remember(kind) { mutableStateOf<SceneMusicTrackEntity?>(null) }
     var previewPlayer by remember(kind) { mutableStateOf<MediaPlayer?>(null) }
 
     fun notify(message: String) {
@@ -230,6 +236,13 @@ fun UnifiedAudioAssetManagerDialog(
                     ) { Text("TÌM TRÊN FREESOUND") }
                 }
                 Button(
+                    onClick = {
+                        stopPreview()
+                        showFreesoundAdvancedTools = true
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("CÔNG CỤ FREESOUND NÂNG CAO") }
+                Button(
                     onClick = { bulkText = ""; showBulkDialog = true },
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("DÁN MÔ TẢ") }
@@ -343,6 +356,40 @@ fun UnifiedAudioAssetManagerDialog(
         )
     }
 
+    if (showFreesoundAdvancedTools) {
+        FreesoundAdvancedToolsDialog(
+            kind = kind,
+            tracks = draft,
+            onUseQuery = { query ->
+                FreesoundSearchPreferences(context).rememberSearch(
+                    category = freesoundCategory(kind),
+                    query = query,
+                    duration = FreesoundDuration.RECOMMENDED,
+                    sort = FreesoundSort.RELEVANCE,
+                )
+                showFreesoundAdvancedTools = false
+                showFreesoundDialog = true
+            },
+            onStageRemoveTrack = { trackId ->
+                draft = draft.filterNot { it.id == trackId }
+                    .mapIndexed { index, row -> row.copy(orderIndex = index) }
+                movedTracks = movedTracks - trackId
+                selectedTrackId = null
+            },
+            onDismiss = { showFreesoundAdvancedTools = false },
+        )
+    }
+
+    similarTrack?.let { track ->
+        FreesoundSimilarAssetDialog(
+            kind = kind,
+            track = track,
+            normalizationTargetLufs = normalizationTarget,
+            onImported = { result -> transientAddedIds = transientAddedIds + result.trackId },
+            onDismiss = { similarTrack = null },
+        )
+    }
+
     selectedTrackId?.let { selectedId ->
         draft.firstOrNull { it.id == selectedId }?.let { track ->
             val index = draft.indexOfFirst { it.id == track.id }
@@ -410,6 +457,11 @@ fun UnifiedAudioAssetManagerDialog(
                         }
                         UnifiedAssetActionButton("SỬA TÊN / MÔ TẢ") {
                             editingTrack = track
+                            selectedTrackId = null
+                        }
+                        UnifiedAssetActionButton("TÌM ÂM THANH TƯƠNG TỰ") {
+                            stopPreview()
+                            similarTrack = track
                             selectedTrackId = null
                         }
                         UnifiedAssetActionButton("SAO CHÉP TÊN") {
@@ -677,6 +729,12 @@ private fun kindShortName(kind: AudioAssetKind): String = when (kind) {
     AudioAssetKind.MUSIC -> "nhạc nền"
     AudioAssetKind.AMBIENCE -> "âm thanh môi trường"
     AudioAssetKind.SFX -> "hiệu ứng âm thanh"
+}
+
+private fun freesoundCategory(kind: AudioAssetKind): FreesoundCategory = when (kind) {
+    AudioAssetKind.MUSIC -> FreesoundCategory.MUSIC
+    AudioAssetKind.AMBIENCE -> FreesoundCategory.AMBIENCE
+    AudioAssetKind.SFX -> FreesoundCategory.SFX
 }
 
 private fun displayName(context: android.content.Context, uri: Uri): String {

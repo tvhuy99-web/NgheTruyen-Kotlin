@@ -53,12 +53,7 @@ import vn.nghetruyen.app.freesound.FreesoundSearchPreferences
 import vn.nghetruyen.app.freesound.FreesoundSort
 import vn.nghetruyen.app.playback.ReaderPlaybackService
 
-/**
- * Canonical asset-library dialog for MUSIC, AMBIENCE and SFX.
- * The Reader music library is the UX reference, so all three kinds expose the same bulk controls:
- * multi-file add, paste descriptions, copy all names/descriptions, clear/save/cancel, plus per-file
- * preview, normalization, edit, copy, enable/disable, reorder, category move and delete.
- */
+/** Canonical asset-library dialog shared by MUSIC, AMBIENCE and SFX. */
 @Composable
 fun UnifiedAudioAssetManagerDialog(
     kind: AudioAssetKind,
@@ -123,8 +118,7 @@ fun UnifiedAudioAssetManagerDialog(
             .mapIndexed { index, row -> row.copy(orderIndex = index) }
         selectedTrackId = null
         notify(
-            "Đã đánh dấu chuyển ‘${track.title}’ sang ${kindShortName(destination)}. " +
-                "Nhấn LƯU DANH SÁCH để xác nhận.",
+            "Đã đánh dấu chuyển ‘${track.title}’ sang ${kindShortName(destination)}. Nhấn LƯU DANH SÁCH để xác nhận.",
         )
     }
 
@@ -136,9 +130,7 @@ fun UnifiedAudioAssetManagerDialog(
             CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
                 val dao = app.container.database.sceneMusicTrackDao()
                 idsToDelete.forEach { id ->
-                    dao.get(id)?.let { track ->
-                        FreesoundImporter.deleteManagedFile(context, track.uri)
-                    }
+                    dao.get(id)?.let { track -> FreesoundImporter.deleteManagedFile(context, track.uri) }
                     dao.delete(id)
                 }
             }
@@ -157,9 +149,7 @@ fun UnifiedAudioAssetManagerDialog(
             it.id !in baselineIds && it.id !in draftIds && it.id !in movedIds
         }
         if (added.isNotEmpty()) {
-            draft = (draft + added)
-                .take(500)
-                .mapIndexed { index, row -> row.copy(orderIndex = index) }
+            draft = (draft + added).take(500).mapIndexed { index, row -> row.copy(orderIndex = index) }
         }
     }
 
@@ -294,13 +284,10 @@ fun UnifiedAudioAssetManagerDialog(
                                     val existing = dao.listAll()
                                     val existingKind = existing.filter { AudioAssetClassifier.classify(it) == kind }
                                     val now = System.currentTimeMillis()
-                                    val normalized = draft.mapIndexed { index, row ->
-                                        row.copy(orderIndex = index, updatedAt = now)
-                                    }
+                                    val normalized = draft.mapIndexed { index, row -> row.copy(orderIndex = index, updatedAt = now) }
                                     val destinationCounts = AudioAssetKind.entries.associateWith { destination ->
                                         existing.count {
-                                            it.id !in movedTracks.keys &&
-                                                AudioAssetClassifier.classify(it) == destination
+                                            it.id !in movedTracks.keys && AudioAssetClassifier.classify(it) == destination
                                         }
                                     }.toMutableMap()
                                     val movedRows = movedTracks.values.map { row ->
@@ -309,8 +296,7 @@ fun UnifiedAudioAssetManagerDialog(
                                         destinationCounts[destination] = order + 1
                                         row.copy(orderIndex = order, updatedAt = now)
                                     }
-                                    val keepIds = (normalized.asSequence() + movedRows.asSequence())
-                                        .mapTo(hashSetOf()) { it.id }
+                                    val keepIds = (normalized.asSequence() + movedRows.asSequence()).mapTo(hashSetOf()) { it.id }
                                     existingKind.filter { it.id !in keepIds }.forEach { track ->
                                         FreesoundImporter.deleteManagedFile(context, track.uri)
                                         dao.delete(track.id)
@@ -349,9 +335,7 @@ fun UnifiedAudioAssetManagerDialog(
         FreesoundSearchDialog(
             kind = kind,
             normalizationTargetLufs = normalizationTarget,
-            onImported = { result ->
-                transientAddedIds = transientAddedIds + result.trackId
-            },
+            onImported = { result -> transientAddedIds = transientAddedIds + result.trackId },
             onDismiss = { showFreesoundDialog = false },
         )
     }
@@ -360,6 +344,7 @@ fun UnifiedAudioAssetManagerDialog(
         FreesoundAdvancedToolsDialog(
             kind = kind,
             tracks = draft,
+            normalizationTargetLufs = normalizationTarget,
             onUseQuery = { query ->
                 FreesoundSearchPreferences(context).rememberSearch(
                     category = freesoundCategory(kind),
@@ -370,6 +355,7 @@ fun UnifiedAudioAssetManagerDialog(
                 showFreesoundAdvancedTools = false
                 showFreesoundDialog = true
             },
+            onImported = { result -> transientAddedIds = transientAddedIds + result.trackId },
             onStageRemoveTrack = { trackId ->
                 draft = draft.filterNot { it.id == trackId }
                     .mapIndexed { index, row -> row.copy(orderIndex = index) }
@@ -415,9 +401,7 @@ fun UnifiedAudioAssetManagerDialog(
                                     normalizationTarget,
                                 ).gainDb
                             } else 0f
-                            val previewLevel = (
-                                track.volume * PcmLoudnessEstimator.gainDbToLinear(gainDb)
-                            ).coerceIn(0f, 1f)
+                            val previewLevel = (track.volume * PcmLoudnessEstimator.gainDbToLinear(gainDb)).coerceIn(0f, 1f)
                             previewPlayer = runCatching {
                                 MediaPlayer.create(context, Uri.parse(track.uri))
                             }.getOrNull()?.also { player ->
@@ -426,10 +410,7 @@ fun UnifiedAudioAssetManagerDialog(
                                     runCatching { completed.release() }
                                     if (previewPlayer === completed) {
                                         previewPlayer = null
-                                        ReaderPlaybackService.command(
-                                            context,
-                                            ReaderPlaybackService.ACTION_MUSIC_PREVIEW_END,
-                                        )
+                                        ReaderPlaybackService.command(context, ReaderPlaybackService.ACTION_MUSIC_PREVIEW_END)
                                     }
                                 }
                                 player.start()
@@ -439,10 +420,7 @@ fun UnifiedAudioAssetManagerDialog(
                                         runCatching { player.stop() }
                                         runCatching { player.release() }
                                         previewPlayer = null
-                                        ReaderPlaybackService.command(
-                                            context,
-                                            ReaderPlaybackService.ACTION_MUSIC_PREVIEW_END,
-                                        )
+                                        ReaderPlaybackService.command(context, ReaderPlaybackService.ACTION_MUSIC_PREVIEW_END)
                                     }
                                 }
                             }
@@ -473,9 +451,7 @@ fun UnifiedAudioAssetManagerDialog(
                             notify(if (description.isBlank()) "Mô tả đang trống." else "Đã sao chép mô tả.")
                         }
                         UnifiedAssetActionButton(if (track.enabled) "TẮT TỆP NÀY" else "BẬT TỆP NÀY") {
-                            draft = draft.map {
-                                if (it.id == track.id) it.copy(enabled = !track.enabled) else it
-                            }
+                            draft = draft.map { if (it.id == track.id) it.copy(enabled = !track.enabled) else it }
                             selectedTrackId = null
                         }
                         AudioAssetKind.entries.filter { it != kind }.forEach { destination ->
@@ -519,9 +495,7 @@ fun UnifiedAudioAssetManagerDialog(
 
     editingTrack?.let { track ->
         var title by remember(track.id, track.title) { mutableStateOf(track.title) }
-        var description by remember(track.id, track.tagsCsv) {
-            mutableStateOf(assetDescription(kind, track.tagsCsv))
-        }
+        var description by remember(track.id, track.tagsCsv) { mutableStateOf(assetDescription(kind, track.tagsCsv)) }
         AlertDialog(
             onDismissRequest = { editingTrack = null },
             title = { Text("CHỈNH SỬA TỆP ÂM THANH") },
@@ -564,9 +538,7 @@ fun UnifiedAudioAssetManagerDialog(
                 TextButton(onClick = {
                     val cleanTitle = title.trim().ifBlank { track.title }
                     draft = draft.map {
-                        if (it.id == track.id) {
-                            it.copy(title = cleanTitle, tagsCsv = tagsWithDescription(kind, description))
-                        } else it
+                        if (it.id == track.id) it.copy(title = cleanTitle, tagsCsv = tagsWithDescription(kind, description)) else it
                     }
                     editingTrack = null
                 }) { Text("LƯU") }
@@ -583,8 +555,7 @@ fun UnifiedAudioAssetManagerDialog(
             confirmButton = {
                 TextButton(onClick = {
                     stopPreview()
-                    draft = draft.filterNot { it.id == track.id }
-                        .mapIndexed { index, row -> row.copy(orderIndex = index) }
+                    draft = draft.filterNot { it.id == track.id }.mapIndexed { index, row -> row.copy(orderIndex = index) }
                     deleteTrack = null
                 }) { Text("XÓA") }
             },
@@ -629,9 +600,7 @@ fun UnifiedAudioAssetManagerDialog(
                             name.isBlank() -> errors += "Dòng ${index + 1}: thiếu tên tệp."
                             track == null -> errors += "Dòng ${index + 1}: không tìm thấy tệp “$name”."
                             description.isBlank() -> Unit
-                            description != "[XÓA]" && description.length > 300 -> {
-                                errors += "Dòng ${index + 1}: mô tả có ${description.length} ký tự, vượt giới hạn 300."
-                            }
+                            description != "[XÓA]" && description.length > 300 -> errors += "Dòng ${index + 1}: mô tả có ${description.length} ký tự, vượt giới hạn 300."
                             else -> updates[track.id] = if (description == "[XÓA]") "" else description
                         }
                     }
@@ -661,9 +630,7 @@ fun UnifiedAudioAssetManagerDialog(
                 if (bulkUpdates.isNotEmpty()) {
                     TextButton(onClick = {
                         draft = draft.map { row ->
-                            bulkUpdates[row.id]?.let {
-                                row.copy(tagsCsv = tagsWithDescription(kind, it))
-                            } ?: row
+                            bulkUpdates[row.id]?.let { row.copy(tagsCsv = tagsWithDescription(kind, it)) } ?: row
                         }
                         showBulkResult = false
                         showBulkDialog = false
@@ -772,8 +739,7 @@ private fun stripAssetTypeMarkers(value: String): String =
         .trim()
 
 @Suppress("UNUSED_PARAMETER")
-private fun assetDescription(kind: AudioAssetKind, tagsCsv: String): String =
-    stripAssetTypeMarkers(tagsCsv)
+private fun assetDescription(kind: AudioAssetKind, tagsCsv: String): String = stripAssetTypeMarkers(tagsCsv)
 
 private fun tagsWithDescription(kind: AudioAssetKind, description: String): String {
     val marker = typeMarker(kind)

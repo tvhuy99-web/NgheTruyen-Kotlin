@@ -122,6 +122,7 @@ data class NarrationPlan(
     val soundEffectCues: List<SoundEffectCue> = emptyList(),
     val audioDirectionError: String = "",
     val freesoundRequirements: List<FreesoundAutoRequirement> = emptyList(),
+    val freesoundRequirementError: String = "",
 )
 
 interface TranslationEngine {

@@ -1,0 +1,155 @@
+name: Build Freesound Mode 3 V7 repair
+
+on:
+  push:
+    branches:
+      - agent/freesound-stage-1
+    paths:
+      - ".github/workflows/build-freesound-mode3-v7.yml"
+      - ".github/scripts/mode3_fix_v7.py"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-freesound-mode3-v7
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: agent/freesound-stage-1
+          fetch-depth: 0
+
+      - name: Record run start
+        shell: bash
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          {
+            echo "RUN_ID=${GITHUB_RUN_ID}"
+            echo "RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT}"
+            echo "TRIGGER_SHA=${GITHUB_SHA}"
+            echo "STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > MODE3_FIX_RUN_V7.txt
+          git add -- MODE3_FIX_RUN_V7.txt
+          git commit -m "Record Mode 3 V7 repair start"
+          git push origin HEAD:agent/freesound-stage-1
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Patch, test and build
+        id: verify
+        shell: bash
+        run: |
+          set +e
+          rm -f /tmp/patch_v7.log /tmp/test_v7.log /tmp/build_v7.log /tmp/result_v7.txt
+
+          python3 .github/scripts/mode3_fix_v7.py > /tmp/patch_v7.log 2>&1
+          PATCH_STATUS=$?
+
+          TEST_STATUS=99
+          BUILD_STATUS=99
+          if [ "$PATCH_STATUS" -eq 0 ]; then
+            ./gradlew --no-daemon --stacktrace :app:testDebugUnitTest > /tmp/test_v7.log 2>&1
+            TEST_STATUS=$?
+          fi
+          if [ "$TEST_STATUS" -eq 0 ]; then
+            ./gradlew --no-daemon --stacktrace :app:assembleDebug > /tmp/build_v7.log 2>&1
+            BUILD_STATUS=$?
+          fi
+
+          SUCCESS=false
+          if [ "$PATCH_STATUS" -eq 0 ] && [ "$TEST_STATUS" -eq 0 ] && [ "$BUILD_STATUS" -eq 0 ] && [ -f app/build/outputs/apk/debug/app-debug.apk ]; then
+            SUCCESS=true
+          fi
+
+          {
+            echo "RUN_ID=${GITHUB_RUN_ID}"
+            echo "RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT}"
+            echo "TRIGGER_SHA=${GITHUB_SHA}"
+            echo "SUCCESS=${SUCCESS}"
+            echo "PATCH_STATUS=${PATCH_STATUS}"
+            echo "TEST_STATUS=${TEST_STATUS}"
+            echo "BUILD_STATUS=${BUILD_STATUS}"
+            echo "ARTIFACT_NAME=NgheTruyen-freesound-mode3-v7-debug"
+            echo
+            echo "=== PATCH LOG ==="
+            tail -n 320 /tmp/patch_v7.log 2>/dev/null || true
+            echo
+            echo "=== TEST LOG ==="
+            tail -n 420 /tmp/test_v7.log 2>/dev/null || true
+            echo
+            echo "=== BUILD LOG ==="
+            tail -n 500 /tmp/build_v7.log 2>/dev/null || true
+          } > /tmp/result_v7.txt
+
+          echo "success=${SUCCESS}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload APK
+        if: steps.verify.outputs.success == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: NgheTruyen-freesound-mode3-v7-debug
+          retention-days: 30
+          if-no-files-found: error
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Commit verified fixes or error report
+        if: always()
+        shell: bash
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ "${{ steps.verify.outputs.success }}" = "true" ]; then
+            for file in \
+              app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt \
+              app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt \
+              app/src/main/java/vn/nghetruyen/app/playback/AudioDirectionRuntime.kt \
+              app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt \
+              app/src/test/java/vn/nghetruyen/app/freesound/FreesoundMode3RegressionTest.kt
+            do
+              git add -- "$file"
+            done
+          else
+            git reset --hard HEAD
+          fi
+          cp /tmp/result_v7.txt MODE3_FIX_BUILD_RESULT_V7.txt
+          git add -- MODE3_FIX_BUILD_RESULT_V7.txt
+          if ! git diff --cached --quiet; then
+            if [ "${{ steps.verify.outputs.success }}" = "true" ]; then
+              git commit -m "Fix incomplete Mode 3 Freesound plans"
+            else
+              git commit -m "Record Mode 3 V7 repair failure"
+            fi
+            git push origin HEAD:agent/freesound-stage-1
+          fi
+
+      - name: Mark failed verification
+        if: steps.verify.outputs.success != 'true'
+        run: exit 1

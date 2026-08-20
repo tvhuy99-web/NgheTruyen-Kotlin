@@ -201,7 +201,14 @@ class AudioDirectionRuntime(
                 ),
             )
         }
+        val mode3RuntimeEmpty = StoryAudioModeRouter.usesAiFreesound(sourceMode) &&
+            (settings.ambienceEnabled || settings.soundEffectsEnabled) &&
+            assetsById.values.none { asset ->
+                (settings.ambienceEnabled && asset.kind == AudioAssetKind.AMBIENCE) ||
+                    (settings.soundEffectsEnabled && asset.kind == AudioAssetKind.SFX)
+            }
         if (!force &&
+            !mode3RuntimeEmpty &&
             preparedChapterId == snapshot.chapterId &&
             preparedSignature.isNotBlank() &&
             validatedFastKey == fastKey &&
@@ -280,9 +287,23 @@ class AudioDirectionRuntime(
                         "resolvedAssets" to outcome.freesoundResolvedAssets.toString(),
                         "audioPlanCreated" to outcome.audioPlanCreated.toString(),
                         "retryRequired" to outcome.freesoundRetryRequired.toString(),
+                        "retryAttempts" to outcome.freesoundRetryAttempts.toString(),
+                        "retryExhausted" to outcome.freesoundRetryExhausted.toString(),
                         "warningCount" to outcome.warnings.size.toString(),
                     ),
                 )
+                if (outcome.freesoundRetryExhausted) {
+                    diagnostic(
+                        "FREESOUND_RUNTIME_RETRY_EXHAUSTED",
+                        DiagnosticSeverity.ERROR,
+                        mapOf(
+                            "attempts" to outcome.freesoundRetryAttempts.toString(),
+                            "resolvedAssets" to outcome.freesoundResolvedAssets.toString(),
+                        ),
+                    )
+                    markFailure(signature)
+                    return false
+                }
             }
 
             // Mode 3 can download and normalize assets during ensureActivePlans(). The first playback

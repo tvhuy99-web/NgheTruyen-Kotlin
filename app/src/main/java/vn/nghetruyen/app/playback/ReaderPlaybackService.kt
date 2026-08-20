@@ -204,6 +204,8 @@ class ReaderPlaybackService : Service() {
                 "audioPlanCreated" to (result?.audioPlanCreated ?: false).toString(),
                 "freesoundPlanCreated" to (result?.freesoundPlanCreated ?: false).toString(),
                 "retryRequired" to (result?.freesoundRetryRequired ?: false).toString(),
+                "retryAttempts" to (result?.freesoundRetryAttempts ?: 0).toString(),
+                "retryExhausted" to (result?.freesoundRetryExhausted ?: false).toString(),
                 "traceCount" to (result?.freesoundDiagnostics?.size ?: 0).toString(),
                 "warningCount" to (result?.warnings?.size ?: 0).toString(),
                 "error" to (error?.message ?: "").take(220),
@@ -226,13 +228,8 @@ class ReaderPlaybackService : Service() {
         }
         result?.freesoundDiagnostics.orEmpty().forEachIndexed { index, detail ->
             val stage = detail.substringBefore(' ').take(56).ifBlank { "TRACE" }
-            val severity = if (
-                detail.contains("FAIL", ignoreCase = true) ||
-                detail.contains("UNRESOLVED", ignoreCase = true) ||
-                detail.contains("STALE", ignoreCase = true) ||
-                detail.contains("MISSING", ignoreCase = true) ||
-                detail.contains("NO_LAYERS", ignoreCase = true)
-            ) DiagnosticSeverity.WARN else DiagnosticSeverity.INFO
+            // BASIC diagnostics must still expose every Freesound stage while debugging Mode 3.
+            val severity = DiagnosticSeverity.WARN
             diagnostic(
                 "FREESOUND_$stage",
                 severity,
@@ -1944,7 +1941,10 @@ class ReaderPlaybackService : Service() {
         narrationPlanJob?.cancel()
         narrationPlanJob = serviceScope.launch {
             var attempt = 0
-            while (currentStoryAutoVoiceCastEnabled && PlaybackQueueStore.state.value.chapterId == snapshot.chapterId) {
+            while (currentStoryAutoVoiceCastEnabled &&
+                PlaybackQueueStore.state.value.chapterId == snapshot.chapterId &&
+                attempt < MAX_NARRATION_ATTEMPTS
+            ) {
                 attempt += 1
                 PlaybackQueueStore.setNarrationAutomation(
                     stage = NarrationAutomationStage.CURRENT_PLANNING,
@@ -1967,10 +1967,17 @@ class ReaderPlaybackService : Service() {
                     Result.failure(IllegalStateException("Không tải được chương để chuẩn bị phân vai."))
                 } else {
                     runCatching {
+                        if (attempt == 1) {
+                            container.narrationPlanCoordinator.resetChapterNarrationState(
+                                content = content,
+                                clearFreesoundCaches = true,
+                            )
+                        }
                         container.narrationPlanCoordinator.ensurePlans(
                             content = content,
                             voice = true,
                             music = shouldPlanAutoSceneMusic(),
+                            force = true,
                             activeTrackId = sceneMusicController.activeTrackId,
                         )
                     }
@@ -1983,7 +1990,35 @@ class ReaderPlaybackService : Service() {
                 val assignmentCount = if (content == null) 0
                 else container.narrationPlanCoordinator.voicePlanAssignmentCount(content)
 
-                if (assignmentCount > 0) {
+                if (planResult?.freesoundRetryExhausted == true) {
+                    diagnostic(
+                        "FREESOUND_MODE3_RETRY_EXHAUSTED",
+                        DiagnosticSeverity.ERROR,
+                        mapOf(
+                            "attempts" to planResult.freesoundRetryAttempts.toString(),
+                            "resolvedAssets" to planResult.freesoundResolvedAssets.toString(),
+                        ),
+                    )
+                    withContext(Dispatchers.Main) {
+                        if (PlaybackQueueStore.state.value.chapterId != snapshot.chapterId) return@withContext
+                        narrationPlanningChapterId = ""
+                        pendingPlay = false
+                        PlaybackQueueStore.setPlaying(false)
+                        PlaybackQueueStore.setNarrationAutomation(
+                            stage = NarrationAutomationStage.FAILED,
+                            progress = 1f,
+                            message = "Freesound thất bại sau 3 lần. Không có kế hoạch âm thanh hợp lệ để phát.",
+                        )
+                        transitionMessage = "Freesound thất bại sau 3 lần; hãy phân vai lại để tạo lượt mới."
+                        updateMediaState()
+                        updateNotification()
+                    }
+                    return@launch
+                }
+
+                val mode3Incomplete = StoryAudioModeRouter.usesAiFreesound(storyAudioSourceMode) &&
+                    planResult?.freesoundRetryRequired == true
+                if (assignmentCount > 0 && !mode3Incomplete) {
                     PlaybackQueueStore.setNarrationAutomation(
                         stage = NarrationAutomationStage.CURRENT_APPLYING,
                         progress = 0.85f,
@@ -2068,11 +2103,23 @@ class ReaderPlaybackService : Service() {
                     PlaybackQueueStore.setNarrationAutomation(
                         stage = NarrationAutomationStage.FAILED,
                         progress = 1f,
-                        message = "Phân vai chưa thành công. Sẽ tự thử lại sau 5 giây.$warningSuffix",
+                        message = if (attempt >= MAX_NARRATION_ATTEMPTS) {
+                            "Phân vai/Mode 3 thất bại sau $MAX_NARRATION_ATTEMPTS lần.$warningSuffix"
+                        } else {
+                            "Chưa chuẩn bị xong. Sẽ thử lại sau 5 giây (lần ${attempt + 1}/$MAX_NARRATION_ATTEMPTS).$warningSuffix"
+                        },
                     )
-                    transitionMessage = "Phân vai chưa thành công; đang chờ thử lại."
+                    transitionMessage = if (attempt >= MAX_NARRATION_ATTEMPTS) {
+                        "Phân vai/Mode 3 thất bại sau $MAX_NARRATION_ATTEMPTS lần."
+                    } else {
+                        "Chưa chuẩn bị xong; đang chờ thử lại."
+                    }
                     updateMediaState()
                     updateNotification()
+                }
+                if (attempt >= MAX_NARRATION_ATTEMPTS) {
+                    pendingPlay = false
+                    return@launch
                 }
                 delay(NARRATION_RETRY_DELAY_MS)
             }
@@ -2095,10 +2142,17 @@ class ReaderPlaybackService : Service() {
             repeat(narrationPrefetchWindowChapters.coerceIn(1, 5)) { offset ->
                 val chapter = current ?: return@repeat
                 val attempt = runCatching {
+                    if (planVoice) {
+                        container.narrationPlanCoordinator.resetChapterNarrationState(
+                            content = chapter,
+                            clearFreesoundCaches = true,
+                        )
+                    }
                     container.narrationPlanCoordinator.ensurePlans(
                         content = chapter,
                         voice = planVoice,
                         music = shouldPlanAutoSceneMusic(),
+                        force = planVoice,
                         activeTrackId = if (offset == 0) sceneMusicController.activeTrackId else null,
                     )
                 }
@@ -2120,7 +2174,9 @@ class ReaderPlaybackService : Service() {
                             0
                         }
                     }
-                    val failed = result == null || (planVoice && assignmentCount <= 0)
+                    val failed = result == null ||
+                        (planVoice && assignmentCount <= 0) ||
+                        (StoryAudioModeRouter.usesAiFreesound(storyAudioSourceMode) && result.freesoundRetryRequired)
                     val musicLabel = if (shouldPlanAutoSceneMusic()) " + nhạc cảnh" else ""
                     val baseMessage = when {
                         result == null -> "Không chuẩn bị AI trước được chương tiếp theo: ${chapter.chapter.title}."
@@ -3095,6 +3151,7 @@ class ReaderPlaybackService : Service() {
         private const val NOTIFICATION_ID = 3011
         private const val PREFETCH_THRESHOLD = 0.75f
         private const val NARRATION_RETRY_DELAY_MS = 5_000L
+        private const val MAX_NARRATION_ATTEMPTS = 3
         private const val WAKE_LOCK_TIMEOUT_MS = 30 * 60 * 1000L
         private const val MAX_PREVIEW_TEXT_CHARS = 320
         private const val MAX_PERSISTED_QUEUE_CHAPTERS = 5

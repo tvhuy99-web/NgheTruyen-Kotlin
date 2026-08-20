@@ -63,6 +63,10 @@ class FreesoundAutoQueryCache(context: Context) {
         preferences.edit().remove(key(kind, query)).apply()
     }
 
+    fun clear() {
+        preferences.edit().clear().apply()
+    }
+
     private fun key(kind: AudioAssetKind, query: String): String {
         val normalized = FreesoundAutoRequirementAggregator.normalizeQuery(query)
         val digest = MessageDigest.getInstance("SHA-256")
@@ -108,6 +112,15 @@ class FreesoundAutoAudioResolver(
             }
             .map(SceneMusicTrackEntity::id)
             .toSet()
+    }
+
+    fun clearResolutionCaches() {
+        queryCache.clear()
+        client.clearSearchCache()
+    }
+
+    fun clearNetworkSearchCache() {
+        client.clearSearchCache()
     }
 
     suspend fun resolve(requirements: List<FreesoundAutoRequirement>): FreesoundAutoResolveResult {

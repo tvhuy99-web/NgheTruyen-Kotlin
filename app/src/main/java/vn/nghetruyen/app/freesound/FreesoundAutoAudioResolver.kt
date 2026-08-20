@@ -14,7 +14,7 @@ import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
 import vn.nghetruyen.app.data.repository.LibraryRepository
 import vn.nghetruyen.app.data.settings.SettingsRepository
 
-private enum class FreesoundAutoResolutionSource { CACHE, FREESOUND, LOCAL_FALLBACK, UNRESOLVED }
+private enum class FreesoundAutoResolutionSource { CACHE, FREESOUND, UNRESOLVED }
 
 data class FreesoundAutoResolvedNeed(
     val need: FreesoundAutoSearchNeed,
@@ -30,7 +30,7 @@ data class FreesoundAutoResolveResult(
     val resolvedCount: Int get() = resolved.count { !it.trackId.isNullOrBlank() }
 }
 
-/** Query -> local track cache. It stores only app-internal ids; no author/license/provenance metadata. */
+/** Query -> managed Freesound track cache. It stores only app-internal ids. */
 class FreesoundAutoQueryCache(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
 
@@ -61,9 +61,9 @@ class FreesoundAutoQueryCache(context: Context) {
 }
 
 /**
- * Mode-3 resolver. Search order is intentionally: previously resolved Freesound cache -> Freesound
- * network search/import -> semantic local fallback -> silence. This keeps Freesound as the primary
- * source without downloading the same need again in later chapters.
+ * Mode-3 resolver. Search order is deliberately strict: previously resolved managed Freesound file
+ * -> Freesound network search/import -> silence. A normal local-library asset is never substituted,
+ * because that would silently mix Mode 2 into Mode 3.
  */
 class FreesoundAutoAudioResolver(
     context: Context,
@@ -91,7 +91,11 @@ class FreesoundAutoAudioResolver(
             val currentTracks = runCatching { existingTracksProvider() }.getOrDefault(emptyList())
             val cachedId = queryCache.get(need.kind, need.query)
             val cachedTrack = cachedId?.let { id -> currentTracks.firstOrNull { it.id == id } }
-                ?.takeIf { it.enabled && AudioAssetClassifier.classify(it) == need.kind }
+                ?.takeIf {
+                    it.enabled &&
+                        AudioAssetClassifier.classify(it) == need.kind &&
+                        FreesoundImporter.soundIdFromManagedUri(it.uri) != null
+                }
             if (cachedTrack != null) {
                 resolutions += FreesoundAutoResolvedNeed(need, cachedTrack.id, FreesoundAutoResolutionSource.CACHE.name)
                 continue
@@ -121,27 +125,15 @@ class FreesoundAutoAudioResolver(
                 }
             }
 
-            if (resolvedTrack != null) {
+            if (resolvedTrack != null && FreesoundImporter.soundIdFromManagedUri(resolvedTrack.uri) != null) {
                 queryCache.put(need.kind, need.query, resolvedTrack.id)
                 resolutions += FreesoundAutoResolvedNeed(need, resolvedTrack.id, FreesoundAutoResolutionSource.FREESOUND.name)
                 continue
             }
 
-            val fallbackTracks = runCatching { existingTracksProvider() }.getOrDefault(emptyList())
-                .filter { it.enabled && AudioAssetClassifier.classify(it) == need.kind }
-            val local = fallbackTracks
-                .map { it to FreesoundLibraryAnalyzer.coverageScore(need.query, listOf(it)) }
-                .maxByOrNull { it.second }
-                ?.takeIf { it.second >= LOCAL_FALLBACK_MIN_SCORE }
-                ?.first
-            if (local != null) {
-                resolutions += FreesoundAutoResolvedNeed(need, local.id, FreesoundAutoResolutionSource.LOCAL_FALLBACK.name)
-                warnings += "Freesound không giải quyết được ‘${need.query}’; đã dùng asset local ‘${local.title}’."
-            } else {
-                resolutions += FreesoundAutoResolvedNeed(need, null, FreesoundAutoResolutionSource.UNRESOLVED.name)
-                val prefix = if (need.importance == FreesoundRequirementImportance.REQUIRED) "Âm thanh quan trọng" else "Âm thanh tùy chọn"
-                warnings += "$prefix ‘${need.query}’ chưa tìm được; khoảng đó sẽ im lặng ở lớp tương ứng."
-            }
+            resolutions += FreesoundAutoResolvedNeed(need, null, FreesoundAutoResolutionSource.UNRESOLVED.name)
+            val prefix = if (need.importance == FreesoundRequirementImportance.REQUIRED) "Âm thanh quan trọng" else "Âm thanh tùy chọn"
+            warnings += "$prefix ‘${need.query}’ chưa tìm được trên Freesound; khoảng đó sẽ im lặng ở lớp tương ứng."
         }
         return FreesoundAutoResolveResult(resolutions, warnings.distinct(), imported)
     }
@@ -175,7 +167,6 @@ class FreesoundAutoAudioResolver(
     companion object {
         private const val SEARCH_PAGE_SIZE = 15
         private const val REMOTE_MIN_SCORE = 0.22
-        private const val LOCAL_FALLBACK_MIN_SCORE = 0.62
 
         internal fun scoreCandidate(query: String, sound: FreesoundSound, rankIndex: Int): Double {
             val queryNorm = FreesoundAutoRequirementAggregator.normalizeQuery(query)

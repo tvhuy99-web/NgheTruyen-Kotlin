@@ -1,0 +1,167 @@
+name: Build latest Freesound verified APK
+
+on:
+  push:
+    branches:
+      - agent/freesound-stage-1
+    paths:
+      - ".github/workflows/build-freesound-latest-verified.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-freesound-latest-verified
+  cancel-in-progress: false
+
+jobs:
+  repair-test-build:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/freesound-stage-1
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Apply repair, test and build
+        id: verify
+        shell: bash
+        run: |
+          set +e
+          rm -f /tmp/mode3_patch.py /tmp/patch.log /tmp/test.log /tmp/build.log /tmp/build_result.txt
+
+          python3 - <<'PY' > /tmp/extract.log 2>&1
+          from pathlib import Path
+          import textwrap
+
+          workflow = Path('.github/workflows/fix-freesound-mode3-runtime.yml').read_text(encoding='utf-8')
+          start_marker = "          python3 - <<'PY'\n"
+          end_marker = "\n          PY\n"
+          if start_marker not in workflow:
+              raise SystemExit('Không tìm thấy patch Python trong workflow sửa Mode 3.')
+          block = workflow.split(start_marker, 1)[1]
+          if end_marker not in block:
+              raise SystemExit('Không tìm thấy điểm kết thúc patch Python Mode 3.')
+          block = block.split(end_marker, 1)[0]
+          Path('/tmp/mode3_patch.py').write_text(textwrap.dedent(block) + '\n', encoding='utf-8')
+          PY
+          EXTRACT_STATUS=$?
+
+          PATCH_STATUS=99
+          TEST_STATUS=99
+          BUILD_STATUS=99
+          if [ "$EXTRACT_STATUS" -eq 0 ]; then
+            python3 /tmp/mode3_patch.py > /tmp/patch.log 2>&1
+            PATCH_STATUS=$?
+          fi
+          if [ "$PATCH_STATUS" -eq 0 ]; then
+            ./gradlew --no-daemon --stacktrace :app:testDebugUnitTest > /tmp/test.log 2>&1
+            TEST_STATUS=$?
+          fi
+          if [ "$TEST_STATUS" -eq 0 ]; then
+            ./gradlew --no-daemon --stacktrace :app:assembleDebug > /tmp/build.log 2>&1
+            BUILD_STATUS=$?
+          fi
+
+          SUCCESS=false
+          if [ "$EXTRACT_STATUS" -eq 0 ] && [ "$PATCH_STATUS" -eq 0 ] && [ "$TEST_STATUS" -eq 0 ] && [ "$BUILD_STATUS" -eq 0 ] && [ -f app/build/outputs/apk/debug/app-debug.apk ]; then
+            SUCCESS=true
+          fi
+
+          {
+            echo "RUN_ID=${GITHUB_RUN_ID}"
+            echo "RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT}"
+            echo "TRIGGER_SHA=${GITHUB_SHA}"
+            echo "SUCCESS=${SUCCESS}"
+            echo "EXTRACT_STATUS=${EXTRACT_STATUS}"
+            echo "PATCH_STATUS=${PATCH_STATUS}"
+            echo "TEST_STATUS=${TEST_STATUS}"
+            echo "BUILD_STATUS=${BUILD_STATUS}"
+            echo "ARTIFACT_NAME=NgheTruyen-freesound-latest-fixed-debug"
+            echo
+            echo "=== EXTRACT LOG (tail) ==="
+            tail -n 80 /tmp/extract.log 2>/dev/null || true
+            echo
+            echo "=== PATCH LOG (tail) ==="
+            tail -n 120 /tmp/patch.log 2>/dev/null || true
+            echo
+            echo "=== TEST LOG (tail) ==="
+            tail -n 180 /tmp/test.log 2>/dev/null || true
+            echo
+            echo "=== BUILD LOG (tail) ==="
+            tail -n 220 /tmp/build.log 2>/dev/null || true
+          } > /tmp/build_result.txt
+
+          echo "success=${SUCCESS}" >> "$GITHUB_OUTPUT"
+          echo "extract_status=${EXTRACT_STATUS}" >> "$GITHUB_OUTPUT"
+          echo "patch_status=${PATCH_STATUS}" >> "$GITHUB_OUTPUT"
+          echo "test_status=${TEST_STATUS}" >> "$GITHUB_OUTPUT"
+          echo "build_status=${BUILD_STATUS}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload verified APK
+        if: steps.verify.outputs.success == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: NgheTruyen-freesound-latest-fixed-debug
+          retention-days: 30
+          if-no-files-found: error
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Commit verified fixes or failure report
+        if: always()
+        shell: bash
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if [ "${{ steps.verify.outputs.success }}" = "true" ]; then
+            git diff --name-only -- app/src/main app/src/test | while IFS= read -r file; do
+              [ -n "$file" ] && git add -- "$file"
+            done
+            git ls-files --others --exclude-standard -- app/src/main app/src/test | while IFS= read -r file; do
+              [ -n "$file" ] && git add -- "$file"
+            done
+          else
+            git reset --hard HEAD
+          fi
+
+          cp /tmp/build_result.txt MODE3_BUILD_RESULT.txt
+          git add -- MODE3_BUILD_RESULT.txt
+
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          if [ "${{ steps.verify.outputs.success }}" = "true" ]; then
+            git commit -m "Fix and verify Freesound Mode 3 runtime"
+          else
+            git commit -m "Record Freesound Mode 3 build failure"
+          fi
+          git push origin HEAD:agent/freesound-stage-1
+
+      - name: Fail workflow when verification failed
+        if: steps.verify.outputs.success != 'true'
+        shell: bash
+        run: exit 1

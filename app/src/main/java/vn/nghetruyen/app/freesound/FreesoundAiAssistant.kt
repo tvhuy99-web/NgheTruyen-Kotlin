@@ -128,7 +128,7 @@ class FreesoundAiAssistant(
         internal fun parseKeywordPlan(raw: String, provider: String = "", model: String = ""): FreesoundAiKeywordPlan {
             val root = JSONObject(extractJsonObject(raw))
             val array = root.optJSONArray("queries") ?: JSONArray()
-            val suggestions = buildList {
+            val suggestions = buildList<FreesoundAiKeywordSuggestion> {
                 for (index in 0 until array.length()) {
                     val item = array.optJSONObject(index) ?: continue
                     val query = item.optString("query").trim().replace(Regex("\\s+"), " ").take(160)

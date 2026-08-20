@@ -1,10 +1,13 @@
 package vn.nghetruyen.app.freesound
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import vn.nghetruyen.app.audio.AudioAssetKind
+import vn.nghetruyen.app.audio.PcmLoudnessEstimator
+import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
 
 class FreesoundImporterTest {
     @Test
@@ -78,6 +81,31 @@ class FreesoundImporterTest {
                 "file:///data/user/0/vn.nghetruyen.app/files/audio/freesound/music/freesound_nope_uuid.ogg",
             ),
         )
+    }
+
+    @Test
+    fun duplicateIsReadyOnlyAfterSuccessfulNormalization() {
+        val base = SceneMusicTrackEntity(
+            id = "track",
+            title = "Thunder",
+            uri = "file:///tmp/thunder.ogg",
+            tagsCsv = "type:sfx",
+            volume = 1f,
+            enabled = true,
+            updatedAt = 1L,
+        )
+        assertFalse(FreesoundImporter.hasValidNormalization(base))
+
+        val ready = base.copy(
+            normalizationVersion = PcmLoudnessEstimator.VERSION,
+            normalizationError = "",
+            loudnessLufsEstimate = -20f,
+            peakDbfs = -2f,
+            normalizationGainDb = 3f,
+        )
+        assertTrue(FreesoundImporter.hasValidNormalization(ready))
+        assertFalse(FreesoundImporter.hasValidNormalization(ready.copy(normalizationError = "decode failed")))
+        assertFalse(FreesoundImporter.hasValidNormalization(ready.copy(normalizationGainDb = Float.NaN)))
     }
 
     @Test

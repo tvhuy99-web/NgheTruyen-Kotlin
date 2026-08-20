@@ -52,6 +52,7 @@ class NarrationPlanCoordinator(
         val freesoundPlanCreated: Boolean = false,
         val freesoundResolvedAssets: Int = 0,
         val freesoundRetryRequired: Boolean = false,
+        val freesoundDiagnostics: List<String> = emptyList(),
     )
 
     private data class FreesoundApplyResult(
@@ -60,6 +61,7 @@ class NarrationPlanCoordinator(
         val resolvedAssets: Int,
         val warnings: List<String>,
         val retryableFailure: Boolean = false,
+        val diagnostics: List<String> = emptyList(),
     )
 
     suspend fun ensurePlans(
@@ -123,13 +125,18 @@ class NarrationPlanCoordinator(
             warnings += "Hiệu ứng âm thanh đang bật nhưng chưa có asset SFX."
         }
 
+        val freesoundDiagnostics = mutableListOf<String>()
         val freesoundKinds = if (freesoundMode) buildSet {
             if (music) add(AudioAssetKind.MUSIC)
             if (audioSettings.ambienceEnabled) add(AudioAssetKind.AMBIENCE)
             if (audioSettings.soundEffectsEnabled) add(AudioAssetKind.SFX)
         } else emptySet()
+        if (freesoundMode) {
+            freesoundDiagnostics += "COORDINATOR_STATE mode=${sourceMode.name} musicRequested=$music ambienceEnabled=${audioSettings.ambienceEnabled} sfxEnabled=${audioSettings.soundEffectsEnabled} kinds=${freesoundKinds.map(AudioAssetKind::name).sorted().joinToString(",")}"
+        }
         if (freesoundMode && freesoundKinds.isEmpty()) {
             warnings += "Mode 3 đang được chọn nhưng MUSIC, AMBIENCE và SFX đều tắt; lượt AI này chỉ có thể phân vai giọng."
+            freesoundDiagnostics += "COORDINATOR_NO_LAYERS all Mode 3 audio layers are disabled"
         }
 
         var restoredFreesound = FreesoundApplyResult(false, false, 0, emptyList())
@@ -137,6 +144,9 @@ class NarrationPlanCoordinator(
             loadFreesoundRequirements(content, freesoundKinds)
         } else null
         val cachedFreesoundRetryRequired = cachedFreesoundRequirements != null && freesoundResolutionRetryRequired(content)
+        if (freesoundMode) {
+            freesoundDiagnostics += "COORDINATOR_CACHE cachedRequirements=${cachedFreesoundRequirements?.size ?: 0} retryRequired=$cachedFreesoundRetryRequired force=$force"
+        }
         if (cachedFreesoundRequirements != null &&
             (cachedFreesoundRetryRequired || !standardFreesoundPlanCurrent(content, freesoundKinds))
         ) {
@@ -164,6 +174,9 @@ class NarrationPlanCoordinator(
             expectedMode = StoryAudioSourceMode.AI_LOCAL,
         )
         val freesoundNeeded = freesoundMode && freesoundKinds.isNotEmpty() && (force || cachedFreesoundRequirements == null)
+        if (freesoundMode) {
+            freesoundDiagnostics += "COORDINATOR_NEEDS voiceNeeded=$voiceNeeded localMusicNeeded=$musicNeeded localAudioNeeded=$audioNeeded freesoundNeeded=$freesoundNeeded"
+        }
 
         if (!voiceNeeded && !musicNeeded && !audioNeeded && !freesoundNeeded) {
             return Result(
@@ -173,7 +186,8 @@ class NarrationPlanCoordinator(
                 audioPlanCreated = restoredFreesound.audioCreated,
                 freesoundPlanCreated = restoredFreesound.musicCreated || restoredFreesound.audioCreated,
                 freesoundResolvedAssets = restoredFreesound.resolvedAssets,
-        freesoundRetryRequired = restoredFreesound.retryableFailure,
+                freesoundRetryRequired = restoredFreesound.retryableFailure,
+                freesoundDiagnostics = (freesoundDiagnostics + restoredFreesound.diagnostics + "COORDINATOR_REUSE no new AI/Freesound work required").distinct(),
             )
         }
 
@@ -215,13 +229,17 @@ class NarrationPlanCoordinator(
                 audioPlanCreated = restoredFreesound.audioCreated,
                 freesoundPlanCreated = restoredFreesound.musicCreated || restoredFreesound.audioCreated,
                 freesoundResolvedAssets = restoredFreesound.resolvedAssets,
-        freesoundRetryRequired = restoredFreesound.retryableFailure,
+                freesoundRetryRequired = restoredFreesound.retryableFailure,
+                freesoundDiagnostics = (freesoundDiagnostics + restoredFreesound.diagnostics + "AI_PLAN_FAILURE error=${outcome.message.take(220)}").distinct(),
             )
             is AppResult.Success -> {
                 if (effectiveVoice) warnings += outcome.value.voiceCast.warnings
                 outcome.value.musicSceneError.takeIf(String::isNotBlank)?.let(warnings::add)
                 outcome.value.audioDirectionError.takeIf(String::isNotBlank)?.let(warnings::add)
                 outcome.value.freesoundRequirementError.takeIf(String::isNotBlank)?.let(warnings::add)
+                if (freesoundMode) {
+                    freesoundDiagnostics += "AI_REQUIREMENTS_RESULT requested=$freesoundNeeded count=${outcome.value.freesoundRequirements.size} error=${outcome.value.freesoundRequirementError.take(220)}"
+                }
 
                 val voiceCreated = if (effectiveVoice) {
                     runCatching { persistVoicePlan(content, outcome.value.voiceCast) }
@@ -284,6 +302,7 @@ class NarrationPlanCoordinator(
                     freesoundPlanCreated = markerCreated || autoApplied.musicCreated || autoApplied.audioCreated,
                     freesoundResolvedAssets = autoApplied.resolvedAssets,
                     freesoundRetryRequired = autoApplied.retryableFailure,
+                    freesoundDiagnostics = (freesoundDiagnostics + autoApplied.diagnostics).distinct(),
                 )
             }
         }
@@ -463,10 +482,12 @@ class NarrationPlanCoordinator(
     ): FreesoundApplyResult {
         val resolved = freesoundResolver.resolve(requirements)
         val warnings = resolved.warnings.toMutableList()
+        val diagnostics = resolved.diagnostics.toMutableList()
         val units = XpkVoiceCastSplitter.buildUnits(content.chapter.title, chapterBody(content))
         val unitIds = units.map { it.id }
         val enabled = library.listEnabledSceneMusicTracks()
             .filter { FreesoundImporter.soundIdFromManagedUri(it.uri) != null }
+        diagnostics += "PLAN_BUILD_START requirements=${requirements.size} units=${unitIds.size} managedTracks=${enabled.size} kinds=${kinds.map(AudioAssetKind::name).sorted().joinToString(",")}"
         var musicCreated = false
         var audioCreated = false
 
@@ -483,6 +504,7 @@ class NarrationPlanCoordinator(
                 warnings += error.message ?: "Kế hoạch MUSIC Freesound không hợp lệ; đã dùng im lặng."
                 XpkSceneMusicParity.fallbackScene(unitIds, emptyList(), null)
             }
+            diagnostics += "PLAN_MUSIC rawCues=${rawCues.size} validatedCues=${validated.size} managedMusicTracks=${musicTracks.size}"
             runCatching {
                 persistMusicPlan(
                     content,
@@ -491,8 +513,13 @@ class NarrationPlanCoordinator(
                     "",
                     StoryAudioSourceMode.AI_FREESOUND,
                 )
-            }.onSuccess { musicCreated = true }
-                .onFailure { warnings += it.message ?: "Không lưu được MUSIC Freesound tự động." }
+            }.onSuccess {
+                musicCreated = true
+                diagnostics += "PLAN_MUSIC_PERSIST success=true"
+            }.onFailure {
+                warnings += it.message ?: "Không lưu được MUSIC Freesound tự động."
+                diagnostics += "PLAN_MUSIC_PERSIST success=false error=${(it.message ?: it::class.java.simpleName).take(220)}"
+            }
         }
 
         if (AudioAssetKind.AMBIENCE in kinds || AudioAssetKind.SFX in kinds) {
@@ -561,6 +588,7 @@ class NarrationPlanCoordinator(
                 ambienceScenes = validatedAmbience.ambienceScenes,
                 soundEffectCues = validatedSfx.soundEffectCues,
             )
+            diagnostics += "PLAN_AUDIO ambienceCandidates=$originalAmbienceCount ambienceValidated=${validatedAmbience.ambienceScenes.size} ambienceTracks=${ambienceTracks.size} sfxCandidates=$originalSfxCount sfxValidated=${validatedSfx.soundEffectCues.size} sfxTracks=${sfxTracks.size}"
             runCatching {
                 persistAudioDirectionPlan(
                     content = content,
@@ -572,16 +600,23 @@ class NarrationPlanCoordinator(
                     soundEffectsEnabled = AudioAssetKind.SFX in kinds,
                     sourceMode = StoryAudioSourceMode.AI_FREESOUND,
                 )
-            }.onSuccess { audioCreated = true }
-                .onFailure { warnings += it.message ?: "Không lưu được AMBIENCE/SFX Freesound tự động." }
+            }.onSuccess {
+                audioCreated = true
+                diagnostics += "PLAN_AUDIO_PERSIST success=true"
+            }.onFailure {
+                warnings += it.message ?: "Không lưu được AMBIENCE/SFX Freesound tự động."
+                diagnostics += "PLAN_AUDIO_PERSIST success=false error=${(it.message ?: it::class.java.simpleName).take(220)}"
+            }
         }
 
+        diagnostics += "PLAN_BUILD_DONE musicCreated=$musicCreated audioCreated=$audioCreated resolvedAssets=${resolved.resolvedCount} retryableFailure=${resolved.retryableFailure}"
         return FreesoundApplyResult(
             musicCreated = musicCreated,
             audioCreated = audioCreated,
             resolvedAssets = resolved.resolvedCount,
             warnings = warnings.distinct(),
             retryableFailure = resolved.retryableFailure,
+            diagnostics = diagnostics.distinct(),
         )
     }
 

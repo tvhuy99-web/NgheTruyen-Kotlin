@@ -20,6 +20,8 @@ internal data class FreesoundAutoSearchOutcome(
     val sound: FreesoundSound?,
     val failureMessage: String? = null,
     val retryable: Boolean = false,
+    val resultCount: Int = 0,
+    val httpCode: Int? = null,
 )
 
 data class FreesoundAutoResolvedNeed(
@@ -33,6 +35,7 @@ data class FreesoundAutoResolveResult(
     val warnings: List<String>,
     val importedTrackIds: Set<String>,
     val retryableFailure: Boolean = false,
+    val diagnostics: List<String> = emptyList(),
 ) {
     val resolvedCount: Int get() = resolved.count { !it.trackId.isNullOrBlank() }
 }
@@ -88,62 +91,98 @@ class FreesoundAutoAudioResolver(
     )
 
     suspend fun resolve(requirements: List<FreesoundAutoRequirement>): FreesoundAutoResolveResult {
+        val startedNanos = System.nanoTime()
         val needs = FreesoundAutoRequirementAggregator.aggregate(requirements)
-        if (needs.isEmpty()) return FreesoundAutoResolveResult(emptyList(), emptyList(), emptySet())
+        val diagnostics = mutableListOf<String>()
+        diagnostics += "RESOLVE_START requirements=${requirements.size} aggregated=${needs.size}"
+        if (needs.isEmpty()) {
+            diagnostics += "RESOLVE_EMPTY no aggregated Freesound needs were produced"
+            return FreesoundAutoResolveResult(
+                resolved = emptyList(),
+                warnings = emptyList(),
+                importedTrackIds = emptySet(),
+                diagnostics = diagnostics,
+            )
+        }
         val warnings = mutableListOf<String>()
         val imported = linkedSetOf<String>()
         val resolutions = mutableListOf<FreesoundAutoResolvedNeed>()
         var retryableFailure = false
+        var queryCacheHits = 0
+        var clientSearches = 0
+        var importAttempts = 0
 
-        for (need in needs) {
+        for ((index, need) in needs.withIndex()) {
+            diagnostics += "NEED_START index=${index + 1}/${needs.size} kind=${need.kind.name} importance=${need.importance.name} usages=${need.usages.size} query=${need.query.take(160)}"
             val currentTracks = runCatching { existingTracksProvider() }.getOrDefault(emptyList())
             val cachedId = queryCache.get(need.kind, need.query)
             val cachedTrack = cachedId?.let { id -> currentTracks.firstOrNull { it.id == id } }
                 ?.takeIf {
                     it.enabled &&
                         AudioAssetClassifier.classify(it) == need.kind &&
-                        FreesoundImporter.soundIdFromManagedUri(it.uri) != null
+                        FreesoundImporter.soundIdFromManagedUri(it.uri) != null &&
+                        FreesoundImporter.managedFileExists(appContext, it.uri)
                 }
             if (cachedTrack != null) {
+                queryCacheHits += 1
+                diagnostics += "QUERY_CACHE_HIT kind=${need.kind.name} trackId=${cachedTrack.id} soundId=${FreesoundImporter.soundIdFromManagedUri(cachedTrack.uri)} fileExists=true query=${need.query.take(140)}"
                 resolutions += FreesoundAutoResolvedNeed(need, cachedTrack.id, FreesoundAutoResolutionSource.CACHE.name)
                 continue
             } else if (cachedId != null) {
+                diagnostics += "QUERY_CACHE_STALE kind=${need.kind.name} trackId=$cachedId reason=missing_disabled_wrong_kind_or_file_missing query=${need.query.take(140)}"
                 queryCache.remove(need.kind, need.query)
+            } else {
+                diagnostics += "QUERY_CACHE_MISS kind=${need.kind.name} query=${need.query.take(140)}"
             }
 
-                    val search = searchBest(need)
+            clientSearches += 1
+            val searchStartedNanos = System.nanoTime()
+            diagnostics += "CLIENT_SEARCH_START index=${index + 1} kind=${need.kind.name} query=${need.query.take(160)}"
+            val search = searchBest(need)
+            val searchElapsedMs = (System.nanoTime() - searchStartedNanos) / 1_000_000L
             val remote = search.sound
+            diagnostics += "CLIENT_SEARCH_DONE index=${index + 1} kind=${need.kind.name} elapsedMs=$searchElapsedMs resultCount=${search.resultCount} httpCode=${search.httpCode ?: 0} selectedSoundId=${remote?.id ?: 0} failure=${search.failureMessage.orEmpty().take(180)}"
             if (!search.failureMessage.isNullOrBlank()) {
                 warnings += "Freesound ‘${need.query}’: ${search.failureMessage}"
                 retryableFailure = retryableFailure || search.retryable
             }
+
             var resolvedTrack: SceneMusicTrackEntity? = null
             if (remote != null) {
+                importAttempts += 1
+                val importStartedNanos = System.nanoTime()
+                diagnostics += "IMPORT_START kind=${need.kind.name} soundId=${remote.id} durationSec=${"%.2f".format(java.util.Locale.US, remote.durationSeconds)} previewAvailable=${remote.preferredPreviewUrl != null} query=${need.query.take(140)}"
                 val import = importer.importPreview(
                     sound = remote,
                     kind = need.kind,
                     normalizationTargetLufs = normalizationTarget(need.kind),
                 )
+                val importElapsedMs = (System.nanoTime() - importStartedNanos) / 1_000_000L
                 if (import.isSuccess) {
                     val result = import.getOrThrow()
                     imported += result.trackId
                     resolvedTrack = runCatching { existingTracksProvider() }.getOrDefault(emptyList())
                         .firstOrNull { it.id == result.trackId && it.enabled }
+                    diagnostics += "IMPORT_SUCCESS kind=${need.kind.name} soundId=${remote.id} trackId=${result.trackId} elapsedMs=$importElapsedMs fileExists=${resolvedTrack?.let { FreesoundImporter.managedFileExists(appContext, it.uri) } == true}"
                 } else if (import.exceptionOrNull() is FreesoundDuplicateException) {
                     resolvedTrack = runCatching { existingTracksProvider() }.getOrDefault(emptyList())
                         .firstOrNull { track ->
                             track.enabled &&
                                 FreesoundImporter.managedFileExists(appContext, track.uri) &&
-                            FreesoundImporter.soundIdFromManagedUri(track.uri) == remote.id &&
+                                FreesoundImporter.soundIdFromManagedUri(track.uri) == remote.id &&
                                 AudioAssetClassifier.classify(track) == need.kind
                         }
+                    diagnostics += "IMPORT_DUPLICATE kind=${need.kind.name} soundId=${remote.id} reusedTrackId=${resolvedTrack?.id.orEmpty()} elapsedMs=$importElapsedMs fileExists=${resolvedTrack != null}"
                 } else {
                     val error = import.exceptionOrNull()
                     val message = error?.message?.takeIf(String::isNotBlank)
                         ?: "Không nhập/chuẩn hóa được preview đã chọn."
                     warnings += "Freesound ‘${need.query}’: $message"
                     if (error is FreesoundNormalizationException && error.retryable) retryableFailure = true
+                    diagnostics += "IMPORT_FAILED kind=${need.kind.name} soundId=${remote.id} elapsedMs=$importElapsedMs retryable=${error is FreesoundNormalizationException && error.retryable} errorType=${error?.javaClass?.simpleName.orEmpty()} error=${message.take(220)}"
                 }
+            } else {
+                diagnostics += "SEARCH_NO_SELECTION kind=${need.kind.name} resultCount=${search.resultCount} query=${need.query.take(160)}"
             }
 
             if (resolvedTrack != null && resolvedTrack.enabled &&
@@ -152,19 +191,30 @@ class FreesoundAutoAudioResolver(
             ) {
                 queryCache.put(need.kind, need.query, resolvedTrack.id)
                 resolutions += FreesoundAutoResolvedNeed(need, resolvedTrack.id, FreesoundAutoResolutionSource.FREESOUND.name)
+                diagnostics += "NEED_RESOLVED kind=${need.kind.name} source=FREESOUND trackId=${resolvedTrack.id} soundId=${FreesoundImporter.soundIdFromManagedUri(resolvedTrack.uri)} query=${need.query.take(140)}"
                 continue
             }
 
             resolutions += FreesoundAutoResolvedNeed(need, null, FreesoundAutoResolutionSource.UNRESOLVED.name)
-    if (search.failureMessage.isNullOrBlank() && remote == null) {
-            val prefix = if (need.importance == FreesoundRequirementImportance.REQUIRED) "Âm thanh quan trọng" else "Âm thanh tùy chọn"
-        warnings += "$prefix ‘${need.query}’ chưa tìm thấy kết quả đủ phù hợp trên Freesound; khoảng đó sẽ im lặng ở lớp tương ứng."
-    }
+            diagnostics += "NEED_UNRESOLVED kind=${need.kind.name} query=${need.query.take(160)}"
+            if (search.failureMessage.isNullOrBlank() && remote == null) {
+                val prefix = if (need.importance == FreesoundRequirementImportance.REQUIRED) "Âm thanh quan trọng" else "Âm thanh tùy chọn"
+                warnings += "$prefix ‘${need.query}’ chưa tìm thấy kết quả đủ phù hợp trên Freesound; khoảng đó sẽ im lặng ở lớp tương ứng."
+            }
         }
-        return FreesoundAutoResolveResult(resolutions, warnings.distinct(), imported, retryableFailure)
+
+        val totalElapsedMs = (System.nanoTime() - startedNanos) / 1_000_000L
+        diagnostics += "RESOLVE_DONE requirements=${requirements.size} aggregated=${needs.size} resolved=${resolutions.count { !it.trackId.isNullOrBlank() }} unresolved=${resolutions.count { it.trackId.isNullOrBlank() }} queryCacheHits=$queryCacheHits clientSearches=$clientSearches importAttempts=$importAttempts imported=${imported.size} retryableFailure=$retryableFailure elapsedMs=$totalElapsedMs"
+        return FreesoundAutoResolveResult(
+            resolved = resolutions,
+            warnings = warnings.distinct(),
+            importedTrackIds = imported,
+            retryableFailure = retryableFailure,
+            diagnostics = diagnostics.distinct(),
+        )
     }
 
-        private suspend fun searchBest(need: FreesoundAutoSearchNeed): FreesoundAutoSearchOutcome {
+    private suspend fun searchBest(need: FreesoundAutoSearchNeed): FreesoundAutoSearchOutcome {
         val request = FreesoundSearchRequest(
             query = need.query,
             category = need.kind.toFreesoundCategory(),
@@ -179,14 +229,18 @@ class FreesoundAutoAudioResolver(
                 failureMessage = result.message,
                 retryable = result.httpCode == null || result.httpCode in setOf(401, 403, 429) ||
                     (result.httpCode ?: 0) >= 500,
+                resultCount = 0,
+                httpCode = result.httpCode,
             )
             is FreesoundSearchResult.Success -> FreesoundAutoSearchOutcome(
                 sound = result.page.results
-                .mapIndexed { index, sound -> sound to scoreCandidate(need.query, sound, index) }
-                .filter { it.first.preferredPreviewUrl != null }
-                .maxByOrNull { it.second }
-                ?.takeIf { it.second >= REMOTE_MIN_SCORE }
+                    .mapIndexed { index, sound -> sound to scoreCandidate(need.query, sound, index) }
+                    .filter { it.first.preferredPreviewUrl != null }
+                    .maxByOrNull { it.second }
+                    ?.takeIf { it.second >= REMOTE_MIN_SCORE }
                     ?.first,
+                resultCount = result.page.results.size,
+                httpCode = 200,
             )
         }
     }

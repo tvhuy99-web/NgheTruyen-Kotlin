@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import vn.nghetruyen.app.NgheTruyenApplication
 import vn.nghetruyen.app.ai.ChapterAiWorkflow
 import vn.nghetruyen.app.ai.NarrationPlanCoordinator
 import vn.nghetruyen.app.audio.AmbienceSfxPlan
@@ -26,6 +27,8 @@ import vn.nghetruyen.app.audio.StoryAudioSourceMode
 import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
 import vn.nghetruyen.app.data.repository.LibraryRepository
 import vn.nghetruyen.app.freesound.FreesoundImporter
+import vn.nghetruyen.source.diagnostics.DiagnosticCategory
+import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 
 /**
  * Playback consumer for the unified XPK chapter plan. This class never calls an AI provider itself:
@@ -44,9 +47,37 @@ class AudioDirectionRuntime(
 ) {
     private data class RuntimeSfxCue(val key: String, val cue: SoundEffectCue)
 
+    private val appContext = context.applicationContext
     private val mutex = Mutex()
     private val ambienceController = SceneAmbienceController(context)
     private val sfxController = SceneSfxController(context)
+    private var lastAmbienceTraceState = ""
+
+    private fun diagnostic(
+        name: String,
+        severity: DiagnosticSeverity = DiagnosticSeverity.DEBUG,
+        attributes: Map<String, String> = emptyMap(),
+    ) {
+        val app = appContext as? NgheTruyenApplication ?: return
+        val snapshot = PlaybackQueueStore.state.value
+        runCatching {
+            app.container.sourceDiagnostics.mark(
+                name = name,
+                category = DiagnosticCategory.RUNTIME,
+                severity = severity,
+                sourceId = snapshot.sourceId.ifBlank { "audio-direction" },
+                traceId = "audio-direction:${snapshot.chapterId}",
+                attributes = attributes + mapOf(
+                    "storyId" to snapshot.storyId,
+                    "chapterId" to snapshot.chapterId,
+                    "unitId" to snapshot.currentUnitId.orEmpty(),
+                ),
+            )
+        }
+    }
+
+    private fun mode3Active(): Boolean =
+        StoryAudioModeRouter.usesAiFreesound(narrationPlanCoordinator.storyAudioSourceMode())
 
     private var runtimeJob: Job? = null
     @Volatile private var runtimeScope: CoroutineScope? = null
@@ -158,6 +189,18 @@ class AudioDirectionRuntime(
         val now = System.currentTimeMillis()
         val sourceMode = narrationPlanCoordinator.storyAudioSourceMode()
         val fastKey = buildFastKey(snapshot, settings, sourceMode)
+        if (StoryAudioModeRouter.usesAiFreesound(sourceMode)) {
+            diagnostic(
+                "FREESOUND_RUNTIME_AUDIO_PLAN_CHECK",
+                DiagnosticSeverity.INFO,
+                mapOf(
+                    "force" to force.toString(),
+                    "ambienceEnabled" to settings.ambienceEnabled.toString(),
+                    "sfxEnabled" to settings.soundEffectsEnabled.toString(),
+                    "preparedChapterId" to preparedChapterId,
+                ),
+            )
+        }
         if (!force &&
             preparedChapterId == snapshot.chapterId &&
             preparedSignature.isNotBlank() &&
@@ -171,6 +214,19 @@ class AudioDirectionRuntime(
         var allAssets = buildRuntimeAssets(rawTracks, settings, sourceMode)
         var activeAudioAssets = activeAudioAssets(allAssets, settings)
         updateRuntimeAssets(allAssets)
+        if (StoryAudioModeRouter.usesAiFreesound(sourceMode)) {
+            diagnostic(
+                "FREESOUND_RUNTIME_AUDIO_ASSETS",
+                if (activeAudioAssets.isEmpty()) DiagnosticSeverity.WARN else DiagnosticSeverity.INFO,
+                mapOf(
+                    "rawTracks" to rawTracks.size.toString(),
+                    "allMode3Assets" to allAssets.size.toString(),
+                    "activeAudioAssets" to activeAudioAssets.size.toString(),
+                    "ambienceAssets" to activeAudioAssets.count { it.kind == AudioAssetKind.AMBIENCE }.toString(),
+                    "sfxAssets" to activeAudioAssets.count { it.kind == AudioAssetKind.SFX }.toString(),
+                ),
+            )
+        }
 
         val validUnits = snapshot.speechChunks.map { it.unitId }.filter(String::isNotBlank)
         var signature = buildPlanSignature(
@@ -210,8 +266,23 @@ class AudioDirectionRuntime(
                 narrationPlanCoordinator.ensureActivePlans(content = content, force = force)
             }.getOrNull()
             if (outcome == null) {
+                if (StoryAudioModeRouter.usesAiFreesound(sourceMode)) {
+                    diagnostic("FREESOUND_RUNTIME_AUDIO_PREPARE_FAILED", DiagnosticSeverity.ERROR)
+                }
                 markFailure(signature)
                 return false
+            }
+            if (StoryAudioModeRouter.usesAiFreesound(sourceMode)) {
+                diagnostic(
+                    "FREESOUND_RUNTIME_AUDIO_PREPARE_RESULT",
+                    if (outcome.freesoundResolvedAssets > 0 && !outcome.freesoundRetryRequired) DiagnosticSeverity.INFO else DiagnosticSeverity.WARN,
+                    mapOf(
+                        "resolvedAssets" to outcome.freesoundResolvedAssets.toString(),
+                        "audioPlanCreated" to outcome.audioPlanCreated.toString(),
+                        "retryRequired" to outcome.freesoundRetryRequired.toString(),
+                        "warningCount" to outcome.warnings.size.toString(),
+                    ),
+                )
             }
 
             // Mode 3 can download and normalize assets during ensureActivePlans(). The first playback
@@ -232,10 +303,28 @@ class AudioDirectionRuntime(
             plan = narrationPlanCoordinator.loadAudioDirectionPlan(content)
         }
         if (plan == null) {
+            if (StoryAudioModeRouter.usesAiFreesound(sourceMode)) {
+                diagnostic(
+                    "FREESOUND_RUNTIME_AUDIO_PLAN_MISSING",
+                    DiagnosticSeverity.ERROR,
+                    mapOf("activeAudioAssets" to activeAudioAssets.size.toString()),
+                )
+            }
             markFailure(signature)
             return false
         }
 
+        if (StoryAudioModeRouter.usesAiFreesound(sourceMode)) {
+            diagnostic(
+                "FREESOUND_RUNTIME_AUDIO_PLAN_READY",
+                DiagnosticSeverity.INFO,
+                mapOf(
+                    "ambienceScenes" to plan.ambienceScenes.size.toString(),
+                    "sfxCues" to plan.soundEffectCues.size.toString(),
+                    "activeAudioAssets" to activeAudioAssets.size.toString(),
+                ),
+            )
+        }
         clearFailure()
         installPlan(snapshot.chapterId, signature, validUnits, plan)
         markFastValidation(fastKey, now)
@@ -409,10 +498,26 @@ class AudioDirectionRuntime(
         preparedSignature = signature
         lastTriggeredSfxKey = ""
         lastEffectAtMillis.clear()
+        if (mode3Active()) {
+            diagnostic(
+                "FREESOUND_RUNTIME_AUDIO_PLAN_INSTALLED",
+                DiagnosticSeverity.INFO,
+                mapOf(
+                    "ambienceMappedUnits" to ambienceByUnitId.size.toString(),
+                    "sfxTriggerUnits" to sfxByUnitId.size.toString(),
+                    "sfxCueCount" to runtimeCues.size.toString(),
+                    "boundedSfxCueCount" to boundedSfxCueKeys.size.toString(),
+                ),
+            )
+        }
     }
 
     private fun applyAmbience(unitId: String, settings: AudioDirectionPreferences.Snapshot) {
         if (!settings.ambienceEnabled) {
+            if (mode3Active() && lastAmbienceTraceState != "disabled") {
+                diagnostic("FREESOUND_RUNTIME_AMBIENCE_DISABLED", DiagnosticSeverity.WARN)
+                lastAmbienceTraceState = "disabled"
+            }
             ambienceController.stop()
             return
         }
@@ -424,6 +529,20 @@ class AudioDirectionRuntime(
             .distinctBy(AudioDirectionAsset::id)
             .take(AudioDirectionLimits.MAX_CONCURRENT_AMBIENCE)
             .toList()
+        val state = assets.joinToString(",") { it.id }.ifBlank { "empty" }
+        if (mode3Active() && state != lastAmbienceTraceState) {
+            diagnostic(
+                if (assets.isEmpty()) "FREESOUND_RUNTIME_AMBIENCE_EMPTY" else "FREESOUND_RUNTIME_AMBIENCE_PLAY",
+                if (assets.isEmpty()) DiagnosticSeverity.WARN else DiagnosticSeverity.INFO,
+                mapOf(
+                    "unitId" to unitId,
+                    "assetCount" to assets.size.toString(),
+                    "assetIds" to assets.joinToString(",") { it.id }.take(260),
+                    "filesExist" to assets.all { FreesoundImporter.managedFileExists(appContext, it.uri) }.toString(),
+                ),
+            )
+            lastAmbienceTraceState = state
+        }
         if (assets.isEmpty()) {
             ambienceController.stop()
             return
@@ -478,6 +597,17 @@ class AudioDirectionRuntime(
             if (candidates.none { it.key == runtimeCue.key }) candidates += runtimeCue
         }
         if (candidates.isEmpty()) return
+        if (mode3Active()) {
+            diagnostic(
+                "FREESOUND_RUNTIME_SFX_CANDIDATES",
+                DiagnosticSeverity.INFO,
+                mapOf(
+                    "unitId" to unitId,
+                    "candidateCount" to candidates.size.toString(),
+                    "maxConcurrent" to maxConcurrent.toString(),
+                ),
+            )
+        }
 
         val now = System.currentTimeMillis()
         var startedAny = false
@@ -499,6 +629,21 @@ class AudioDirectionRuntime(
                 repeatCount = cue.repeatCount,
                 repeatIntervalMillis = cue.cadence.intervalMillis,
             )
+            if (mode3Active()) {
+                diagnostic(
+                    "FREESOUND_RUNTIME_SFX_TRIGGER",
+                    if (started) DiagnosticSeverity.INFO else DiagnosticSeverity.WARN,
+                    mapOf(
+                        "unitId" to unitId,
+                        "effectId" to cue.effectId,
+                        "soundId" to (FreesoundImporter.soundIdFromManagedUri(asset.uri)?.toString() ?: ""),
+                        "fileExists" to FreesoundImporter.managedFileExists(appContext, asset.uri).toString(),
+                        "started" to started.toString(),
+                        "repeatCount" to cue.repeatCount.toString(),
+                        "loopUntilStop" to cue.loopUntilStop.toString(),
+                    ),
+                )
+            }
             if (started) {
                 startedAny = true
                 lastEffectAtMillis[cue.effectId] = now
@@ -556,6 +701,7 @@ class AudioDirectionRuntime(
         cachedParagraphIdentity = 0
         cachedParagraphCount = -1
         cachedParagraphHash = ""
+        lastAmbienceTraceState = ""
     }
 
     companion object {

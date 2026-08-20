@@ -21,10 +21,22 @@ object FreesoundLibraryAnalyzer {
     private val typeMarkerRegex = Regex(
         """(?i)(?:type\s*[:=]\s*(?:sfx[_-]?continuous|continuous|sfx|sound[_-]?effect|ambience|environment|music)|\[(?:continuous|sfx[_-]?continuous|sfx|ambience|environment|music)])""",
     )
+    private val audioExtensionRegex = Regex("(?i)\\.(?:wav|wave|mp3|ogg|flac|aac|m4a|aiff|aif|opus)$")
     private val nonWordRegex = Regex("[^a-z0-9]+")
     private val stopWords = setOf(
         "a", "an", "and", "audio", "background", "effect", "effects", "for", "in", "of", "sound", "sounds", "the", "with",
         "am", "anh", "cai", "cac", "cho", "cua", "la", "mot", "nhung", "tieng", "trong", "va", "voi",
+    )
+    private val vietnameseToEnglishToken = mapOf(
+        "mua" to "rain", "rung" to "forest", "sam" to "thunder", "set" to "lightning", "bao" to "storm",
+        "gio" to "wind", "song" to "river", "thac" to "waterfall", "bien" to "ocean", "hang" to "cave",
+        "dem" to "night", "lua" to "fire", "dong" to "crowd", "lang" to "village", "pho" to "city",
+        "chua" to "temple", "cung" to "palace", "tuyet" to "snow", "dam" to "swamp", "mac" to "desert",
+        "cho" to "market", "kiem" to "sword", "phep" to "magic", "buoc" to "footsteps", "no" to "explosion",
+        "cua" to "door", "ngua" to "horse", "ten" to "arrow", "quyen" to "punch", "nga" to "fall",
+        "kinh" to "glass", "go" to "wood", "loai" to "metal", "khien" to "shield", "chuong" to "bell",
+        "tim" to "heartbeat", "tho" to "breathing", "ao" to "cloth", "nuoc" to "water", "da" to "rock",
+        "xich" to "chain", "quai" to "monster", "rong" to "dragon", "dich" to "teleport",
     )
 
     fun coverageTopics(kind: AudioAssetKind): List<String> = when (kind) {
@@ -69,13 +81,13 @@ object FreesoundLibraryAnalyzer {
         val queryTokens = tokens(query)
         if (queryNorm.isBlank() || queryTokens.isEmpty()) return 0.0
         return tracks.maxOfOrNull { track ->
-            val title = normalize(track.title)
+            val title = normalizeTitle(track.title)
             val description = normalize(description(track.tagsCsv))
             val combined = "$title $description".trim()
-            if (combined.contains(queryNorm) || queryNorm.contains(title).takeIf { title.length >= 5 } == true) {
+            if (combined.contains(queryNorm) || (title.length >= 5 && queryNorm.contains(title))) {
                 1.0
             } else {
-                val titleScore = tokenCoverage(queryTokens, tokens(track.title))
+                val titleScore = tokenCoverage(queryTokens, tokens(stripAudioExtension(track.title)))
                 val descriptionScore = tokenCoverage(queryTokens, tokens(description(track.tagsCsv)))
                 max(titleScore, descriptionScore * 0.9)
             }
@@ -99,10 +111,10 @@ object FreesoundLibraryAnalyzer {
                     continue
                 }
 
-                val firstTitle = normalize(first.title)
-                val secondTitle = normalize(second.title)
+                val firstTitle = normalizeTitle(first.title)
+                val secondTitle = normalizeTitle(second.title)
                 val exactTitle = firstTitle.isNotBlank() && firstTitle == secondTitle
-                val titleScore = jaccard(tokens(first.title), tokens(second.title))
+                val titleScore = jaccard(tokens(stripAudioExtension(first.title)), tokens(stripAudioExtension(second.title)))
                 val descriptionScore = jaccard(
                     tokens(description(first.tagsCsv)),
                     tokens(description(second.tagsCsv)),
@@ -114,7 +126,7 @@ object FreesoundLibraryAnalyzer {
                 val score = if (exactTitle) 1.0 else max(containsScore, titleScore * 0.78 + descriptionScore * 0.22)
                 if (score >= NEAR_DUPLICATE_THRESHOLD) {
                     val reason = when {
-                        exactTitle -> "Tên giống nhau"
+                        exactTitle -> "Tên giống nhau sau khi bỏ đuôi tệp"
                         containsScore > 0.0 -> "Tên gần như bao hàm nhau"
                         descriptionScore >= 0.75 -> "Tên và mô tả rất gần nhau"
                         else -> "Tên có mức tương đồng cao"
@@ -145,6 +157,7 @@ object FreesoundLibraryAnalyzer {
         .asSequence()
         .map(String::trim)
         .filter { it.length >= 2 && it !in stopWords }
+        .map { vietnameseToEnglishToken[it] ?: it }
         .toSet()
 
     internal fun jaccard(first: Set<String>, second: Set<String>): Double {
@@ -153,6 +166,10 @@ object FreesoundLibraryAnalyzer {
         val union = first.union(second).size.toDouble()
         return if (union <= 0.0) 0.0 else intersection / union
     }
+
+    private fun normalizeTitle(value: String): String = normalize(stripAudioExtension(value))
+
+    private fun stripAudioExtension(value: String): String = value.trim().replace(audioExtensionRegex, "").trim()
 
     private fun tokenCoverage(query: Set<String>, candidate: Set<String>): Double {
         if (query.isEmpty() || candidate.isEmpty()) return 0.0

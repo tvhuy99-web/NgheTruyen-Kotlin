@@ -14,7 +14,6 @@ import vn.nghetruyen.app.data.settings.SettingsRepository
 import vn.nghetruyen.app.downloads.DownloadScheduler
 import vn.nghetruyen.app.importers.BookImporter
 import vn.nghetruyen.app.following.FollowingUpdateScheduler
-import vn.nghetruyen.app.freesound.FreesoundAiAssistant
 import vn.nghetruyen.app.freesound.FreesoundClient
 import vn.nghetruyen.app.freesound.FreesoundCredentialStore
 import vn.nghetruyen.app.playback.TtsVoiceCatalog
@@ -134,9 +133,6 @@ class AppContainer(context: Context) {
     val ttsVoiceCatalog: TtsVoiceCatalog by lazy { TtsVoiceCatalog(appContext) }
     val aiCredentialStore: EncryptedAiCredentialStore by lazy { EncryptedAiCredentialStore(appContext) }
     val aiRequestGovernor: AiRequestGovernor by lazy { AiRequestGovernor(database, settingsRepository) }
-    val freesoundAiAssistant: FreesoundAiAssistant by lazy {
-        FreesoundAiAssistant(settingsRepository, aiCredentialStore, aiRequestGovernor, libraryRepository)
-    }
     val aiServices: OnlineTextAiServices by lazy {
         OnlineTextAiServices(settingsRepository, aiCredentialStore, aiRequestGovernor, libraryRepository, sourceDiagnostics)
     }

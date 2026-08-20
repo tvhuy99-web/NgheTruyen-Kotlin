@@ -1,7 +1,12 @@
 package vn.nghetruyen.app.freesound
 
+import java.util.ArrayDeque
+import java.util.LinkedHashMap
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -19,13 +24,26 @@ class FreesoundClient(
     private val credentialStore: FreesoundCredentialStore,
     private val httpClient: OkHttpClient = defaultHttpClient(),
 ) {
+    private data class CacheEntry(
+        val page: FreesoundSearchPage,
+        val storedAt: Long,
+    )
+
+    private val cacheLock = Any()
+    private val pageCache = object : LinkedHashMap<String, CacheEntry>(CACHE_MAX_ENTRIES, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CacheEntry>?): Boolean =
+            size > CACHE_MAX_ENTRIES
+    }
+    private val rateMutex = Mutex()
+    private val requestTimes = ArrayDeque<Long>()
+
     suspend fun testConnection(): FreesoundConnectionResult = withContext(Dispatchers.IO) {
         val apiKey = credentialStore.apiKey()
             ?: return@withContext FreesoundConnectionResult(
                 success = false,
                 message = "Chưa lưu khóa API Freesound.",
             )
-
+        awaitLocalRatePermit()
         val request = Request.Builder()
             .url(buildSearchUrl(FreesoundSearchRequest(query = "test", pageSize = 1), fields = "id"))
             .header("Authorization", "Token $apiKey")
@@ -70,32 +88,89 @@ class FreesoundClient(
         )
     }
 
-    private fun executeSoundListRequest(
+    fun clearSearchCache() {
+        synchronized(cacheLock) { pageCache.clear() }
+    }
+
+    private suspend fun executeSoundListRequest(
         url: HttpUrl,
         request: FreesoundSearchRequest,
         networkFailureMessage: String,
     ): FreesoundSearchResult {
+        val cacheKey = url.toString()
+        cachedPage(cacheKey)?.let { return FreesoundSearchResult.Success(it) }
         val apiKey = credentialStore.apiKey()
             ?: return FreesoundSearchResult.Failure("Chưa lưu khóa API Freesound.")
-        val httpRequest = Request.Builder()
-            .url(url)
-            .header("Authorization", "Token $apiKey")
-            .header("Accept", "application/json")
-            .header("User-Agent", USER_AGENT)
-            .get()
-            .build()
 
-        return runCatching {
-            httpClient.newCall(httpRequest).execute().use { response ->
-                if (!response.isSuccessful) {
-                    return@use searchFailureForHttpCode(response.code)
+        suspend fun executeOnce(): Pair<FreesoundSearchResult, Long?> {
+            awaitLocalRatePermit()
+            val httpRequest = Request.Builder()
+                .url(url)
+                .header("Authorization", "Token $apiKey")
+                .header("Accept", "application/json")
+                .header("User-Agent", USER_AGENT)
+                .get()
+                .build()
+            return runCatching {
+                httpClient.newCall(httpRequest).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        val retryAfter = response.header("Retry-After")
+                            ?.trim()
+                            ?.toLongOrNull()
+                            ?.times(1_000L)
+                        return@use searchFailureForHttpCode(response.code) to retryAfter
+                    }
+                    val page = parseSearchPage(response.body.string(), request)
+                    cachePage(cacheKey, page)
+                    FreesoundSearchResult.Success(page) to null
                 }
-                FreesoundSearchResult.Success(
-                    parseSearchPage(response.body.string(), request),
-                )
+            }.getOrElse {
+                FreesoundSearchResult.Failure(message = networkFailureMessage) to null
             }
-        }.getOrElse {
-            FreesoundSearchResult.Failure(message = networkFailureMessage)
+        }
+
+        val first = executeOnce()
+        val firstFailure = first.first as? FreesoundSearchResult.Failure
+        if (firstFailure?.httpCode != 429) return first.first
+
+        val retryDelay = (first.second ?: RATE_LIMIT_DEFAULT_RETRY_MS)
+            .coerceIn(1_000L, RATE_LIMIT_MAX_AUTO_RETRY_MS)
+        delay(retryDelay)
+        return executeOnce().first
+    }
+
+    private fun cachedPage(key: String): FreesoundSearchPage? = synchronized(cacheLock) {
+        val entry = pageCache[key] ?: return@synchronized null
+        if (System.currentTimeMillis() - entry.storedAt > CACHE_TTL_MS) {
+            pageCache.remove(key)
+            null
+        } else {
+            entry.page
+        }
+    }
+
+    private fun cachePage(key: String, page: FreesoundSearchPage) {
+        synchronized(cacheLock) {
+            pageCache[key] = CacheEntry(page, System.currentTimeMillis())
+        }
+    }
+
+    private suspend fun awaitLocalRatePermit() {
+        while (true) {
+            val waitMs = rateMutex.withLock {
+                val now = System.currentTimeMillis()
+                while (requestTimes.isNotEmpty() && now - requestTimes.first() >= RATE_WINDOW_MS) {
+                    requestTimes.removeFirst()
+                }
+                if (requestTimes.size < LOCAL_REQUESTS_PER_WINDOW) {
+                    requestTimes.addLast(now)
+                    0L
+                } else {
+                    (RATE_WINDOW_MS - (now - requestTimes.first()) + RATE_SAFETY_MS).coerceAtLeast(RATE_SAFETY_MS)
+                }
+            }
+            if (waitMs <= 0L) return
+            delay(waitMs)
         }
     }
 
@@ -104,6 +179,13 @@ class FreesoundClient(
         private const val API_BASE_URL = "https://freesound.org/apiv2/"
         private const val USER_AGENT = "NgheTruyen-Android/Freesound"
         private const val SEARCH_FIELDS = "id,name,description,duration,previews"
+        private const val CACHE_MAX_ENTRIES = 48
+        private const val CACHE_TTL_MS = 5L * 60L * 1_000L
+        private const val RATE_WINDOW_MS = 60_000L
+        private const val RATE_SAFETY_MS = 250L
+        private const val LOCAL_REQUESTS_PER_WINDOW = 50
+        private const val RATE_LIMIT_DEFAULT_RETRY_MS = 5_000L
+        private const val RATE_LIMIT_MAX_AUTO_RETRY_MS = 30_000L
 
         internal fun resultForHttpCode(code: Int): FreesoundConnectionResult = when (code) {
             in 200..299 -> FreesoundConnectionResult(
@@ -118,7 +200,7 @@ class FreesoundClient(
             )
             429 -> FreesoundConnectionResult(
                 success = false,
-                message = "Freesound đang giới hạn số yêu cầu. Hãy thử lại sau.",
+                message = "Freesound đang giới hạn số yêu cầu. Ứng dụng sẽ tự giãn nhịp trước lần thử tiếp theo.",
                 httpCode = code,
             )
             else -> FreesoundConnectionResult(
@@ -217,7 +299,7 @@ class FreesoundClient(
                 httpCode = code,
             )
             429 -> FreesoundSearchResult.Failure(
-                message = "Freesound đang giới hạn số yêu cầu. Hãy thử lại sau.",
+                message = "Freesound đang giới hạn số yêu cầu. Ứng dụng đã tự giãn nhịp và thử lại một lần.",
                 httpCode = code,
             )
             else -> FreesoundSearchResult.Failure(

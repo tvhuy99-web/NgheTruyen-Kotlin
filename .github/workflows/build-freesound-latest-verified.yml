@@ -26,6 +26,22 @@ jobs:
           ref: agent/freesound-stage-1
           fetch-depth: 0
 
+      - name: Record run start
+        shell: bash
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          {
+            echo "RUN_ID=${GITHUB_RUN_ID}"
+            echo "RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT}"
+            echo "TRIGGER_SHA=${GITHUB_SHA}"
+            echo "STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > MODE3_RUN_START.txt
+          git add -- MODE3_RUN_START.txt
+          git commit -m "Record Freesound verified build start"
+          git push origin HEAD:agent/freesound-stage-1
+
       - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
@@ -101,13 +117,11 @@ jobs:
           def _reindent_new(old, new, matched):
               from collections import Counter
               from difflib import SequenceMatcher
-
               old_lines = old.strip('\n').splitlines()
               new_lines = new.strip('\n').splitlines()
               actual_lines = matched.splitlines()
               old_keys = [line.lstrip(' \t').rstrip() for line in old_lines]
               new_keys = [line.lstrip(' \t').rstrip() for line in new_lines]
-
               mapped = {}
               matcher = SequenceMatcher(a=old_keys, b=new_keys, autojunk=False)
               for tag, i1, i2, j1, j2 in matcher.get_opcodes():
@@ -118,13 +132,11 @@ jobs:
                       new_index = j1 + offset
                       if old_index < len(actual_lines):
                           mapped[new_index] = _indent_width(actual_lines[old_index])
-
               offsets = []
               for index, actual_indent in mapped.items():
                   if index < len(new_lines) and new_lines[index].strip():
                       offsets.append(actual_indent - _indent_width(new_lines[index]))
               base_offset = Counter(offsets).most_common(1)[0][0] if offsets else 0
-
               rendered = []
               for index, line in enumerate(new_lines):
                   stripped = line.lstrip(' \t')
@@ -141,7 +153,6 @@ jobs:
               if exact_count == expected:
                   write(path, text.replace(old, new, expected))
                   return
-
               pattern = _flex_pattern(old)
               matches = list(pattern.finditer(text))
               if len(matches) != expected:

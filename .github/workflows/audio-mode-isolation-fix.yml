@@ -1,0 +1,65 @@
+name: Audio Mode Isolation Fix
+
+on:
+  push:
+    branches:
+      - agent/freesound-stage-1
+    paths:
+      - .github/workflows/audio-mode-isolation-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/freesound-stage-1
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Apply strict mode isolation patch
+        run: python3 .github/scripts/audio_mode_isolation_fix.py
+
+      - name: Verify patch invariants
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          reader = Path('app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt').read_text()
+          service = Path('app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt').read_text()
+          ai = Path('app/src/main/java/vn/nghetruyen/app/ai/XpkNarrationAiServices.kt').read_text()
+          coordinator = Path('app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt').read_text()
+          assert 'if (manualMode)' in reader
+          assert 'onSourceModeChanged = { mode ->' in reader
+          assert 'StoryAudioModeRouter.allowsManualPlaylist(storyAudioSourceMode)' in service
+          assert 'requestedTrackId == XpkSceneMusicParity.SILENCE_TRACK_ID' in service
+          assert 'AI_AUDIO_SOURCE_MODE_MIXED' in ai
+          assert 'validatedAmbience' in coordinator and 'validatedSfx' in coordinator
+          print('mode isolation invariants verified')
+          PY
+
+      - name: Compile production Kotlin
+        run: ./gradlew :app:compileDebugKotlin --stacktrace
+
+      - name: Run focused regression tests
+        run: ./gradlew :app:testDebugUnitTest --tests 'vn.nghetruyen.app.audio.StoryAudioSourceModeTest' --tests 'vn.nghetruyen.app.freesound.FreesoundStage6Test' --stacktrace
+
+      - name: Commit verified fixes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt \
+                  app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt \
+                  app/src/main/java/vn/nghetruyen/app/ai/XpkNarrationAiServices.kt \
+                  app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt
+          git diff --cached --quiet && exit 0
+          git commit -m 'Fix strict story audio mode isolation'
+          git push origin HEAD:agent/freesound-stage-1

@@ -119,18 +119,56 @@ class FreesoundImporter(
         kind: AudioAssetKind,
         normalizationTargetLufs: Float,
     ): Result<FreesoundImportResult> {
-        val previewUrl = sound.preferredPreviewUrl
-            ?: return Result.failure(IllegalArgumentException("Âm thanh này không có preview HQ khả dụng."))
-        if (!previewUrl.startsWith("https://", ignoreCase = true)) {
-            return Result.failure(IllegalArgumentException("Địa chỉ preview Freesound không an toàn."))
+        val candidates = previewCandidatesForImport(sound)
+        if (candidates.isEmpty()) {
+            return Result.failure(IllegalArgumentException("Âm thanh này không có preview HQ khả dụng."))
         }
 
-        val extension = extensionForPreviewUrl(previewUrl)
         val directory = managedDirectory(appContext, kind)
         if (!directory.isDirectory && !directory.mkdirs()) {
             return Result.failure(IllegalStateException("Không tạo được thư mục lưu âm thanh Freesound."))
         }
 
+        var lastError: Throwable? = null
+        for (previewUrl in candidates) {
+            val attempt = importPreviewCandidate(
+                sound = sound,
+                kind = kind,
+                normalizationTargetLufs = normalizationTargetLufs,
+                previewUrl = previewUrl,
+                directory = directory,
+            )
+            if (attempt.isSuccess) return attempt
+            val error = attempt.exceptionOrNull()
+            if (error is CancellationException) throw error
+            lastError = error
+        }
+
+        return Result.failure(
+            IllegalStateException(
+                buildString {
+                    append("Không nhập được preview HQ Freesound")
+                    if (candidates.size > 1) append(" bằng cả OGG và MP3")
+                    lastError?.message?.takeIf(String::isNotBlank)?.let { append(": $it") }
+                    append('.')
+                },
+                lastError,
+            ),
+        )
+    }
+
+    private suspend fun importPreviewCandidate(
+        sound: FreesoundSound,
+        kind: AudioAssetKind,
+        normalizationTargetLufs: Float,
+        previewUrl: String,
+        directory: File,
+    ): Result<FreesoundImportResult> {
+        if (!previewUrl.startsWith("https://", ignoreCase = true)) {
+            return Result.failure(IllegalArgumentException("Địa chỉ preview Freesound không an toàn."))
+        }
+
+        val extension = extensionForPreviewUrl(previewUrl)
         val finalFile = File(
             directory,
             "freesound_${sound.id}_${UUID.randomUUID()}.$extension",
@@ -139,7 +177,7 @@ class FreesoundImporter(
         val markerFile = File("${finalFile.absolutePath}$NORMALIZING_SUFFIX")
         var savedTrackId: String? = null
 
-        try {
+        return try {
             val request = Request.Builder()
                 .url(previewUrl)
                 .header("Accept", "audio/*")
@@ -203,7 +241,7 @@ class FreesoundImporter(
             awaitNormalization(workId, trackId)
             markerFile.delete()
 
-            return Result.success(
+            Result.success(
                 FreesoundImportResult(
                     trackId = trackId,
                     uri = uri,
@@ -221,7 +259,7 @@ class FreesoundImporter(
             partFile.delete()
             finalFile.delete()
             markerFile.delete()
-            return Result.failure(error)
+            Result.failure(error)
         }
     }
 
@@ -273,6 +311,12 @@ class FreesoundImporter(
         private val managedSoundIdRegex = Regex(
             """(?i)(?:^|/)audio/freesound/(?:music|ambience|sfx)/freesound_(\d+)_[-0-9a-f]+\.(?:ogg|mp3)$""",
         )
+
+        internal fun previewCandidatesForImport(sound: FreesoundSound): List<String> =
+            listOfNotNull(sound.previewHqOgg, sound.previewHqMp3)
+                .map(String::trim)
+                .filter { it.startsWith("https://", ignoreCase = true) }
+                .distinct()
 
         internal fun hasValidNormalization(track: SceneMusicTrackEntity): Boolean =
             track.normalizationVersion >= PcmLoudnessEstimator.VERSION &&

@@ -1,7 +1,10 @@
 package vn.nghetruyen.app.freesound
 
 import android.content.Context
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import android.net.Uri
+import android.os.StatFs
 import java.io.File
 import java.util.Locale
 import java.util.UUID
@@ -42,15 +45,23 @@ class FreesoundImporter(
         normalizationTargetLufs: Float,
     ): Result<FreesoundImportResult> = withContext(Dispatchers.IO) {
         importMutex.withLock {
+            cleanupStalePartFiles(appContext)
             val duplicateCheck = runCatching { existingTracksProvider() }
             if (duplicateCheck.isFailure) {
                 return@withLock Result.failure(
                     duplicateCheck.exceptionOrNull() ?: IllegalStateException("Không kiểm tra được thư viện hiện tại."),
                 )
             }
-            if (duplicateCheck.getOrThrow().any { soundIdFromManagedUri(it.uri) == sound.id }) {
+
+            val matches = duplicateCheck.getOrThrow().filter { soundIdFromManagedUri(it.uri) == sound.id }
+            val existing = matches.firstOrNull { managedFileExists(appContext, it.uri) }
+            if (existing != null) {
                 return@withLock Result.failure(FreesoundDuplicateException(sound.id))
             }
+            matches.forEach { stale ->
+                runCatching { repository.deleteSceneMusicTrack(stale.id) }
+            }
+
             importPreviewLocked(sound, kind, normalizationTargetLufs)
         }
     }
@@ -96,6 +107,7 @@ class FreesoundImporter(
                 if (declaredLength > MAX_PREVIEW_BYTES) {
                     throw IllegalStateException("Preview Freesound vượt giới hạn dung lượng cho phép.")
                 }
+                ensureFreeSpace(directory, declaredLength)
 
                 var total = 0L
                 body.byteStream().use { input ->
@@ -121,6 +133,7 @@ class FreesoundImporter(
                 partFile.copyTo(finalFile, overwrite = false)
                 partFile.delete()
             }
+            validateDownloadedAudio(finalFile)
 
             val uri = Uri.fromFile(finalFile).toString()
             val title = titleForImport(sound.name, "Âm thanh Freesound ${sound.id}")
@@ -169,6 +182,8 @@ class FreesoundImporter(
         internal const val MAX_PREVIEW_BYTES = 64L * 1024L * 1024L
         internal const val MAX_BATCH_SIZE = 50
         private const val MANAGED_ROOT = "audio/freesound"
+        private const val FREE_SPACE_RESERVE_BYTES = 4L * 1024L * 1024L
+        private const val UNKNOWN_LENGTH_REQUIRED_BYTES = 12L * 1024L * 1024L
         private val importMutex = Mutex()
         private val managedSoundIdRegex = Regex(
             """(?i)(?:^|/)audio/freesound/(?:music|ambience|sfx)/freesound_(\d+)_[-0-9a-f]+\.(?:ogg|mp3)$""",
@@ -203,16 +218,38 @@ class FreesoundImporter(
             return managedSoundIdRegex.find(clean)?.groupValues?.getOrNull(1)?.toIntOrNull()
         }
 
+        fun managedFileExists(context: Context, uri: String): Boolean {
+            val file = managedFile(context, uri) ?: return false
+            return file.isFile && file.length() > 0L
+        }
+
         fun deleteManagedFile(context: Context, uri: String): Boolean {
-            val parsed = runCatching { Uri.parse(uri) }.getOrNull() ?: return false
-            if (!parsed.scheme.equals("file", ignoreCase = true)) return false
-            val path = parsed.path ?: return false
-            val candidate = runCatching { File(path).canonicalFile }.getOrNull() ?: return false
-            val root = runCatching { File(context.applicationContext.filesDir, MANAGED_ROOT).canonicalFile }.getOrNull()
-                ?: return false
-            val rootPath = root.path.trimEnd(File.separatorChar) + File.separator
-            if (!candidate.path.startsWith(rootPath)) return false
+            val candidate = managedFile(context, uri) ?: return false
             return !candidate.exists() || candidate.delete()
+        }
+
+        internal fun cleanupStalePartFiles(context: Context): Int {
+            val root = File(context.applicationContext.filesDir, MANAGED_ROOT)
+            if (!root.isDirectory) return 0
+            var deleted = 0
+            root.walkTopDown().forEach { file ->
+                if (file.isFile && file.name.endsWith(".part", ignoreCase = true) && file.delete()) {
+                    deleted += 1
+                }
+            }
+            return deleted
+        }
+
+        private fun managedFile(context: Context, uri: String): File? {
+            val parsed = runCatching { Uri.parse(uri) }.getOrNull() ?: return null
+            if (!parsed.scheme.equals("file", ignoreCase = true)) return null
+            val path = parsed.path ?: return null
+            val candidate = runCatching { File(path).canonicalFile }.getOrNull() ?: return null
+            val root = runCatching { File(context.applicationContext.filesDir, MANAGED_ROOT).canonicalFile }.getOrNull()
+                ?: return null
+            val rootPath = root.path.trimEnd(File.separatorChar) + File.separator
+            if (!candidate.path.startsWith(rootPath)) return null
+            return candidate
         }
 
         private fun managedDirectory(context: Context, kind: AudioAssetKind): File =
@@ -220,6 +257,35 @@ class FreesoundImporter(
                 File(context.applicationContext.filesDir, MANAGED_ROOT),
                 kind.name.lowercase(Locale.ROOT),
             )
+
+        private fun ensureFreeSpace(directory: File, declaredLength: Long) {
+            val required = if (declaredLength > 0L) {
+                declaredLength.coerceAtMost(MAX_PREVIEW_BYTES) + FREE_SPACE_RESERVE_BYTES
+            } else {
+                UNKNOWN_LENGTH_REQUIRED_BYTES
+            }
+            val available = runCatching { StatFs(directory.absolutePath).availableBytes }.getOrDefault(Long.MAX_VALUE)
+            if (available < required) {
+                throw IllegalStateException("Không đủ dung lượng trống để tải âm thanh Freesound.")
+            }
+        }
+
+        private fun validateDownloadedAudio(file: File) {
+            val extractor = MediaExtractor()
+            try {
+                extractor.setDataSource(file.absolutePath)
+                val hasAudioTrack = (0 until extractor.trackCount).any { index ->
+                    extractor.getTrackFormat(index)
+                        .getString(MediaFormat.KEY_MIME)
+                        ?.startsWith("audio/") == true
+                }
+                if (!hasAudioTrack) {
+                    throw IllegalStateException("Tệp Freesound tải về không phải tệp âm thanh hợp lệ.")
+                }
+            } finally {
+                runCatching { extractor.release() }
+            }
+        }
 
         private fun defaultHttpClient(): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)

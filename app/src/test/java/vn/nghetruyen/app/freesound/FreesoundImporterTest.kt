@@ -1,6 +1,7 @@
 package vn.nghetruyen.app.freesound
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import vn.nghetruyen.app.audio.AudioAssetKind
@@ -40,5 +41,66 @@ class FreesoundImporterTest {
         val tags = FreesoundImporter.tagsForImport(AudioAssetKind.SFX, longDescription)
         assertTrue(tags.startsWith("type:sfx, "))
         assertEquals(300, tags.removePrefix("type:sfx, ").length)
+    }
+
+    @Test
+    fun managedUriExposesFreesoundIdAcrossAllThreeCategories() {
+        assertEquals(
+            12345,
+            FreesoundImporter.soundIdFromManagedUri(
+                "file:///data/user/0/vn.nghetruyen.app/files/audio/freesound/music/freesound_12345_8ad49d6c-7b14-4cc1-a4d7-817e30dad079.ogg",
+            ),
+        )
+        assertEquals(
+            88,
+            FreesoundImporter.soundIdFromManagedUri(
+                "file:///data/user/0/vn.nghetruyen.app/files/audio/freesound/ambience/freesound_88_8ad49d6c-7b14-4cc1-a4d7-817e30dad079.mp3",
+            ),
+        )
+        assertEquals(
+            9,
+            FreesoundImporter.soundIdFromManagedUri(
+                "file:///data/user/0/vn.nghetruyen.app/files/audio/freesound/sfx/freesound_9_8ad49d6c-7b14-4cc1-a4d7-817e30dad079.ogg",
+            ),
+        )
+    }
+
+    @Test
+    fun duplicateDetectionDoesNotTreatExternalOrMalformedUrisAsFreesoundImports() {
+        assertNull(FreesoundImporter.soundIdFromManagedUri("content://media/external/audio/123"))
+        assertNull(
+            FreesoundImporter.soundIdFromManagedUri(
+                "file:///storage/emulated/0/Music/freesound_123_8ad49d6c-7b14-4cc1-a4d7-817e30dad079.ogg",
+            ),
+        )
+        assertNull(
+            FreesoundImporter.soundIdFromManagedUri(
+                "file:///data/user/0/vn.nghetruyen.app/files/audio/freesound/music/freesound_nope_uuid.ogg",
+            ),
+        )
+    }
+
+    @Test
+    fun queueSummaryCountsEveryTerminalAndActiveState() {
+        val summary = summarizeFreesoundQueue(
+            listOf(
+                FreesoundImportQueueStatus.QUEUED,
+                FreesoundImportQueueStatus.QUEUED,
+                FreesoundImportQueueStatus.IMPORTING,
+                FreesoundImportQueueStatus.IMPORTED,
+                FreesoundImportQueueStatus.IMPORTED,
+                FreesoundImportQueueStatus.FAILED,
+                FreesoundImportQueueStatus.DUPLICATE,
+                FreesoundImportQueueStatus.CANCELLED,
+            ),
+        )
+
+        assertEquals(2, summary.queued)
+        assertEquals(1, summary.importing)
+        assertEquals(2, summary.imported)
+        assertEquals(1, summary.failed)
+        assertEquals(1, summary.duplicate)
+        assertEquals(1, summary.cancelled)
+        assertEquals(8, summary.total)
     }
 }

@@ -317,10 +317,12 @@ class FreesoundImporter(
             return managedSoundIdRegex.find(clean)?.groupValues?.getOrNull(1)?.toIntOrNull()
         }
 
+        /** Pure string parser so local JVM unit tests do not invoke android.net.Uri stubs. */
         private fun normalizationMarker(uri: String): File? {
-            val parsed = runCatching { Uri.parse(uri) }.getOrNull() ?: return null
-            if (!parsed.scheme.equals("file", ignoreCase = true)) return null
-            val path = parsed.path ?: return null
+            val clean = uri.substringBefore('?').substringBefore('#')
+            if (!clean.startsWith("file://", ignoreCase = true)) return null
+            val path = clean.substring("file://".length)
+            if (path.isBlank()) return null
             return File("$path$NORMALIZING_SUFFIX")
         }
 

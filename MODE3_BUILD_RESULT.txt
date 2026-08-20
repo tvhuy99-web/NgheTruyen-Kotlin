@@ -1,6 +1,6 @@
-RUN_ID=32386740380
+RUN_ID=32387815009
 RUN_ATTEMPT=1
-TRIGGER_SHA=9ab8a7ec2233559323b3e2c665f5ded4c14ce5d0
+TRIGGER_SHA=444e4523803ba041259df8304e1a9687228b3066
 SUCCESS=false
 EXTRACT_STATUS=0
 PATCH_STATUS=1
@@ -11,7 +11,7 @@ ARTIFACT_NAME=NgheTruyen-freesound-latest-fixed-debug
 === EXTRACT LOG (tail) ===
 
 === PATCH LOG (tail) ===
-app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt: expected exactly 1 occurrence, found 0: '        val warnings = mutableListOf<String>()\n    val imported = linkedSetOf<String>()\n    val resolutions = mutableLis'
+FreesoundImporterTest.kt provenance insertion anchor mismatch
 
 === TEST LOG (tail) ===
 

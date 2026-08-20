@@ -5,6 +5,10 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import vn.nghetruyen.app.audio.AudioAssetKind
+import vn.nghetruyen.app.audio.SoundEffectCue
+import vn.nghetruyen.app.audio.AmbienceSfxPlan
+import vn.nghetruyen.app.audio.AmbienceScene
+import vn.nghetruyen.app.ai.XpkAmbienceSfxDirector
 
 class FreesoundMode3RegressionTest {
     @Test
@@ -72,5 +76,24 @@ class FreesoundMode3RegressionTest {
         val oggOnly = both.copy(previewHqMp3 = null)
         assertEquals("https://cdn.example/a.ogg", oggOnly.preferredPreviewUrl)
         assertFalse(FreesoundPreviewPlayer.previewCandidates(oggOnly.preferredPreviewUrl!!).isEmpty())
+    }
+
+    @Test
+    fun ambienceSfxDirectorAcceptsItsOwnEncodedPayload() {
+        val units = (1..12).map { "U$it" }
+        val plan = AmbienceSfxPlan(
+            ambienceScenes = listOf(AmbienceScene("U1", "U12", "amb-1")),
+            soundEffectCues = listOf(SoundEffectCue(unitId = "U4", effectId = "sfx-1")),
+        )
+        val parsed = XpkAmbienceSfxDirector.parseAndValidate(
+            raw = XpkAmbienceSfxDirector.encode(plan),
+            validUnitIds = units,
+            validAmbienceIds = setOf("amb-1"),
+            validSfxIds = setOf("sfx-1"),
+            ambienceEnabled = true,
+            soundEffectsEnabled = true,
+        )
+        assertEquals(1, parsed.ambienceScenes.size)
+        assertEquals(1, parsed.soundEffectCues.size)
     }
 }

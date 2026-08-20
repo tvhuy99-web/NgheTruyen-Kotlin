@@ -2401,15 +2401,12 @@ class ReaderPlaybackService : Service() {
                 .filter { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }
                 .filter { track ->
                     !StoryAudioModeRouter.usesAiFreesound(storyAudioSourceMode) ||
-                        FreesoundImporter.soundIdFromManagedUri(track.uri) != null
+                        (FreesoundImporter.soundIdFromManagedUri(track.uri) != null &&
+                            FreesoundImporter.managedFileExists(applicationContext, track.uri))
                 }
         } else emptyList()
         val musicSourceHash = originalChapter?.let { chapter ->
-            ChapterAiWorkflow.sha256(
-                chapter.paragraphs + enabledMusicTracks.flatMap { track ->
-                    listOf(track.id, track.tagsCsv, track.title)
-                },
-            )
+            container.narrationPlanCoordinator.musicSourceHashForPlayback(chapter, enabledMusicTracks)
         }
         val musicPlan = if (musicSourceHash != null) {
             container.libraryRepository.getChapterTransform(chapterId, ChapterAiWorkflow.KIND_SCENE_MUSIC)

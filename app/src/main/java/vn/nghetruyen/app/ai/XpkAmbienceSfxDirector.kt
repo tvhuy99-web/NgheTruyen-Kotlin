@@ -36,8 +36,12 @@ object XpkAmbienceSfxDirector {
         require(validUnitIds.isNotEmpty()) { "Timeline UNIT hợp lệ đang trống." }
         val root = JSONObject(raw.trim())
         val keys = root.keys().asSequence().toSet()
-        require(keys == setOf("ambience_scenes", "sfx_cues")) {
-            "Kết quả audio direction nội bộ phải có ambience_scenes và sfx_cues."
+        val allowedRootKeys = setOf("engine", "ambience_scenes", "sfx_cues")
+        require("ambience_scenes" in keys && "sfx_cues" in keys && keys.all { it in allowedRootKeys }) {
+            "Kết quả audio direction nội bộ phải có ambience_scenes và sfx_cues, không được có trường lạ."
+        }
+        if ("engine" in keys) {
+            require(root.optString("engine") == ENGINE) { "Audio direction dùng engine không hợp lệ." }
         }
         val order = validUnitIds.withIndex().associate { it.value to it.index }
 

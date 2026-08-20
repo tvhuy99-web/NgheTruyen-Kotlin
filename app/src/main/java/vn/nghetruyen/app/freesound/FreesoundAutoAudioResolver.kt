@@ -158,7 +158,7 @@ class FreesoundAutoAudioResolver(
         }
     }
 
-    private fun normalizationTarget(kind: AudioAssetKind): Float = when (kind) {
+    private suspend fun normalizationTarget(kind: AudioAssetKind): Float = when (kind) {
         AudioAssetKind.MUSIC -> settingsRepository.snapshot().sceneMusicTargetLufs
         AudioAssetKind.AMBIENCE -> AudioDirectionPreferences.shared(appContext).snapshot().ambienceNormalizationTargetLufs
         AudioAssetKind.SFX -> AudioDirectionPreferences.shared(appContext).snapshot().soundEffectsNormalizationTargetLufs

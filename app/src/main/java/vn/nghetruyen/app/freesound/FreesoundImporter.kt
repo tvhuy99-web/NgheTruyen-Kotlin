@@ -5,12 +5,15 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
 import android.os.StatFs
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import java.io.File
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -30,6 +33,10 @@ data class FreesoundImportResult(
 class FreesoundDuplicateException(
     val soundId: Int,
 ) : IllegalStateException("Âm thanh Freesound #$soundId đã có trong thư viện.")
+
+class FreesoundNormalizationException(
+    message: String,
+) : IllegalStateException(message)
 
 class FreesoundImporter(
     context: Context,
@@ -145,17 +152,12 @@ class FreesoundImporter(
             ).getOrThrow()
             savedTrackId = trackId
 
-            try {
-                SceneMusicAnalysisWorker.enqueue(
-                    context = appContext,
-                    trackId = trackId,
-                    targetLufs = normalizationTargetLufs,
-                )
-            } catch (error: Throwable) {
-                repository.deleteSceneMusicTrack(trackId)
-                savedTrackId = null
-                throw error
-            }
+            val workId = SceneMusicAnalysisWorker.enqueue(
+                context = appContext,
+                trackId = trackId,
+                targetLufs = normalizationTargetLufs,
+            )
+            awaitNormalization(workId, trackId)
 
             return Result.success(
                 FreesoundImportResult(
@@ -177,6 +179,31 @@ class FreesoundImporter(
         }
     }
 
+    private suspend fun awaitNormalization(workId: UUID, trackId: String) {
+        val workManager = WorkManager.getInstance(appContext)
+        val deadline = System.currentTimeMillis() + NORMALIZATION_TIMEOUT_MS
+        while (true) {
+            val info = runCatching { workManager.getWorkInfoById(workId).get() }.getOrNull()
+                ?: throw FreesoundNormalizationException("Không đọc được trạng thái chuẩn hóa của tệp vừa nhập.")
+            when (info.state) {
+                WorkInfo.State.SUCCEEDED -> return
+                WorkInfo.State.FAILED -> {
+                    val storedError = repository.getSceneMusicTrack(trackId)?.normalizationError.orEmpty().trim()
+                    throw FreesoundNormalizationException(
+                        storedError.ifBlank { "Chuẩn hóa âm thanh Freesound thất bại." },
+                    )
+                }
+                WorkInfo.State.CANCELLED -> throw FreesoundNormalizationException("Chuẩn hóa âm thanh Freesound đã bị hủy.")
+                else -> Unit
+            }
+            if (System.currentTimeMillis() >= deadline) {
+                SceneMusicAnalysisWorker.cancel(appContext, workId)
+                throw FreesoundNormalizationException("Chuẩn hóa âm thanh Freesound quá thời gian cho phép.")
+            }
+            delay(NORMALIZATION_POLL_MS)
+        }
+    }
+
     companion object {
         private const val USER_AGENT = "NgheTruyen-Android/Freesound"
         internal const val MAX_PREVIEW_BYTES = 64L * 1024L * 1024L
@@ -184,6 +211,8 @@ class FreesoundImporter(
         private const val MANAGED_ROOT = "audio/freesound"
         private const val FREE_SPACE_RESERVE_BYTES = 4L * 1024L * 1024L
         private const val UNKNOWN_LENGTH_REQUIRED_BYTES = 12L * 1024L * 1024L
+        private const val NORMALIZATION_POLL_MS = 300L
+        private const val NORMALIZATION_TIMEOUT_MS = 10L * 60L * 1_000L
         private val importMutex = Mutex()
         private val managedSoundIdRegex = Regex(
             """(?i)(?:^|/)audio/freesound/(?:music|ambience|sfx)/freesound_(\d+)_[-0-9a-f]+\.(?:ogg|mp3)$""",

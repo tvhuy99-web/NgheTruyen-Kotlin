@@ -373,18 +373,7 @@ fun AudioDirectionLayerSwitches(
                     enabled = tracks.isNotEmpty(),
                     onClick = { openNormalization(AudioAssetKind.entries.toSet()) },
                 )
-                AudioManagerButton(
-                    label = "KHO NHẠC ĐÃ TẢI / FALLBACK ($musicTrackCount)",
-                    onClick = { managerKind = AudioAssetKind.MUSIC },
-                )
-                AudioManagerButton(
-                    label = "KHO MÔI TRƯỜNG ĐÃ TẢI / FALLBACK (${tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.AMBIENCE }})",
-                    onClick = { managerKind = AudioAssetKind.AMBIENCE },
-                )
-                AudioManagerButton(
-                    label = "KHO SFX ĐÃ TẢI / FALLBACK (${tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.SFX }})",
-                    onClick = { managerKind = AudioAssetKind.SFX },
-                )
+                Text("Mode 3 chỉ phát các file Freesound đã resolve cho kế hoạch hiện tại. Nếu một nhu cầu không resolve được, lớp tương ứng giữ im lặng; không dùng kho local làm fallback.")
             }
         }
     }

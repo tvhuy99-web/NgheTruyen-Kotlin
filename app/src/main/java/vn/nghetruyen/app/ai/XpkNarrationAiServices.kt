@@ -135,6 +135,15 @@ class XpkNarrationAiServices(
         if (request.includeFreesoundAudioRequirements && request.freesoundRequirementKinds.isEmpty()) {
             return failure("AI_FREESOUND_KINDS_EMPTY", "Chế độ Freesound tự động chưa bật lớp âm thanh nào.")
         }
+        if (
+            request.includeFreesoundAudioRequirements &&
+            (request.includeSceneMusic || request.includeAmbience || request.includeSoundEffects)
+        ) {
+            return failure(
+                "AI_AUDIO_SOURCE_MODE_MIXED",
+                "Mode 3 không được gửi catalog MUSIC/AMBIENCE/SFX local hoặc dùng bộ quy tắc chọn track_id của Mode 2.",
+            )
+        }
         if (request.includeSceneMusic && request.tracks.isEmpty()) {
             return failure("AI_TRACKS_EMPTY", "Chưa có tệp nhạc cảnh đang bật.")
         }

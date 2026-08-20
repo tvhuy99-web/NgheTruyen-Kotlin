@@ -27,16 +27,52 @@ object FreesoundLibraryAnalyzer {
         "a", "an", "and", "audio", "background", "effect", "effects", "for", "in", "of", "sound", "sounds", "the", "with",
         "am", "anh", "cai", "cac", "cho", "cua", "la", "mot", "nhung", "tieng", "trong", "va", "voi",
     )
-    private val vietnameseToEnglishToken = mapOf(
-        "mua" to "rain", "rung" to "forest", "sam" to "thunder", "set" to "lightning", "bao" to "storm",
-        "gio" to "wind", "song" to "river", "thac" to "waterfall", "bien" to "ocean", "hang" to "cave",
-        "dem" to "night", "lua" to "fire", "dong" to "crowd", "lang" to "village", "pho" to "city",
-        "chua" to "temple", "cung" to "palace", "tuyet" to "snow", "dam" to "swamp", "mac" to "desert",
-        "cho" to "market", "kiem" to "sword", "phep" to "magic", "buoc" to "footsteps", "no" to "explosion",
-        "cua" to "door", "ngua" to "horse", "ten" to "arrow", "quyen" to "punch", "nga" to "fall",
-        "kinh" to "glass", "go" to "wood", "loai" to "metal", "khien" to "shield", "chuong" to "bell",
-        "tim" to "heartbeat", "tho" to "breathing", "ao" to "cloth", "nuoc" to "water", "da" to "rock",
-        "xich" to "chain", "quai" to "monster", "rong" to "dragon", "dich" to "teleport",
+    private val vietnameseSemanticPhrases = listOf(
+        "âm thanh môi trường" to "ambience",
+        "cung điện" to "palace",
+        "đám đông" to "crowd",
+        "đầm lầy" to "swamp",
+        "dịch chuyển" to "teleport",
+        "hang động" to "cave",
+        "hơi thở" to "breathing",
+        "kim loại" to "metal",
+        "kính vỡ" to "glass break",
+        "mũi tên" to "arrow",
+        "nhịp tim" to "heartbeat",
+        "phép thuật" to "magic",
+        "quái vật" to "monster",
+        "quần áo" to "cloth",
+        "sa mạc" to "desert",
+        "thành phố" to "city",
+        "tiếng nổ" to "explosion",
+        "bước chân" to "footsteps",
+        "cú đấm" to "punch",
+        "cung tên" to "bow",
+        "ban đêm" to "night",
+        "mưa" to "rain",
+        "rừng" to "forest",
+        "sấm" to "thunder",
+        "sét" to "lightning",
+        "bão" to "storm",
+        "gió" to "wind",
+        "sông" to "river",
+        "thác" to "waterfall",
+        "biển" to "ocean",
+        "đêm" to "night",
+        "lửa" to "fire",
+        "làng" to "village",
+        "chùa" to "temple",
+        "đền" to "temple",
+        "tuyết" to "snow",
+        "chợ" to "market",
+        "kiếm" to "sword",
+        "cửa" to "door",
+        "ngựa" to "horse",
+        "khiên" to "shield",
+        "chuông" to "bell",
+        "nước" to "water",
+        "xích" to "chain",
+        "rồng" to "dragon",
     )
 
     fun coverageTopics(kind: AudioAssetKind): List<String> = when (kind) {
@@ -146,9 +182,12 @@ object FreesoundLibraryAnalyzer {
         .trim()
 
     internal fun normalize(value: String): String {
-        val withoutMarks = Normalizer.normalize(value, Normalizer.Form.NFD)
+        var semantic = value.lowercase()
+        vietnameseSemanticPhrases.forEach { (vietnamese, english) ->
+            semantic = semantic.replace(vietnamese, " $english ")
+        }
+        val withoutMarks = Normalizer.normalize(semantic, Normalizer.Form.NFD)
             .replace(Regex("\\p{Mn}+"), "")
-            .lowercase()
         return withoutMarks.replace(nonWordRegex, " ").trim().replace(Regex("\\s+"), " ")
     }
 
@@ -157,7 +196,6 @@ object FreesoundLibraryAnalyzer {
         .asSequence()
         .map(String::trim)
         .filter { it.length >= 2 && it !in stopWords }
-        .map { vietnameseToEnglishToken[it] ?: it }
         .toSet()
 
     internal fun jaccard(first: Set<String>, second: Set<String>): Double {

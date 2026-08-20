@@ -64,7 +64,108 @@ jobs:
           if end_marker not in block:
               raise SystemExit('Không tìm thấy điểm kết thúc patch Python Mode 3.')
           block = block.split(end_marker, 1)[0]
-          Path('/tmp/mode3_patch.py').write_text(textwrap.dedent(block) + '\n', encoding='utf-8')
+          script = textwrap.dedent(block)
+
+          old_helpers = '''def replace_once(path, old, new):
+              text = read(path)
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected exactly 1 occurrence, found {count}: {old[:120]!r}")
+              write(path, text.replace(old, new, 1))
+
+          def replace_count(path, old, new, expected):
+              text = read(path)
+              count = text.count(old)
+              if count != expected:
+                  raise SystemExit(f"{path}: expected {expected} occurrences, found {count}: {old[:120]!r}")
+              write(path, text.replace(old, new))
+'''
+          old_helpers = textwrap.dedent(old_helpers)
+
+          new_helpers = r'''def _indent_width(line):
+              return len(line) - len(line.lstrip(' \t'))
+
+          def _flex_pattern(snippet):
+              import re
+              core = snippet.strip('\n')
+              lines = core.splitlines()
+              patterns = []
+              for line in lines:
+                  content = line.lstrip(' \t').rstrip()
+                  if content:
+                      patterns.append(r'^[ \t]*' + re.escape(content) + r'[ \t]*$')
+                  else:
+                      patterns.append(r'^[ \t]*$')
+              return re.compile(r'\n'.join(patterns), re.MULTILINE)
+
+          def _reindent_new(old, new, matched):
+              from collections import Counter
+              from difflib import SequenceMatcher
+
+              old_lines = old.strip('\n').splitlines()
+              new_lines = new.strip('\n').splitlines()
+              actual_lines = matched.splitlines()
+              old_keys = [line.lstrip(' \t').rstrip() for line in old_lines]
+              new_keys = [line.lstrip(' \t').rstrip() for line in new_lines]
+
+              mapped = {}
+              matcher = SequenceMatcher(a=old_keys, b=new_keys, autojunk=False)
+              for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+                  if tag != 'equal':
+                      continue
+                  for offset in range(i2 - i1):
+                      old_index = i1 + offset
+                      new_index = j1 + offset
+                      if old_index < len(actual_lines):
+                          mapped[new_index] = _indent_width(actual_lines[old_index])
+
+              offsets = []
+              for index, actual_indent in mapped.items():
+                  if index < len(new_lines) and new_lines[index].strip():
+                      offsets.append(actual_indent - _indent_width(new_lines[index]))
+              base_offset = Counter(offsets).most_common(1)[0][0] if offsets else 0
+
+              rendered = []
+              for index, line in enumerate(new_lines):
+                  stripped = line.lstrip(' \t')
+                  if not stripped:
+                      rendered.append('')
+                      continue
+                  indent = mapped.get(index, max(0, _indent_width(line) + base_offset))
+                  rendered.append(' ' * indent + stripped)
+              return '\n'.join(rendered)
+
+          def _replace_flexible(path, old, new, expected):
+              text = read(path)
+              exact_count = text.count(old)
+              if exact_count == expected:
+                  write(path, text.replace(old, new, expected))
+                  return
+
+              pattern = _flex_pattern(old)
+              matches = list(pattern.finditer(text))
+              if len(matches) != expected:
+                  raise SystemExit(
+                      f"{path}: expected {expected} flexible occurrence(s), found {len(matches)}; "
+                      f"exact={exact_count}: {old[:120]!r}"
+                  )
+              for match in reversed(matches):
+                  replacement = _reindent_new(old, new, match.group(0))
+                  text = text[:match.start()] + replacement + text[match.end():]
+              write(path, text)
+
+          def replace_once(path, old, new):
+              _replace_flexible(path, old, new, 1)
+
+          def replace_count(path, old, new, expected):
+              _replace_flexible(path, old, new, expected)
+'''
+          new_helpers = textwrap.dedent(new_helpers)
+
+          if old_helpers not in script:
+              raise SystemExit('Không tìm thấy helper replace_once/replace_count để nâng cấp matcher.')
+          script = script.replace(old_helpers, new_helpers, 1)
+          Path('/tmp/mode3_patch.py').write_text(script + '\n', encoding='utf-8')
           PY
           EXTRACT_STATUS=$?
 
@@ -101,16 +202,16 @@ jobs:
             echo "ARTIFACT_NAME=NgheTruyen-freesound-latest-fixed-debug"
             echo
             echo "=== EXTRACT LOG (tail) ==="
-            tail -n 80 /tmp/extract.log 2>/dev/null || true
+            tail -n 120 /tmp/extract.log 2>/dev/null || true
             echo
             echo "=== PATCH LOG (tail) ==="
-            tail -n 120 /tmp/patch.log 2>/dev/null || true
+            tail -n 180 /tmp/patch.log 2>/dev/null || true
             echo
             echo "=== TEST LOG (tail) ==="
-            tail -n 180 /tmp/test.log 2>/dev/null || true
+            tail -n 240 /tmp/test.log 2>/dev/null || true
             echo
             echo "=== BUILD LOG (tail) ==="
-            tail -n 220 /tmp/build.log 2>/dev/null || true
+            tail -n 260 /tmp/build.log 2>/dev/null || true
           } > /tmp/build_result.txt
 
           echo "success=${SUCCESS}" >> "$GITHUB_OUTPUT"

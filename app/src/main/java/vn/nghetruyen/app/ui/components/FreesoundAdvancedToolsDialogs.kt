@@ -55,7 +55,6 @@ import vn.nghetruyen.app.freesound.FreesoundSemanticPlan
 import vn.nghetruyen.app.freesound.FreesoundSemanticSearchEngine
 import vn.nghetruyen.app.freesound.FreesoundSemanticSearchHit
 import vn.nghetruyen.app.freesound.FreesoundSemanticSearchResult
-import vn.nghetruyen.app.freesound.FreesoundSound
 import vn.nghetruyen.app.playback.PlaybackQueueStore
 import vn.nghetruyen.app.playback.ReaderPlaybackService
 
@@ -74,12 +73,7 @@ fun FreesoundAdvancedToolsDialog(
     val application = context.applicationContext as NgheTruyenApplication
     val scope = rememberCoroutineScope()
     val assistant = remember(application) {
-        FreesoundAiAssistant(
-            settingsRepository = application.container.settingsRepository,
-            credentialStore = application.container.aiCredentialStore,
-            requestGovernor = application.container.aiRequestGovernor,
-            libraryRepository = application.container.libraryRepository,
-        )
+        FreesoundAiAssistant(application.container.xpkNarrationAiServices)
     }
     val semanticEngine = remember(application) {
         FreesoundSemanticSearchEngine(application.container.freesoundClient)
@@ -194,11 +188,19 @@ fun FreesoundAdvancedToolsDialog(
     }
 
     fun inspectCoverage() {
-        gaps = FreesoundLibraryAnalyzer.findMissingTopics(kind, tracks)
+        val standard = FreesoundLibraryAnalyzer.findMissingTopics(kind, tracks)
+        val chapterSpecific = chapterPlan?.suggestions
+            .orEmpty()
+            .map { FreesoundLibraryGap(it.query, FreesoundLibraryAnalyzer.coverageScore(it.query, tracks)) }
+            .filter { it.coverageScore < 0.56 }
+        gaps = (chapterSpecific + standard)
+            .distinctBy { it.query.lowercase() }
+            .sortedWith(compareBy<FreesoundLibraryGap> { it.coverageScore }.thenBy { it.query })
+            .take(40)
         status = if (gaps.isEmpty()) {
-            "Không thấy khoảng trống rõ ràng trong bộ chủ đề chuẩn của ${advancedKindLabel(kind).lowercase()}."
+            "Không thấy khoảng trống rõ ràng cho ${advancedKindLabel(kind).lowercase()}."
         } else {
-            "Phát hiện ${gaps.size} nhóm âm thanh còn thiếu hoặc phủ yếu."
+            "Phát hiện ${gaps.size} nhóm ${advancedKindLabel(kind).lowercase()} còn thiếu hoặc phủ yếu${if (chapterSpecific.isNotEmpty()) ", gồm nhu cầu rút từ chương hiện tại" else ""}."
         }
     }
 
@@ -208,8 +210,7 @@ fun FreesoundAdvancedToolsDialog(
         status = "Đang quét toàn bộ thư viện và tính SHA-256 cho các tệp đọc được…"
         scope.launch {
             val databaseTracks = application.container.database.sceneMusicTrackDao().listAll()
-            val effectiveAll = databaseTracks
-                .filter { AudioAssetClassifier.classify(it) != kind } + tracks
+            val effectiveAll = databaseTracks.filter { AudioAssetClassifier.classify(it) != kind } + tracks
             duplicateTracks = effectiveAll.associateBy(SceneMusicTrackEntity::id)
 
             val exactGroups = FreesoundExactDuplicateAnalyzer.find(context, effectiveAll)
@@ -230,9 +231,7 @@ fun FreesoundAdvancedToolsDialog(
                     }
                 }
             }
-            val exactKeys = exactPairs.mapTo(hashSetOf()) {
-                setOf(it.firstTrackId, it.secondTrackId)
-            }
+            val exactKeys = exactPairs.mapTo(hashSetOf()) { setOf(it.firstTrackId, it.secondTrackId) }
             val nearPairs = FreesoundLibraryAnalyzer.findNearDuplicates(effectiveAll, maxResults = 80)
                 .filter { setOf(it.firstTrackId, it.secondTrackId) !in exactKeys }
             val currentIds = tracks.mapTo(hashSetOf(), SceneMusicTrackEntity::id)
@@ -274,7 +273,7 @@ fun FreesoundAdvancedToolsDialog(
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text(if (busy) "ĐANG XỬ LÝ…" else "AI PHÂN TÍCH TOÀN CHƯƠNG") }
                 Text(
-                    "Gửi toàn bộ chương đến đúng provider/model AI của truyện, nhưng chỉ yêu cầu từ khóa cho ${advancedKindLabel(kind).lowercase()} đang quản lý; không quét hai danh mục còn lại.",
+                    "Gửi toàn bộ chương đến đúng transport/provider/model AI của phân vai, nhưng chỉ yêu cầu từ khóa cho ${advancedKindLabel(kind).lowercase()} đang quản lý; không quét hai danh mục còn lại.",
                     style = MaterialTheme.typography.bodySmall,
                 )
 
@@ -499,12 +498,7 @@ fun FreesoundSimilarAssetDialog(
         )
     }
     val assistant = remember(application) {
-        FreesoundAiAssistant(
-            settingsRepository = application.container.settingsRepository,
-            credentialStore = application.container.aiCredentialStore,
-            requestGovernor = application.container.aiRequestGovernor,
-            libraryRepository = application.container.libraryRepository,
-        )
+        FreesoundAiAssistant(application.container.xpkNarrationAiServices)
     }
     val semanticEngine = remember(application) {
         FreesoundSemanticSearchEngine(application.container.freesoundClient)

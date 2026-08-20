@@ -132,6 +132,7 @@ jobs:
               app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt \
               app/src/main/java/vn/nghetruyen/app/playback/AudioDirectionRuntime.kt \
               app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt \
+              app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt \
               app/src/test/java/vn/nghetruyen/app/freesound/FreesoundMode3RegressionTest.kt
             do
               git add -- "$file"

@@ -135,44 +135,105 @@ object FreesoundLibraryAnalyzer {
         maxResults: Int = 40,
     ): List<FreesoundNearDuplicate> {
         if (tracks.size < 2) return emptyList()
-        val pairs = mutableListOf<FreesoundNearDuplicate>()
-        for (firstIndex in 0 until tracks.lastIndex) {
-            val first = tracks[firstIndex]
-            for (secondIndex in firstIndex + 1 until tracks.size) {
-                val second = tracks[secondIndex]
-                val firstRemoteId = FreesoundImporter.soundIdFromManagedUri(first.uri)
-                val secondRemoteId = FreesoundImporter.soundIdFromManagedUri(second.uri)
-                if (firstRemoteId != null && firstRemoteId == secondRemoteId) {
-                    pairs += FreesoundNearDuplicate(first.id, second.id, 1.0, "Cùng Freesound ID #$firstRemoteId")
-                    continue
-                }
 
-                val firstTitle = normalizeTitle(first.title)
-                val secondTitle = normalizeTitle(second.title)
-                val exactTitle = firstTitle.isNotBlank() && firstTitle == secondTitle
-                val titleScore = jaccard(tokens(stripAudioExtension(first.title)), tokens(stripAudioExtension(second.title)))
-                val descriptionScore = jaccard(
-                    tokens(description(first.tagsCsv)),
-                    tokens(description(second.tagsCsv)),
-                )
-                val containsScore = if (
-                    firstTitle.length >= 6 && secondTitle.length >= 6 &&
-                    (firstTitle.contains(secondTitle) || secondTitle.contains(firstTitle))
-                ) 0.9 else 0.0
-                val score = if (exactTitle) 1.0 else max(containsScore, titleScore * 0.78 + descriptionScore * 0.22)
-                if (score >= NEAR_DUPLICATE_THRESHOLD) {
-                    val reason = when {
-                        exactTitle -> "Tên giống nhau sau khi bỏ đuôi tệp"
-                        containsScore > 0.0 -> "Tên gần như bao hàm nhau"
-                        descriptionScore >= 0.75 -> "Tên và mô tả rất gần nhau"
-                        else -> "Tên có mức tương đồng cao"
-                    }
-                    pairs += FreesoundNearDuplicate(first.id, second.id, score.coerceIn(0.0, 1.0), reason)
+        data class Signature(
+            val track: SceneMusicTrackEntity,
+            val remoteId: Int?,
+            val normalizedTitle: String,
+            val titleTokens: Set<String>,
+            val descriptionTokens: Set<String>,
+        )
+
+        val signatures = tracks.map { track ->
+            Signature(
+                track = track,
+                remoteId = FreesoundImporter.soundIdFromManagedUri(track.uri),
+                normalizedTitle = normalizeTitle(track.title),
+                titleTokens = tokens(stripAudioExtension(track.title)),
+                descriptionTokens = tokens(description(track.tagsCsv)),
+            )
+        }
+        val candidatePairs = linkedSetOf<Pair<Int, Int>>()
+
+        fun addPairs(indexes: List<Int>) {
+            if (indexes.size < 2) return
+            for (firstOffset in 0 until indexes.lastIndex) {
+                for (secondOffset in firstOffset + 1 until indexes.size) {
+                    val first = indexes[firstOffset]
+                    val second = indexes[secondOffset]
+                    candidatePairs += if (first < second) first to second else second to first
                 }
             }
         }
+
+        signatures.indices
+            .filter { signatures[it].remoteId != null }
+            .groupBy { signatures[it].remoteId }
+            .values
+            .forEach(::addPairs)
+
+        signatures.indices
+            .filter { signatures[it].normalizedTitle.isNotBlank() }
+            .groupBy { signatures[it].normalizedTitle }
+            .values
+            .forEach(::addPairs)
+
+        val byTitleToken = linkedMapOf<String, MutableList<Int>>()
+        signatures.forEachIndexed { index, signature ->
+            signature.titleTokens.forEach { token ->
+                byTitleToken.getOrPut(token) { mutableListOf() } += index
+            }
+        }
+        byTitleToken.values
+            .asSequence()
+            .filter { it.size in 2..MAX_TOKEN_BUCKET_SIZE }
+            .forEach(::addPairs)
+
+        if (candidatePairs.isEmpty()) return emptyList()
+        val pairs = mutableListOf<FreesoundNearDuplicate>()
+        candidatePairs.forEach { (firstIndex, secondIndex) ->
+            val first = signatures[firstIndex]
+            val second = signatures[secondIndex]
+            if (first.remoteId != null && first.remoteId == second.remoteId) {
+                pairs += FreesoundNearDuplicate(
+                    first.track.id,
+                    second.track.id,
+                    1.0,
+                    "Cùng Freesound ID #${first.remoteId}",
+                )
+                return@forEach
+            }
+
+            val exactTitle = first.normalizedTitle.isNotBlank() && first.normalizedTitle == second.normalizedTitle
+            val titleScore = jaccard(first.titleTokens, second.titleTokens)
+            val descriptionScore = jaccard(first.descriptionTokens, second.descriptionTokens)
+            val containsScore = if (
+                first.normalizedTitle.length >= 6 && second.normalizedTitle.length >= 6 &&
+                (first.normalizedTitle.contains(second.normalizedTitle) || second.normalizedTitle.contains(first.normalizedTitle))
+            ) 0.9 else 0.0
+            val score = if (exactTitle) 1.0 else max(containsScore, titleScore * 0.78 + descriptionScore * 0.22)
+            if (score >= NEAR_DUPLICATE_THRESHOLD) {
+                val reason = when {
+                    exactTitle -> "Tên giống nhau sau khi bỏ đuôi tệp"
+                    containsScore > 0.0 -> "Tên gần như bao hàm nhau"
+                    descriptionScore >= 0.75 -> "Tên và mô tả rất gần nhau"
+                    else -> "Tên có mức tương đồng cao"
+                }
+                pairs += FreesoundNearDuplicate(
+                    first.track.id,
+                    second.track.id,
+                    score.coerceIn(0.0, 1.0),
+                    reason,
+                )
+            }
+        }
+
         return pairs
-            .sortedWith(compareByDescending<FreesoundNearDuplicate> { it.score }.thenBy { it.firstTrackId }.thenBy { it.secondTrackId })
+            .sortedWith(
+                compareByDescending<FreesoundNearDuplicate> { it.score }
+                    .thenBy { it.firstTrackId }
+                    .thenBy { it.secondTrackId },
+            )
             .take(maxResults.coerceIn(1, 100))
     }
 
@@ -216,4 +277,5 @@ object FreesoundLibraryAnalyzer {
 
     private const val COVERED_THRESHOLD = 0.56
     private const val NEAR_DUPLICATE_THRESHOLD = 0.72
+    private const val MAX_TOKEN_BUCKET_SIZE = 64
 }

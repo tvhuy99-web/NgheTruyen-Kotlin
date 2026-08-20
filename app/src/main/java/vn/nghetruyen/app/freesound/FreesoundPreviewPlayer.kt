@@ -7,8 +7,6 @@ class FreesoundPreviewPlayer {
     private var player: MediaPlayer? = null
     private var activeSoundId: Int? = null
 
-    fun isActive(soundId: Int): Boolean = activeSoundId == soundId
-
     fun play(
         soundId: Int,
         previewUrl: String,
@@ -30,20 +28,24 @@ class FreesoundPreviewPlayer {
                     .build(),
             )
             setOnPreparedListener { prepared ->
-                if (activeSoundId == soundId) {
-                    prepared.start()
-                    onStarted()
+                if (activeSoundId == soundId && player === prepared) {
+                    runCatching { prepared.start() }
+                        .onSuccess { onStarted() }
+                        .onFailure {
+                            releaseIfCurrent(prepared)
+                            onError()
+                        }
                 }
             }
-            setOnCompletionListener {
-                if (activeSoundId == soundId) {
-                    releaseCurrent()
+            setOnCompletionListener { completed ->
+                if (activeSoundId == soundId && player === completed) {
+                    releaseIfCurrent(completed)
                     onStopped()
                 }
             }
-            setOnErrorListener { _, _, _ ->
-                if (activeSoundId == soundId) {
-                    releaseCurrent()
+            setOnErrorListener { failed, _, _ ->
+                if (activeSoundId == soundId && player === failed) {
+                    releaseIfCurrent(failed)
                     onError()
                 }
                 true
@@ -54,21 +56,22 @@ class FreesoundPreviewPlayer {
             mediaPlayer.setDataSource(previewUrl)
             mediaPlayer.prepareAsync()
         }.onFailure {
-            releaseCurrent()
+            releaseIfCurrent(mediaPlayer)
             onError()
         }
     }
 
     fun stop() {
-        val hadActive = activeSoundId != null
         releaseCurrent()
-        if (hadActive) {
-            // UI state is owned by the caller; no callback is required for an explicit stop.
-        }
     }
 
     fun release() {
         releaseCurrent()
+    }
+
+    private fun releaseIfCurrent(candidate: MediaPlayer) {
+        if (player === candidate) releaseCurrent()
+        else runCatching { candidate.release() }
     }
 
     private fun releaseCurrent() {

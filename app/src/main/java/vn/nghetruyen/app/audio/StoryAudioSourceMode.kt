@@ -49,8 +49,22 @@ object StoryAudioModeRouter {
     fun usesAiLocal(mode: StoryAudioSourceMode): Boolean = mode == StoryAudioSourceMode.AI_LOCAL
     fun usesAiFreesound(mode: StoryAudioSourceMode): Boolean = mode == StoryAudioSourceMode.AI_FREESOUND
 
+    /** Legacy sequential/shuffle/plain-background playback belongs exclusively to Mode 1. */
+    fun allowsManualPlaylist(mode: StoryAudioSourceMode): Boolean = usesManualLocal(mode)
+
     /** Voice-cast AI is independent from the story-audio source mode. */
     fun shouldUseLocalAudioCatalogs(mode: StoryAudioSourceMode): Boolean = usesAiLocal(mode)
 
     fun shouldRequestFreesoundRequirements(mode: StoryAudioSourceMode): Boolean = usesAiFreesound(mode)
+
+    /** Mode 2 and Mode 3 are deliberately different AI contracts and may never be mixed. */
+    fun isValidAiAudioContract(
+        mode: StoryAudioSourceMode,
+        hasLocalAudioCatalog: Boolean,
+        requestsFreesoundRequirements: Boolean,
+    ): Boolean = when (mode) {
+        StoryAudioSourceMode.LOCAL_MANUAL -> !hasLocalAudioCatalog && !requestsFreesoundRequirements
+        StoryAudioSourceMode.AI_LOCAL -> !requestsFreesoundRequirements
+        StoryAudioSourceMode.AI_FREESOUND -> !hasLocalAudioCatalog && requestsFreesoundRequirements
+    }
 }

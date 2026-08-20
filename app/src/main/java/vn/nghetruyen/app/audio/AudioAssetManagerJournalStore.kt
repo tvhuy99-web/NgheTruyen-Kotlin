@@ -3,6 +3,8 @@ package vn.nghetruyen.app.audio
 import android.content.Context
 import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -15,41 +17,46 @@ import org.json.JSONObject
  */
 class AudioAssetManagerJournalStore(context: Context) {
     private val root = File(context.applicationContext.filesDir, "audio-manager-journal")
+    private val mutex = Mutex()
 
     suspend fun load(kind: AudioAssetKind): Set<String> = withContext(Dispatchers.IO) {
-        val source = file(kind)
-        if (!source.isFile) return@withContext emptySet()
-        runCatching { decode(source.readText(Charsets.UTF_8)) }
-            .getOrElse {
-                source.delete()
-                emptySet()
-            }
+        mutex.withLock {
+            val source = file(kind)
+            if (!source.isFile) return@withLock emptySet()
+            runCatching { decode(source.readText(Charsets.UTF_8)) }
+                .getOrElse {
+                    source.delete()
+                    emptySet()
+                }
+        }
     }
 
     suspend fun save(kind: AudioAssetKind, transientTrackIds: Collection<String>) = withContext(Dispatchers.IO) {
-        val ids = transientTrackIds
-            .asSequence()
-            .map(String::trim)
-            .filter(String::isNotBlank)
-            .distinct()
-            .take(MAX_TRACK_IDS)
-            .toList()
-        if (ids.isEmpty()) {
-            clearBlocking(kind)
-            return@withContext
-        }
-        if (!root.isDirectory && !root.mkdirs()) return@withContext
-        val target = file(kind)
-        val temp = File(root, "${target.name}.part")
-        temp.writeText(encode(ids), Charsets.UTF_8)
-        if (!temp.renameTo(target)) {
-            temp.copyTo(target, overwrite = true)
-            temp.delete()
+        mutex.withLock {
+            val ids = transientTrackIds
+                .asSequence()
+                .map(String::trim)
+                .filter(String::isNotBlank)
+                .distinct()
+                .take(MAX_TRACK_IDS)
+                .toList()
+            if (ids.isEmpty()) {
+                clearBlocking(kind)
+                return@withLock
+            }
+            if (!root.isDirectory && !root.mkdirs()) return@withLock
+            val target = file(kind)
+            val temp = File(root, "${target.name}.part")
+            temp.writeText(encode(ids), Charsets.UTF_8)
+            if (!temp.renameTo(target)) {
+                temp.copyTo(target, overwrite = true)
+                temp.delete()
+            }
         }
     }
 
     suspend fun clear(kind: AudioAssetKind) = withContext(Dispatchers.IO) {
-        clearBlocking(kind)
+        mutex.withLock { clearBlocking(kind) }
     }
 
     private fun clearBlocking(kind: AudioAssetKind) {

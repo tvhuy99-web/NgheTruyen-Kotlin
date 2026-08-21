@@ -50,7 +50,12 @@ require(
     "app/src/main/java/vn/nghetruyen/app/AppContainer.kt",
     "val aiServices: OnlineTextAiServices",
     "val xpkNarrationAiServices: XpkNarrationAiServices",
-    "NarrationPlanCoordinator(libraryRepository, settingsRepository, xpkNarrationAiServices)",
+    "NarrationPlanCoordinator(",
+    "library = libraryRepository",
+    "settings = settingsRepository",
+    "ai = xpkNarrationAiServices",
+    "storyAudioModeStore = storyAudioSourceModeStore",
+    "freesoundResolver = freesoundAutoAudioResolver",
 )
 forbid(
     "app/src/main/java/vn/nghetruyen/app/AppContainer.kt",
@@ -208,8 +213,13 @@ require(
     "private val narrationPlanCoordinator: NarrationPlanCoordinator",
     "narrationPlanCoordinator.ensureActivePlans",
     "narrationPlanCoordinator.loadAudioDirectionPlan",
-    "minimumSfxGapMillis",
-    "maxConcurrentSfx",
+    "maxConcurrent = Int.MAX_VALUE",
+)
+require(
+    "app/src/main/java/vn/nghetruyen/app/audio/AudioDirectionModels.kt",
+    "const val MAX_CONCURRENT_AMBIENCE = Int.MAX_VALUE",
+    "const val MAX_CONCURRENT_SFX = Int.MAX_VALUE",
+    "const val MAX_SFX_REPEAT_COUNT = Int.MAX_VALUE",
 )
 
 require(
@@ -222,7 +232,8 @@ require(
     "val aiRateMultiplier = 1f + speedAdjustPct / 100f",
     "val aiPitchMultiplier = 1f + pitchAdjustPct / 100f",
     "val aiVolumeMultiplier = 1f + volumeAdjustPct / 100f",
-    "volume = (track.volume * sceneVolume * normalizationGain).coerceIn(0f, 1f)",
+    "val effectiveSceneVolume = (track.volume * sceneVolume * normalizationGain).coerceIn(0f, 1f)",
+    "volume = effectiveSceneVolume",
     "tts.setAudioAttributes(speechAudioAttributes())",
     "private fun speechAudioAttributes(): AudioAttributes = AudioAttributes.Builder()",
     ".setUsage(AudioAttributes.USAGE_MEDIA)",
@@ -237,7 +248,8 @@ require(
     "manualNarrationChapterId = PlaybackQueueStore.state.value.chapterId",
     "val voicePlanEnabled = currentStoryAutoVoiceCastEnabled || manualNarrationChapterId == chapterId",
     "if (voicePlanEnabled && originalHash != null)",
-    "Phân vai chưa thành công. Sẽ tự thử lại sau 5 giây.",
+    "Phân vai/Mode 3 thất bại sau $MAX_NARRATION_ATTEMPTS lần.",
+    "Chưa chuẩn bị xong. Sẽ thử lại sau 5 giây (lần ${attempt + 1}/$MAX_NARRATION_ATTEMPTS).",
     "if (currentStoryAutoVoiceCastEnabled && prefetchNarrationPlansEnabled)",
     "if (!PlaybackQueueStore.state.value.isPlaying) pendingPlay = false",
     "private val speechCompletionMonitor = SpeechCompletionMonitor()",

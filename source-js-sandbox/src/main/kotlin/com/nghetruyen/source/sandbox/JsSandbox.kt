@@ -136,6 +136,7 @@ class SafeRhinoExecutor(
         val runtime = Runtime.getRuntime()
         runtime.totalMemory() - runtime.freeMemory()
     },
+    private val memoryPressureRelief: () -> Unit = { System.gc() },
 ) {
     fun <T> execute(block: (Context, ScriptableObject, RhinoExecutionBudget) -> T): RhinoExecutionResult<T> {
         val started = clockMs()
@@ -144,6 +145,7 @@ class SafeRhinoExecutor(
             deadlineMs = started + policy.wallClockTimeoutMs,
             clockMs = clockMs,
             memoryUsageBytes = memoryUsageBytes,
+            memoryPressureRelief = memoryPressureRelief,
         )
         val factory = BudgetContextFactory(policy, budget)
         return try {
@@ -175,6 +177,7 @@ class RhinoExecutionBudget internal constructor(
     val deadlineMs: Long,
     private val clockMs: () -> Long,
     private val memoryUsageBytes: () -> Long,
+    private val memoryPressureRelief: () -> Unit,
 ) {
     private var baselineHeapBytes: Long? = null
 
@@ -220,15 +223,24 @@ class RhinoExecutionBudget internal constructor(
             )
         }
         val baseline = baselineHeapBytes ?: memoryUsageBytes().also { baselineHeapBytes = it }
-        val growth = (memoryUsageBytes() - baseline).coerceAtLeast(0L)
+        var growth = (memoryUsageBytes() - baseline).coerceAtLeast(0L)
         peakHeapGrowthBytes = maxOf(peakHeapGrowthBytes, growth)
         val limit = policy.maxHeapGrowthBytes
         if (limit != null && growth > limit) {
-            throw BudgetExceededException(
-                JsSandboxFailure.MEMORY_LIMIT,
-                "JavaScript exceeded $limit bytes of observed heap growth " +
-                    "(observedInstructions=$instructions, peakHeapGrowthBytes=$peakHeapGrowthBytes)",
-            )
+            // Runtime.usedMemory is process-wide and can temporarily include garbage or unrelated
+            // JVM allocations. Before failing closed, request one pressure-relief cycle and measure
+            // retained growth again. A script that really keeps more than the budget still fails;
+            // transient allocation/GC timing no longer makes unrelated small scripts flaky.
+            memoryPressureRelief()
+            growth = (memoryUsageBytes() - baseline).coerceAtLeast(0L)
+            if (growth > limit) {
+                throw BudgetExceededException(
+                    JsSandboxFailure.MEMORY_LIMIT,
+                    "JavaScript exceeded $limit bytes of retained heap growth " +
+                        "(observedInstructions=$instructions, retainedHeapGrowthBytes=$growth, " +
+                        "peakObservedHeapGrowthBytes=$peakHeapGrowthBytes)",
+                )
+            }
         }
     }
 }

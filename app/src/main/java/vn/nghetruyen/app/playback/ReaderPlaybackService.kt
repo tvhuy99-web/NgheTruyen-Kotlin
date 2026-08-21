@@ -41,6 +41,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import vn.nghetruyen.app.MainActivity
 import vn.nghetruyen.app.ai.ChapterAiWorkflow
+import vn.nghetruyen.app.ai.NarrationPlanCoordinator
+import vn.nghetruyen.app.ai.XpkSceneMusicParity
 import vn.nghetruyen.app.ai.XpkVoiceCastSplitter
 import vn.nghetruyen.app.NgheTruyenApplication
 import vn.nghetruyen.app.R
@@ -61,10 +63,15 @@ import vn.nghetruyen.app.ui.reference.ReferenceVoiceRoleExtras
 import vn.nghetruyen.app.audio.Pcm16WaveConverter
 import vn.nghetruyen.app.audio.AudioAssetClassifier
 import vn.nghetruyen.app.audio.AudioAssetKind
+import vn.nghetruyen.app.audio.AudioDirectionPreferences
+import vn.nghetruyen.app.audio.StoryAudioModeRouter
+import vn.nghetruyen.app.audio.StoryAudioSourceMode
 import vn.nghetruyen.app.audio.SonicPcmProcessor
 import vn.nghetruyen.app.audio.PcmLoudnessEstimator
 import vn.nghetruyen.source.diagnostics.DiagnosticCategory
 import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
+import vn.nghetruyen.app.freesound.FreesoundImporter
+import org.json.JSONObject
 import java.io.File
 import java.util.ArrayDeque
 import java.util.Locale
@@ -89,6 +96,11 @@ private data class ActiveSpeechAttempt(
     val usedSonic: Boolean,
     val recovery: SpeechRecoveryState = SpeechRecoveryState(),
 )
+
+internal object NarrationAutomaticPlanPolicy {
+    // Automatic playback preparation is cache-first. Explicit user re-cast paths may still force.
+    const val FORCE_REGENERATION = false
+}
 
 class ReaderPlaybackService : Service() {
     private lateinit var tts: TextToSpeech
@@ -165,6 +177,87 @@ class ReaderPlaybackService : Service() {
     )
 }
 
+    private fun diagnosticFreesoundPlanStart(phase: String) {
+        if (!StoryAudioModeRouter.usesAiFreesound(storyAudioSourceMode)) return
+        val audio = AudioDirectionPreferences.currentSnapshot()
+        diagnostic(
+            "FREESOUND_MODE3_PLAN_START",
+            DiagnosticSeverity.INFO,
+            mapOf(
+                "phase" to phase,
+                "musicEnabled" to autoSceneMusicEnabled.toString(),
+                "ambienceEnabled" to audio.ambienceEnabled.toString(),
+                "sfxEnabled" to audio.soundEffectsEnabled.toString(),
+            ),
+        )
+    }
+
+    private fun diagnosticFreesoundPlanResult(
+        phase: String,
+        result: NarrationPlanCoordinator.Result?,
+        error: Throwable? = null,
+    ) {
+        if (!StoryAudioModeRouter.usesAiFreesound(storyAudioSourceMode)) return
+        diagnostic(
+            "FREESOUND_MODE3_PLAN_RESULT",
+            if (result == null || result.freesoundRetryRequired || error != null) DiagnosticSeverity.WARN else DiagnosticSeverity.INFO,
+            mapOf(
+                "phase" to phase,
+                "resultPresent" to (result != null).toString(),
+                "resolvedAssets" to (result?.freesoundResolvedAssets ?: 0).toString(),
+                "musicPlanCreated" to (result?.musicPlanCreated ?: false).toString(),
+                "audioPlanCreated" to (result?.audioPlanCreated ?: false).toString(),
+                "freesoundPlanCreated" to (result?.freesoundPlanCreated ?: false).toString(),
+                "retryRequired" to (result?.freesoundRetryRequired ?: false).toString(),
+                "retryAttempts" to (result?.freesoundRetryAttempts ?: 0).toString(),
+                "retryExhausted" to (result?.freesoundRetryExhausted ?: false).toString(),
+                "traceCount" to (result?.freesoundDiagnostics?.size ?: 0).toString(),
+                "warningCount" to (result?.warnings?.size ?: 0).toString(),
+                "error" to (error?.message ?: "").take(220),
+            ),
+        )
+        if (
+            result != null &&
+            result.freesoundResolvedAssets == 0 &&
+            (result.freesoundRetryRequired || result.freesoundRetryExhausted)
+        ) {
+            diagnostic(
+                "FREESOUND_MODE3_ZERO_AUDIO",
+                DiagnosticSeverity.WARN,
+                mapOf(
+                    "phase" to phase,
+                    "retryRequired" to result.freesoundRetryRequired.toString(),
+                    "musicPlanCreated" to result.musicPlanCreated.toString(),
+                    "audioPlanCreated" to result.audioPlanCreated.toString(),
+                    "traceCount" to result.freesoundDiagnostics.size.toString(),
+                    "firstTrace" to result.freesoundDiagnostics.firstOrNull().orEmpty().take(260),
+                    "firstWarning" to result.warnings.firstOrNull().orEmpty().take(260),
+                ),
+            )
+        }
+        result?.freesoundDiagnostics.orEmpty().forEachIndexed { index, detail ->
+            val stage = detail.substringBefore(' ').take(56).ifBlank { "TRACE" }
+            // BASIC diagnostics keeps INFO, so normal Freesound stages stay visible without
+            // inflating the warning count. Only actual failed/unresolved stages are warnings.
+            val normalizedDetail = detail.uppercase(Locale.ROOT)
+            val severity = if (
+                normalizedDetail.contains("FAILED") ||
+                normalizedDetail.contains("ERROR") ||
+                normalizedDetail.contains("RETRY_EXHAUSTED") ||
+                normalizedDetail.contains("NEED_UNRESOLVED")
+            ) DiagnosticSeverity.WARN else DiagnosticSeverity.INFO
+            diagnostic(
+                "FREESOUND_$stage",
+                severity,
+                mapOf(
+                    "phase" to phase,
+                    "index" to (index + 1).toString(),
+                    "detail" to detail.take(420),
+                ),
+            )
+        }
+    }
+
     private var transitionMessage: String? = null
     private var currentEnginePackage: String? = null
     private var pendingRoleEnginePackage: String? = null
@@ -178,6 +271,7 @@ class ReaderPlaybackService : Service() {
     private var xpkSceneTrackByUnitId: Map<String, String> = emptyMap()
     private var sceneMusicTracks: Map<String, SceneMusicTrackEntity> = emptyMap()
     private var activeSceneTrackId: String? = null
+    private var lastSceneMusicLookupTraceState: String = ""
     private var musicPreviewActive = false
     private var musicPreviewPlainWasPlaying = false
     private var musicPreviewSceneWasActive = false
@@ -196,6 +290,7 @@ class ReaderPlaybackService : Service() {
     private var backgroundMusicVolume: Float = 0.18f
     private var backgroundMusicDuckFactor: Float = 0.63095734f
     private var backgroundMusicEnabled = false
+    private var storyAudioSourceMode = StoryAudioSourceMode.AI_LOCAL
     private var backgroundMusicAttackMillis = 1850
     private var backgroundMusicReleaseMillis = 2050
     private var backgroundMusicTracks: List<SceneMusicTrackEntity> = emptyList()
@@ -1795,9 +1890,64 @@ class ReaderPlaybackService : Service() {
         return candidate.chapter.index == snapshot.chapterIndex + 1
     }
 
-    private fun shouldPlanAutoSceneMusic(): Boolean = backgroundMusicEnabled && autoSceneMusicEnabled
+    private fun shouldPlanAutoSceneMusic(): Boolean =
+        !StoryAudioModeRouter.usesManualLocal(storyAudioSourceMode) && autoSceneMusicEnabled
+
+    private fun shouldPlanAutoStoryAudio(): Boolean {
+        if (StoryAudioModeRouter.usesManualLocal(storyAudioSourceMode)) return false
+        val audio = AudioDirectionPreferences.currentSnapshot()
+        return autoSceneMusicEnabled || audio.ambienceEnabled || audio.soundEffectsEnabled
+    }
 
     private fun prepareCurrentNarrationBeforePlayback(snapshot: PlaybackSnapshot): Boolean {
+        val planAudioWithoutVoice = !currentStoryAutoVoiceCastEnabled && shouldPlanAutoStoryAudio()
+        if (planAudioWithoutVoice && snapshot.chapterId.isNotBlank()) {
+            if (narrationPreparedChapterId == snapshot.chapterId) return false
+            pendingPlay = true
+            PlaybackQueueStore.setPlaying(false)
+            if (narrationPlanningChapterId == snapshot.chapterId && narrationPlanJob?.isActive == true) return true
+            narrationPlanningChapterId = snapshot.chapterId
+            narrationPlanJob?.cancel()
+            narrationPlanJob = serviceScope.launch {
+                PlaybackQueueStore.setNarrationAutomation(
+                    stage = NarrationAutomationStage.CURRENT_PLANNING,
+                    progress = 0.35f,
+                    message = "Đang chuẩn bị âm thanh AI cho chương hiện tại.",
+                )
+                val content = container.libraryRepository.loadCachedChapter(snapshot.chapterId)
+                val planResult = if (content == null) null else runCatching {
+                    container.narrationPlanCoordinator.ensurePlans(
+                        content = content,
+                        voice = false,
+                        music = shouldPlanAutoSceneMusic(),
+                        activeTrackId = sceneMusicController.activeTrackId,
+                    )
+                }.getOrNull()
+                val configured = applyConfiguredVoice(useStoryProfile = true)
+                withContext(Dispatchers.Main) {
+                    if (PlaybackQueueStore.state.value.chapterId != snapshot.chapterId) return@withContext
+                    narrationPreparedChapterId = snapshot.chapterId
+                    narrationPlanningChapterId = ""
+                    voiceSettingsReady = configured
+                    val warning = planResult?.warnings?.firstOrNull()?.takeIf(String::isNotBlank)
+                    PlaybackQueueStore.setNarrationAutomation(
+                        stage = NarrationAutomationStage.CURRENT_READY,
+                        progress = 1f,
+                        message = warning?.let { "Âm thanh AI đã chuẩn bị với cảnh báo: ${it.take(120)}" }
+                            ?: "Đã chuẩn bị âm thanh AI cho chương hiện tại.",
+                    )
+                    transitionMessage = null
+                    if (configured && pendingPlay) {
+                        pendingPlay = false
+                        play()
+                    } else {
+                        updateMediaState()
+                        updateNotification()
+                    }
+                }
+            }
+            return true
+        }
         if (!currentStoryAutoVoiceCastEnabled || snapshot.chapterId.isBlank()) return false
         if (narrationPreparedChapterId == snapshot.chapterId) return false
         pendingPlay = true
@@ -1808,7 +1958,10 @@ class ReaderPlaybackService : Service() {
         narrationPlanJob?.cancel()
         narrationPlanJob = serviceScope.launch {
             var attempt = 0
-            while (currentStoryAutoVoiceCastEnabled && PlaybackQueueStore.state.value.chapterId == snapshot.chapterId) {
+            while (currentStoryAutoVoiceCastEnabled &&
+                PlaybackQueueStore.state.value.chapterId == snapshot.chapterId &&
+                attempt < MAX_NARRATION_ATTEMPTS
+            ) {
                 attempt += 1
                 PlaybackQueueStore.setNarrationAutomation(
                     stage = NarrationAutomationStage.CURRENT_PLANNING,
@@ -1825,31 +1978,64 @@ class ReaderPlaybackService : Service() {
                     updateNotification()
                 }
 
+                diagnosticFreesoundPlanStart("voice_and_audio")
                 val content = container.libraryRepository.loadCachedChapter(snapshot.chapterId)
                 val planningAttempt = if (content == null) {
                     Result.failure(IllegalStateException("Không tải được chương để chuẩn bị phân vai."))
                 } else {
                     runCatching {
+                        // Do not reset/force here. If prefetch is still running, ensurePlans waits on
+                        // the coordinator mutex and then reuses its completed transforms/assets.
                         container.narrationPlanCoordinator.ensurePlans(
                             content = content,
                             voice = true,
                             music = shouldPlanAutoSceneMusic(),
+                            force = NarrationAutomaticPlanPolicy.FORCE_REGENERATION,
                             activeTrackId = sceneMusicController.activeTrackId,
                         )
                     }
                 }
                 val planResult = planningAttempt.getOrNull()
+                diagnosticFreesoundPlanResult("voice_and_audio", planResult, planningAttempt.exceptionOrNull())
                 val warnings = planResult?.warnings ?: listOf(
                     planningAttempt.exceptionOrNull()?.message ?: "Không chuẩn bị được phân vai TTS.",
                 )
                 val assignmentCount = if (content == null) 0
                 else container.narrationPlanCoordinator.voicePlanAssignmentCount(content)
 
-                if (assignmentCount > 0) {
+                if (planResult?.freesoundRetryExhausted == true) {
+                    diagnostic(
+                        "FREESOUND_MODE3_RETRY_EXHAUSTED",
+                        DiagnosticSeverity.ERROR,
+                        mapOf(
+                            "attempts" to planResult.freesoundRetryAttempts.toString(),
+                            "resolvedAssets" to planResult.freesoundResolvedAssets.toString(),
+                        ),
+                    )
+                    withContext(Dispatchers.Main) {
+                        if (PlaybackQueueStore.state.value.chapterId != snapshot.chapterId) return@withContext
+                        narrationPlanningChapterId = ""
+                        pendingPlay = false
+                        PlaybackQueueStore.setPlaying(false)
+                        PlaybackQueueStore.setNarrationAutomation(
+                            stage = NarrationAutomationStage.FAILED,
+                            progress = 1f,
+                            message = "Freesound thất bại sau 3 lần. Không có kế hoạch âm thanh hợp lệ để phát.",
+                        )
+                        transitionMessage = "Freesound thất bại sau 3 lần; hãy phân vai lại để tạo lượt mới."
+                        updateMediaState()
+                        updateNotification()
+                    }
+                    return@launch
+                }
+
+                val mode3Incomplete = StoryAudioModeRouter.usesAiFreesound(storyAudioSourceMode) &&
+                    planResult?.freesoundRetryRequired == true
+                if (assignmentCount > 0 && !mode3Incomplete) {
                     PlaybackQueueStore.setNarrationAutomation(
                         stage = NarrationAutomationStage.CURRENT_APPLYING,
                         progress = 0.85f,
-                        message = "Đã phân vai $assignmentCount mục. Đang áp dụng giọng${if (shouldPlanAutoSceneMusic()) " và nhạc cảnh" else ""}."
+                        message = "Đã phân vai $assignmentCount mục. Đang áp dụng giọng${if (shouldPlanAutoStoryAudio()) " và âm thanh truyện" else ""}."
                     )
                     val configured = applyConfiguredVoice(useStoryProfile = true)
                     withContext(Dispatchers.Main) {
@@ -1858,12 +2044,39 @@ class ReaderPlaybackService : Service() {
                         narrationPlanningChapterId = ""
                         voiceSettingsReady = configured
                         val musicApplied = hasSceneMusicPlan()
+                        val mode3 = StoryAudioModeRouter.usesAiFreesound(storyAudioSourceMode)
+                        val warning = warnings.firstOrNull()?.takeIf(String::isNotBlank)
+                        val audioStatus = if (!mode3) {
+                            if (musicApplied) " và đã áp dụng nhạc cảnh" else ""
+                        } else {
+                            FreesoundPlaybackStatusFormatter.format(
+                                resultPresent = planResult != null,
+                                downloadedAssets = planResult?.freesoundDownloadedAssets ?: 0,
+                                reusedAssets = planResult?.freesoundReusedAssets ?: 0,
+                                retryRequired = planResult?.freesoundRetryRequired ?: false,
+                                audioLayersEnabled = shouldPlanAutoStoryAudio(),
+                            )
+                        }
                         PlaybackQueueStore.setNarrationAutomation(
                             stage = NarrationAutomationStage.CURRENT_READY,
                             progress = 1f,
-                            message = "Đã phân vai xong $assignmentCount mục${if (musicApplied) " và đã áp dụng nhạc cảnh" else ""}. Đang bắt đầu phát.",
+                            message = "Đã phân vai xong $assignmentCount mục$audioStatus. Đang bắt đầu phát." +
+                                warning?.let { " • ${it.take(140)}" }.orEmpty(),
                         )
-                        transitionMessage = null
+                        if (mode3) {
+                            diagnostic(
+                                "FREESOUND_AUTO_PLAN_APPLIED",
+                                if (planResult?.freesoundRetryRequired == true || warning != null) DiagnosticSeverity.WARN else DiagnosticSeverity.INFO,
+                                mapOf(
+                                    "resolvedAssets" to (planResult?.freesoundResolvedAssets ?: 0).toString(),
+                                    "retryRequired" to (planResult?.freesoundRetryRequired ?: false).toString(),
+                                    "musicApplied" to musicApplied.toString(),
+                                    "audioPlanCreated" to (planResult?.audioPlanCreated ?: false).toString(),
+                                    "warning" to warning.orEmpty().take(180),
+                                ),
+                            )
+                        }
+                        transitionMessage = warning?.take(180)
                         if (configured && pendingPlay) {
                             pendingPlay = false
                             play()
@@ -1904,11 +2117,23 @@ class ReaderPlaybackService : Service() {
                     PlaybackQueueStore.setNarrationAutomation(
                         stage = NarrationAutomationStage.FAILED,
                         progress = 1f,
-                        message = "Phân vai chưa thành công. Sẽ tự thử lại sau 5 giây.$warningSuffix",
+                        message = if (attempt >= MAX_NARRATION_ATTEMPTS) {
+                            "Phân vai/Mode 3 thất bại sau $MAX_NARRATION_ATTEMPTS lần.$warningSuffix"
+                        } else {
+                            "Chưa chuẩn bị xong. Sẽ thử lại sau 5 giây (lần ${attempt + 1}/$MAX_NARRATION_ATTEMPTS).$warningSuffix"
+                        },
                     )
-                    transitionMessage = "Phân vai chưa thành công; đang chờ thử lại."
+                    transitionMessage = if (attempt >= MAX_NARRATION_ATTEMPTS) {
+                        "Phân vai/Mode 3 thất bại sau $MAX_NARRATION_ATTEMPTS lần."
+                    } else {
+                        "Chưa chuẩn bị xong; đang chờ thử lại."
+                    }
                     updateMediaState()
                     updateNotification()
+                }
+                if (attempt >= MAX_NARRATION_ATTEMPTS) {
+                    pendingPlay = false
+                    return@launch
                 }
                 delay(NARRATION_RETRY_DELAY_MS)
             }
@@ -1922,23 +2147,28 @@ class ReaderPlaybackService : Service() {
         sourceId: String,
         parentChapterId: String,
     ) {
-        if (!prefetchNarrationPlansEnabled || !currentStoryAutoVoiceCastEnabled) return
+        val planVoice = currentStoryAutoVoiceCastEnabled
+        val planAudio = shouldPlanAutoStoryAudio()
+        if (!prefetchNarrationPlansEnabled || (!planVoice && !planAudio)) return
         narrationPrefetchJob?.cancel()
         narrationPrefetchJob = serviceScope.launch {
             var current: ChapterContent? = content
             repeat(narrationPrefetchWindowChapters.coerceIn(1, 5)) { offset ->
                 val chapter = current ?: return@repeat
                 val attempt = runCatching {
+                    // Prefetch is idempotent: reuse an existing valid plan and only create missing/
+                    // stale pieces. This prevents repeated prefetches from redownloading assets.
                     container.narrationPlanCoordinator.ensurePlans(
                         content = chapter,
-                        voice = true,
+                        voice = planVoice,
                         music = shouldPlanAutoSceneMusic(),
+                        force = NarrationAutomaticPlanPolicy.FORCE_REGENERATION,
                         activeTrackId = if (offset == 0) sceneMusicController.activeTrackId else null,
                     )
                 }
                 val result = attempt.getOrNull()
                 if (offset == 0) {
-                    val assignmentCount = if (result == null) {
+                    val assignmentCount = if (!planVoice || result == null) {
                         0
                     } else {
                         try {
@@ -1954,15 +2184,16 @@ class ReaderPlaybackService : Service() {
                             0
                         }
                     }
-                    val failed = result == null || assignmentCount <= 0 || (
-                        result.warnings.isNotEmpty() && !result.voicePlanCreated && !result.musicPlanCreated
-                    )
+                    val failed = result == null ||
+                        (planVoice && assignmentCount <= 0) ||
+                        (StoryAudioModeRouter.usesAiFreesound(storyAudioSourceMode) && result.freesoundRetryRequired)
                     val musicLabel = if (shouldPlanAutoSceneMusic()) " + nhạc cảnh" else ""
                     val baseMessage = when {
-                        result == null -> "Không phân vai trước được chương tiếp theo: ${chapter.chapter.title}."
+                        result == null -> "Không chuẩn bị AI trước được chương tiếp theo: ${chapter.chapter.title}."
+                        !planVoice -> "Đã chuẩn bị âm thanh AI cho chương tiếp theo: ${chapter.chapter.title}."
                         assignmentCount <= 0 -> "Phân vai trước chưa tạo được mục giọng hợp lệ: ${chapter.chapter.title}."
                         failed -> "Phân vai trước chương tiếp theo chưa thành công: ${chapter.chapter.title}."
-                        result.voicePlanCreated || result.musicPlanCreated ->
+                        result.voicePlanCreated || result.musicPlanCreated || result.audioPlanCreated || result.freesoundPlanCreated ->
                             "Đã phân vai $assignmentCount mục$musicLabel cho chương tiếp theo: ${chapter.chapter.title}."
                         else -> "Chương tiếp theo đã có $assignmentCount mục phân vai$musicLabel hợp lệ: ${chapter.chapter.title}."
                     }
@@ -2101,6 +2332,7 @@ class ReaderPlaybackService : Service() {
     private suspend fun applyConfiguredVoice(useStoryProfile: Boolean, skipEngineCheck: Boolean = false): Boolean {
         val settings = container.settingsRepository.snapshot()
         applyRuntimeSettings(settings)
+        storyAudioSourceMode = container.storyAudioSourceModeStore.get()
         val storyId = PlaybackQueueStore.state.value.storyId
         val previousStoryAutoVoiceCastEnabled = currentStoryAutoVoiceCastEnabled
         currentStoryAutoVoiceCastEnabled = if (useStoryProfile && storyId.isNotBlank()) {
@@ -2177,13 +2409,14 @@ class ReaderPlaybackService : Service() {
         val enabledMusicTracks = if (useStoryProfile && chapterId.isNotBlank()) {
             container.libraryRepository.listEnabledSceneMusicTracks()
                 .filter { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }
+                .filter { track ->
+                    !StoryAudioModeRouter.usesAiFreesound(storyAudioSourceMode) ||
+                        (FreesoundImporter.soundIdFromManagedUri(track.uri) != null &&
+                            FreesoundImporter.managedFileExists(applicationContext, track.uri))
+                }
         } else emptyList()
         val musicSourceHash = originalChapter?.let { chapter ->
-            ChapterAiWorkflow.sha256(
-                chapter.paragraphs + enabledMusicTracks.flatMap { track ->
-                    listOf(track.id, track.tagsCsv, track.title)
-                },
-            )
+            container.narrationPlanCoordinator.musicSourceHashForPlayback(chapter, enabledMusicTracks)
         }
         val musicPlan = if (musicSourceHash != null) {
             container.libraryRepository.getChapterTransform(chapterId, ChapterAiWorkflow.KIND_SCENE_MUSIC)
@@ -2194,7 +2427,11 @@ class ReaderPlaybackService : Service() {
         val previousTrackIds = backgroundMusicTracks.map(SceneMusicTrackEntity::id)
         backgroundMusicTracks = orderedMusicTracks
         if (previousTrackIds != orderedMusicTracks.map(SceneMusicTrackEntity::id)) backgroundMusicShuffleBag.clear()
-        val musicPlanUsable = backgroundMusicEnabled && autoSceneMusicEnabled && musicPlan?.sourceSha256 == musicSourceHash
+        val musicPlanUsable = !StoryAudioModeRouter.usesManualLocal(storyAudioSourceMode) &&
+            autoSceneMusicEnabled &&
+            musicPlan != null &&
+            musicPlan.sourceSha256 == musicSourceHash &&
+            scenePlanMatchesCurrentSourceMode(musicPlan.transformedText)
         xpkSceneTrackByUnitId = if (musicPlanUsable) {
             runCatching {
                 XpkPlaybackRuntime.parseSceneTimeline(
@@ -2210,27 +2447,51 @@ class ReaderPlaybackService : Service() {
         sceneMusicTracks = if (hasSceneMusicPlan()) {
             orderedMusicTracks.associateBy { it.id }
         } else emptyMap()
+        if (StoryAudioModeRouter.usesAiFreesound(storyAudioSourceMode)) {
+            diagnostic(
+                "FREESOUND_RUNTIME_MUSIC_PLAN_STATE",
+                if (musicPlanUsable && hasSceneMusicPlan()) DiagnosticSeverity.INFO else DiagnosticSeverity.WARN,
+                mapOf(
+                    "enabledMusicTracks" to enabledMusicTracks.size.toString(),
+                    "musicPlanPresent" to (musicPlan != null).toString(),
+                    "sourceHashMatch" to (musicPlan != null && musicPlan.sourceSha256 == musicSourceHash).toString(),
+                    "sourceModeMatch" to (musicPlan?.let { scenePlanMatchesCurrentSourceMode(it.transformedText) } == true).toString(),
+                    "musicPlanUsable" to musicPlanUsable.toString(),
+                    "unitAssignments" to xpkSceneTrackByUnitId.size.toString(),
+                    "legacyCueRows" to sceneMusicCues.size.toString(),
+                    "runtimeTracks" to sceneMusicTracks.size.toString(),
+                ),
+            )
+        }
         activeSceneTrackId = sceneMusicController.activeTrackId
+        lastSceneMusicLookupTraceState = ""
         PlaybackQueueStore.updateVoice(config.rate, config.pitch, config.volume)
         withContext(Dispatchers.Main) {
             applyRuntimeVoice(config)
             if (!hasSceneMusicPlan()) {
-                if (backgroundMusicEnabled && backgroundMusicTracks.isNotEmpty()) {
-                    configureBackgroundMusic(null, false, 0f, settings.backgroundMusicDuckFactor)
-                    val activeId = sceneMusicController.activeTrackId
-                    if (activeId != null && backgroundMusicTracks.none { it.id == activeId }) {
+                if (StoryAudioModeRouter.allowsManualPlaylist(storyAudioSourceMode)) {
+                    if (backgroundMusicEnabled && backgroundMusicTracks.isNotEmpty()) {
+                        configureBackgroundMusic(null, false, 0f, settings.backgroundMusicDuckFactor)
+                        val activeId = sceneMusicController.activeTrackId
+                        if (activeId != null && backgroundMusicTracks.none { it.id == activeId }) {
+                            sceneMusicController.stop(clearTrack = true)
+                        }
+                        if (PlaybackQueueStore.state.value.isPlaying) ensureBackgroundPlaylist(advance = false)
+                        else sceneMusicController.pause()
+                    } else {
                         sceneMusicController.stop(clearTrack = true)
+                        activeSceneTrackId = null
+                        configureBackgroundMusic(
+                            settings.backgroundMusicUri,
+                            settings.backgroundMusicEnabled,
+                            settings.backgroundMusicVolume,
+                            settings.backgroundMusicDuckFactor,
+                        )
                     }
-                    if (PlaybackQueueStore.state.value.isPlaying) ensureBackgroundPlaylist(advance = false)
-                    else sceneMusicController.pause()
                 } else {
                     sceneMusicController.stop(clearTrack = true)
-                    configureBackgroundMusic(
-                        settings.backgroundMusicUri,
-                        settings.backgroundMusicEnabled,
-                        settings.backgroundMusicVolume,
-                        settings.backgroundMusicDuckFactor,
-                    )
+                    activeSceneTrackId = null
+                    configureBackgroundMusic(null, false, 0f, settings.backgroundMusicDuckFactor)
                 }
             } else {
                 configureBackgroundMusic(null, false, 0f, settings.backgroundMusicDuckFactor)
@@ -2320,15 +2581,52 @@ class ReaderPlaybackService : Service() {
 
     private fun hasSceneMusicPlan(): Boolean = xpkSceneTrackByUnitId.isNotEmpty() || sceneMusicCues.isNotEmpty()
 
+    private fun scenePlanMatchesCurrentSourceMode(transformedText: String): Boolean = runCatching {
+        JSONObject(transformedText).optString("audio_source_mode").trim() == storyAudioSourceMode.name
+    }.getOrDefault(false)
+
     private fun updateSceneMusicForUnit(unitId: String?, paragraphIndex: Int) {
         if (!hasSceneMusicPlan()) {
-            if (backgroundMusicEnabled && backgroundMusicTracks.isNotEmpty()) ensureBackgroundPlaylist(advance = false)
+            if (StoryAudioModeRouter.allowsManualPlaylist(storyAudioSourceMode) &&
+                backgroundMusicEnabled && backgroundMusicTracks.isNotEmpty()
+            ) {
+                ensureBackgroundPlaylist(advance = false)
+            } else if (!StoryAudioModeRouter.allowsManualPlaylist(storyAudioSourceMode)) {
+                sceneMusicController.stop(clearTrack = true)
+                activeSceneTrackId = null
+            }
             return
         }
         val canonicalPlanActive = xpkSceneTrackByUnitId.isNotEmpty()
         val legacyCue = if (canonicalPlanActive) null else sceneMusicCues.lastOrNull { it.startParagraph <= paragraphIndex }
         val requestedTrackId = if (canonicalPlanActive) unitId?.let(xpkSceneTrackByUnitId::get) else legacyCue?.trackId
         val snapshot = PlaybackQueueStore.state.value
+        if (StoryAudioModeRouter.usesAiFreesound(storyAudioSourceMode)) {
+            val lookupTraceState = "$canonicalPlanActive:${requestedTrackId.orEmpty()}"
+            if (lookupTraceState != lastSceneMusicLookupTraceState) {
+                diagnostic(
+                    "FREESOUND_RUNTIME_MUSIC_LOOKUP",
+                    DiagnosticSeverity.INFO,
+                    mapOf(
+                        "canonicalPlan" to canonicalPlanActive.toString(),
+                        "requestedTrackId" to requestedTrackId.orEmpty(),
+                        "unitId" to unitId.orEmpty(),
+                        "paragraphIndex" to paragraphIndex.toString(),
+                        "availableTracks" to sceneMusicTracks.size.toString(),
+                    ),
+                )
+                lastSceneMusicLookupTraceState = lookupTraceState
+            }
+        }
+        if (requestedTrackId == XpkSceneMusicParity.SILENCE_TRACK_ID) {
+            if (StoryAudioModeRouter.usesAiFreesound(storyAudioSourceMode)) {
+                diagnostic("FREESOUND_RUNTIME_MUSIC_SILENCE", DiagnosticSeverity.INFO)
+            }
+            sceneMusicController.stop(clearTrack = true)
+            activeSceneTrackId = null
+            transitionMessage = null
+            return
+        }
         val track = requestedTrackId?.let { selectedTrackId ->
             SceneMusicSelector.select(
                 tracks = sceneMusicTracks.values,
@@ -2340,6 +2638,18 @@ class ReaderPlaybackService : Service() {
             )
         }
         if (requestedTrackId == null || track == null || !track.enabled) {
+            if (StoryAudioModeRouter.usesAiFreesound(storyAudioSourceMode)) {
+                diagnostic(
+                    "FREESOUND_RUNTIME_MUSIC_MISSING",
+                    DiagnosticSeverity.WARN,
+                    mapOf(
+                        "requestedTrackId" to requestedTrackId.orEmpty(),
+                        "trackFound" to (track != null).toString(),
+                        "trackEnabled" to (track?.enabled ?: false).toString(),
+                        "availableTracks" to sceneMusicTracks.size.toString(),
+                    ),
+                )
+            }
             if (canonicalPlanActive) {
                 sceneMusicController.stop(clearTrack = true)
                 activeSceneTrackId = null
@@ -2375,10 +2685,25 @@ class ReaderPlaybackService : Service() {
             1f
         }
         val sceneVolume = legacyCue?.volume?.coerceIn(0f, 1f) ?: 1f
+        val effectiveSceneVolume = (track.volume * sceneVolume * normalizationGain).coerceIn(0f, 1f)
+        if (StoryAudioModeRouter.usesAiFreesound(storyAudioSourceMode)) {
+            diagnostic(
+                "FREESOUND_RUNTIME_MUSIC_PLAY",
+                if (FreesoundImporter.managedFileExists(this, track.uri)) DiagnosticSeverity.INFO else DiagnosticSeverity.ERROR,
+                mapOf(
+                    "trackId" to track.id,
+                    "soundId" to (FreesoundImporter.soundIdFromManagedUri(track.uri)?.toString() ?: ""),
+                    "fileExists" to FreesoundImporter.managedFileExists(this, track.uri).toString(),
+                    "normalizationVersion" to track.normalizationVersion.toString(),
+                    "normalizationError" to track.normalizationError.take(160),
+                    "volume" to effectiveSceneVolume.toString(),
+                ),
+            )
+        }
         sceneMusicController.transition(
             trackId = track.id,
             uri = track.uri,
-            volume = (track.volume * sceneVolume * normalizationGain).coerceIn(0f, 1f),
+            volume = effectiveSceneVolume,
             duckFactor = backgroundMusicDuckFactor,
             crossfadeMillis = sceneMusicCrossfadeMillis,
         )
@@ -2455,6 +2780,7 @@ class ReaderPlaybackService : Service() {
     }
 
     private fun ensureBackgroundPlaylist(advance: Boolean): Boolean {
+        if (!StoryAudioModeRouter.allowsManualPlaylist(storyAudioSourceMode)) return false
         if (!backgroundMusicEnabled || backgroundMusicTracks.isEmpty() || hasSceneMusicPlan()) return false
         val track = chooseBackgroundPlaylistTrack(advance) ?: return false
         val tracks = backgroundMusicTracks.filter(SceneMusicTrackEntity::enabled)
@@ -2476,7 +2802,9 @@ class ReaderPlaybackService : Service() {
             looping = tracks.size == 1,
             onCompletion = if (tracks.size > 1) {
                 {
-                    if (PlaybackQueueStore.state.value.isPlaying && backgroundMusicEnabled && !hasSceneMusicPlan()) {
+                    if (StoryAudioModeRouter.allowsManualPlaylist(storyAudioSourceMode) &&
+                        PlaybackQueueStore.state.value.isPlaying && backgroundMusicEnabled && !hasSceneMusicPlan()
+                    ) {
                         ensureBackgroundPlaylist(advance = true)
                     }
                 }
@@ -2536,7 +2864,8 @@ class ReaderPlaybackService : Service() {
     }
 
     private fun updateBackgroundMusic(ducked: Boolean, pause: Boolean = false) {
-        val usesTrackLibrary = backgroundMusicEnabled && backgroundMusicTracks.isNotEmpty()
+        val usesTrackLibrary = StoryAudioModeRouter.allowsManualPlaylist(storyAudioSourceMode) &&
+            backgroundMusicEnabled && backgroundMusicTracks.isNotEmpty()
         if (hasSceneMusicPlan() || sceneMusicController.activeTrackId != null || usesTrackLibrary) {
             sceneMusicController.setDuckTiming(backgroundMusicAttackMillis, backgroundMusicReleaseMillis)
             if (pause) {
@@ -2834,6 +3163,7 @@ class ReaderPlaybackService : Service() {
         private const val NOTIFICATION_ID = 3011
         private const val PREFETCH_THRESHOLD = 0.75f
         private const val NARRATION_RETRY_DELAY_MS = 5_000L
+        private const val MAX_NARRATION_ATTEMPTS = 3
         private const val WAKE_LOCK_TIMEOUT_MS = 30 * 60 * 1000L
         private const val MAX_PREVIEW_TEXT_CHARS = 320
         private const val MAX_PERSISTED_QUEUE_CHAPTERS = 5

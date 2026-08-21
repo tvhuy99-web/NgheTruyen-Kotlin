@@ -10,10 +10,9 @@ import android.os.Looper
 import java.util.ArrayDeque
 import kotlin.math.roundToInt
 import vn.nghetruyen.app.audio.AudioDirectionAsset
-import vn.nghetruyen.app.audio.AudioDirectionLimits
 import vn.nghetruyen.app.audio.PcmLoudnessEstimator
 
-/** Bounded foreground-SFX player with cue-scoped stop/repeat/loop control. */
+/** Foreground-SFX player with cue-scoped stop/repeat/loop control and no app-level quantity quota. */
 class SceneSfxController(context: Context) {
     private data class ActiveSfx(val cueKey: String, val player: MediaPlayer)
 
@@ -23,6 +22,7 @@ class SceneSfxController(context: Context) {
     private val positiveBoosts = mutableMapOf<MediaPlayer, LoudnessEnhancer>()
     private val pendingCallbacks = linkedMapOf<String, MutableList<Runnable>>()
 
+    @Suppress("UNUSED_PARAMETER")
     @Synchronized
     fun play(
         asset: AudioDirectionAsset,
@@ -34,30 +34,45 @@ class SceneSfxController(context: Context) {
         repeatIntervalMillis: Long = 550L,
     ): Boolean {
         val key = cueKey.ifBlank { "one-shot:${System.nanoTime()}" }
-        val limit = maxConcurrent.coerceIn(1, AudioDirectionLimits.MAX_CONCURRENT_SFX)
-        val safeRepeatCount = repeatCount.coerceIn(1, AudioDirectionLimits.MAX_SFX_REPEAT_COUNT)
+        val safeRepeatCount = repeatCount.coerceAtLeast(1)
         val safeInterval = repeatIntervalMillis.coerceIn(120L, 2_000L)
 
         if (loopUntilStopped) stopCue(key)
-        val started = startOne(asset, masterVolume, limit, key, looping = loopUntilStopped)
+        val started = startOne(asset, masterVolume, key, looping = loopUntilStopped)
         if (!started) return false
         if (!loopUntilStopped && safeRepeatCount > 1) {
-            for (repeatIndex in 1 until safeRepeatCount) {
-                lateinit var task: Runnable
-                task = Runnable {
-                    synchronized(this@SceneSfxController) {
-                        pendingCallbacks[key]?.let { callbacks ->
-                            callbacks.remove(task)
-                            if (callbacks.isEmpty()) pendingCallbacks.remove(key)
-                        }
-                        startOne(asset, masterVolume, limit, key, looping = false)
-                    }
-                }
-                pendingCallbacks.getOrPut(key) { mutableListOf() }.add(task)
-                handler.postDelayed(task, safeInterval * repeatIndex)
-            }
+            scheduleRepeat(
+                asset = asset,
+                masterVolume = masterVolume,
+                cueKey = key,
+                remaining = safeRepeatCount - 1,
+                intervalMillis = safeInterval,
+            )
         }
         return true
+    }
+
+    private fun scheduleRepeat(
+        asset: AudioDirectionAsset,
+        masterVolume: Float,
+        cueKey: String,
+        remaining: Int,
+        intervalMillis: Long,
+    ) {
+        if (remaining <= 0) return
+        lateinit var task: Runnable
+        task = Runnable {
+            synchronized(this@SceneSfxController) {
+                pendingCallbacks[cueKey]?.let { callbacks ->
+                    callbacks.remove(task)
+                    if (callbacks.isEmpty()) pendingCallbacks.remove(cueKey)
+                }
+                startOne(asset, masterVolume, cueKey, looping = false)
+                scheduleRepeat(asset, masterVolume, cueKey, remaining - 1, intervalMillis)
+            }
+        }
+        pendingCallbacks.getOrPut(cueKey) { mutableListOf() }.add(task)
+        handler.postDelayed(task, intervalMillis)
     }
 
     @Synchronized
@@ -87,11 +102,9 @@ class SceneSfxController(context: Context) {
     private fun startOne(
         asset: AudioDirectionAsset,
         masterVolume: Float,
-        limit: Int,
         cueKey: String,
         looping: Boolean,
     ): Boolean {
-        while (activePlayers.size >= limit) releaseOldest()
         val player = runCatching {
             MediaPlayer().apply {
                 setAudioAttributes(

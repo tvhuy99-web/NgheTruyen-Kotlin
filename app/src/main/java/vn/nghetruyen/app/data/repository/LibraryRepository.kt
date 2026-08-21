@@ -1109,18 +1109,38 @@ class LibraryRepository(private val db: AppDatabase) {
 
     suspend fun saveSceneMusicTrack(title: String, uri: String, tagsCsv: String): Result<String> = runCatching {
         require(uri.isNotBlank()) { "Thiếu URI tệp nhạc." }
+        val cleanUri = uri.trim().take(2000)
+        val cleanTitle = title.trim().ifBlank { "Nhạc cảnh" }.take(120)
+        val cleanTags = tagsCsv.trim().take(500)
         val id = UUID.nameUUIDFromBytes(uri.toByteArray()).toString()
-        db.sceneMusicTrackDao().upsert(
-            SceneMusicTrackEntity(
-                id = id,
-                title = title.trim().ifBlank { "Nhạc cảnh" }.take(120),
-                uri = uri.trim().take(2000),
-                tagsCsv = tagsCsv.trim().take(500),
-                volume = 1.0f,
-                enabled = true,
-                updatedAt = System.currentTimeMillis(),
-            ),
-        )
+        db.withTransaction {
+            val dao = db.sceneMusicTrackDao()
+            val now = System.currentTimeMillis()
+            val existing = dao.get(id)
+            val saved = if (existing != null) {
+                existing.copy(
+                    title = cleanTitle,
+                    uri = cleanUri,
+                    tagsCsv = cleanTags,
+                    updatedAt = now,
+                )
+            } else {
+                val nextOrderIndex = (dao.maxOrderIndex().toLong() + 1L)
+                    .coerceAtMost(Int.MAX_VALUE.toLong())
+                    .toInt()
+                SceneMusicTrackEntity(
+                    id = id,
+                    title = cleanTitle,
+                    uri = cleanUri,
+                    tagsCsv = cleanTags,
+                    volume = 1.0f,
+                    enabled = true,
+                    orderIndex = nextOrderIndex,
+                    updatedAt = now,
+                )
+            }
+            dao.upsert(saved)
+        }
         id
     }
 

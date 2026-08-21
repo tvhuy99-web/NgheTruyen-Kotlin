@@ -11,7 +11,7 @@ object XpkSceneMusicParity {
     const val MODE = "ai_full_authority"
     const val SILENCE_TRACK_ID = "NONE"
     const val SILENCE_PROMPT_ID = "0"
-    private const val MIN_MIDDLE_SCENE_UNITS = 2
+    private const val MIN_MIDDLE_SCENE_UNITS = 1
 
     data class PromptTrack(
         val id: String,
@@ -119,11 +119,11 @@ object XpkSceneMusicParity {
             5. Im lặng là một lựa chọn bình đẳng với track. Không bắt buộc mở nhạc chỉ vì catalog có bài phù hợp sơ bộ; cũng không ưu tiên im lặng nếu một bài thực sự hỗ trợ cảnh tốt hơn.
             6. Trong toàn chương, chỉ đánh giá lại khi có chuyển biến đủ bền về chức năng kể chuyện, hướng cảm xúc, nhịp, mức căng thẳng, không gian, thời gian, quy mô hoặc tính chất diễn biến.
             7. Giữ bài hoặc giữ im lặng trong toàn khoảng mà trạng thái đó còn phù hợp. Đổi tại đúng UNIT đầu tiên nơi trạng thái khác trở thành lựa chọn phù hợp hơn cho diễn biến đang bắt đầu.
-            8. Ổn định quan trọng hơn phản ứng theo từng câu: không đổi vì một câu thoại, một cảm xúc thoáng qua, một động tác ngắn, một SFX đơn lẻ hoặc một từ khóa. Một cảnh nhạc/im lặng nằm giữa chương phải kéo dài ít nhất $MIN_MIDDLE_SCENE_UNITS UNIT; nếu thay đổi không đủ bền thì giữ trạng thái hiện tại.
+            8. Ổn định quan trọng hơn phản ứng máy móc theo từ khóa, nhưng không có số UNIT tối thiểu cho một cảnh. Một vùng một UNIT vẫn hợp lệ nếu đúng tại UNIT đó đã bắt đầu một trạng thái kể chuyện thực sự khác.
             9. Không đặt mục tiêu về số lần đổi nhạc, số khoảng im lặng hoặc số lượng music_scene. Không ưu tiên một bài cho cả chương, không ưu tiên đổi ít và cũng không ưu tiên đổi nhiều.
             10. Một chuyển biến chỉ tạo ranh giới khi nó thực sự mở ra một đơn vị kể chuyện mới có chức năng âm nhạc khác. Không dùng BGM như SFX để nhấn một khoảnh khắc đơn lẻ.
             11. Không dựa riêng vào độ dài bài đã phát, tên giả định, mã số, từ khóa hay nhãn cảm xúc. Chỉ dùng mô tả catalog và nội dung thực tế.
-            12. Có thể giữ INCOMING_TRACK_ID qua một phần hoặc toàn bộ chương, đổi khỏi nó ngay đầu chương, dùng lại một bài sau khi đã chuyển qua bài khác, hoặc xen khoảng $SILENCE_PROMPT_ID khi phù hợp.
+            12. INCOMING_TRACK_ID chỉ là lựa chọn continuity TÙY CHỌN. Chương mới tuyệt đối không bắt buộc dùng lại bài chương trước; có thể giữ, đổi ngay, quay lại một bài cũ hoặc dùng $SILENCE_PROMPT_ID hoàn toàn theo nội dung chương hiện tại.
             13. Hai cảnh liền nhau không được cùng track_id; nếu cùng bài hoặc cùng $SILENCE_PROMPT_ID thì phải gộp thành một cảnh liên tục.
             14. Mỗi music_scene là một khoảng liên tục dùng cùng một track_id trong catalog hoặc $SILENCE_PROMPT_ID. start_id và end_id đều được tính bao gồm.
             15. Cảnh đầu bắt đầu tại ID $firstUnitId; cảnh cuối kết thúc tại ID $lastUnitId. Các cảnh phải đúng thứ tự TIMELINE, liên tục, không chồng lấn và không bỏ sót UNIT/DIALOGUE.
@@ -135,7 +135,7 @@ object XpkSceneMusicParity {
             KIỂM TRA ÂM THẦM TRƯỚC KHI TRẢ:
 
             20. Kiểm tra toàn chương được phủ kín, track_id đều là mã số hợp lệ và không có hai cảnh liền nhau cùng trạng thái.
-            21. Kiểm tra không có cảnh nhạc/im lặng giữa chương chỉ tồn tại một UNIT; nếu có, bỏ ranh giới phản ứng quá nhanh và gộp vào trạng thái ổn định phù hợp hơn.
+            21. Kiểm tra mỗi ranh giới MUSIC phản ánh một thay đổi kể chuyện thực sự; không kéo dài hoặc gộp cảnh chỉ để đạt một số UNIT tối thiểu vì không có quota độ dài.
             22. Kiểm tra riêng đầu chương: INCOMING_TRACK_ID được giữ hoặc thay thế dựa trên nội dung hiện tại, không do thiên kiến continuity.
             23. Kiểm tra không có quyết định nào chỉ vì một SFX, một ambience, một từ khóa hoặc vị trí catalog.
             24. Không trình bày quá trình suy luận hoặc kết quả kiểm tra.
@@ -149,7 +149,7 @@ object XpkSceneMusicParity {
             - Mỗi phần tử music_scenes có đúng ba trường: start_id, end_id, track_id.
             - track_id phải khớp chính xác một mã số trong TRACK_CATALOG; chỉ MUSIC dùng $SILENCE_PROMPT_ID để biểu diễn im lặng.
             - Không có hai phần tử music_scenes liền nhau dùng cùng track_id.
-            - Cảnh nhạc hoặc im lặng nằm giữa chương không được ngắn hơn $MIN_MIDDLE_SCENE_UNITS UNIT.
+            - Không có độ dài tối thiểu hoặc quota số music_scene; ràng buộc duy nhất về lớp là tại một thời điểm chỉ có một track_id/trạng thái MUSIC.
             - Không sao chép một track_id từ ví dụ cấu trúc; lựa chọn phải được tạo từ nội dung và catalog của request hiện tại.
         """.trimIndent()
         return PromptBlock(

@@ -124,8 +124,9 @@ class XpkAudioPromptQualityTest {
         assertTrue(prompt.contains("track_id=\"0\""))
         assertTrue(prompt.contains("tuyệt đối không xuất ambience_id=\"NONE\""))
         assertTrue(prompt.contains("tuyệt đối không xuất effect_id=\"NONE\""))
-        assertTrue(prompt.contains("MAX_SFX_CUES_THIS_CHAPTER chỉ là TRẦN an toàn"))
+        assertTrue(prompt.contains("Không có trần số SFX trong chương"))
         assertTrue(prompt.contains("Nếu các UNIT sau không nhắc lại nguồn âm"))
+        assertTrue(prompt.contains("Độ dài vật lý của file không quyết định ranh giới scene"))
         assertTrue(prompt.contains("asset tổng hợp"))
         assertFalse(prompt.contains("\"music_scenes\": []"))
     }
@@ -181,5 +182,61 @@ class XpkAudioPromptQualityTest {
             "Thunder File.wav",
             "Sword File.wav",
         ).forEach { leaked -> assertFalse(prompt.contains(leaked)) }
+    }
+
+    @Test
+    fun freesoundPromptRequiresShortSearchableQueries() {
+        val base = XpkVoiceCastPrompt.build(
+            title = "Freesound",
+            body = "Gió rít qua rừng. Một khối đá đổ sập.",
+            profiles = emptyList(),
+            storyNote = "",
+            expressiveAdjustment = false,
+            speedLimitPct = 0,
+            pitchLimitPct = 0,
+            volumeLimitPct = 0,
+            expressionPrompt = "",
+            includeVoiceCast = false,
+            includeSceneMusic = false,
+            includeAudioDirection = true,
+        )
+        val prompt = XpkUnifiedNarrationPrompt.compose(
+            base = base,
+            title = "Freesound",
+            includeVoiceCast = false,
+            includeSceneMusic = false,
+            includeAmbience = false,
+            includeSoundEffects = false,
+            ambienceTracks = emptyList(),
+            soundEffectTracks = emptyList(),
+            includeFreesoundAudioRequirements = true,
+            freesoundRequirementKinds = setOf(vn.nghetruyen.app.audio.AudioAssetKind.MUSIC, vn.nghetruyen.app.audio.AudioAssetKind.AMBIENCE, vn.nghetruyen.app.audio.AudioAssetKind.SFX),
+            previousChapterTail = "Nhân vật vẫn đứng trên sườn núi tuyết trong gió mạnh.",
+            incomingFreesoundMusicQuery = "dark fantasy cinematic",
+            incomingFreesoundAmbienceQueries = listOf("snow wind", "mountain wind"),
+        )
+        assertTrue(prompt.contains("ưu tiên 2 từ"))
+        assertTrue(prompt.contains("không quá 3 search term"))
+        assertTrue(prompt.contains("Freesound mặc định coi các term là bắt buộc"))
+        assertTrue(prompt.contains("debris crash"))
+        assertTrue(prompt.contains("forest wind"))
+        assertTrue(prompt.contains("CÙNG NGUYÊN TẮC VỚI MODE 2"))
+        assertTrue(prompt.contains("Im lặng là lựa chọn bình đẳng với nhạc"))
+        assertTrue(prompt.contains("Không có độ dài tối thiểu cho AMBIENCE"))
+        assertTrue(prompt.contains("Độ dài vật lý của file ambience KHÔNG quyết định ranh giới scene"))
+        assertTrue(prompt.contains("ONE-SHOT"))
+        assertTrue(prompt.contains("COUNTED REPEAT"))
+        assertTrue(prompt.contains("ACTION LOOP"))
+        assertTrue(prompt.contains("không gửi catalog local", ignoreCase = true))
+        assertTrue(prompt.contains("MODE3_PREVIOUS_BOUNDARY_MUSIC_QUERY: dark fantasy cinematic"))
+        assertTrue(prompt.contains("- snow wind"))
+        assertTrue(prompt.contains("- mountain wind"))
+        assertTrue(prompt.contains("không phải lệnh bắt buộc giữ", ignoreCase = true))
+        assertTrue(prompt.contains("giữ NGUYÊN VĂN query"))
+        assertTrue(prompt.contains("sang chương mới KHÔNG phải là lý do đổi ambience"))
+        assertTrue(prompt.contains("im lặng tốt hơn một âm sai cảnh"))
+        assertFalse(prompt.contains("TRACK_CATALOG"))
+        assertFalse(prompt.contains("AMBIENCE_CATALOG"))
+        assertFalse(prompt.contains("SFX_CATALOG"))
     }
 }

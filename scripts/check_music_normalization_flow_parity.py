@@ -23,10 +23,14 @@ for token in [
         raise SystemExit("MUSIC_NORMALIZE_FLOW worker missing: " + token)
 
 for token in [
-    'title = "Attack"',
-    'title = "Release"',
-    'label = "CHUẨN HÓA TOÀN BỘ ÂM THANH"',
-    'title = { Text("CHUẨN HÓA TOÀN BỘ ÂM THANH") }',
+    'title = "Attack nhạc AI local"',
+    'title = "Release nhạc AI local"',
+    'title = "Attack nhạc Mode 3"',
+    'title = "Release nhạc Mode 3"',
+    'label = "CHUẨN HÓA KHO NHẠC"',
+    'label = "CHUẨN HÓA THƯ VIỆN AI LOCAL"',
+    'label = "CHUẨN HÓA / BẢO TRÌ FILE ÂM THANH MODE 3"',
+    'title = { Text(if (normalizationKinds == setOf(AudioAssetKind.MUSIC)) "CHUẨN HÓA KHO NHẠC" else "CHUẨN HÓA KHO ÂM THANH") }',
     'title = "Nhạc nền ($musicCount tệp)"',
     'title = "Âm thanh môi trường ($ambienceCount tệp)"',
     'title = "Hiệu ứng âm thanh ($sfxCount tệp)"',
@@ -92,6 +96,8 @@ for token in [
 
 for forbidden in [
     'label = "CHUẨN HÓA TOÀN BỘ KHO NHẠC"',
+    'label = "CHUẨN HÓA TOÀN BỘ ÂM THANH"',
+    'title = { Text("CHUẨN HÓA TOÀN BỘ ÂM THANH") }',
     'title = "Mức chuẩn hóa"',
     "normalizationTarget(kind)",
 ]:

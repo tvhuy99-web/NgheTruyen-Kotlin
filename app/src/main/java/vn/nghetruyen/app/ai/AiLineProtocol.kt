@@ -4,6 +4,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
 import vn.nghetruyen.app.audio.AmbienceSfxPlan
+import vn.nghetruyen.app.audio.AudioAssetKind
+import vn.nghetruyen.app.freesound.FreesoundAutoRequirementCodec
 
 object AiLineProtocol {
     data class XpkParseOptions(
@@ -17,6 +19,8 @@ object AiLineProtocol {
         val includeSceneMusic: Boolean = false,
         val includeAmbience: Boolean = false,
         val includeSoundEffects: Boolean = false,
+        val includeFreesoundAudioRequirements: Boolean = false,
+        val freesoundRequirementKinds: Set<AudioAssetKind> = emptySet(),
         val speedLimitPct: Float = 10f,
         val pitchLimitPct: Float = 10f,
         val volumeLimitPct: Float = 10f,
@@ -99,6 +103,20 @@ object AiLineProtocol {
             }
         } else AmbienceSfxPlan()
 
+        var freesoundRequirementError = ""
+        val freesoundRequirements = if (options.includeFreesoundAudioRequirements) {
+            runCatching {
+                FreesoundAutoRequirementCodec.parse(
+                    root = root,
+                    validUnitIds = options.validUnitIds,
+                    enabledKinds = options.freesoundRequirementKinds,
+                )
+            }.getOrElse { error ->
+                freesoundRequirementError = error.message ?: "Kết quả nhu cầu Freesound không hợp lệ"
+                emptyList()
+            }
+        } else emptyList()
+
         return NarrationPlan(
             voiceCast = voicePlan,
             musicCues = scenes,
@@ -106,6 +124,8 @@ object AiLineProtocol {
             ambienceScenes = audioPlan.ambienceScenes,
             soundEffectCues = audioPlan.soundEffectCues,
             audioDirectionError = audioDirectionError,
+            freesoundRequirements = freesoundRequirements,
+            freesoundRequirementError = freesoundRequirementError,
         )
     }
 

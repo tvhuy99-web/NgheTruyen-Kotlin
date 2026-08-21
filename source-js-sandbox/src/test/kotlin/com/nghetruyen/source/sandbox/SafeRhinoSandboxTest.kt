@@ -95,6 +95,7 @@ class SafeRhinoSandboxTest {
         val executor = SafeRhinoExecutor(
             policy = JsSandboxPolicy(maxHeapGrowthBytes = 10),
             memoryUsageBytes = { usedHeap },
+            memoryPressureRelief = {},
         )
 
         val failure = runCatching {
@@ -106,6 +107,30 @@ class SafeRhinoSandboxTest {
 
         assertTrue(failure is JsSandboxException)
         assertEquals(JsSandboxFailure.MEMORY_LIMIT, (failure as JsSandboxException).failure)
+    }
+
+    @Test
+    fun transientHeapGrowthIsRecheckedAfterPressureRelief() {
+        var usedHeap = 100L
+        var reliefCalls = 0
+        val executor = SafeRhinoExecutor(
+            policy = JsSandboxPolicy(maxHeapGrowthBytes = 10),
+            memoryUsageBytes = { usedHeap },
+            memoryPressureRelief = {
+                reliefCalls += 1
+                usedHeap = 105L
+            },
+        )
+
+        val result = executor.execute { _, _, budget ->
+            usedHeap = 111L
+            budget.charge(1)
+            "ok"
+        }
+
+        assertEquals("ok", result.value)
+        assertEquals(1, reliefCalls)
+        assertEquals(11L, result.peakHeapGrowthBytes)
     }
 
     private data class ContextResult(val value: String)

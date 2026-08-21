@@ -19,9 +19,9 @@ data class AudioDirectionAsset(
 )
 
 /**
- * One logical ambience interval. Two rows may overlap on the same UNIT range to represent the
- * PRIMARY + SECONDARY ambience layers. Keeping one id per row preserves the persisted/export format
- * while allowing the runtime and mixer to compose at most two compatible environmental layers.
+ * One logical ambience interval. Any number of physically distinct, compatible ambience rows may
+ * overlap on the same UNIT range when the story really contains those simultaneous sources.
+ * Keeping one id per row preserves the persisted/export format without imposing a directing quota.
  */
 data class AmbienceScene(
     val startUnitId: String,
@@ -60,10 +60,11 @@ data class AmbienceSfxPlan(
 )
 
 object AudioDirectionLimits {
-    const val MAX_CONCURRENT_AMBIENCE = 2
-    const val MAX_CONCURRENT_SFX = 3
-    const val MAX_SFX_REPEAT_COUNT = 16
-    const val MIN_AMBIENCE_SCENE_UNITS = 2
+    // Compatibility sentinels only. AI-authored AMBIENCE/SFX are not quantity-capped by the app.
+    const val MAX_CONCURRENT_AMBIENCE = Int.MAX_VALUE
+    const val MAX_CONCURRENT_SFX = Int.MAX_VALUE
+    const val MAX_SFX_REPEAT_COUNT = Int.MAX_VALUE
+    const val MIN_AMBIENCE_SCENE_UNITS = 1
 }
 
 /**

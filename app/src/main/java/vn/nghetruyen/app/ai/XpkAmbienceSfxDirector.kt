@@ -12,9 +12,9 @@ import vn.nghetruyen.app.audio.SfxCadence
  * Validator/persistence codec for the Ambience and SFX portions of the unified XPK chapter plan.
  * Prompt composition lives only in [XpkUnifiedNarrationPrompt] so there is no second AI contract.
  *
- * Ambience keeps the v1 persisted schema (one ambience_id per row), but two rows may overlap to
- * express two compatible logical ambience layers. Existing two-field SFX cues remain readable;
- * rhythm/span fields are optional extensions of that persisted schema.
+ * Ambience keeps the v1 persisted schema (one ambience_id per row), while any number of compatible
+ * rows may overlap when the scene contains multiple real environmental sources. Existing two-field
+ * SFX cues remain readable; rhythm/span fields are optional extensions of that persisted schema.
  */
 object XpkAmbienceSfxDirector {
     const val ENGINE = "xpk-audio-direction-v1"
@@ -36,8 +36,12 @@ object XpkAmbienceSfxDirector {
         require(validUnitIds.isNotEmpty()) { "Timeline UNIT hợp lệ đang trống." }
         val root = JSONObject(raw.trim())
         val keys = root.keys().asSequence().toSet()
-        require(keys == setOf("ambience_scenes", "sfx_cues")) {
-            "Kết quả audio direction nội bộ phải có ambience_scenes và sfx_cues."
+        val allowedRootKeys = setOf("engine", "ambience_scenes", "sfx_cues")
+        require("ambience_scenes" in keys && "sfx_cues" in keys && keys.all { it in allowedRootKeys }) {
+            "Kết quả audio direction nội bộ phải có ambience_scenes và sfx_cues, không được có trường lạ."
+        }
+        if ("engine" in keys) {
+            require(root.optString("engine") == ENGINE) { "Audio direction dùng engine không hợp lệ." }
         }
         val order = validUnitIds.withIndex().associate { it.value to it.index }
 
@@ -80,10 +84,7 @@ object XpkAmbienceSfxDirector {
         )
 
         val sfxArray = root.optJSONArray("sfx_cues") ?: JSONArray()
-        val maxSfx = maxSfxForUnits(validUnitIds.size)
-        require(sfxArray.length() <= maxSfx) { "AI trả quá nhiều SFX cho một chương." }
         val soundEffectCues = mutableListOf<SoundEffectCue>()
-        val usedSignatures = hashSetOf<String>()
         var previousSfxIndex = -1
         for (index in 0 until sfxArray.length()) {
             val row = sfxArray.getJSONObject(index)
@@ -118,8 +119,8 @@ object XpkAmbienceSfxDirector {
             require(stopIndex == null || stopIndex > unitIndex) {
                 "sfx_cues[$index] phải dừng ở một UNIT nằm sau unit_id; stop_unit_id là ranh giới loại trừ."
             }
-            require(repeatCount in 1..AudioDirectionLimits.MAX_SFX_REPEAT_COUNT) {
-                "sfx_cues[$index] có repeat_count ngoài giới hạn."
+            require(repeatCount >= 1) {
+                "sfx_cues[$index] có repeat_count phải lớn hơn hoặc bằng 1."
             }
             require(!loopUntilStop || stopUnitId != null) {
                 "sfx_cues[$index] loop_until_stop bắt buộc có stop_unit_id."
@@ -136,15 +137,6 @@ object XpkAmbienceSfxDirector {
                 cadence = cadence,
                 loopUntilStop = loopUntilStop,
             )
-            val signature = listOf(
-                unitId,
-                effectId,
-                stopUnitId.orEmpty(),
-                repeatCount.toString(),
-                cadence.name,
-                loopUntilStop.toString(),
-            ).joinToString("|")
-            require(usedSignatures.add(signature)) { "sfx_cues[$index] lặp lại đúng cùng một cue." }
             soundEffectCues += cue
             previousSfxIndex = unitIndex
         }
@@ -274,5 +266,4 @@ object XpkAmbienceSfxDirector {
         }
     }
 
-    private fun maxSfxForUnits(unitCount: Int): Int = ((unitCount + 3) / 4).coerceIn(4, 48)
 }

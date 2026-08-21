@@ -114,7 +114,7 @@ class XpkAmbienceSfxDirectorTest {
     }
 
     @Test
-    fun rejectsUnknownIdsThirdAmbienceLayerAndFourthConcurrentSfx() {
+    fun rejectsUnknownIdsButAllowsManyAmbienceLayersAndConcurrentSfx() {
         assertFails {
             XpkAmbienceSfxDirector.parseAndValidate(
                 raw = """{"ambience_scenes":[],"sfx_cues":[{"unit_id":"P0002-U01","effect_id":"missing"}]}""",
@@ -125,39 +125,38 @@ class XpkAmbienceSfxDirectorTest {
                 soundEffectsEnabled = true,
             )
         }
-        assertFails {
-            XpkAmbienceSfxDirector.parseAndValidate(
-                raw = """
-                    {"ambience_scenes":[
-                      {"start_id":"P0001-U01","end_id":"P0004-U01","ambience_id":"rain"},
-                      {"start_id":"P0001-U01","end_id":"P0004-U01","ambience_id":"forest"},
-                      {"start_id":"P0001-U01","end_id":"P0004-U01","ambience_id":"wind"}
-                    ],"sfx_cues":[]}
-                """.trimIndent(),
-                validUnitIds = units,
-                validAmbienceIds = setOf("rain", "forest", "wind"),
-                validSfxIds = emptySet(),
-                ambienceEnabled = true,
-                soundEffectsEnabled = false,
-            )
-        }
-        assertFails {
-            XpkAmbienceSfxDirector.parseAndValidate(
-                raw = """
-                    {"ambience_scenes":[],"sfx_cues":[
-                      {"unit_id":"P0001-U01","effect_id":"a","stop_unit_id":"P0004-U01","loop_until_stop":true},
-                      {"unit_id":"P0001-U01","effect_id":"b","stop_unit_id":"P0004-U01","loop_until_stop":true},
-                      {"unit_id":"P0001-U01","effect_id":"c","stop_unit_id":"P0004-U01","loop_until_stop":true},
-                      {"unit_id":"P0002-U01","effect_id":"d"}
-                    ]}
-                """.trimIndent(),
-                validUnitIds = units,
-                validAmbienceIds = emptySet(),
-                validSfxIds = setOf("a", "b", "c", "d"),
-                ambienceEnabled = false,
-                soundEffectsEnabled = true,
-            )
-        }
+        val ambiencePlan = XpkAmbienceSfxDirector.parseAndValidate(
+            raw = """
+                {"ambience_scenes":[
+                  {"start_id":"P0001-U01","end_id":"P0004-U01","ambience_id":"rain"},
+                  {"start_id":"P0001-U01","end_id":"P0004-U01","ambience_id":"forest"},
+                  {"start_id":"P0001-U01","end_id":"P0004-U01","ambience_id":"wind"}
+                ],"sfx_cues":[]}
+            """.trimIndent(),
+            validUnitIds = units,
+            validAmbienceIds = setOf("rain", "forest", "wind"),
+            validSfxIds = emptySet(),
+            ambienceEnabled = true,
+            soundEffectsEnabled = false,
+        )
+        assertEquals(3, ambiencePlan.ambienceScenes.size)
+
+        val sfxPlan = XpkAmbienceSfxDirector.parseAndValidate(
+            raw = """
+                {"ambience_scenes":[],"sfx_cues":[
+                  {"unit_id":"P0001-U01","effect_id":"a","stop_unit_id":"P0004-U01","loop_until_stop":true},
+                  {"unit_id":"P0001-U01","effect_id":"b","stop_unit_id":"P0004-U01","loop_until_stop":true},
+                  {"unit_id":"P0001-U01","effect_id":"c","stop_unit_id":"P0004-U01","loop_until_stop":true},
+                  {"unit_id":"P0002-U01","effect_id":"d"}
+                ]}
+            """.trimIndent(),
+            validUnitIds = units,
+            validAmbienceIds = emptySet(),
+            validSfxIds = setOf("a", "b", "c", "d"),
+            ambienceEnabled = false,
+            soundEffectsEnabled = true,
+        )
+        assertEquals(4, sfxPlan.soundEffectCues.size)
     }
 
     @Test
@@ -209,17 +208,16 @@ class XpkAmbienceSfxDirectorTest {
     }
 
     @Test
-    fun rejectsOneUnitAmbienceFlicker() {
-        assertFails {
-            XpkAmbienceSfxDirector.parseAndValidate(
-                raw = """{"ambience_scenes":[{"start_id":"P0002-U01","end_id":"P0002-U01","ambience_id":"rain"}],"sfx_cues":[]}""",
-                validUnitIds = units,
-                validAmbienceIds = setOf("rain"),
-                validSfxIds = emptySet(),
-                ambienceEnabled = true,
-                soundEffectsEnabled = false,
-            )
-        }
+    fun acceptsOneUnitAmbienceWhenAiDecidesTheSourceIsThatBrief() {
+        val plan = XpkAmbienceSfxDirector.parseAndValidate(
+            raw = """{"ambience_scenes":[{"start_id":"P0002-U01","end_id":"P0002-U01","ambience_id":"rain"}],"sfx_cues":[]}""",
+            validUnitIds = units,
+            validAmbienceIds = setOf("rain"),
+            validSfxIds = emptySet(),
+            ambienceEnabled = true,
+            soundEffectsEnabled = false,
+        )
+        assertEquals(1, plan.ambienceScenes.size)
     }
 
     @Test

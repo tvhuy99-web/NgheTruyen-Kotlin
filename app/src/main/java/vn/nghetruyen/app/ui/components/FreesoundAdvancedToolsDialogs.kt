@@ -30,6 +30,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import vn.nghetruyen.app.NgheTruyenApplication
 import vn.nghetruyen.app.audio.AudioAssetClassifier
@@ -505,7 +506,8 @@ fun FreesoundSimilarAssetDialog(
     }
     val remoteSoundId = remember(track.uri) { FreesoundImporter.soundIdFromManagedUri(track.uri) }
     val category = kind.toAdvancedFreesoundCategory()
-    val chapterStoryId = PlaybackQueueStore.state.value.storyId
+    val playbackState by PlaybackQueueStore.state.collectAsStateWithLifecycle()
+    val chapterStoryId = playbackState.storyId
 
     var loading by remember(track.id) { mutableStateOf(true) }
     var importingId by remember(track.id) { mutableStateOf<Int?>(null) }

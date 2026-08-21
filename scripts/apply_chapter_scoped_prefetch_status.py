@@ -12,7 +12,7 @@ store = Path("app/src/main/java/vn/nghetruyen/app/playback/PlaybackQueueStore.kt
 replace_once(
     store,
     """enum class NarrationAutomationStage {\n    IDLE,\n    CURRENT_PLANNING,\n    CURRENT_APPLYING,\n    CURRENT_READY,\n    NEXT_LOADING,\n    NEXT_PLANNING,\n    NEXT_READY,\n    FAILED,\n}\n\ndata class PlaybackSnapshot(""",
-    """enum class NarrationAutomationStage {\n    IDLE,\n    CURRENT_PLANNING,\n    CURRENT_APPLYING,\n    CURRENT_READY,\n    NEXT_LOADING,\n    NEXT_PLANNING,\n    NEXT_READY,\n    FAILED,\n}\n\ninternal data class FreesoundTransferSummary(\n    val downloadedAssets: Int = 0,\n    val reusedAssets: Int = 0,\n)\n\ndata class PlaybackSnapshot(""",
+    """enum class NarrationAutomationStage {\n    IDLE,\n    CURRENT_PLANNING,\n    CURRENT_APPLYING,\n    CURRENT_READY,\n    NEXT_LOADING,\n    NEXT_PLANNING,\n    NEXT_READY,\n    FAILED,\n}\n\ndata class FreesoundTransferSummary(\n    val downloadedAssets: Int = 0,\n    val reusedAssets: Int = 0,\n)\n\ndata class PlaybackSnapshot(""",
 )
 replace_once(
     store,

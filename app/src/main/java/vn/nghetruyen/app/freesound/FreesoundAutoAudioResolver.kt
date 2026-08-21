@@ -722,8 +722,7 @@ class FreesoundAutoAudioResolver(
             is FreesoundSearchResult.Failure -> FreesoundAutoSearchOutcome(
                 sound = null,
                 failureMessage = result.message,
-                retryable = result.httpCode == null || result.httpCode in setOf(401, 403, 429) ||
-                    (result.httpCode ?: 0) >= 500,
+                retryable = isRetryableSearchFailure(result.httpCode),
                 resultCount = 0,
                 httpCode = result.httpCode,
                 queryUsed = query,
@@ -757,6 +756,8 @@ class FreesoundAutoAudioResolver(
             "into", "onto", "single", "one", "sound", "effect", "audio",
         )
 
+        internal fun isRetryableSearchFailure(httpCode: Int?): Boolean =
+            httpCode == null || httpCode == 429 || httpCode >= 500
         internal fun searchQueryForRetry(query: String, retryAttempt: Int): String {
             val original = query.trim()
             if (retryAttempt <= 1 || original.isBlank()) return original
@@ -923,7 +924,6 @@ object FreesoundAutoPlanBuilder {
                     }
                 }
         }
-        stabilizeMusicAssignments(selectedByUnit)
         return musicAssignmentsToCues(selectedByUnit, validUnitIds)
     }
 
@@ -942,26 +942,7 @@ object FreesoundAutoPlanBuilder {
             val safeTrack = cue.trackId.takeIf { it in validTrackIds } ?: XpkSceneMusicParity.SILENCE_TRACK_ID
             for (index in start..end) selected[index] = safeTrack
         }
-        stabilizeMusicAssignments(selected)
         return musicAssignmentsToCues(selected, validUnitIds)
-    }
-
-    private fun stabilizeMusicAssignments(rows: MutableList<String>) {
-        if (rows.size < 3) return
-        while (true) {
-            val runs = musicRuns(rows)
-            if (runs.size <= 2) return
-            val short = runs.subList(1, runs.lastIndex).firstOrNull { it.end - it.start + 1 < 2 } ?: return
-            val runIndex = runs.indexOf(short)
-            val left = runs[runIndex - 1]
-            val right = runs[runIndex + 1]
-            val replacement = when {
-                left.trackId == right.trackId -> left.trackId
-                left.trackId != XpkSceneMusicParity.SILENCE_TRACK_ID -> left.trackId
-                else -> right.trackId
-            }
-            for (index in short.start..short.end) rows[index] = replacement
-        }
     }
 
     private fun musicRuns(rows: List<String>): List<MusicRun> {
@@ -1018,7 +999,8 @@ object FreesoundAutoPlanBuilder {
             val end = order.getValue(candidate.scene.endUnitId)
             val duplicate = accepted.any { existing ->
                 existing.scene.ambienceId == candidate.scene.ambienceId &&
-                    rangesOverlap(start, end, order.getValue(existing.scene.startUnitId), order.getValue(existing.scene.endUnitId))
+                    existing.scene.startUnitId == candidate.scene.startUnitId &&
+                    existing.scene.endUnitId == candidate.scene.endUnitId
             }
             if (duplicate) return@forEach
             val wouldOverflow = (start..end).any { unit ->
@@ -1142,8 +1124,6 @@ object FreesoundAutoPlanBuilder {
         return RequiredCoverage(missingMusic, missingAmbience, missingSfx)
     }
 
-    private fun rangesOverlap(firstStart: Int, firstEnd: Int, secondStart: Int, secondEnd: Int): Boolean =
-        firstStart <= secondEnd && secondStart <= firstEnd
 }
 
 private fun AudioAssetKind.toFreesoundCategory(): FreesoundCategory = when (this) {

@@ -36,7 +36,7 @@ class FreesoundImporterTest {
     }
 
     @Test
-        fun previewPlayerUsesOnlyTheRealUrlReturnedByFreesound() {
+    fun previewPlayerUsesOnlyTheRealUrlReturnedByFreesound() {
         assertEquals(
             listOf("https://cdn.example/77-hq.ogg?token=x"),
             FreesoundPreviewPlayer.previewCandidates("https://cdn.example/77-hq.ogg?token=x"),
@@ -67,7 +67,7 @@ class FreesoundImporterTest {
             FreesoundImporter.tagsForImport(AudioAssetKind.SFX, "   "),
         )
 
-            val provenance = FreesoundImporter.tagsForImport(
+        val provenance = FreesoundImporter.tagsForImport(
             kind = AudioAssetKind.SFX,
             description = "Close thunder",
             soundId = 123,
@@ -164,6 +164,21 @@ class FreesoundImporterTest {
         assertTrue(FreesoundImporter.hasValidNormalization(ready))
         assertFalse(FreesoundImporter.hasValidNormalization(ready.copy(normalizationError = "decode failed")))
         assertFalse(FreesoundImporter.hasValidNormalization(ready.copy(normalizationGainDb = Float.NaN)))
+    }
+
+    @Test
+    fun retryableNormalizationFailurePreservesDownloadedFileForResume() {
+        assertTrue(
+            FreesoundImporter.shouldPreserveImportedFile(
+                FreesoundNormalizationException("temporary", retryable = true),
+            ),
+        )
+        assertFalse(
+            FreesoundImporter.shouldPreserveImportedFile(
+                FreesoundNormalizationException("decode failed", retryable = false),
+            ),
+        )
+        assertFalse(FreesoundImporter.shouldPreserveImportedFile(IllegalStateException("download failed")))
     }
 
     @Test

@@ -103,11 +103,13 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if [ "${{ steps.verify.outputs.success }}" = "true" ]; then
             for file in \
+              app/src/main/java/vn/nghetruyen/app/ai/XpkUnifiedNarrationPrompt.kt \
               app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt \
               app/src/main/java/vn/nghetruyen/app/freesound/FreesoundImporter.kt \
               app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt \
               app/src/main/java/vn/nghetruyen/app/playback/AudioDirectionRuntime.kt \
               app/src/main/java/vn/nghetruyen/app/playback/SceneAmbienceController.kt \
+              app/src/test/java/vn/nghetruyen/app/ai/XpkAudioPromptQualityTest.kt \
               app/src/test/java/vn/nghetruyen/app/playback/AmbienceLoopTransitionPolicyTest.kt \
               source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt \
               source-diagnostics/src/main/kotlin/vn/nghetruyen/source/diagnostics/SourceDiagnostics.kt
@@ -122,7 +124,7 @@ jobs:
             exit 0
           fi
           if [ "${{ steps.verify.outputs.success }}" = "true" ]; then
-            git commit -m "Smooth short ambience loops and runtime audio"
+            git commit -m "Finalize file-adaptive ambience and audio prompt"
           else
             git commit -m "Record all-fixes verification failure"
           fi

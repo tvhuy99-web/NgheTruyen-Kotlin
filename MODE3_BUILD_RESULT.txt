@@ -1,5 +1,5 @@
 RUN_ID=32387815009
-RUN_ATTEMPT=6
+RUN_ATTEMPT=7
 TRIGGER_SHA=444e4523803ba041259df8304e1a9687228b3066
 SUCCESS=true
 EXTRACT_STATUS=0
@@ -55,12 +55,10 @@ SKIP app/src/test/java/vn/nghetruyen/app/ai/XpkAudioPromptQualityTest.kt: incomi
 SKIP app/src/test/java/vn/nghetruyen/app/ai/XpkAudioPromptQualityTest.kt: MODE3_PREVIOUS_BOUNDARY_MUSIC_QUERY: dark fantasy cinematic
 SKIP app/src/test/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioTest.kt: fun relaxedSearchStillRejectsAWeakGenericSemanticMatch()
 Audio selection + cross-chapter continuity patch prepared.
-PATCH app/src/main/java/vn/nghetruyen/app/playback/SceneAmbienceController.kt: import kotlin.math.cos
-PATCH app/src/main/java/vn/nghetruyen/app/playback/SceneAmbienceController.kt: internal object AmbienceLoopTransitionPolicy
-PATCH app/src/main/java/vn/nghetruyen/app/playback/SceneAmbienceController.kt: AmbienceLoopTransitionPolicy.overlapRange(
-PATCH app/src/main/java/vn/nghetruyen/app/playback/SceneAmbienceController.kt: AmbienceLoopTransitionPolicy.crossfadeGains(fraction)
-PATCH app/src/main/java/vn/nghetruyen/app/playback/SceneAmbienceController.kt: AmbienceLoopTransitionPolicy.startOffsetRange(duration)
+SKIP SceneAmbienceController: file-duration continuous policy already present
 WRITE app/src/test/java/vn/nghetruyen/app/playback/AmbienceLoopTransitionPolicyTest.kt
+PATCH XpkUnifiedNarrationPrompt: file duration is a runtime concern
+PATCH XpkAudioPromptQualityTest: verify file-duration independence
 Prepared runtime + audio-continuity + short ambience loop fixes for verified commit.
 
 === TEST LOG (tail) ===
@@ -244,9 +242,9 @@ w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/test/jav
 > Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
 > Task :app:processDebugUnitTestJavaRes
 > Task :app:testDebugUnitTest
-gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/verify-1787298503195.json
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/verify-1787299779952.json
 
-BUILD SUCCESSFUL in 3m 28s
+BUILD SUCCESSFUL in 3m 20s
 55 actionable tasks: 55 executed
 
 === BUILD LOG (tail) ===
@@ -339,8 +337,8 @@ Daemon will be stopped at the end of the build
 > Task :app:generateDebugAssets UP-TO-DATE
 > Task :app:mergeDebugAssets UP-TO-DATE
 > Task :app:compressDebugAssets
-> Task :app:desugarDebugFileDependencies
 > Task :app:l8DexDesugarLibDebug
+> Task :app:desugarDebugFileDependencies
 > Task :app:dexBuilderDebug
 > Task :app:mergeDebugGlobalSynthetics
 > Task :source-js-sandbox:processResources NO-SOURCE
@@ -351,20 +349,20 @@ Daemon will be stopped at the end of the build
 > Task :app:checkDebugDuplicateClasses
 > Task :app:mergeDebugNativeLibs
 > Task :app:mergeDebugJavaResource
-> Task :app:mergeLibDexDebug
-> Task :app:validateSigningDebug
-> Task :app:writeDebugAppMetadata
-> Task :app:writeDebugSigningConfigVersions
 
 > Task :app:stripDebugDebugSymbols
 Unable to strip the following libraries, packaging them as they are: libandroidx.graphics.path.so, libdatastore_shared_counter.so. Run with --info option to learn more.
 
+> Task :app:validateSigningDebug
+> Task :app:mergeLibDexDebug
+> Task :app:writeDebugAppMetadata
+> Task :app:writeDebugSigningConfigVersions
 > Task :app:mergeProjectDexDebug
 > Task :app:mergeExtDexDebug
 > Task :app:packageDebug
 > Task :app:createDebugApkListingFileRedirect
 > Task :app:assembleDebug
-gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/verify-1787298711086.json
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/verify-1787299978591.json
 
-BUILD SUCCESSFUL in 1m 47s
+BUILD SUCCESSFUL in 1m 42s
 62 actionable tasks: 18 executed, 44 up-to-date

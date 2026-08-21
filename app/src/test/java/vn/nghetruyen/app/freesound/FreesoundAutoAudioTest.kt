@@ -245,4 +245,32 @@ class FreesoundAutoAudioTest {
         assertEquals("paper burn", parsed.single().query)
     }
 
+    @Test
+    fun resolveResultCountsUniqueDownloadedAndReusedTracks() {
+        val needA = FreesoundAutoSearchNeed(
+            kind = vn.nghetruyen.app.audio.AudioAssetKind.AMBIENCE,
+            query = "snow mountain wind",
+            importance = FreesoundRequirementImportance.REQUIRED,
+            usages = emptyList(),
+        )
+        val needB = FreesoundAutoSearchNeed(
+            kind = vn.nghetruyen.app.audio.AudioAssetKind.SFX,
+            query = "sword clash",
+            importance = FreesoundRequirementImportance.OPTIONAL,
+            usages = emptyList(),
+        )
+        val result = FreesoundAutoResolveResult(
+            resolved = listOf(
+                FreesoundAutoResolvedNeed(needA, "track-new", "FREESOUND"),
+                FreesoundAutoResolvedNeed(needA, "track-new", "FREESOUND"),
+                FreesoundAutoResolvedNeed(needB, "track-cache", "CACHE"),
+            ),
+            warnings = emptyList(),
+            importedTrackIds = setOf("track-new"),
+        )
+        assertEquals(setOf("track-new", "track-cache"), result.resolvedTrackIds)
+        assertEquals(1, result.downloadedTrackCount)
+        assertEquals(1, result.reusedTrackCount)
+    }
+
 }

@@ -30,9 +30,16 @@ if missing:
     raise SystemExit("REFERENCE_WORKFLOW missing Reader markers: " + repr(missing))
 
 for marker in [
+    "StoryAudioSourceMode.LOCAL_MANUAL",
+    "StoryAudioSourceMode.AI_LOCAL",
+    "StoryAudioSourceMode.AI_FREESOUND",
     'label = "QUẢN LÝ NHẠC ($musicTrackCount)"',
-    'label = "QUẢN LÝ ÂM THANH MÔI TRƯỜNG',
-    'label = "QUẢN LÝ HIỆU ỨNG ÂM THANH',
+    'label = "QUẢN LÝ NHẠC LOCAL',
+    'label = "QUẢN LÝ MÔI TRƯỜNG LOCAL',
+    'label = "QUẢN LÝ SFX LOCAL',
+    'label = "QUẢN LÝ NHẠC ĐÃ TẢI',
+    'label = "QUẢN LÝ MÔI TRƯỜNG ĐÃ TẢI',
+    'label = "QUẢN LÝ SFX ĐÃ TẢI',
     "UnifiedAudioAssetManagerDialog(",
 ]:
     if marker not in component:
@@ -41,6 +48,10 @@ for marker in [
 for marker in [
     'label = { Text("Mô tả") }',
     'UnifiedAssetActionButton("CHUẨN HÓA")',
+    'Text("TÌM TRÊN FREESOUND")',
+    'Text("TÌM & TẢI THÊM TRÊN FREESOUND")',
+    'Text("CÔNG CỤ FREESOUND NÂNG CAO")',
+    'UnifiedAssetActionButton("TÌM ÂM THANH TƯƠNG TỰ")',
     'Text("LƯU")',
     'Text("XÓA")',
 ]:
@@ -48,9 +59,9 @@ for marker in [
         raise SystemExit("REFERENCE_WORKFLOW audio manager marker missing: " + marker)
 
 manager_positions = [
-    component.find('label = "QUẢN LÝ NHẠC ($musicTrackCount)"'),
-    component.find('label = "QUẢN LÝ ÂM THANH MÔI TRƯỜNG'),
-    component.find('label = "QUẢN LÝ HIỆU ỨNG ÂM THANH'),
+    component.find('label = "QUẢN LÝ NHẠC LOCAL'),
+    component.find('label = "QUẢN LÝ MÔI TRƯỜNG LOCAL'),
+    component.find('label = "QUẢN LÝ SFX LOCAL'),
 ]
 if not (0 <= manager_positions[0] < manager_positions[1] < manager_positions[2]):
     raise SystemExit("REFERENCE_WORKFLOW three audio managers must stay adjacent in Music/Ambience/SFX order")
@@ -84,8 +95,9 @@ if music_start < 0 or music_end < 0:
     raise SystemExit("REFERENCE_WORKFLOW Background Music dialog missing")
 music_dialog = reader[music_start:music_end]
 for marker in [
-    'Text("Bật nhạc nền", Modifier.weight(1f))',
     "AudioDirectionLayerSwitches(",
+    "onSourceModeChanged = { mode ->",
+    'Text("Bật nhạc nền thủ công", Modifier.weight(1f))',
     "musicTrackCount = musicTracks.size",
     "onManageMusic = {",
     'Text("Chế độ phát"',
@@ -95,8 +107,8 @@ for marker in [
         raise SystemExit("REFERENCE_WORKFLOW music control missing: " + marker)
 if 'ReaderMenuButton("QUẢN LÝ DANH SÁCH NHẠC")' in music_dialog:
     raise SystemExit("REFERENCE_WORKFLOW duplicate standalone music manager remains")
-if music_dialog.find('Text("Bật nhạc nền"') > music_dialog.find("AudioDirectionLayerSwitches("):
-    raise SystemExit("REFERENCE_WORKFLOW master Background Music switch must be first")
+if music_dialog.find("AudioDirectionLayerSwitches(") > music_dialog.find('Text("Bật nhạc nền thủ công"'):
+    raise SystemExit("REFERENCE_WORKFLOW source-mode controls must precede the manual-only music switch")
 for obsolete in [
     "CÂN BẰNG ÂM THANH",
     'title = { Text("AI & CHUYỂN NGỮ") }',

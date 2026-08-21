@@ -2046,15 +2046,16 @@ class ReaderPlaybackService : Service() {
                         val musicApplied = hasSceneMusicPlan()
                         val mode3 = StoryAudioModeRouter.usesAiFreesound(storyAudioSourceMode)
                         val warning = warnings.firstOrNull()?.takeIf(String::isNotBlank)
-                        val audioStatus = when {
-                            !mode3 -> if (musicApplied) " và đã áp dụng nhạc cảnh" else ""
-                            planResult == null -> " • Mode 3 chưa tạo được kế hoạch âm thanh"
-                            planResult.freesoundRetryRequired ->
-                                " • Freesound đang lỗi tạm thời; sẽ thử resolve lại"
-                            planResult.freesoundResolvedAssets > 0 ->
-                                " • Freesound đã resolve ${planResult.freesoundResolvedAssets} tệp"
-                            shouldPlanAutoStoryAudio() -> " • Freesound chưa resolve được tệp nào"
-                            else -> " • các lớp âm thanh Mode 3 đang tắt"
+                        val audioStatus = if (!mode3) {
+                            if (musicApplied) " và đã áp dụng nhạc cảnh" else ""
+                        } else {
+                            FreesoundPlaybackStatusFormatter.format(
+                                resultPresent = planResult != null,
+                                downloadedAssets = planResult?.freesoundDownloadedAssets ?: 0,
+                                reusedAssets = planResult?.freesoundReusedAssets ?: 0,
+                                retryRequired = planResult?.freesoundRetryRequired ?: false,
+                                audioLayersEnabled = shouldPlanAutoStoryAudio(),
+                            )
                         }
                         PlaybackQueueStore.setNarrationAutomation(
                             stage = NarrationAutomationStage.CURRENT_READY,

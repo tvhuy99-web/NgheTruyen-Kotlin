@@ -56,6 +56,8 @@ class NarrationPlanCoordinator(
         val audioPlanCreated: Boolean = false,
         val freesoundPlanCreated: Boolean = false,
         val freesoundResolvedAssets: Int = 0,
+        val freesoundDownloadedAssets: Int = 0,
+        val freesoundReusedAssets: Int = 0,
         val freesoundRetryRequired: Boolean = false,
         val freesoundRetryAttempts: Int = 0,
         val freesoundRetryExhausted: Boolean = false,
@@ -67,6 +69,8 @@ class NarrationPlanCoordinator(
         val audioCreated: Boolean,
         val resolvedAssets: Int,
         val warnings: List<String>,
+        val downloadedTrackIds: Set<String> = emptySet(),
+        val reusedTrackIds: Set<String> = emptySet(),
         val retryableFailure: Boolean = false,
         val diagnostics: List<String> = emptyList(),
         val attempts: Int = 0,
@@ -226,6 +230,26 @@ class NarrationPlanCoordinator(
             }.onFailure { warnings += it.message ?: "Không cập nhật được trạng thái retry Freesound." }
         }
 
+        if (
+            freesoundMode &&
+            restoredFreesound.resolvedAssets == 0 &&
+            !cachedFreesoundRetryRequired &&
+            !cachedFreesoundRetryExhausted &&
+            cachedFreesoundRequirements != null &&
+            cachedFreesoundRequirements.isNotEmpty() &&
+            standardFreesoundPlanCurrent(content, freesoundKinds, cachedFreesoundRequirements)
+        ) {
+            val reusedTrackIds = cachedFreesoundTrackIds(cachedFreesoundRequirements, freesoundKinds)
+            if (reusedTrackIds.isNotEmpty()) {
+                restoredFreesound = restoredFreesound.copy(
+                    resolvedAssets = reusedTrackIds.size,
+                    reusedTrackIds = reusedTrackIds,
+                    diagnostics = (restoredFreesound.diagnostics +
+                        "CACHE_PLAN_REUSE uniqueTracks=${reusedTrackIds.size}").distinct(),
+                )
+            }
+        }
+
         val voiceNeeded = effectiveVoice && needsVoicePlan(content, force)
         val musicNeeded = effectiveMusic && needsMusicPlan(content, musicTracks, force, StoryAudioSourceMode.AI_LOCAL)
         val audioNeeded = (effectiveAmbience || effectiveSfx) && needsAudioDirectionPlan(
@@ -251,6 +275,8 @@ class NarrationPlanCoordinator(
                 audioPlanCreated = restoredFreesound.audioCreated,
                 freesoundPlanCreated = restoredFreesound.musicCreated || restoredFreesound.audioCreated,
                 freesoundResolvedAssets = restoredFreesound.resolvedAssets,
+                freesoundDownloadedAssets = restoredFreesound.downloadedTrackIds.size,
+                freesoundReusedAssets = (restoredFreesound.reusedTrackIds - restoredFreesound.downloadedTrackIds).size,
                 freesoundRetryRequired = restoredFreesound.retryableFailure,
                 freesoundRetryAttempts = restoredFreesound.attempts,
                 freesoundRetryExhausted = restoredFreesound.retryExhausted,
@@ -299,6 +325,8 @@ class NarrationPlanCoordinator(
                 audioPlanCreated = restoredFreesound.audioCreated,
                 freesoundPlanCreated = restoredFreesound.musicCreated || restoredFreesound.audioCreated,
                 freesoundResolvedAssets = restoredFreesound.resolvedAssets,
+                freesoundDownloadedAssets = restoredFreesound.downloadedTrackIds.size,
+                freesoundReusedAssets = (restoredFreesound.reusedTrackIds - restoredFreesound.downloadedTrackIds).size,
                 freesoundRetryRequired = restoredFreesound.retryableFailure,
                 freesoundRetryAttempts = restoredFreesound.attempts,
                 freesoundRetryExhausted = restoredFreesound.retryExhausted,
@@ -385,6 +413,8 @@ class NarrationPlanCoordinator(
                     audioPlanCreated = localAudioCreated || autoApplied.audioCreated,
                     freesoundPlanCreated = markerCreated || autoApplied.musicCreated || autoApplied.audioCreated,
                     freesoundResolvedAssets = autoApplied.resolvedAssets,
+                    freesoundDownloadedAssets = autoApplied.downloadedTrackIds.size,
+                    freesoundReusedAssets = (autoApplied.reusedTrackIds - autoApplied.downloadedTrackIds).size,
                     freesoundRetryRequired = autoApplied.retryableFailure,
                     freesoundRetryAttempts = autoApplied.attempts,
                     freesoundRetryExhausted = autoApplied.retryExhausted,
@@ -546,6 +576,20 @@ class NarrationPlanCoordinator(
         return !isCurrentTimelineTransform(cached.transformedText, XpkAmbienceSfxDirector.ENGINE, content)
     }
 
+    private suspend fun cachedFreesoundTrackIds(
+        requirements: List<FreesoundAutoRequirement>,
+        kinds: Set<AudioAssetKind>,
+    ): Set<String> {
+        if (requirements.isEmpty() || kinds.isEmpty()) return emptySet()
+        val result = linkedSetOf<String>()
+        requirements.forEach { requirement ->
+            if (requirement.kind in kinds) {
+                freesoundResolver.cachedManagedTrackId(requirement.kind, requirement.query)?.let(result::add)
+            }
+        }
+        return result
+    }
+
     private suspend fun standardFreesoundPlanCurrent(
         content: ChapterContent,
         kinds: Set<AudioAssetKind>,
@@ -664,6 +708,8 @@ class NarrationPlanCoordinator(
         var latest = FreesoundApplyResult(false, false, 0, emptyList())
         val warnings = mutableListOf<String>()
         val diagnostics = mutableListOf<String>()
+        val downloadedTrackIds = linkedSetOf<String>()
+        val reusedTrackIds = linkedSetOf<String>()
         for (attempt in 1..MAX_FREESOUND_RUNTIME_ATTEMPTS) {
             if (attempt > 1) {
                 delay(FREESOUND_RUNTIME_RETRY_DELAY_MS)
@@ -671,6 +717,8 @@ class NarrationPlanCoordinator(
             }
             diagnostics += "RUNTIME_RETRY_START attempt=$attempt/$MAX_FREESOUND_RUNTIME_ATTEMPTS"
             latest = applyFreesoundRequirementsOnce(content, requirements, kinds, attempt)
+            downloadedTrackIds += latest.downloadedTrackIds
+            reusedTrackIds += latest.reusedTrackIds
             warnings += latest.warnings
             diagnostics += latest.diagnostics
             diagnostics += "RUNTIME_RETRY_RESULT attempt=$attempt resolved=${latest.resolvedAssets} retryRequired=${latest.retryableFailure}"
@@ -678,6 +726,8 @@ class NarrationPlanCoordinator(
                 freesoundRetryExhaustedChapters.remove(content.chapter.id)
                 return latest.copy(
                     warnings = warnings.distinct(),
+                    downloadedTrackIds = downloadedTrackIds,
+                    reusedTrackIds = reusedTrackIds - downloadedTrackIds,
                     diagnostics = diagnostics.distinct(),
                     attempts = attempt,
                     retryExhausted = false,
@@ -688,6 +738,8 @@ class NarrationPlanCoordinator(
         freesoundRetryExhaustedChapters += content.chapter.id
         return latest.copy(
             warnings = (warnings + "Freesound không tạo được kế hoạch âm thanh hợp lệ sau 3 lần thử.").distinct(),
+            downloadedTrackIds = downloadedTrackIds,
+            reusedTrackIds = reusedTrackIds - downloadedTrackIds,
             retryableFailure = true,
             diagnostics = (diagnostics + "RUNTIME_RETRY_EXHAUSTED attempts=$MAX_FREESOUND_RUNTIME_ATTEMPTS").distinct(),
             attempts = MAX_FREESOUND_RUNTIME_ATTEMPTS,
@@ -859,12 +911,17 @@ class NarrationPlanCoordinator(
             }
         }
         diagnostics += "PLAN_REQUIRED_COVERAGE musicMissing=$requiredMusicMissing ambienceMissing=$requiredAmbienceMissing sfxMissing=$requiredSfxMissing"
-        diagnostics += "PLAN_BUILD_DONE musicCreated=$musicCreated audioCreated=$audioCreated resolvedAssets=${resolved.resolvedCount} unresolved=${resolved.unresolvedCount} unresolvedRequired=${resolved.unresolvedRequiredCount} retryableFailure=${resolved.retryableFailure} requiredPlanMissing=$requiredPlanMissing retryRecommended=$retryRecommended"
+        val resolvedTrackIds = resolved.resolved.mapNotNull { it.trackId?.takeIf(String::isNotBlank) }.toSet()
+        val downloadedTrackIds = resolved.importedTrackIds
+        val reusedTrackIds = resolvedTrackIds - downloadedTrackIds
+        diagnostics += "PLAN_BUILD_DONE musicCreated=$musicCreated audioCreated=$audioCreated resolvedAssets=${resolved.resolvedCount} uniqueTracks=${resolvedTrackIds.size} downloaded=${downloadedTrackIds.size} reused=${reusedTrackIds.size} unresolved=${resolved.unresolvedCount} unresolvedRequired=${resolved.unresolvedRequiredCount} retryableFailure=${resolved.retryableFailure} requiredPlanMissing=$requiredPlanMissing retryRecommended=$retryRecommended"
         return FreesoundApplyResult(
             musicCreated = musicCreated,
             audioCreated = audioCreated,
             resolvedAssets = resolved.resolvedCount,
             warnings = warnings.distinct(),
+            downloadedTrackIds = downloadedTrackIds,
+            reusedTrackIds = reusedTrackIds,
             retryableFailure = retryRecommended,
             diagnostics = diagnostics.distinct(),
             attempts = 1,

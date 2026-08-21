@@ -97,6 +97,9 @@ data class FreesoundAutoResolveResult(
     val diagnostics: List<String> = emptyList(),
 ) {
     val resolvedCount: Int get() = resolved.count { !it.trackId.isNullOrBlank() }
+    val resolvedTrackIds: Set<String> get() = resolved.mapNotNull { it.trackId?.takeIf(String::isNotBlank) }.toSet()
+    val downloadedTrackCount: Int get() = importedTrackIds.size
+    val reusedTrackCount: Int get() = (resolvedTrackIds - importedTrackIds).size
     val unresolvedCount: Int get() = resolved.size - resolvedCount
     val unresolvedRequiredCount: Int get() = resolved.count {
         it.trackId.isNullOrBlank() && it.need.importance == FreesoundRequirementImportance.REQUIRED

@@ -42,13 +42,14 @@ jobs:
       - name: Install validation dependencies
         run: python3 -m pip install --disable-pip-version-check beautifulsoup4 cryptography
 
-      - name: Patch strict coordinator wiring
+      - name: Patch strict Mode 3 and uncapped audio wiring
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
           p = Path('scripts/check_xpk_strict_parity.py')
           s = p.read_text()
+
           old = '    "NarrationPlanCoordinator(libraryRepository, settingsRepository, xpkNarrationAiServices)",\n'
           new = '''    "NarrationPlanCoordinator(",
               "library = libraryRepository",
@@ -59,7 +60,27 @@ jobs:
           '''
           if s.count(old) != 1:
               raise SystemExit(f'expected exactly one old coordinator anchor, got {s.count(old)}')
-          p.write_text(s.replace(old, new))
+          s = s.replace(old, new)
+
+          old_runtime = '''    "narrationPlanCoordinator.loadAudioDirectionPlan",
+              "minimumSfxGapMillis",
+              "maxConcurrentSfx",
+          )
+          '''
+          new_runtime = '''    "narrationPlanCoordinator.loadAudioDirectionPlan",
+              "maxConcurrent = Int.MAX_VALUE",
+          )
+          require(
+              "app/src/main/java/vn/nghetruyen/app/audio/AudioDirectionModels.kt",
+              "const val MAX_CONCURRENT_AMBIENCE = Int.MAX_VALUE",
+              "const val MAX_CONCURRENT_SFX = Int.MAX_VALUE",
+              "const val MAX_SFX_REPEAT_COUNT = Int.MAX_VALUE",
+          )
+          '''
+          if s.count(old_runtime) != 1:
+              raise SystemExit(f'expected exactly one old runtime quota block, got {s.count(old_runtime)}')
+          s = s.replace(old_runtime, new_runtime)
+          p.write_text(s)
           PY
           python3 scripts/check_xpk_strict_parity.py
 
@@ -77,5 +98,5 @@ jobs:
             echo "Nothing to commit"
             exit 0
           fi
-          git commit -m "Update strict parity for Freesound coordinator wiring"
+          git commit -m "Update strict parity for current audio runtime"
           git push origin HEAD:integration/freesound-stage-1-clean

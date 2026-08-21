@@ -1,6 +1,6 @@
-RUN_ID=32451629001
+RUN_ID=32451725138
 RUN_ATTEMPT=1
-TRIGGER_SHA=fbb8ff563524014f1bc1c39a09c5f109c5bc0caa
+TRIGGER_SHA=a25e07e30318ad125620517a30f6897a0135c111
 SUCCESS=false
 PATCH_STATUS=1
 TEST_STATUS=99
@@ -8,7 +8,7 @@ BUILD_STATUS=99
 ARTIFACT_NAME=NgheTruyen-freesound-mode3-v17-debug
 
 === PATCH LOG ===
-app/src/main/java/vn/nghetruyen/app/ai/XpkAmbienceSfxDirector.kt: regex expected exactly one match, got 0: '\\n            val signature = listOf\\(\\n                unitId,\\n                effectId,\\n                stopUnitId\\.'
+V17 runner could not locate selector end
 
 === TEST LOG ===
 

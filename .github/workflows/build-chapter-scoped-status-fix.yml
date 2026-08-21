@@ -1,9 +1,9 @@
 name: Build Chapter Scoped Status Fix
 
 on:
-  push:
+  pull_request:
     branches:
-      - fix/freesound-latency-status-cloudflare
+      - main
     paths:
       - scripts/apply_chapter_scoped_prefetch_status.py
       - .github/workflows/build-chapter-scoped-status-fix.yml
@@ -62,4 +62,6 @@ jobs:
             scripts/apply_chapter_scoped_prefetch_status.py \
             .github/workflows/build-chapter-scoped-status-fix.yml
           git commit -m "fix: keep Freesound transfer status chapter-scoped [skip ci]"
+          git fetch origin fix/freesound-latency-status-cloudflare
+          git rebase origin/fix/freesound-latency-status-cloudflare
           git push origin HEAD:fix/freesound-latency-status-cloudflare

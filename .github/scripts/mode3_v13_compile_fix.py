@@ -39,4 +39,20 @@ replace_once(
     "AudioDirectionLimits import",
 )
 
-print("V13 generated-source syntax/import fix applied.")
+prompt = ROOT / "app/src/main/java/vn/nghetruyen/app/ai/XpkUnifiedNarrationPrompt.kt"
+replace_once(
+    prompt,
+    "Mode 3 dùng cùng logic đạo diễn MUSIC/AMBIENCE/SFX của Mode 2; khác biệt duy nhất là không gửi catalog asset local và không yêu cầu AI chọn track_id.",
+    "Mode 3 dùng cùng logic đạo diễn MUSIC/AMBIENCE/SFX của Mode 2; khác biệt duy nhất là không gửi catalog local (asset trên máy) và không yêu cầu AI chọn track_id.",
+    "explicit no-local-catalog wording",
+)
+
+stage5 = ROOT / "app/src/test/java/vn/nghetruyen/app/freesound/FreesoundStage5Test.kt"
+replace_once(
+    stage5,
+    '        assertEquals("duration:[10 TO 300]", url.queryParameter("filter"))\n',
+    '        assertEquals("category:\\\"Soundscapes\\\" duration:[10 TO 300]", url.queryParameter("filter"))\n',
+    "similar taxonomy filter expectation",
+)
+
+print("V13 generated-source syntax/import/prompt/test fix applied.")

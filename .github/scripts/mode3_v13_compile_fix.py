@@ -32,5 +32,11 @@ replace_once(
     '''    }\n}\n\n/** Converts resolved search needs into the same local runtime cue types used by the existing player. */\n''',
     "duplicate resolver closing braces",
 )
+replace_once(
+    resolver,
+    '''import vn.nghetruyen.app.audio.AudioDirectionPreferences\n''',
+    '''import vn.nghetruyen.app.audio.AudioDirectionLimits\nimport vn.nghetruyen.app.audio.AudioDirectionPreferences\n''',
+    "AudioDirectionLimits import",
+)
 
-print("V13 generated-source syntax fix applied.")
+print("V13 generated-source syntax/import fix applied.")

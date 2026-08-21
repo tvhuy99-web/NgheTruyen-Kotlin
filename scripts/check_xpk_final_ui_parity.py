@@ -38,13 +38,20 @@ for removed in [
     if removed in reader:
         raise SystemExit("XPK_FINAL_UI obsolete explanatory music prose/control remains: " + removed)
 
-# Audio Director owns normalization. One algorithm is shared, but MUSIC / AMBIENCE / SFX keep
-# independent user-selected LUFS targets and normalize-all routes every asset through its kind target.
+# Audio Director owns normalization. MUSIC / AMBIENCE / SFX keep independent LUFS targets,
+# while the visible controls are now deliberately separated by source mode.
 for marker in [
-    'title = "Attack"',
-    'title = "Release"',
-    'label = "CHUẨN HÓA TOÀN BỘ ÂM THANH"',
-    'title = { Text("CHUẨN HÓA TOÀN BỘ ÂM THANH") }',
+    'Text("MODE 1 · PHÁT THỦ CÔNG TỪ THƯ VIỆN LOCAL")',
+    'Text("MODE 2 · AI CHỌN TỪ THƯ VIỆN LOCAL")',
+    'Text("MODE 3 · AI TỰ TÌM TRÊN FREESOUND")',
+    'title = "Attack nhạc AI local"',
+    'title = "Release nhạc AI local"',
+    'title = "Attack nhạc Mode 3"',
+    'title = "Release nhạc Mode 3"',
+    'label = "CHUẨN HÓA KHO NHẠC"',
+    'label = "CHUẨN HÓA THƯ VIỆN AI LOCAL"',
+    'label = "CHUẨN HÓA / BẢO TRÌ FILE ÂM THANH MODE 3"',
+    'title = { Text(if (normalizationKinds == setOf(AudioAssetKind.MUSIC)) "CHUẨN HÓA KHO NHẠC" else "CHUẨN HÓA KHO ÂM THANH") }',
     'title = "Nhạc nền ($musicCount tệp)"',
     'title = "Âm thanh môi trường ($ambienceCount tệp)"',
     'title = "Hiệu ứng âm thanh ($sfxCount tệp)"',
@@ -55,12 +62,48 @@ for marker in [
     "AudioAssetKind.AMBIENCE -> ambienceTarget",
     "AudioAssetKind.SFX -> sfxTarget",
     'label = "QUẢN LÝ NHẠC ($musicTrackCount)"',
-    'label = "QUẢN LÝ ÂM THANH MÔI TRƯỜNG',
-    'label = "QUẢN LÝ HIỆU ỨNG ÂM THANH',
+    'label = "QUẢN LÝ NHẠC LOCAL ($musicTrackCount)"',
+    'label = "QUẢN LÝ MÔI TRƯỜNG LOCAL (',
+    'label = "QUẢN LÝ SFX LOCAL (',
+    'label = "QUẢN LÝ NHẠC ĐÃ TẢI (',
+    'label = "QUẢN LÝ MÔI TRƯỜNG ĐÃ TẢI (',
+    'label = "QUẢN LÝ SFX ĐÃ TẢI (',
     "UnifiedAudioAssetManagerDialog(",
 ]:
     if marker not in component:
         raise SystemExit("XPK_FINAL_UI audio routing marker missing: " + marker)
+
+# Keep the three manager entry points adjacent and in MUSIC / AMBIENCE / SFX order
+# inside both AI-local and AI-Freesound modes.
+mode2_start = component.find("StoryAudioSourceMode.AI_LOCAL ->")
+mode3_start = component.find("StoryAudioSourceMode.AI_FREESOUND ->")
+if mode2_start < 0 or mode3_start < 0 or mode2_start >= mode3_start:
+    raise SystemExit("XPK_FINAL_UI source-mode blocks missing or reordered")
+mode2 = component[mode2_start:mode3_start]
+mode3 = component[mode3_start:]
+for block_name, block, markers in [
+    (
+        "AI_LOCAL",
+        mode2,
+        [
+            'label = "QUẢN LÝ NHẠC LOCAL',
+            'label = "QUẢN LÝ MÔI TRƯỜNG LOCAL',
+            'label = "QUẢN LÝ SFX LOCAL',
+        ],
+    ),
+    (
+        "AI_FREESOUND",
+        mode3,
+        [
+            'label = "QUẢN LÝ NHẠC ĐÃ TẢI',
+            'label = "QUẢN LÝ MÔI TRƯỜNG ĐÃ TẢI',
+            'label = "QUẢN LÝ SFX ĐÃ TẢI',
+        ],
+    ),
+]:
+    positions = [block.find(marker) for marker in markers]
+    if not (0 <= positions[0] < positions[1] < positions[2]):
+        raise SystemExit(f"XPK_FINAL_UI {block_name} managers must stay in Music/Ambience/SFX order")
 
 for marker in [
     "ActivityResultContracts.OpenMultipleDocuments()",
@@ -82,14 +125,6 @@ for marker in [
 ]:
     if marker not in audio_manager:
         raise SystemExit("XPK_FINAL_UI complete audio manager marker missing: " + marker)
-
-manager_positions = [
-    component.find('label = "QUẢN LÝ NHẠC ($musicTrackCount)"'),
-    component.find('label = "QUẢN LÝ ÂM THANH MÔI TRƯỜNG'),
-    component.find('label = "QUẢN LÝ HIỆU ỨNG ÂM THANH'),
-]
-if not (0 <= manager_positions[0] < manager_positions[1] < manager_positions[2]):
-    raise SystemExit("XPK_FINAL_UI three audio managers must stay together in Music/Ambience/SFX order")
 
 for removed in [
     'text = "ÂM THANH AI"',

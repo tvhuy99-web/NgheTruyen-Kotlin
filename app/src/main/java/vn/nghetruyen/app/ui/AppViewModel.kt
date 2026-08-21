@@ -90,6 +90,7 @@ import vn.nghetruyen.app.data.settings.AiOnlineSettings
 import vn.nghetruyen.app.data.settings.AiProvider
 import vn.nghetruyen.app.playback.PlaybackQueueStore
 import vn.nghetruyen.app.playback.NarrationAutomationStage
+import vn.nghetruyen.app.playback.NarrationAutomationStatusFormatter
 import vn.nghetruyen.app.playback.PlaybackPreparationState
 import vn.nghetruyen.app.playback.PlaybackSnapshot
 import vn.nghetruyen.app.playback.ReaderPlaybackService
@@ -4427,7 +4428,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     PlaybackQueueStore.setNarrationAutomation(
                         stage = NarrationAutomationStage.CURRENT_READY,
                         progress = 1f,
-                        message = "Đã phân vai xong $assignmentCount mục. Đang bắt đầu phát.",
+                        message = NarrationAutomationStatusFormatter.ready(
+                            assignmentCount = assignmentCount,
+                            resultPresent = result != null,
+                            downloadedAssets = result?.freesoundDownloadedAssets ?: 0,
+                            reusedAssets = result?.freesoundReusedAssets ?: 0,
+                            retryRequired = result?.freesoundRetryRequired ?: false,
+                            audioLayersEnabled = container.narrationPlanCoordinator.storyAudioSourceMode() ==
+                                vn.nghetruyen.app.audio.StoryAudioSourceMode.AI_FREESOUND,
+                            beginPlayback = true,
+                            warning = result?.warnings?.firstOrNull(),
+                        ),
                     )
                     mutableState.update { it.copy(aiBusy = false, message = null) }
                     ReaderPlaybackService.command(

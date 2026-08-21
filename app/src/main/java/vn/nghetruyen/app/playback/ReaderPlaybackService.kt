@@ -235,27 +235,28 @@ class ReaderPlaybackService : Service() {
                 ),
             )
         }
-        result?.freesoundDiagnostics.orEmpty().forEachIndexed { index, detail ->
-            val stage = detail.substringBefore(' ').take(56).ifBlank { "TRACE" }
-            // BASIC diagnostics keeps INFO, so normal Freesound stages stay visible without
-            // inflating the warning count. Only actual failed/unresolved stages are warnings.
-            val normalizedDetail = detail.uppercase(Locale.ROOT)
-            val severity = if (
-                normalizedDetail.contains("FAILED") ||
-                normalizedDetail.contains("ERROR") ||
-                normalizedDetail.contains("RETRY_EXHAUSTED") ||
-                normalizedDetail.contains("NEED_UNRESOLVED")
-            ) DiagnosticSeverity.WARN else DiagnosticSeverity.INFO
-            diagnostic(
-                "FREESOUND_$stage",
-                severity,
-                mapOf(
-                    "phase" to phase,
-                    "index" to (index + 1).toString(),
-                    "detail" to detail.take(420),
-                ),
-            )
-        }
+        result?.freesoundDiagnostics.orEmpty()
+            .filter { detail ->
+                val normalized = detail.uppercase(Locale.ROOT)
+                normalized.contains("FAILED") ||
+                    normalized.contains("ERROR") ||
+                    normalized.contains("RETRY_EXHAUSTED") ||
+                    normalized.contains("NEED_UNRESOLVED") ||
+                    normalized.contains("CACHE_STALE") ||
+                    normalized.contains("NO_SELECTION")
+            }
+            .forEachIndexed { index, detail ->
+                val stage = detail.substringBefore(' ').take(56).ifBlank { "TRACE" }
+                diagnostic(
+                    "FREESOUND_$stage",
+                    DiagnosticSeverity.WARN,
+                    mapOf(
+                        "phase" to phase,
+                        "index" to (index + 1).toString(),
+                        "detail" to detail.take(420),
+                    ),
+                )
+            }
     }
 
     private var transitionMessage: String? = null
@@ -2046,22 +2047,19 @@ class ReaderPlaybackService : Service() {
                         val musicApplied = hasSceneMusicPlan()
                         val mode3 = StoryAudioModeRouter.usesAiFreesound(storyAudioSourceMode)
                         val warning = warnings.firstOrNull()?.takeIf(String::isNotBlank)
-                        val audioStatus = if (!mode3) {
-                            if (musicApplied) " và đã áp dụng nhạc cảnh" else ""
-                        } else {
-                            FreesoundPlaybackStatusFormatter.format(
+                        PlaybackQueueStore.setNarrationAutomation(
+                            stage = NarrationAutomationStage.CURRENT_READY,
+                            progress = 1f,
+                            message = NarrationAutomationStatusFormatter.ready(
+                                assignmentCount = assignmentCount,
                                 resultPresent = planResult != null,
                                 downloadedAssets = planResult?.freesoundDownloadedAssets ?: 0,
                                 reusedAssets = planResult?.freesoundReusedAssets ?: 0,
                                 retryRequired = planResult?.freesoundRetryRequired ?: false,
-                                audioLayersEnabled = shouldPlanAutoStoryAudio(),
-                            )
-                        }
-                        PlaybackQueueStore.setNarrationAutomation(
-                            stage = NarrationAutomationStage.CURRENT_READY,
-                            progress = 1f,
-                            message = "Đã phân vai xong $assignmentCount mục$audioStatus. Đang bắt đầu phát." +
-                                warning?.let { " • ${it.take(140)}" }.orEmpty(),
+                                audioLayersEnabled = mode3 && shouldPlanAutoStoryAudio(),
+                                beginPlayback = true,
+                                warning = warning,
+                            ),
                         )
                         if (mode3) {
                             diagnostic(
@@ -2187,25 +2185,37 @@ class ReaderPlaybackService : Service() {
                     val failed = result == null ||
                         (planVoice && assignmentCount <= 0) ||
                         (StoryAudioModeRouter.usesAiFreesound(storyAudioSourceMode) && result.freesoundRetryRequired)
-                    val musicLabel = if (shouldPlanAutoSceneMusic()) " + nhạc cảnh" else ""
-                    val baseMessage = when {
-                        result == null -> "Không chuẩn bị AI trước được chương tiếp theo: ${chapter.chapter.title}."
-                        !planVoice -> "Đã chuẩn bị âm thanh AI cho chương tiếp theo: ${chapter.chapter.title}."
-                        assignmentCount <= 0 -> "Phân vai trước chưa tạo được mục giọng hợp lệ: ${chapter.chapter.title}."
-                        failed -> "Phân vai trước chương tiếp theo chưa thành công: ${chapter.chapter.title}."
-                        result.voicePlanCreated || result.musicPlanCreated || result.audioPlanCreated || result.freesoundPlanCreated ->
-                            "Đã phân vai $assignmentCount mục$musicLabel cho chương tiếp theo: ${chapter.chapter.title}."
-                        else -> "Chương tiếp theo đã có $assignmentCount mục phân vai$musicLabel hợp lệ: ${chapter.chapter.title}."
-                    }
                     val warning = result?.warnings?.firstOrNull()?.takeIf(String::isNotBlank)
                         ?: attempt.exceptionOrNull()?.message
+                    val mode3 = StoryAudioModeRouter.usesAiFreesound(storyAudioSourceMode)
+                    val baseMessage = when {
+                        result == null -> "Không chuẩn bị AI trước được chương tiếp theo: ${chapter.chapter.title}." +
+                            warning?.let { " • ${it.take(120)}" }.orEmpty()
+                        !planVoice -> "Đã tải xong chương tiếp theo: ${chapter.chapter.title}. Đã chuẩn bị âm thanh AI." +
+                            warning?.let { " • ${it.take(120)}" }.orEmpty()
+                        assignmentCount <= 0 -> "Phân vai trước chưa tạo được mục giọng hợp lệ: ${chapter.chapter.title}." +
+                            warning?.let { " • ${it.take(120)}" }.orEmpty()
+                        failed -> "Phân vai trước chương tiếp theo chưa thành công: ${chapter.chapter.title}." +
+                            warning?.let { " • ${it.take(120)}" }.orEmpty()
+                        else -> NarrationAutomationStatusFormatter.ready(
+                            assignmentCount = assignmentCount,
+                            resultPresent = true,
+                            downloadedAssets = result.freesoundDownloadedAssets,
+                            reusedAssets = result.freesoundReusedAssets,
+                            retryRequired = result.freesoundRetryRequired,
+                            audioLayersEnabled = mode3 && planAudio,
+                            prefix = "Đã tải xong chương tiếp theo: ${chapter.chapter.title}",
+                            beginPlayback = false,
+                            warning = warning,
+                        )
+                    }
                     // Do not let a late prefetch result overwrite CURRENT_PLANNING/READY after the
                     // reader has already promoted this chapter into the foreground.
                     if (PlaybackQueueStore.state.value.chapterId == parentChapterId) {
                         PlaybackQueueStore.setNarrationAutomation(
                             stage = if (failed) NarrationAutomationStage.FAILED else NarrationAutomationStage.NEXT_READY,
                             progress = 1f,
-                            message = baseMessage + warning?.let { " • ${it.take(120)}" }.orEmpty(),
+                            message = baseMessage,
                         )
                     }
                     if (failed) return@launch

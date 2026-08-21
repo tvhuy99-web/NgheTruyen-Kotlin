@@ -1594,6 +1594,19 @@ private class GraphicsCanvasObject(
     }
 }
 
+internal object VBookBrowserChallengeDetector {
+    fun isChallenge(html: String): Boolean {
+        if (html.isBlank()) return false
+        val normalized = Jsoup.parse(html).text().lowercase(Locale.ROOT)
+        return normalized.contains("cloudflare") ||
+            normalized.contains("thực hiện xác minh bảo mật") ||
+            normalized.contains("security verification") ||
+            normalized.contains("checking your browser") ||
+            normalized.contains("verify you are human") ||
+            normalized.contains("chờ một chút") && normalized.contains("bảo mật")
+    }
+}
+
 private class BrowserCompatObject(
     private val cx: Context,
     private val ownerScope: Scriptable,
@@ -1725,20 +1738,37 @@ private class BrowserCompatObject(
     private fun waitSelector(raw: Any?, timeoutMs: Long): Any {
         val selectors = stringList(raw)
         if (selectors.isEmpty()) return false
-        val perSelector = (timeoutMs / selectors.size).coerceAtLeast(250L)
-        selectors.forEach { selector ->
-            val response = brokers.browser.execute(manifest, SourceBrowserRequest(
+        val deadline = clockMs() + timeoutMs
+        do {
+            selectors.forEach { selector ->
+                val remaining = (deadline - clockMs()).coerceAtLeast(100L)
+                val response = brokers.browser.execute(manifest, SourceBrowserRequest(
+                    sourceId = manifest.id,
+                    action = SourceBrowserAction.WAIT_SELECTOR,
+                    selector = selector,
+                    timeoutMs = minOf(750L, remaining),
+                    traceId = request.traceId,
+                ))
+                if (response is SourcePlatformResult.Success) {
+                    lastUrl = response.value.finalUrl ?: lastUrl
+                    return selector
+                }
+                if (clockMs() >= deadline) return false
+            }
+            val snapshot = brokers.browser.execute(manifest, SourceBrowserRequest(
                 sourceId = manifest.id,
-                action = SourceBrowserAction.WAIT_SELECTOR,
-                selector = selector,
-                timeoutMs = perSelector,
+                action = SourceBrowserAction.DOM_SNAPSHOT,
+                timeoutMs = minOf(1_000L, (deadline - clockMs()).coerceAtLeast(100L)),
                 traceId = request.traceId,
             ))
-            if (response is SourcePlatformResult.Success) {
-                lastUrl = response.value.finalUrl ?: lastUrl
-                return selector
+            if (snapshot is SourcePlatformResult.Success) {
+                lastUrl = snapshot.value.finalUrl ?: lastUrl
+                lastHtml = snapshot.value.value.orEmpty()
+                if (VBookBrowserChallengeDetector.isChallenge(lastHtml)) {
+                    error("BROWSER_ANTIBOT_CHALLENGE: Trang nguồn đang yêu cầu xác minh bảo mật/Cloudflare.")
+                }
             }
-        }
+        } while (clockMs() < deadline)
         return false
     }
 

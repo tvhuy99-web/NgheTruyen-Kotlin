@@ -514,7 +514,8 @@ class FreesoundAutoAudioResolver(
                     if (import.isSuccess) {
                         val result = import.getOrThrow()
                         resolvedTrack = knownTracks.firstOrNull { it.id == result.trackId && it.enabled }
-                        if (preexistingSoundTrackByIndex[seed.index] == null) imported += result.trackId else normalizationResumes += 1
+                        if (result.downloadedNewFile) imported += result.trackId
+                        else if (result.reusedExistingFile || preexistingSoundTrackByIndex[seed.index] != null) normalizationResumes += 1
                         diagnostics += "IMPORT_SUCCESS kind=${need.kind.name} soundId=${remote.id} trackId=${result.trackId} elapsedMs=$importElapsedMs downloadMs=${result.downloadElapsedMs} normalizationMs=${result.normalizationElapsedMs} fileExists=${resolvedTrack?.let { FreesoundImporter.managedFileExists(appContext, it.uri) } == true}"
                         liveDiagnostic(
                             traceId,
@@ -554,8 +555,16 @@ class FreesoundAutoAudioResolver(
                         val message = error?.message?.takeIf(String::isNotBlank)
                             ?: "Không nhập/chuẩn hóa được preview đã chọn."
                         warnings += "Freesound ‘${need.query}’: $message"
-                        if (error is FreesoundNormalizationException && error.retryable) retryableFailure = true
-                        diagnostics += "IMPORT_FAILED kind=${need.kind.name} soundId=${remote.id} elapsedMs=$importElapsedMs retryable=${error is FreesoundNormalizationException && error.retryable} errorType=${error?.javaClass?.simpleName.orEmpty()} error=${message.take(220)}"
+                        val retryableImport = when (error) {
+                            is FreesoundImportException -> error.retryable
+                            is FreesoundNormalizationException -> error.retryable
+                            else -> FreesoundImporter.isRetryableImportFailure(error)
+                        }
+                        if (error is FreesoundImportException && error.downloadedNewFile) {
+                            error.trackId?.let(imported::add)
+                        }
+                        retryableFailure = retryableFailure || retryableImport
+                        diagnostics += "IMPORT_FAILED kind=${need.kind.name} soundId=${remote.id} elapsedMs=$importElapsedMs retryable=$retryableImport errorType=${error?.javaClass?.simpleName.orEmpty()} error=${message.take(220)}"
                         liveDiagnostic(
                             traceId,
                             "FREESOUND_IMPORT_FAILED",
@@ -564,7 +573,7 @@ class FreesoundAutoAudioResolver(
                                 "kind" to need.kind.name,
                                 "soundId" to remote.id.toString(),
                                 "elapsedMs" to importElapsedMs.toString(),
-                                "retryable" to (error is FreesoundNormalizationException && error.retryable).toString(),
+                                "retryable" to retryableImport.toString(),
                                 "errorType" to error?.javaClass?.simpleName.orEmpty(),
                                 "error" to message.take(240),
                             ),
@@ -733,7 +742,11 @@ class FreesoundAutoAudioResolver(
             is FreesoundSearchResult.Success -> FreesoundAutoSearchOutcome(
                 sound = result.page.results
                     .mapIndexed { index, sound -> sound to scoreCandidate(need, sound, index) }
-                    .filter { (sound, _) -> sound.preferredPreviewUrl != null && candidateMeetsLexicalFloor(need, sound) }
+                    .filter { (sound, _) ->
+                        sound.preferredPreviewUrl != null &&
+                            candidateMeetsLexicalFloor(need, sound) &&
+                            candidateMeetsDurationLimit(need, sound)
+                    }
                     .maxByOrNull { it.second }
                     ?.takeIf { it.second >= REMOTE_MIN_SCORE }
                     ?.first,
@@ -802,6 +815,15 @@ class FreesoundAutoAudioResolver(
             sound: FreesoundSound,
         ): Boolean = candidateLexicalCoverage(need, sound) >= REMOTE_MIN_LEXICAL_COVERAGE
 
+        internal fun candidateMeetsDurationLimit(
+            need: FreesoundAutoSearchNeed,
+            sound: FreesoundSound,
+        ): Boolean = when (need.kind) {
+            AudioAssetKind.MUSIC -> sound.durationSeconds in 10.0..480.0
+            AudioAssetKind.AMBIENCE -> sound.durationSeconds in 8.0..180.0
+            AudioAssetKind.SFX -> sound.durationSeconds in 0.05..20.0
+        }
+
         internal fun scoreCandidate(
             need: FreesoundAutoSearchNeed,
             sound: FreesoundSound,
@@ -840,10 +862,10 @@ class FreesoundAutoAudioResolver(
                     else -> -0.10
                 }
                 AudioAssetKind.AMBIENCE -> when (sound.durationSeconds) {
-                    in 30.0..180.0 -> 0.12
-                    in 15.0..300.0 -> 0.07
-                    in 10.0..<15.0 -> 0.02
-                    else -> -0.10
+                    in 20.0..120.0 -> 0.14
+                    in 10.0..180.0 -> 0.05
+                    in 8.0..<10.0 -> 0.01
+                    else -> -0.30
                 }
                 AudioAssetKind.SFX -> {
                     val actionLoop = need.usages.any { it.loopUntilStop }

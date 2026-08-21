@@ -8,6 +8,7 @@ import android.os.StatFs
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import java.io.File
+import java.io.InterruptedIOException
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -31,7 +32,17 @@ data class FreesoundImportResult(
     val title: String,
     val downloadElapsedMs: Long = 0L,
     val normalizationElapsedMs: Long = 0L,
+    val downloadedNewFile: Boolean = true,
+    val reusedExistingFile: Boolean = false,
 )
+
+class FreesoundImportException(
+    message: String,
+    val retryable: Boolean = false,
+    val downloadedNewFile: Boolean = false,
+    val trackId: String? = null,
+    cause: Throwable? = null,
+) : IllegalStateException(message, cause)
 
 class FreesoundDuplicateException(
     val soundId: Int,
@@ -110,15 +121,25 @@ class FreesoundImporter(
                     title = track.title,
                     downloadElapsedMs = 0L,
                     normalizationElapsedMs = normalizationElapsedMs,
+                    downloadedNewFile = false,
+                    reusedExistingFile = true,
                 ),
             )
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Throwable) {
             if (shouldPreserveImportedFile(error)) {
-                // The download is already valid. Keep it plus the marker so a later Mode-3
-                // resolve can resume normalization instead of downloading the same sound again.
-                Result.failure(error)
+                // The file existed before this attempt. Keep it and report retryability without
+                // misclassifying a normalization resume as a newly downloaded asset.
+                Result.failure(
+                    FreesoundImportException(
+                        message = error.message ?: "Chuẩn hóa tệp Freesound cần thử lại.",
+                        retryable = true,
+                        downloadedNewFile = false,
+                        trackId = track.id,
+                        cause = error,
+                    ),
+                )
             } else {
                 runCatching { repository.deleteSceneMusicTrack(track.id) }
                 deleteManagedFile(appContext, track.uri)
@@ -143,31 +164,48 @@ class FreesoundImporter(
             return Result.failure(IllegalStateException("Không tạo được thư mục lưu âm thanh Freesound."))
         }
 
+        val deadlineNanos = System.nanoTime() + PREVIEW_IMPORT_BUDGET_MS * 1_000_000L
         var lastError: Throwable? = null
+        var attempted = 0
         for (previewUrl in candidates) {
+            val remainingMs = ((deadlineNanos - System.nanoTime()) / 1_000_000L).coerceAtLeast(0L)
+            if (remainingMs < MIN_PREVIEW_ATTEMPT_MS) {
+                lastError = FreesoundImportException(
+                    "Preview Freesound vượt quá thời gian tải chung ${PREVIEW_IMPORT_BUDGET_MS / 1_000L} giây.",
+                    retryable = true,
+                )
+                break
+            }
+            attempted += 1
             val attempt = importPreviewCandidate(
                 sound = sound,
                 kind = kind,
                 normalizationTargetLufs = normalizationTargetLufs,
                 previewUrl = previewUrl,
                 directory = directory,
+                callTimeoutMs = remainingMs.coerceAtMost(PER_PREVIEW_MAX_CALL_MS),
             )
             if (attempt.isSuccess) return attempt
             val error = attempt.exceptionOrNull()
             if (error is CancellationException) throw error
+            if (error is FreesoundImportException && error.downloadedNewFile) return attempt
             if (error is FreesoundNormalizationException && error.retryable) return attempt
             lastError = error
         }
 
+        val message = buildString {
+            append("Không nhập được preview HQ Freesound")
+            if (attempted > 1) append(" bằng cả OGG và MP3")
+            lastError?.message?.takeIf(String::isNotBlank)?.let { append(": $it") }
+            append('.')
+        }
         return Result.failure(
-            IllegalStateException(
-                buildString {
-                    append("Không nhập được preview HQ Freesound")
-                    if (candidates.size > 1) append(" bằng cả OGG và MP3")
-                    lastError?.message?.takeIf(String::isNotBlank)?.let { append(": $it") }
-                    append('.')
-                },
-                lastError,
+            FreesoundImportException(
+                message = message,
+                retryable = isRetryableImportFailure(lastError),
+                downloadedNewFile = (lastError as? FreesoundImportException)?.downloadedNewFile == true,
+                trackId = (lastError as? FreesoundImportException)?.trackId,
+                cause = lastError,
             ),
         )
     }
@@ -178,6 +216,7 @@ class FreesoundImporter(
         normalizationTargetLufs: Float,
         previewUrl: String,
         directory: File,
+        callTimeoutMs: Long,
     ): Result<FreesoundImportResult> {
         if (!previewUrl.startsWith("https://", ignoreCase = true)) {
             return Result.failure(IllegalArgumentException("Địa chỉ preview Freesound không an toàn."))
@@ -201,7 +240,12 @@ class FreesoundImporter(
                 .get()
                 .build()
 
-            httpClient.newCall(request).execute().use { response ->
+            val boundedClient = httpClient.newBuilder()
+                .connectTimeout(minOf(8_000L, callTimeoutMs).coerceAtLeast(500L), TimeUnit.MILLISECONDS)
+                .readTimeout(minOf(10_000L, callTimeoutMs).coerceAtLeast(500L), TimeUnit.MILLISECONDS)
+                .callTimeout(callTimeoutMs.coerceAtLeast(500L), TimeUnit.MILLISECONDS)
+                .build()
+            boundedClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     throw IllegalStateException("Không tải được preview Freesound (HTTP ${response.code}).")
                 }
@@ -275,6 +319,8 @@ class FreesoundImporter(
                     title = title,
                     downloadElapsedMs = downloadElapsedMs,
                     normalizationElapsedMs = normalizationElapsedMs,
+                    downloadedNewFile = true,
+                    reusedExistingFile = false,
                 ),
             )
         } catch (cancelled: CancellationException) {
@@ -285,12 +331,28 @@ class FreesoundImporter(
             throw cancelled
         } catch (error: Throwable) {
             partFile.delete()
-            if (!shouldPreserveImportedFile(error)) {
+            val preserve = shouldPreserveImportedFile(error)
+            if (!preserve) {
                 savedTrackId?.let { runCatching { repository.deleteSceneMusicTrack(it) } }
                 finalFile.delete()
                 markerFile.delete()
             }
-            Result.failure(error)
+            val surfaced = when {
+                preserve -> FreesoundImportException(
+                    message = error.message ?: "Chuẩn hóa tệp Freesound cần thử lại.",
+                    retryable = true,
+                    downloadedNewFile = savedTrackId != null,
+                    trackId = savedTrackId,
+                    cause = error,
+                )
+                isRetryableImportFailure(error) -> FreesoundImportException(
+                    message = error.message ?: "Kết nối tải preview Freesound tạm thời thất bại.",
+                    retryable = true,
+                    cause = error,
+                )
+                else -> error
+            }
+            Result.failure(surfaced)
         }
     }
 
@@ -347,6 +409,9 @@ class FreesoundImporter(
         private const val UNKNOWN_LENGTH_REQUIRED_BYTES = 12L * 1024L * 1024L
         private const val NORMALIZATION_POLL_MS = 120L
         private const val DOWNLOAD_BUFFER_BYTES = 64 * 1024
+        internal const val PREVIEW_IMPORT_BUDGET_MS = 15_000L
+        private const val PER_PREVIEW_MAX_CALL_MS = 12_000L
+        private const val MIN_PREVIEW_ATTEMPT_MS = 800L
         private const val NORMALIZATION_TIMEOUT_MS = 10L * 60L * 1_000L
         private const val STALE_PART_AGE_MS = 15L * 60L * 1_000L
         private const val SOUND_LOCK_STRIPES = 64
@@ -370,6 +435,14 @@ class FreesoundImporter(
 
         internal fun shouldPreserveImportedFile(error: Throwable): Boolean =
             error is FreesoundNormalizationException && error.retryable
+
+        internal fun isRetryableImportFailure(error: Throwable?): Boolean =
+            generateSequence(error) { it.cause }.any { candidate ->
+                val message = candidate.message.orEmpty()
+                candidate is InterruptedIOException ||
+                    message.contains("timeout", ignoreCase = true) ||
+                    Regex("""HTTP\s+(?:429|5\d\d)""", RegexOption.IGNORE_CASE).containsMatchIn(message)
+            }
 
         internal fun extensionForPreviewUrl(url: String): String {
             val clean = url.substringBefore('?').substringBefore('#').lowercase(Locale.ROOT)

@@ -18,29 +18,13 @@ jobs:
   repair-test-build:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 75
     steps:
       - name: Checkout branch
         uses: actions/checkout@v4
         with:
           ref: agent/freesound-stage-1
           fetch-depth: 0
-
-      - name: Record run start
-        shell: bash
-        run: |
-          set -e
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          {
-            echo "RUN_ID=${GITHUB_RUN_ID}"
-            echo "RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT}"
-            echo "TRIGGER_SHA=${GITHUB_SHA}"
-            echo "STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          } > MODE3_RUN_START.txt
-          git add -- MODE3_RUN_START.txt
-          git commit -m "Record Freesound verified build start"
-          git push origin HEAD:agent/freesound-stage-1
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -60,220 +44,87 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
-      - name: Apply repair, test and build
+      - name: Apply all runtime fixes
+        shell: bash
+        run: python3 .github/scripts/fix_all_runtime_20260821.py
+
+      - name: Test and build
         id: verify
         shell: bash
         run: |
           set +e
-          rm -f /tmp/mode3_patch.py /tmp/patch.log /tmp/test.log /tmp/build.log /tmp/build_result.txt
-
-          python3 - <<'PY' > /tmp/extract.log 2>&1
-          from pathlib import Path
-          import textwrap
-
-          workflow = Path('.github/workflows/fix-freesound-mode3-runtime.yml').read_text(encoding='utf-8')
-          start_marker = "          python3 - <<'PY'\n"
-          end_marker = "\n          PY\n"
-          if start_marker not in workflow:
-              raise SystemExit('Không tìm thấy patch Python trong workflow sửa Mode 3.')
-          block = workflow.split(start_marker, 1)[1]
-          if end_marker not in block:
-              raise SystemExit('Không tìm thấy điểm kết thúc patch Python Mode 3.')
-          block = block.split(end_marker, 1)[0]
-          script = textwrap.dedent(block)
-
-          old_helpers = '''def replace_once(path, old, new):
-              text = read(path)
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f"{path}: expected exactly 1 occurrence, found {count}: {old[:120]!r}")
-              write(path, text.replace(old, new, 1))
-
-          def replace_count(path, old, new, expected):
-              text = read(path)
-              count = text.count(old)
-              if count != expected:
-                  raise SystemExit(f"{path}: expected {expected} occurrences, found {count}: {old[:120]!r}")
-              write(path, text.replace(old, new))
-          '''
-          old_helpers = textwrap.dedent(old_helpers)
-
-          new_helpers = r'''def _indent_width(line):
-              return len(line) - len(line.lstrip(' \t'))
-
-          def _flex_pattern(snippet):
-              import re
-              core = snippet.strip('\n')
-              lines = core.splitlines()
-              patterns = []
-              for line in lines:
-                  content = line.lstrip(' \t').rstrip()
-                  if content:
-                      patterns.append(r'^[ \t]*' + re.escape(content) + r'[ \t]*$')
-                  else:
-                      patterns.append(r'^[ \t]*$')
-              return re.compile(r'\n'.join(patterns), re.MULTILINE)
-
-          def _reindent_new(old, new, matched):
-              from collections import Counter
-              from difflib import SequenceMatcher
-              old_lines = old.strip('\n').splitlines()
-              new_lines = new.strip('\n').splitlines()
-              actual_lines = matched.splitlines()
-              old_keys = [line.lstrip(' \t').rstrip() for line in old_lines]
-              new_keys = [line.lstrip(' \t').rstrip() for line in new_lines]
-              mapped = {}
-              matcher = SequenceMatcher(a=old_keys, b=new_keys, autojunk=False)
-              for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-                  if tag != 'equal':
-                      continue
-                  for offset in range(i2 - i1):
-                      old_index = i1 + offset
-                      new_index = j1 + offset
-                      if old_index < len(actual_lines):
-                          mapped[new_index] = _indent_width(actual_lines[old_index])
-              offsets = []
-              for index, actual_indent in mapped.items():
-                  if index < len(new_lines) and new_lines[index].strip():
-                      offsets.append(actual_indent - _indent_width(new_lines[index]))
-              base_offset = Counter(offsets).most_common(1)[0][0] if offsets else 0
-              rendered = []
-              for index, line in enumerate(new_lines):
-                  stripped = line.lstrip(' \t')
-                  if not stripped:
-                      rendered.append('')
-                      continue
-                  indent = mapped.get(index, max(0, _indent_width(line) + base_offset))
-                  rendered.append(' ' * indent + stripped)
-              return '\n'.join(rendered)
-
-          def _replace_flexible(path, old, new, expected):
-              text = read(path)
-              exact_count = text.count(old)
-              if exact_count == expected:
-                  write(path, text.replace(old, new, expected))
-                  return
-              pattern = _flex_pattern(old)
-              matches = list(pattern.finditer(text))
-              if len(matches) != expected:
-                  raise SystemExit(
-                      f"{path}: expected {expected} flexible occurrence(s), found {len(matches)}; "
-                      f"exact={exact_count}: {old[:120]!r}"
-                  )
-              for match in reversed(matches):
-                  replacement = _reindent_new(old, new, match.group(0))
-                  text = text[:match.start()] + replacement + text[match.end():]
-              write(path, text)
-
-          def replace_once(path, old, new):
-              _replace_flexible(path, old, new, 1)
-
-          def replace_count(path, old, new, expected):
-              _replace_flexible(path, old, new, expected)
-          '''
-          new_helpers = textwrap.dedent(new_helpers)
-
-          if old_helpers not in script:
-              raise SystemExit('Không tìm thấy helper replace_once/replace_count để nâng cấp matcher.')
-          script = script.replace(old_helpers, new_helpers, 1)
-          Path('/tmp/mode3_patch.py').write_text(script + '\n', encoding='utf-8')
-          PY
-          EXTRACT_STATUS=$?
-
-          PATCH_STATUS=99
-          TEST_STATUS=99
+          rm -f /tmp/all-fixes-test.log /tmp/all-fixes-build.log
+          ./gradlew --no-daemon --stacktrace :source-diagnostics:test :source-vbook:test :app:testDebugUnitTest > /tmp/all-fixes-test.log 2>&1
+          TEST_STATUS=$?
           BUILD_STATUS=99
-          if [ "$EXTRACT_STATUS" -eq 0 ]; then
-            python3 /tmp/mode3_patch.py > /tmp/patch.log 2>&1
-            PATCH_STATUS=$?
-          fi
-          if [ "$PATCH_STATUS" -eq 0 ]; then
-            ./gradlew --no-daemon --stacktrace :app:testDebugUnitTest > /tmp/test.log 2>&1
-            TEST_STATUS=$?
-          fi
           if [ "$TEST_STATUS" -eq 0 ]; then
-            ./gradlew --no-daemon --stacktrace :app:assembleDebug > /tmp/build.log 2>&1
+            ./gradlew --no-daemon --stacktrace :app:assembleDebug > /tmp/all-fixes-build.log 2>&1
             BUILD_STATUS=$?
           fi
-
           SUCCESS=false
-          if [ "$EXTRACT_STATUS" -eq 0 ] && [ "$PATCH_STATUS" -eq 0 ] && [ "$TEST_STATUS" -eq 0 ] && [ "$BUILD_STATUS" -eq 0 ] && [ -f app/build/outputs/apk/debug/app-debug.apk ]; then
+          if [ "$TEST_STATUS" -eq 0 ] && [ "$BUILD_STATUS" -eq 0 ] && [ -f app/build/outputs/apk/debug/app-debug.apk ]; then
             SUCCESS=true
           fi
-
           {
             echo "RUN_ID=${GITHUB_RUN_ID}"
             echo "RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT}"
             echo "TRIGGER_SHA=${GITHUB_SHA}"
             echo "SUCCESS=${SUCCESS}"
-            echo "EXTRACT_STATUS=${EXTRACT_STATUS}"
-            echo "PATCH_STATUS=${PATCH_STATUS}"
             echo "TEST_STATUS=${TEST_STATUS}"
             echo "BUILD_STATUS=${BUILD_STATUS}"
-            echo "ARTIFACT_NAME=NgheTruyen-freesound-latest-fixed-debug"
-            echo
-            echo "=== EXTRACT LOG (tail) ==="
-            tail -n 120 /tmp/extract.log 2>/dev/null || true
-            echo
-            echo "=== PATCH LOG (tail) ==="
-            tail -n 180 /tmp/patch.log 2>/dev/null || true
+            echo "ARTIFACT_NAME=NgheTruyen-freesound-all-fixes-debug"
             echo
             echo "=== TEST LOG (tail) ==="
-            tail -n 240 /tmp/test.log 2>/dev/null || true
+            tail -n 360 /tmp/all-fixes-test.log 2>/dev/null || true
             echo
             echo "=== BUILD LOG (tail) ==="
-            tail -n 260 /tmp/build.log 2>/dev/null || true
-          } > /tmp/build_result.txt
-
+            tail -n 260 /tmp/all-fixes-build.log 2>/dev/null || true
+          } > FIX_ALL_RUNTIME_BUILD_RESULT_20260821.txt
           echo "success=${SUCCESS}" >> "$GITHUB_OUTPUT"
-          echo "extract_status=${EXTRACT_STATUS}" >> "$GITHUB_OUTPUT"
-          echo "patch_status=${PATCH_STATUS}" >> "$GITHUB_OUTPUT"
-          echo "test_status=${TEST_STATUS}" >> "$GITHUB_OUTPUT"
-          echo "build_status=${BUILD_STATUS}" >> "$GITHUB_OUTPUT"
           exit 0
 
-      - name: Upload verified APK
+      - name: Upload APK
         if: steps.verify.outputs.success == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: NgheTruyen-freesound-latest-fixed-debug
+          name: NgheTruyen-freesound-all-fixes-debug
           retention-days: 30
           if-no-files-found: error
           path: app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Commit verified fixes or failure report
+      - name: Commit verified fixes or report
         if: always()
         shell: bash
         run: |
           set -e
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
           if [ "${{ steps.verify.outputs.success }}" = "true" ]; then
-            git diff --name-only -- app/src/main app/src/test | while IFS= read -r file; do
-              [ -n "$file" ] && git add -- "$file"
-            done
-            git ls-files --others --exclude-standard -- app/src/main app/src/test | while IFS= read -r file; do
-              [ -n "$file" ] && git add -- "$file"
+            for file in \
+              app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt \
+              app/src/main/java/vn/nghetruyen/app/freesound/FreesoundImporter.kt \
+              app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt \
+              app/src/main/java/vn/nghetruyen/app/playback/AudioDirectionRuntime.kt \
+              source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt \
+              source-diagnostics/src/main/kotlin/vn/nghetruyen/source/diagnostics/SourceDiagnostics.kt
+            do
+              git add -- "$file"
             done
           else
             git reset --hard HEAD
           fi
-
-          cp /tmp/build_result.txt MODE3_BUILD_RESULT.txt
-          git add -- MODE3_BUILD_RESULT.txt
-
+          git add -- FIX_ALL_RUNTIME_BUILD_RESULT_20260821.txt
           if git diff --cached --quiet; then
             exit 0
           fi
           if [ "${{ steps.verify.outputs.success }}" = "true" ]; then
-            git commit -m "Fix and verify Freesound Mode 3 runtime"
+            git commit -m "Fix Freesound latency and runtime diagnostics"
           else
-            git commit -m "Record Freesound Mode 3 build failure"
+            git commit -m "Record all-fixes verification failure"
           fi
           git push origin HEAD:agent/freesound-stage-1
 
-      - name: Fail workflow when verification failed
+      - name: Fail if verification failed
         if: steps.verify.outputs.success != 'true'
         shell: bash
         run: exit 1

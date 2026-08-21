@@ -1,0 +1,15 @@
+RUN_ID=32451495360
+RUN_ATTEMPT=1
+TRIGGER_SHA=313ea1a352318a74883549edec1e77251c510f47
+SUCCESS=false
+PATCH_STATUS=1
+TEST_STATUS=99
+BUILD_STATUS=99
+ARTIFACT_NAME=NgheTruyen-freesound-mode3-v17-debug
+
+=== PATCH LOG ===
+app/src/main/java/vn/nghetruyen/app/ai/XpkAmbienceSfxDirector.kt: regex expected exactly one match, got 0: '\\n            val signature = listOf\\(\\n                unitId,\\n                effectId,\\n                stopUnitId\\.'
+
+=== TEST LOG ===
+
+=== BUILD LOG ===

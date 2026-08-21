@@ -27,6 +27,13 @@ replace_once(
     """                        onSearch = viewModel::submitSearch,\n""",
 )
 
+reference_app = Path("app/src/main/java/vn/nghetruyen/app/ui/ReferenceNgheTruyenApp.kt")
+replace_once(
+    reference_app,
+    """                        onQueryChange = viewModel::updateQuery,\n                        onSearch = {\n                            val mode = if (state.query.trim().isBlank() && !state.searchAllSources) {\n                                ExploreMode.HOME\n                            } else {\n                                ExploreMode.SEARCH\n                            }\n                            activateExploreDiagnosticContext(mode = mode)\n                            viewModel.search()\n                        },\n                        onSearchAllSourcesChange = { enabled ->\n                            activateExploreDiagnosticContext(\n                                mode = if (enabled) ExploreMode.SEARCH else ExploreMode.HOME,\n                            )\n                            viewModel.setSearchAllSources(enabled)\n                        },\n                        onSortModeChange = viewModel::setSearchSortMode,\n""",
+    """                        onSearch = { query, allSources, sortMode ->\n                            val mode = if (query.trim().isBlank() && !allSources) {\n                                ExploreMode.HOME\n                            } else {\n                                ExploreMode.SEARCH\n                            }\n                            activateExploreDiagnosticContext(mode = mode)\n                            viewModel.submitSearch(query, allSources, sortMode)\n                        },\n""",
+)
+
 vm = Path("app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt")
 replace_once(
     vm,

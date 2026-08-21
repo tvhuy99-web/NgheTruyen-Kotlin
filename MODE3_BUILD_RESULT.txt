@@ -1,5 +1,5 @@
 RUN_ID=32387815009
-RUN_ATTEMPT=5
+RUN_ATTEMPT=6
 TRIGGER_SHA=444e4523803ba041259df8304e1a9687228b3066
 SUCCESS=true
 EXTRACT_STATUS=0
@@ -36,26 +36,32 @@ SKIP source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt: 
 SKIP source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt: "remove" -> fn { element.remove(); this }
 SKIP source-diagnostics/src/main/kotlin/vn/nghetruyen/source/diagnostics/SourceDiagnostics.kt: val legacyTerminal = state == null && isLegacyTerminal(upper)
 All runtime/Freesound/diagnostics patches applied or already present.
-Normalized ambience continuity anchor for verified patch.
+Ambience prompt continuity anchor already prepared.
 Escaped Kotlin newline literal inside continuity patch.
-PATCH app/src/main/java/vn/nghetruyen/app/ai/AiServices.kt: incomingFreesoundAmbienceQueries
-PATCH app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt: private data class FreesoundContinuityContext
-PATCH app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt: incomingFreesoundMusicQuery = freesoundContinuity.musicQuery
-PATCH app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt: private suspend fun buildFreesoundContinuityContext
-PATCH app/src/main/java/vn/nghetruyen/app/ai/XpkNarrationAiServices.kt: incomingFreesoundMusicQuery = request.context.incomingFreesoundMusicQuery
-PATCH app/src/main/java/vn/nghetruyen/app/ai/XpkUnifiedNarrationPrompt.kt: incomingFreesoundMusicQuery: String? = null
-PATCH app/src/main/java/vn/nghetruyen/app/ai/XpkUnifiedNarrationPrompt.kt: im lặng tốt hơn một âm sai cảnh
-PATCH app/src/main/java/vn/nghetruyen/app/ai/XpkUnifiedNarrationPrompt.kt: MODE3_PREVIOUS_BOUNDARY_AMBIENCE_QUERIES
-PATCH app/src/main/java/vn/nghetruyen/app/ai/XpkUnifiedNarrationPrompt.kt: Ở ranh giới chương cũng áp dụng đúng quy tắc này
-PATCH app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt: candidateMeetsLexicalFloor(need, sound)
-PATCH app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt: REMOTE_MIN_LEXICAL_COVERAGE
-PATCH app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt: internal fun candidateLexicalCoverage
-PATCH app/src/test/java/vn/nghetruyen/app/ai/NarrationPlanContextTest.kt: rain|forest|ignored-third
-PATCH app/src/test/java/vn/nghetruyen/app/ai/XpkAudioPromptQualityTest.kt: incomingFreesoundAmbienceQueries = listOf("snow wind", "mountain wind")
-PATCH app/src/test/java/vn/nghetruyen/app/ai/XpkAudioPromptQualityTest.kt: MODE3_PREVIOUS_BOUNDARY_MUSIC_QUERY: dark fantasy cinematic
-PATCH app/src/test/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioTest.kt: fun relaxedSearchStillRejectsAWeakGenericSemanticMatch()
+SKIP app/src/main/java/vn/nghetruyen/app/ai/AiServices.kt: incomingFreesoundAmbienceQueries
+SKIP app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt: private data class FreesoundContinuityContext
+SKIP app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt: incomingFreesoundMusicQuery = freesoundContinuity.musicQuery
+SKIP app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt: private suspend fun buildFreesoundContinuityContext
+SKIP app/src/main/java/vn/nghetruyen/app/ai/XpkNarrationAiServices.kt: incomingFreesoundMusicQuery = request.context.incomingFreesoundMusicQuery
+SKIP app/src/main/java/vn/nghetruyen/app/ai/XpkUnifiedNarrationPrompt.kt: incomingFreesoundMusicQuery: String? = null
+SKIP app/src/main/java/vn/nghetruyen/app/ai/XpkUnifiedNarrationPrompt.kt: im lặng tốt hơn một âm sai cảnh
+SKIP app/src/main/java/vn/nghetruyen/app/ai/XpkUnifiedNarrationPrompt.kt: MODE3_PREVIOUS_BOUNDARY_AMBIENCE_QUERIES
+SKIP app/src/main/java/vn/nghetruyen/app/ai/XpkUnifiedNarrationPrompt.kt: Ở ranh giới chương cũng áp dụng đúng quy tắc này
+SKIP app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt: candidateMeetsLexicalFloor(need, sound)
+SKIP app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt: REMOTE_MIN_LEXICAL_COVERAGE
+SKIP app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt: internal fun candidateLexicalCoverage
+SKIP app/src/test/java/vn/nghetruyen/app/ai/NarrationPlanContextTest.kt: rain|forest|ignored-third
+SKIP app/src/test/java/vn/nghetruyen/app/ai/XpkAudioPromptQualityTest.kt: incomingFreesoundAmbienceQueries = listOf("snow wind", "mountain wind")
+SKIP app/src/test/java/vn/nghetruyen/app/ai/XpkAudioPromptQualityTest.kt: MODE3_PREVIOUS_BOUNDARY_MUSIC_QUERY: dark fantasy cinematic
+SKIP app/src/test/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioTest.kt: fun relaxedSearchStillRejectsAWeakGenericSemanticMatch()
 Audio selection + cross-chapter continuity patch prepared.
-Prepared runtime + audio-continuity fixes for verified commit.
+PATCH app/src/main/java/vn/nghetruyen/app/playback/SceneAmbienceController.kt: import kotlin.math.cos
+PATCH app/src/main/java/vn/nghetruyen/app/playback/SceneAmbienceController.kt: internal object AmbienceLoopTransitionPolicy
+PATCH app/src/main/java/vn/nghetruyen/app/playback/SceneAmbienceController.kt: AmbienceLoopTransitionPolicy.overlapRange(
+PATCH app/src/main/java/vn/nghetruyen/app/playback/SceneAmbienceController.kt: AmbienceLoopTransitionPolicy.crossfadeGains(fraction)
+PATCH app/src/main/java/vn/nghetruyen/app/playback/SceneAmbienceController.kt: AmbienceLoopTransitionPolicy.startOffsetRange(duration)
+WRITE app/src/test/java/vn/nghetruyen/app/playback/AmbienceLoopTransitionPolicyTest.kt
+Prepared runtime + audio-continuity + short ambience loop fixes for verified commit.
 
 === TEST LOG (tail) ===
 Gradle Wrapper JAR is already verified.
@@ -91,10 +97,10 @@ Daemon will be stopped at the end of the build
 > Task :app:mapDebugSourceSetPaths
 > Task :app:generateDebugResources
 > Task :app:packageDebugResources
-> Task :app:parseDebugLocalResources
+> Task :app:mergeDebugResources
 > Task :app:createDebugCompatibleScreenManifests
 > Task :app:extractDeepLinksDebug
-> Task :app:mergeDebugResources
+> Task :app:parseDebugLocalResources
 > Task :app:processDebugMainManifest
 > Task :app:processDebugManifest
 > Task :app:processDebugManifestForPackage
@@ -238,9 +244,9 @@ w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/test/jav
 > Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
 > Task :app:processDebugUnitTestJavaRes
 > Task :app:testDebugUnitTest
-gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/verify-1787296565872.json
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/verify-1787298503195.json
 
-BUILD SUCCESSFUL in 3m 14s
+BUILD SUCCESSFUL in 3m 28s
 55 actionable tasks: 55 executed
 
 === BUILD LOG (tail) ===
@@ -333,8 +339,8 @@ Daemon will be stopped at the end of the build
 > Task :app:generateDebugAssets UP-TO-DATE
 > Task :app:mergeDebugAssets UP-TO-DATE
 > Task :app:compressDebugAssets
-> Task :app:l8DexDesugarLibDebug
 > Task :app:desugarDebugFileDependencies
+> Task :app:l8DexDesugarLibDebug
 > Task :app:dexBuilderDebug
 > Task :app:mergeDebugGlobalSynthetics
 > Task :source-js-sandbox:processResources NO-SOURCE
@@ -348,17 +354,17 @@ Daemon will be stopped at the end of the build
 > Task :app:mergeLibDexDebug
 > Task :app:validateSigningDebug
 > Task :app:writeDebugAppMetadata
+> Task :app:writeDebugSigningConfigVersions
 
 > Task :app:stripDebugDebugSymbols
 Unable to strip the following libraries, packaging them as they are: libandroidx.graphics.path.so, libdatastore_shared_counter.so. Run with --info option to learn more.
 
-> Task :app:writeDebugSigningConfigVersions
 > Task :app:mergeProjectDexDebug
 > Task :app:mergeExtDexDebug
 > Task :app:packageDebug
 > Task :app:createDebugApkListingFileRedirect
 > Task :app:assembleDebug
-gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/verify-1787296760178.json
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/verify-1787298711086.json
 
-BUILD SUCCESSFUL in 1m 42s
+BUILD SUCCESSFUL in 1m 47s
 62 actionable tasks: 18 executed, 44 up-to-date

@@ -6,7 +6,10 @@ import android.media.MediaPlayer
 import android.media.audiofx.LoudnessEnhancer
 import android.net.Uri
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.math.PI
+import kotlin.math.cos
 import kotlin.math.roundToInt
+import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlin.random.Random
 import kotlinx.coroutines.CancellationException
@@ -19,6 +22,63 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import vn.nghetruyen.app.audio.AudioDirectionAsset
 import vn.nghetruyen.app.audio.PcmLoudnessEstimator
+
+internal object AmbienceLoopTransitionPolicy {
+    private const val FULL_SHORT_ADAPT_MS = 10_000
+    private const val ADAPT_END_MS = 20_000
+    private const val MAX_OVERLAP_MS = 4_000
+    private const val MAX_START_OFFSET_MS = 1_800
+
+    /**
+     * Short ambience files need substantially more overlap because many source clips already contain
+     * their own fade-in/fade-out. The requested settings remain authoritative for long files, while
+     * clips around ten seconds automatically use roughly 26-36% overlap to hide the source envelope.
+     */
+    fun overlapRange(durationMillis: Int, requestedMinMillis: Int, requestedMaxMillis: Int): IntRange {
+        if (durationMillis <= 0) return 200..200
+        val weight = shortClipWeight(durationMillis)
+        val requestedMin = requestedMinMillis.coerceAtLeast(200)
+        val requestedMax = requestedMaxMillis.coerceAtLeast(requestedMin)
+        val shortTargetMin = (durationMillis * 0.26f).roundToInt()
+        val shortTargetMax = (durationMillis * 0.36f).roundToInt()
+        val hardMax = minOf(MAX_OVERLAP_MS, (durationMillis * 0.42f).roundToInt()).coerceAtLeast(200)
+        val min = blend(requestedMin, shortTargetMin, weight).coerceIn(200, hardMax)
+        val max = blend(requestedMax, shortTargetMax, weight).coerceIn(min, hardMax)
+        return min..max
+    }
+
+    /**
+     * For short loops, start the incoming player beyond the quiet intro instead of repeatedly
+     * replaying a baked-in fade-in. Long files retain the old small random jitter behaviour.
+     */
+    fun startOffsetRange(durationMillis: Int): IntRange {
+        if (durationMillis < 2_500) return 0..0
+        val weight = shortClipWeight(durationMillis)
+        val legacyMax = minOf(durationMillis / 12, 450).coerceAtLeast(0)
+        val shortTargetMin = (durationMillis * 0.10f).roundToInt()
+        val shortTargetMax = (durationMillis * 0.16f).roundToInt()
+        val hardMax = minOf(MAX_START_OFFSET_MS, durationMillis / 5).coerceAtLeast(0)
+        val min = blend(0, shortTargetMin, weight).coerceIn(0, hardMax)
+        val max = blend(legacyMax, shortTargetMax, weight).coerceIn(min, hardMax)
+        return min..max
+    }
+
+    /** Equal-power rather than linear crossfade, preventing the perceived dip around the midpoint. */
+    fun crossfadeGains(fraction: Float): Pair<Float, Float> {
+        val t = fraction.coerceIn(0f, 1f)
+        val angle = t.toDouble() * (PI / 2.0)
+        return cos(angle).toFloat() to sin(angle).toFloat()
+    }
+
+    private fun shortClipWeight(durationMillis: Int): Float = when {
+        durationMillis <= FULL_SHORT_ADAPT_MS -> 1f
+        durationMillis >= ADAPT_END_MS -> 0f
+        else -> (ADAPT_END_MS - durationMillis).toFloat() / (ADAPT_END_MS - FULL_SHORT_ADAPT_MS).toFloat()
+    }
+
+    private fun blend(base: Int, target: Int, weight: Float): Int =
+        (base + (target - base) * weight.coerceIn(0f, 1f)).roundToInt()
+}
 
 /**
  * Voice-first ambience bus with any number of logical layers selected by the AI.
@@ -264,10 +324,16 @@ class SceneAmbienceController(context: Context) {
         val position = runCatching { current.player.currentPosition }.getOrDefault(0)
         if (duration <= 0) return
         val remaining = (duration - position).coerceAtLeast(1)
-        val maximumUsefulOverlap = (duration / 3).coerceAtLeast(250)
-        val minOverlap = overlapMinMillis.coerceAtMost(maximumUsefulOverlap).coerceAtLeast(200)
-        val maxOverlap = overlapMaxMillis.coerceAtMost(maximumUsefulOverlap).coerceAtLeast(minOverlap)
-        val overlap = if (maxOverlap == minOverlap) minOverlap else Random.nextInt(minOverlap, maxOverlap + 1)
+        val overlapRange = AmbienceLoopTransitionPolicy.overlapRange(
+            durationMillis = duration,
+            requestedMinMillis = overlapMinMillis,
+            requestedMaxMillis = overlapMaxMillis,
+        )
+        val overlap = if (overlapRange.first == overlapRange.last) {
+            overlapRange.first
+        } else {
+            Random.nextInt(overlapRange.first, overlapRange.last + 1)
+        }
         val waitMillis = (remaining - overlap).coerceAtLeast(120)
 
         layer.loopJob = scope.launch {
@@ -314,8 +380,9 @@ class SceneAmbienceController(context: Context) {
         repeat(steps + 1) { index ->
             if (layers[layer.anchorAsset.id] !== layer || pausedSnapshot) return
             val fraction = index.toFloat() / steps.toFloat()
-            old.fade = 1f - fraction
-            next.fade = fraction
+            val (oldGain, nextGain) = AmbienceLoopTransitionPolicy.crossfadeGains(fraction)
+            old.fade = oldGain
+            next.fade = nextGain
             applyLevel(layer, old)
             applyLevel(layer, next)
             if (index < steps) delay((durationMillis / steps).coerceAtLeast(1).toLong())
@@ -498,9 +565,8 @@ class SceneAmbienceController(context: Context) {
     }
 
     private fun loopStartJitterMillis(duration: Int): Int {
-        if (duration < 2_000) return 0
-        val ceiling = minOf(duration / 12, 450).coerceAtLeast(1)
-        return Random.nextInt(0, ceiling + 1)
+        val range = AmbienceLoopTransitionPolicy.startOffsetRange(duration)
+        return if (range.first == range.last) range.first else Random.nextInt(range.first, range.last + 1)
     }
 
     private fun effectiveVolume(asset: AudioDirectionAsset, masterVolume: Float): Float {

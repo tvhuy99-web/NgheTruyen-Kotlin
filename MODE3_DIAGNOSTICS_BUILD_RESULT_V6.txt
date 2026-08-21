@@ -1,0 +1,15 @@
+RUN_ID=32394172613
+RUN_ATTEMPT=1
+TRIGGER_SHA=7636eee4b5ca372a18aa7dda3bd7f95e09d11043
+SUCCESS=false
+PATCH_STATUS=1
+TEST_STATUS=99
+BUILD_STATUS=99
+ARTIFACT_NAME=NgheTruyen-freesound-diagnostics-v6-debug
+
+=== PATCH LOG ===
+app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt: expected exactly 1 occurrence, found 2: '                freesoundResolvedAssets = restoredFreesound.resolvedAssets,\n        freesoundRetryRe'
+
+=== TEST LOG ===
+
+=== BUILD LOG ===

@@ -1,0 +1,15 @@
+RUN_ID=32439073052
+RUN_ATTEMPT=1
+TRIGGER_SHA=8c36e9510fcc49494489a1963880ea84c3c221a8
+SUCCESS=false
+PATCH_STATUS=1
+TEST_STATUS=99
+BUILD_STATUS=99
+ARTIFACT_NAME=NgheTruyen-freesound-mode3-v15-debug
+
+=== PATCH LOG ===
+app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt: expected exactly one match, got 3
+
+=== TEST LOG ===
+
+=== BUILD LOG ===

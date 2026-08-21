@@ -21,12 +21,19 @@ import vn.nghetruyen.app.ui.reference.ReferenceVoiceRoleExtras
 import vn.nghetruyen.source.diagnostics.DiagnosticCategory
 import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 import java.io.IOException
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlin.math.min
 
+data class AiAuxiliaryJsonResult(
+    val content: String,
+    val provider: String,
+    val model: String,
+)
+
 /**
- * Canonical XPK chapter-director transport. Voice, scene music, ambience and SFX share one prompt,
- * one provider request, one quota reservation and one response parser.
+ * Canonical XPK chapter-director transport. Voice, scene music, ambience, SFX and Mode-3
+ * Freesound requirements share one prompt, one provider request, one quota reservation and one parser.
  */
 class XpkNarrationAiServices(
     context: Context,
@@ -65,7 +72,45 @@ class XpkNarrationAiServices(
         }
     }
 
+    /**
+     * Auxiliary structured-JSON entry point that deliberately reuses the exact transport,
+     * provider/model resolution, credentials, endpoint fallback, timeout and quota governor
+     * used by production narration/voice-cast planning.
+     */
+    suspend fun completeAuxiliaryJson(
+        storyId: String,
+        prompt: String,
+    ): AppResult<AiAuxiliaryJsonResult> {
+        val clean = prompt.trim()
+        if (clean.isBlank()) return failure("AI_EMPTY_INPUT", "Yêu cầu AI đang trống.")
+        if (clean.length > MAX_PROMPT_CHARS) {
+            return failure("AI_INPUT_TOO_LARGE", "Yêu cầu AI vượt giới hạn gửi trong một lượt.")
+        }
+        val config = resolveConfiguration(storyId)
+        validateConfiguration(config)?.let { return it }
+        diagnostic(
+            "AI_AUXILIARY_JSON_START",
+            attributes = mapOf(
+                "storyId" to storyId,
+                "provider" to config.provider.name,
+                "model" to config.model,
+                "inputChars" to clean.length.toString(),
+            ),
+        )
+        return when (val response = chat(clean, config)) {
+            is AppResult.Failure -> response
+            is AppResult.Success -> AppResult.Success(
+                AiAuxiliaryJsonResult(
+                    content = response.value,
+                    provider = config.provider.name,
+                    model = config.model,
+                ),
+            )
+        }
+    }
+
     suspend fun planNarration(request: NarrationPlanRequest): AppResult<NarrationPlan> {
+        val narrationTraceId = "ai-narration:${UUID.randomUUID()}"
         diagnostic(
             "AI_NARRATION_PLAN_START",
             attributes = mapOf(
@@ -75,14 +120,32 @@ class XpkNarrationAiServices(
                 "sceneMusic" to request.includeSceneMusic.toString(),
                 "ambience" to request.includeAmbience.toString(),
                 "sfx" to request.includeSoundEffects.toString(),
+                "freesoundAuto" to request.includeFreesoundAudioRequirements.toString(),
+                "freesoundKinds" to request.freesoundRequirementKinds.joinToString(",") { it.name },
                 "inputChars" to request.rawText.length.toString(),
             ),
+            traceId = narrationTraceId,
         )
         val rawText = request.rawText.trim()
         if (rawText.isBlank()) return failure("AI_EMPTY_INPUT", "Chương không có nội dung để lập kế hoạch kể chuyện.")
         if (rawText.length > MAX_PLAN_CHARS) return failure("AI_INPUT_TOO_LARGE", "Chương quá dài để lập kế hoạch kể chuyện trong một lượt.")
-        if (!request.includeVoiceCast && !request.includeSceneMusic && !request.includeAmbience && !request.includeSoundEffects) {
+        if (
+            !request.includeVoiceCast && !request.includeSceneMusic && !request.includeAmbience &&
+            !request.includeSoundEffects && !request.includeFreesoundAudioRequirements
+        ) {
             return failure("AI_PLAN_EMPTY", "Không có hạng mục kể chuyện nào được yêu cầu.")
+        }
+        if (request.includeFreesoundAudioRequirements && request.freesoundRequirementKinds.isEmpty()) {
+            return failure("AI_FREESOUND_KINDS_EMPTY", "Chế độ Freesound tự động chưa bật lớp âm thanh nào.")
+        }
+        if (
+            request.includeFreesoundAudioRequirements &&
+            (request.includeSceneMusic || request.includeAmbience || request.includeSoundEffects)
+        ) {
+            return failure(
+                "AI_AUDIO_SOURCE_MODE_MIXED",
+                "Mode 3 không được gửi catalog MUSIC/AMBIENCE/SFX local hoặc dùng bộ quy tắc chọn track_id của Mode 2.",
+            )
         }
         if (request.includeSceneMusic && request.tracks.isEmpty()) {
             return failure("AI_TRACKS_EMPTY", "Chưa có tệp nhạc cảnh đang bật.")
@@ -159,7 +222,7 @@ class XpkNarrationAiServices(
             tracks = request.tracks,
             context = request.context,
             profileSettingsById = profileSettingsById,
-            includeAudioDirection = request.includeAmbience || request.includeSoundEffects,
+            includeAudioDirection = request.includeAmbience || request.includeSoundEffects || request.includeFreesoundAudioRequirements,
         )
         val validSceneTrackIds = if (request.includeSceneMusic) bundle.sceneTrackIds else emptyList()
         val ambienceAliasToId = if (request.includeAmbience) ambienceCatalog.aliasToId else emptyMap()
@@ -179,7 +242,8 @@ class XpkNarrationAiServices(
 
         if (
             request.includeVoiceCast && bundle.dialogueIds.isEmpty() &&
-            !request.includeSceneMusic && !request.includeAmbience && !request.includeSoundEffects
+            !request.includeSceneMusic && !request.includeAmbience && !request.includeSoundEffects &&
+            !request.includeFreesoundAudioRequirements
         ) {
             return AppResult.Success(
                 NarrationPlan(
@@ -200,8 +264,12 @@ class XpkNarrationAiServices(
             soundEffectTracks = request.soundEffectTracks,
             previousChapterTail = request.context.previousChapterEnding,
             incomingAmbienceId = request.context.incomingAmbienceId,
+            incomingFreesoundMusicQuery = request.context.incomingFreesoundMusicQuery,
+            incomingFreesoundAmbienceQueries = request.context.incomingFreesoundAmbienceQueries,
             ambienceCatalog = ambienceCatalog.takeIf { request.includeAmbience },
             sfxCatalog = sfxCatalog.takeIf { request.includeSoundEffects },
+            includeFreesoundAudioRequirements = request.includeFreesoundAudioRequirements,
+            freesoundRequirementKinds = request.freesoundRequirementKinds,
         )
         if (prompt.length > MAX_PROMPT_CHARS) {
             return failure("AI_INPUT_TOO_LARGE", "Bản chép đạo diễn âm thanh vượt giới hạn gửi AI.")
@@ -223,6 +291,8 @@ class XpkNarrationAiServices(
                         includeSceneMusic = request.includeSceneMusic,
                         includeAmbience = request.includeAmbience,
                         includeSoundEffects = request.includeSoundEffects,
+                        includeFreesoundAudioRequirements = request.includeFreesoundAudioRequirements,
+                        freesoundRequirementKinds = request.freesoundRequirementKinds,
                         speedLimitPct = config.expressionSpeedLimitPct.toFloat(),
                         pitchLimitPct = config.expressionPitchLimitPct.toFloat(),
                         volumeLimitPct = config.expressionVolumeLimitPct.toFloat(),
@@ -258,7 +328,10 @@ class XpkNarrationAiServices(
                             "sceneMusic" to request.includeSceneMusic.toString(),
                             "ambience" to request.includeAmbience.toString(),
                             "sfx" to request.includeSoundEffects.toString(),
+                            "freesoundAuto" to request.includeFreesoundAudioRequirements.toString(),
+                            "freesoundRequirements" to it.freesoundRequirements.size.toString(),
                         ),
+                        traceId = narrationTraceId,
                     )
                     AppResult.Success(it)
                 },
@@ -535,12 +608,18 @@ class XpkNarrationAiServices(
         val body: String,
     )
 
-    private fun diagnostic(name: String, severity: DiagnosticSeverity = DiagnosticSeverity.DEBUG, attributes: Map<String, String> = emptyMap()) {
+    private fun diagnostic(
+        name: String,
+        severity: DiagnosticSeverity = DiagnosticSeverity.DEBUG,
+        attributes: Map<String, String> = emptyMap(),
+        traceId: String? = null,
+    ) {
         (appContext as? NgheTruyenApplication)?.container?.sourceDiagnostics?.mark(
             name = name,
             category = DiagnosticCategory.RUNTIME,
             severity = severity,
             sourceId = "ai",
+            traceId = traceId ?: "app:${UUID.randomUUID()}",
             attributes = attributes,
         )
     }

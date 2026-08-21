@@ -1,0 +1,136 @@
+name: Build latest Freesound verified APK
+
+on:
+  push:
+    branches:
+      - agent/freesound-stage-1
+    paths:
+      - ".github/workflows/build-freesound-latest-verified.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-freesound-latest-verified
+  cancel-in-progress: false
+
+jobs:
+  repair-test-build:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/freesound-stage-1
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Apply all runtime fixes
+        shell: bash
+        run: |
+          python3 .github/scripts/fix_all_runtime_20260821.py
+          python3 .github/scripts/smooth_short_ambience_loops_20260821.py
+
+      - name: Test and build
+        id: verify
+        shell: bash
+        run: |
+          set +e
+          rm -f /tmp/all-fixes-test.log /tmp/all-fixes-build.log
+          ./gradlew --no-daemon --stacktrace :source-diagnostics:test :source-vbook:test :app:testDebugUnitTest > /tmp/all-fixes-test.log 2>&1
+          TEST_STATUS=$?
+          BUILD_STATUS=99
+          if [ "$TEST_STATUS" -eq 0 ]; then
+            ./gradlew --no-daemon --stacktrace :app:assembleDebug > /tmp/all-fixes-build.log 2>&1
+            BUILD_STATUS=$?
+          fi
+          SUCCESS=false
+          if [ "$TEST_STATUS" -eq 0 ] && [ "$BUILD_STATUS" -eq 0 ] && [ -f app/build/outputs/apk/debug/app-debug.apk ]; then
+            SUCCESS=true
+          fi
+          {
+            echo "RUN_ID=${GITHUB_RUN_ID}"
+            echo "RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT}"
+            echo "TRIGGER_SHA=${GITHUB_SHA}"
+            echo "SUCCESS=${SUCCESS}"
+            echo "TEST_STATUS=${TEST_STATUS}"
+            echo "BUILD_STATUS=${BUILD_STATUS}"
+            echo "ARTIFACT_NAME=NgheTruyen-freesound-all-fixes-debug"
+            echo
+            echo "=== TEST LOG (tail) ==="
+            tail -n 360 /tmp/all-fixes-test.log 2>/dev/null || true
+            echo
+            echo "=== BUILD LOG (tail) ==="
+            tail -n 260 /tmp/all-fixes-build.log 2>/dev/null || true
+          } > FIX_ALL_RUNTIME_BUILD_RESULT_20260821.txt
+          echo "success=${SUCCESS}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload APK
+        if: steps.verify.outputs.success == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: NgheTruyen-freesound-all-fixes-debug
+          retention-days: 30
+          if-no-files-found: error
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Commit verified fixes or report
+        if: always()
+        shell: bash
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ "${{ steps.verify.outputs.success }}" = "true" ]; then
+            for file in \
+              app/src/main/java/vn/nghetruyen/app/ai/XpkUnifiedNarrationPrompt.kt \
+              app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt \
+              app/src/main/java/vn/nghetruyen/app/freesound/FreesoundImporter.kt \
+              app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt \
+              app/src/main/java/vn/nghetruyen/app/playback/AudioDirectionRuntime.kt \
+              app/src/main/java/vn/nghetruyen/app/playback/SceneAmbienceController.kt \
+              app/src/test/java/vn/nghetruyen/app/ai/XpkAudioPromptQualityTest.kt \
+              app/src/test/java/vn/nghetruyen/app/playback/AmbienceLoopTransitionPolicyTest.kt \
+              source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt \
+              source-diagnostics/src/main/kotlin/vn/nghetruyen/source/diagnostics/SourceDiagnostics.kt
+            do
+              git add -- "$file"
+            done
+          else
+            git reset --hard HEAD
+          fi
+          git add -- FIX_ALL_RUNTIME_BUILD_RESULT_20260821.txt
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          if [ "${{ steps.verify.outputs.success }}" = "true" ]; then
+            git commit -m "Finalize file-adaptive ambience and audio prompt"
+          else
+            git commit -m "Record all-fixes verification failure"
+          fi
+          git push origin HEAD:agent/freesound-stage-1
+
+      - name: Fail if verification failed
+        if: steps.verify.outputs.success != 'true'
+        shell: bash
+        run: exit 1

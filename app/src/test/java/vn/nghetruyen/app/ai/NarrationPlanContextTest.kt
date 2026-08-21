@@ -12,6 +12,6 @@ class NarrationPlanContextTest {
         )
 
         assertEquals(listOf("rain", "forest", "ignored-third", "rain"), context.incomingAmbienceIds)
-        assertEquals("rain|forest", context.incomingAmbienceId)
+        assertEquals("rain|forest|ignored-third", context.incomingAmbienceId)
     }
 }

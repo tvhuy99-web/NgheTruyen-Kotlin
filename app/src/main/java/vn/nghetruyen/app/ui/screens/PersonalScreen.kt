@@ -60,6 +60,7 @@ import vn.nghetruyen.app.sources.SourceCheckStatus
 import vn.nghetruyen.app.sourceplatform.DiagnosticHumanFormatter
 import vn.nghetruyen.app.transfer.BackupComponent
 import vn.nghetruyen.app.ui.MainUiState
+import vn.nghetruyen.app.ui.components.FreesoundSettingsCard
 import vn.nghetruyen.app.ui.components.ReferenceActionButton
 import vn.nghetruyen.app.ui.components.ReferenceGray
 import vn.nghetruyen.app.ui.components.ReferencePanelBackground
@@ -228,6 +229,7 @@ fun PersonalScreen(
         "settings_tts" -> "Cài đặt TTS"
         "settings_playback" -> "Tai nghe và tự động hóa"
         "settings_music" -> "Nhạc nền và nhạc cảnh"
+        "settings_audio_sources" -> "Nguồn âm thanh trực tuyến"
         "settings_following" -> "Theo dõi chương mới"
         "settings_storage" -> "Dung lượng ngoại tuyến"
         "settings_export" -> "Xuất sách nói"
@@ -394,6 +396,9 @@ fun PersonalScreen(
                 onEnabledChange = onSceneMusicEnabledChange,
                 onDelete = onDeleteSceneMusic,
             )
+        }
+        "settings_audio_sources" -> PersonalSubPage("NGUỒN ÂM THANH TRỰC TUYẾN") {
+            FreesoundSettingsCard()
         }
         "settings_following" -> PersonalSubPage("THEO DÕI CHƯƠNG MỚI") {
             FollowingSettingsCard(
@@ -740,6 +745,7 @@ private fun ReferenceSettingsHomePage(
             "settings_ai" to "THIẾT LẬP AI",
             "settings_automation" to "PHÂN VAI TTS BẰNG AI",
             "settings_music" to "NHẠC NỀN & NHẠC CẢNH",
+            "settings_audio_sources" to "NGUỒN ÂM THANH TRỰC TUYẾN",
             "settings_following" to "THEO DÕI CHƯƠNG MỚI",
             "settings_storage" to "DUNG LƯỢNG NGOẠI TUYẾN",
             "settings_export" to "XUẤT SÁCH NÓI",

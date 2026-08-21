@@ -1,0 +1,146 @@
+name: Audit Freesound merge readiness
+
+on:
+  push:
+    branches:
+      - agent/freesound-stage-1
+    paths:
+      - ".github/workflows/audit-freesound-merge-readiness-20260821.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: audit-freesound-merge-readiness
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      EXPECTED_DEBUG_CERT_SHA256: 534bf882c96a59ccf4310d18d02b14b62aa68e2beff3b6d05bf308e9909eb2f4
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v6
+        with:
+          ref: agent/freesound-stage-1
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Install validation dependencies
+        run: python3 -m pip install --disable-pip-version-check beautifulsoup4 cryptography
+
+      - name: Run canonical Milestone 0 gate
+        id: m0
+        continue-on-error: true
+        run: bash scripts/m0_gate.sh
+
+      - name: Run all JVM tests
+        id: tests
+        continue-on-error: true
+        run: ./gradlew --no-daemon --stacktrace test
+
+      - name: Run Android lint
+        id: lint
+        continue-on-error: true
+        run: ./gradlew --no-daemon --stacktrace :app:lintDebug
+
+      - name: Assemble debug APK
+        id: build
+        continue-on-error: true
+        run: ./gradlew --no-daemon --stacktrace :app:assembleDebug
+
+      - name: Verify stable debug APK signature
+        id: signature
+        continue-on-error: true
+        shell: bash
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          APKSIGNER="${ANDROID_HOME}/build-tools/36.0.0/apksigner"
+          test -f "${APK}"
+          test -x "${APKSIGNER}"
+          ACTUAL_CERT_SHA256="$("${APKSIGNER}" verify --print-certs "${APK}" | awk -F': ' '/certificate SHA-256 digest:/ {print tolower($NF); exit}')"
+          echo "Expected certificate: ${EXPECTED_DEBUG_CERT_SHA256}"
+          echo "Actual certificate:   ${ACTUAL_CERT_SHA256}"
+          test "${ACTUAL_CERT_SHA256}" = "${EXPECTED_DEBUG_CERT_SHA256}"
+
+      - name: Enable KVM
+        id: kvm
+        continue-on-error: true
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run connected Android tests on API 33
+        id: instrumentation
+        continue-on-error: true
+        uses: reactivecircus/android-emulator-runner@v2.37.0
+        with:
+          api-level: 33
+          target: default
+          arch: x86_64
+          disable-animations: true
+          script: ./gradlew --no-daemon --stacktrace connectedDebugAndroidTest
+
+      - name: Write merge-readiness result
+        if: always()
+        shell: bash
+        run: |
+          cat > MERGE_READINESS_RESULT_20260821.txt <<EOF
+          RUN_ID=${GITHUB_RUN_ID}
+          RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT}
+          TESTED_SHA=${GITHUB_SHA}
+          M0_OUTCOME=${{ steps.m0.outcome }}
+          JVM_TEST_OUTCOME=${{ steps.tests.outcome }}
+          LINT_OUTCOME=${{ steps.lint.outcome }}
+          BUILD_OUTCOME=${{ steps.build.outcome }}
+          SIGNATURE_OUTCOME=${{ steps.signature.outcome }}
+          KVM_OUTCOME=${{ steps.kvm.outcome }}
+          INSTRUMENTATION_OUTCOME=${{ steps.instrumentation.outcome }}
+          EOF
+
+      - name: Commit audit result
+        if: always()
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- MERGE_READINESS_RESULT_20260821.txt
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Record Freesound merge-readiness audit"
+          git push origin HEAD:agent/freesound-stage-1
+
+      - name: Upload audit reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: freesound-merge-readiness-${{ github.run_number }}
+          if-no-files-found: warn
+          path: |
+            MERGE_READINESS_RESULT_20260821.txt
+            app/build/reports/**
+            build/reports/m0/**
+            app/build/outputs/apk/debug/*.apk
+            app/build/reports/androidTests/connected/**
+            app/build/outputs/androidTest-results/connected/**

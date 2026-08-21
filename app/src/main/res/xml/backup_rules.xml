@@ -4,6 +4,7 @@
          domain="database" path="." and path="datastore/" -->
     <include domain="sharedpref" path="." />
     <exclude domain="sharedpref" path="encrypted_ai_credentials_v1.xml" />
+    <exclude domain="sharedpref" path="encrypted_freesound_credentials_v1.xml" />
     <exclude domain="sharedpref" path="encrypted_source_sessions_v1.xml" />
     <exclude domain="sharedpref" path="encrypted_vbook_secrets_v1.xml" />
     <exclude domain="sharedpref" path="encrypted_vbook_config_v1.xml" />

@@ -1,0 +1,319 @@
+RUN_ID=32437760263
+RUN_ATTEMPT=1
+TRIGGER_SHA=7981c0d7e2012e2353f67efcbb126f71845b2587
+SUCCESS=true
+PATCH_STATUS=0
+TEST_STATUS=0
+BUILD_STATUS=0
+ARTIFACT_NAME=NgheTruyen-freesound-mode3-v14-debug
+
+=== PATCH LOG ===
+Mode 3 V14 local-first cache, 4-way search, timing and long-file optimization patch applied.
+V14 normalization policy regression test updated.
+
+=== TEST LOG ===
+Gradle Wrapper JAR is already verified.
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.13/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :source-api:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :source-api:processResources NO-SOURCE
+> Task :source-diagnostics:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :source-diagnostics:processResources NO-SOURCE
+> Task :source-package:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :source-package:processResources NO-SOURCE
+> Task :source-repository:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :source-store:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :source-store:processResources NO-SOURCE
+> Task :source-js-sandbox:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :source-runtime:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :source-runtime:processResources NO-SOURCE
+> Task :source-vbook:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :source-vbook:processResources NO-SOURCE
+> Task :source-repository:processResources NO-SOURCE
+> Task :source-lua:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :source-lua:processResources
+> Task :source-network:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :source-network:processResources NO-SOURCE
+> Task :source-js-sandbox:processResources NO-SOURCE
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugBuildConfig
+> Task :app:checkDebugAarMetadata
+> Task :app:processDebugNavigationResources
+> Task :app:compileDebugNavigationResources
+> Task :app:mapDebugSourceSetPaths
+> Task :app:generateDebugResources
+> Task :app:packageDebugResources
+> Task :app:mergeDebugResources
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:extractDeepLinksDebug
+> Task :app:parseDebugLocalResources
+> Task :app:processDebugMainManifest
+> Task :app:processDebugManifest
+> Task :app:processDebugManifestForPackage
+> Task :app:javaPreCompileDebug
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:javaPreCompileDebugUnitTest
+> Task :app:mergeDebugShaders
+> Task :app:compileDebugShaders NO-SOURCE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets
+> Task :app:processDebugResources
+> Task :app:processDebugUnitTestManifest
+> Task :app:packageDebugUnitTestForUnitTest
+> Task :app:generateDebugUnitTestConfig
+
+> Task :source-js-sandbox:compileKotlin
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/source-js-sandbox/src/main/kotlin/com/nghetruyen/source/sandbox/JsSandbox.kt:358:13 'fun setOptimizationLevel(p0: Int): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/source-js-sandbox/src/main/kotlin/com/nghetruyen/source/sandbox/JsSyntaxValidator.kt:26:20 'var optimizationLevel: Int' is deprecated. Deprecated in Java.
+
+> Task :source-js-sandbox:compileJava NO-SOURCE
+> Task :source-js-sandbox:classes UP-TO-DATE
+> Task :source-js-sandbox:jar
+> Task :source-api:compileKotlin
+> Task :source-api:compileJava NO-SOURCE
+> Task :source-api:classes UP-TO-DATE
+> Task :source-api:jar
+> Task :source-diagnostics:compileKotlin
+> Task :source-diagnostics:compileJava NO-SOURCE
+> Task :source-diagnostics:classes UP-TO-DATE
+> Task :source-diagnostics:jar
+> Task :source-package:compileKotlin
+> Task :source-package:compileJava NO-SOURCE
+> Task :source-package:classes UP-TO-DATE
+> Task :source-package:jar
+> Task :source-network:compileKotlin
+> Task :source-network:compileJava NO-SOURCE
+> Task :source-network:classes UP-TO-DATE
+> Task :source-network:jar
+
+> Task :source-runtime:compileKotlin
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/source-runtime/src/main/kotlin/vn/nghetruyen/source/runtime/DeclarativeSourceRuntime.kt:469:53 Type annotation class 'org.jspecify.annotations.Nullable' of the inferred type is inaccessible. Check the module classpath for missing or conflicting dependencies. This will become an error in language version 2.4. See https://youtrack.jetbrains.com/issue/KT-80247.
+
+> Task :source-runtime:compileJava NO-SOURCE
+> Task :source-runtime:classes UP-TO-DATE
+> Task :source-runtime:jar
+> Task :source-store:compileKotlin
+> Task :source-store:compileJava NO-SOURCE
+> Task :source-store:classes UP-TO-DATE
+> Task :source-store:jar
+
+> Task :source-vbook:compileKotlin
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt:1351:117 Type annotation class 'org.jspecify.annotations.Nullable' of the inferred type is inaccessible. Check the module classpath for missing or conflicting dependencies. This will become an error in language version 2.4. See https://youtrack.jetbrains.com/issue/KT-80247.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt:1394:107 Type annotation class 'org.jspecify.annotations.Nullable' of the inferred type is inaccessible. Check the module classpath for missing or conflicting dependencies. This will become an error in language version 2.4. See https://youtrack.jetbrains.com/issue/KT-80247.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt:1405:48 Type annotation class 'org.jspecify.annotations.Nullable' of the inferred type is inaccessible. Check the module classpath for missing or conflicting dependencies. This will become an error in language version 2.4. See https://youtrack.jetbrains.com/issue/KT-80247.
+
+> Task :source-vbook:compileJava NO-SOURCE
+> Task :source-vbook:classes UP-TO-DATE
+> Task :source-vbook:jar
+> Task :source-repository:compileKotlin
+> Task :source-repository:compileJava NO-SOURCE
+> Task :source-repository:classes UP-TO-DATE
+> Task :source-repository:jar
+> Task :source-lua:compileKotlin
+> Task :source-lua:compileJava NO-SOURCE
+> Task :source-lua:classes
+> Task :source-lua:jar
+> Task :app:kaptGenerateStubsDebugKotlin
+> Task :app:kaptDebugKotlin
+> Task :app:compileDebugKotlin
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ai/OnlineAiServices.kt:41:53 'interface VoiceCastEngine : Any' is deprecated. Use XpkNarrationAiServices; paragraph voice-cast protocol is retired from production wiring.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ai/OnlineAiServices.kt:41:70 'interface SceneMusicPlanner : Any' is deprecated. Use XpkNarrationAiServices; paragraph scene-cue protocol is retired from production wiring.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ai/OnlineAiServices.kt:41:89 'interface NarrationPlanner : Any' is deprecated. Use XpkNarrationAiServices; legacy narration planner is retired from production wiring.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ai/OnlineAiServices.kt:356:55 'fun parseVoiceCast(raw: String): VoiceCastPlan' is deprecated. Use parseXpkNarration; paragraph ROLE/ASSIGN protocol is not used by XPK narration runtime.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ai/OnlineAiServices.kt:383:66 'fun parseSceneCues(raw: String): List<SceneMusicCue>' is deprecated. Use parseXpkNarration; paragraph CUE protocol is not used by XPK narration runtime.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ai/OnlineAiServices.kt:483:59 'fun parseVoiceCast(raw: String): VoiceCastPlan' is deprecated. Use parseXpkNarration; paragraph ROLE/ASSIGN protocol is not used by XPK narration runtime.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ai/OnlineAiServices.kt:485:74 'fun parseSceneCues(raw: String): List<SceneMusicCue>' is deprecated. Use parseXpkNarration; paragraph CUE protocol is not used by XPK narration runtime.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ai/XpkNarrationAiServices.kt:416:44 Unnecessary safe call on a non-null receiver of type 'ResponseBody'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/audio/AudioExportWorker.kt:325:36 Unnecessary non-null assertion (!!) on a non-null receiver of type 'TtsFileSynthesizer'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/audio/AudioExportWorker.kt:331:32 Unnecessary non-null assertion (!!) on a non-null receiver of type 'TtsFileSynthesizer'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/audio/AudioExportWorker.kt:781:44 'constructor(p0: Int, p1: CharSequence!, p2: PendingIntent?): Notification.Action.Builder' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/audio/TtsFileSynthesizer.kt:41:26 This declaration overrides a deprecated member but is not marked as deprecated itself. Add the '@Deprecated' annotation or suppress the diagnostic.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/downloads/ChapterDownloadWorker.kt:451:37 'constructor(p0: Int, p1: CharSequence!, p2: PendingIntent?): Notification.Action.Builder' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt:628:38 Elvis operator (?:) always returns the left operand of non-nullable type 'Int'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoRequirements.kt:75:29 'when' is exhaustive so 'else' is redundant here.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt:786:30 This declaration overrides a deprecated member but is not marked as deprecated itself. Add the '@Deprecated' annotation or suppress the diagnostic.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt:2428:48 Unnecessary non-null assertion (!!) on a non-null receiver of type 'ChapterTransformEntity'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt:3085:36 'constructor(p0: Int, p1: CharSequence!, p2: PendingIntent?): Notification.Action.Builder' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/playback/TtsVoiceCatalog.kt:33:45 Redundant call of conversion method.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidChromiumVBookRuntime.kt:240:21 'var databaseEnabled: Boolean' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidSourceBrowserBroker.kt:395:51 'var databaseEnabled: Boolean' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sourceplatform/ExtensionWebViewAuthority.kt:23:13 'var databaseEnabled: Boolean' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sourceplatform/SourceBrowserViewportHost.kt:91:21 Unnecessary safe call on a non-null receiver of type 'ViewGroup'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sourceplatform/SourcePlatformModels.kt:183:29 Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'SimpleDateFormat?'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sources/SourceDiagnosticBrowserActivity.kt:222:51 'var databaseEnabled: Boolean' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sources/SourceLoginActivity.kt:115:22 'var databaseEnabled: Boolean' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sources/TruyenComSource.kt:216:37 Unnecessary safe call on a non-null receiver of type 'Element'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sources/TruyenComSource.kt:320:35 Unnecessary safe call on a non-null receiver of type 'Element'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sources/TruyenComSource.kt:332:35 Unnecessary safe call on a non-null receiver of type 'Element'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sources/TruyenCvSource.kt:272:39 Unnecessary safe call on a non-null receiver of type 'Element'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sources/TruyenCvSource.kt:401:44 Unnecessary safe call on a non-null receiver of type 'Element'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sources/TruyenCvSource.kt:409:61 Unnecessary safe call on a non-null receiver of type 'Element'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sources/TruyenCvSource.kt:422:35 Unnecessary safe call on a non-null receiver of type 'Element'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sources/TruyenFullSource.kt:365:35 Unnecessary safe call on a non-null receiver of type 'Element'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sources/TruyenFullSource.kt:378:35 Unnecessary safe call on a non-null receiver of type 'Element'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/components/FreesoundAdvancedToolsDialogs.kt:252:73 'fun announceForAccessibility(p0: CharSequence!): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/components/FreesoundAdvancedToolsDialogs.kt:598:68 'fun announceForAccessibility(p0: CharSequence!): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/components/FreesoundSearchDialog.kt:407:43 'fun announceForAccessibility(p0: CharSequence!): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/components/FreesoundSettingsCard.kt:46:62 'fun announceForAccessibility(p0: CharSequence!): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/components/ReferenceDiagnosticsChrome.kt:97:21 'val LocalClipboardManager: ProvidableCompositionLocal<ClipboardManager>' is deprecated. Use LocalClipboard instead which supports suspend functions.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/components/UnifiedAudioAssetManagerDialog.kt:70:21 'val LocalClipboardManager: ProvidableCompositionLocal<ClipboardManager>' is deprecated. Use LocalClipboard instead which supports suspend functions.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/screens/ExploreScreen.kt:144:18 'fun announceForAccessibility(p0: CharSequence!): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/screens/LibraryScreen.kt:118:14 'fun announceForAccessibility(p0: CharSequence!): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt:257:14 'fun announceForAccessibility(p0: CharSequence!): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt:1297:29 'val LocalClipboardManager: ProvidableCompositionLocal<ClipboardManager>' is deprecated. Use LocalClipboard instead which supports suspend functions.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt:1639:25 'val LocalClipboardManager: ProvidableCompositionLocal<ClipboardManager>' is deprecated. Use LocalClipboard instead which supports suspend functions.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt:179:21 'val LocalClipboardManager: ProvidableCompositionLocal<ClipboardManager>' is deprecated. Use LocalClipboard instead which supports suspend functions.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt:337:14 'fun announceForAccessibility(p0: CharSequence!): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt:343:18 'fun announceForAccessibility(p0: CharSequence!): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt:279:14 'fun announceForAccessibility(p0: CharSequence!): Unit' is deprecated. Deprecated in Java.
+
+> Task :app:compileDebugJavaWithJavac
+> Task :app:processDebugJavaRes
+> Task :app:bundleDebugClassesToRuntimeJar
+> Task :app:bundleDebugClassesToCompileJar
+> Task :app:kaptGenerateStubsDebugUnitTestKotlin
+
+> Task :app:kaptDebugUnitTestKotlin
+warning: The following options were not recognized by any processor: '[room.schemaLocation, kapt.kotlin.generated, room.incremental]'
+
+> Task :app:compileDebugUnitTestKotlin
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/test/java/vn/nghetruyen/app/ai/AiLineProtocolTest.kt:9:35 'fun parseVoiceCast(raw: String): VoiceCastPlan' is deprecated. Use parseXpkNarration; paragraph ROLE/ASSIGN protocol is not used by XPK narration runtime.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/test/java/vn/nghetruyen/app/ai/AiLineProtocolTest.kt:22:35 'fun parseSceneCues(raw: String): List<SceneMusicCue>' is deprecated. Use parseXpkNarration; paragraph CUE protocol is not used by XPK narration runtime.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/test/java/vn/nghetruyen/app/playback/XpkStrictParityTest.kt:11:8 'interface NarrationPlanner : Any' is deprecated. Use XpkNarrationAiServices; legacy narration planner is retired from production wiring.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/test/java/vn/nghetruyen/app/playback/XpkStrictParityTest.kt:13:8 'interface SceneMusicPlanner : Any' is deprecated. Use XpkNarrationAiServices; paragraph scene-cue protocol is retired from production wiring.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/test/java/vn/nghetruyen/app/playback/XpkStrictParityTest.kt:15:8 'interface VoiceCastEngine : Any' is deprecated. Use XpkNarrationAiServices; paragraph voice-cast protocol is retired from production wiring.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/test/java/vn/nghetruyen/app/playback/XpkStrictParityTest.kt:180:21 'interface VoiceCastEngine : Any' is deprecated. Use XpkNarrationAiServices; paragraph voice-cast protocol is retired from production wiring.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/test/java/vn/nghetruyen/app/playback/XpkStrictParityTest.kt:181:21 'interface SceneMusicPlanner : Any' is deprecated. Use XpkNarrationAiServices; paragraph scene-cue protocol is retired from production wiring.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/test/java/vn/nghetruyen/app/playback/XpkStrictParityTest.kt:182:21 'interface NarrationPlanner : Any' is deprecated. Use XpkNarrationAiServices; legacy narration planner is retired from production wiring.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/test/java/vn/nghetruyen/app/sources/HostRequestGovernorTest.kt:14:36 This declaration needs opt-in. Its usage should be marked with '@kotlinx.coroutines.ExperimentalCoroutinesApi' or '@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)'
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/test/java/vn/nghetruyen/app/sources/HostRequestGovernorTest.kt:16:34 This declaration needs opt-in. Its usage should be marked with '@kotlinx.coroutines.ExperimentalCoroutinesApi' or '@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)'
+
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processDebugUnitTestJavaRes
+> Task :app:testDebugUnitTest
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/verify-1787277137018.json
+
+BUILD SUCCESSFUL in 3m 28s
+55 actionable tasks: 55 executed
+
+=== BUILD LOG ===
+Gradle Wrapper JAR is already verified.
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.13/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :source-api:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :source-api:compileKotlin UP-TO-DATE
+> Task :source-api:compileJava NO-SOURCE
+> Task :source-api:processResources NO-SOURCE
+> Task :source-api:classes UP-TO-DATE
+> Task :source-api:jar UP-TO-DATE
+> Task :source-diagnostics:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :source-diagnostics:compileKotlin UP-TO-DATE
+> Task :source-diagnostics:compileJava NO-SOURCE
+> Task :source-diagnostics:processResources NO-SOURCE
+> Task :source-diagnostics:classes UP-TO-DATE
+> Task :source-diagnostics:jar UP-TO-DATE
+> Task :source-package:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :source-package:compileKotlin UP-TO-DATE
+> Task :source-package:compileJava NO-SOURCE
+> Task :source-package:processResources NO-SOURCE
+> Task :source-package:classes UP-TO-DATE
+> Task :source-package:jar UP-TO-DATE
+> Task :source-store:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :source-store:compileKotlin UP-TO-DATE
+> Task :source-store:compileJava NO-SOURCE
+> Task :source-store:processResources NO-SOURCE
+> Task :source-store:classes UP-TO-DATE
+> Task :source-store:jar UP-TO-DATE
+> Task :source-runtime:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :source-runtime:compileKotlin UP-TO-DATE
+> Task :source-runtime:compileJava NO-SOURCE
+> Task :source-runtime:processResources NO-SOURCE
+> Task :source-runtime:classes UP-TO-DATE
+> Task :source-runtime:jar UP-TO-DATE
+> Task :source-network:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :source-network:compileKotlin UP-TO-DATE
+> Task :source-network:compileJava NO-SOURCE
+> Task :source-network:processResources NO-SOURCE
+> Task :source-network:classes UP-TO-DATE
+> Task :source-network:jar UP-TO-DATE
+> Task :source-repository:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :source-js-sandbox:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :source-js-sandbox:compileKotlin UP-TO-DATE
+> Task :source-js-sandbox:compileJava NO-SOURCE
+> Task :source-vbook:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :source-vbook:compileKotlin UP-TO-DATE
+> Task :source-vbook:compileJava NO-SOURCE
+> Task :source-vbook:processResources NO-SOURCE
+> Task :source-vbook:classes UP-TO-DATE
+> Task :source-vbook:jar UP-TO-DATE
+> Task :source-repository:compileKotlin UP-TO-DATE
+> Task :source-repository:compileJava NO-SOURCE
+> Task :source-repository:processResources NO-SOURCE
+> Task :source-repository:classes UP-TO-DATE
+> Task :source-repository:jar UP-TO-DATE
+> Task :source-lua:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :source-lua:compileKotlin UP-TO-DATE
+> Task :source-lua:compileJava NO-SOURCE
+> Task :source-lua:processResources UP-TO-DATE
+> Task :source-lua:classes UP-TO-DATE
+> Task :source-lua:jar UP-TO-DATE
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:generateDebugBuildConfig UP-TO-DATE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :app:processDebugNavigationResources UP-TO-DATE
+> Task :app:compileDebugNavigationResources UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :app:processDebugMainManifest UP-TO-DATE
+> Task :app:processDebugManifest UP-TO-DATE
+> Task :app:processDebugManifestForPackage UP-TO-DATE
+> Task :app:processDebugResources UP-TO-DATE
+> Task :app:kaptGenerateStubsDebugKotlin UP-TO-DATE
+> Task :app:kaptDebugKotlin UP-TO-DATE
+> Task :app:compileDebugKotlin UP-TO-DATE
+> Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :app:compileDebugJavaWithJavac UP-TO-DATE
+> Task :app:mergeDebugShaders UP-TO-DATE
+> Task :app:compileDebugShaders NO-SOURCE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets UP-TO-DATE
+> Task :app:compressDebugAssets
+> Task :app:l8DexDesugarLibDebug
+> Task :app:desugarDebugFileDependencies
+> Task :app:dexBuilderDebug
+> Task :app:mergeDebugGlobalSynthetics
+> Task :source-js-sandbox:processResources NO-SOURCE
+> Task :source-js-sandbox:classes UP-TO-DATE
+> Task :source-js-sandbox:jar UP-TO-DATE
+> Task :app:processDebugJavaRes UP-TO-DATE
+> Task :app:mergeDebugJniLibFolders
+> Task :app:checkDebugDuplicateClasses
+> Task :app:mergeDebugNativeLibs
+> Task :app:mergeDebugJavaResource
+> Task :app:mergeLibDexDebug
+> Task :app:validateSigningDebug
+> Task :app:writeDebugAppMetadata
+> Task :app:writeDebugSigningConfigVersions
+
+> Task :app:stripDebugDebugSymbols
+Unable to strip the following libraries, packaging them as they are: libandroidx.graphics.path.so, libdatastore_shared_counter.so. Run with --info option to learn more.
+
+> Task :app:mergeProjectDexDebug
+> Task :app:mergeExtDexDebug
+> Task :app:packageDebug
+> Task :app:createDebugApkListingFileRedirect
+> Task :app:assembleDebug
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/verify-1787277345479.json
+
+BUILD SUCCESSFUL in 1m 48s
+62 actionable tasks: 18 executed, 44 up-to-date

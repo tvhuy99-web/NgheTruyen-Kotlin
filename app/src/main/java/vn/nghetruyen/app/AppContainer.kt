@@ -8,12 +8,16 @@ import vn.nghetruyen.app.ai.NarrationPlanCoordinator
 import vn.nghetruyen.app.ai.XpkNarrationAiServices
 import vn.nghetruyen.app.ai.vietphrase.VietPhraseOnlineUpdater
 import vn.nghetruyen.app.audio.AudioExportScheduler
+import vn.nghetruyen.app.audio.StoryAudioSourceModeStore
 import vn.nghetruyen.app.data.local.AppDatabase
 import vn.nghetruyen.app.data.repository.LibraryRepository
 import vn.nghetruyen.app.data.settings.SettingsRepository
 import vn.nghetruyen.app.downloads.DownloadScheduler
 import vn.nghetruyen.app.importers.BookImporter
 import vn.nghetruyen.app.following.FollowingUpdateScheduler
+import vn.nghetruyen.app.freesound.FreesoundAutoAudioResolver
+import vn.nghetruyen.app.freesound.FreesoundClient
+import vn.nghetruyen.app.freesound.FreesoundCredentialStore
 import vn.nghetruyen.app.playback.TtsVoiceCatalog
 import vn.nghetruyen.app.sources.EncryptedSourceSessionStore
 import vn.nghetruyen.app.sourceplatform.AndroidVBookQuickTranslationRegistry
@@ -126,6 +130,18 @@ class AppContainer(context: Context) {
     val bookImporter: BookImporter by lazy { BookImporter(appContext.contentResolver) }
     val downloadScheduler: DownloadScheduler by lazy { DownloadScheduler(appContext) }
     val followingUpdateScheduler: FollowingUpdateScheduler by lazy { FollowingUpdateScheduler(appContext) }
+    val freesoundCredentialStore: FreesoundCredentialStore by lazy { FreesoundCredentialStore(appContext) }
+    val freesoundClient: FreesoundClient by lazy { FreesoundClient(freesoundCredentialStore) }
+    val storyAudioSourceModeStore: StoryAudioSourceModeStore by lazy { StoryAudioSourceModeStore(appContext) }
+    val freesoundAutoAudioResolver: FreesoundAutoAudioResolver by lazy {
+        FreesoundAutoAudioResolver(
+            context = appContext,
+            repository = libraryRepository,
+            settingsRepository = settingsRepository,
+            client = freesoundClient,
+            existingTracksProvider = { database.sceneMusicTrackDao().listAll() },
+        )
+    }
     val ttsVoiceCatalog: TtsVoiceCatalog by lazy { TtsVoiceCatalog(appContext) }
     val aiCredentialStore: EncryptedAiCredentialStore by lazy { EncryptedAiCredentialStore(appContext) }
     val aiRequestGovernor: AiRequestGovernor by lazy { AiRequestGovernor(database, settingsRepository) }
@@ -136,7 +152,13 @@ class AppContainer(context: Context) {
         XpkNarrationAiServices(appContext, settingsRepository, aiCredentialStore, aiRequestGovernor, libraryRepository)
     }
     val narrationPlanCoordinator: NarrationPlanCoordinator by lazy {
-        NarrationPlanCoordinator(libraryRepository, settingsRepository, xpkNarrationAiServices)
+        NarrationPlanCoordinator(
+            library = libraryRepository,
+            settings = settingsRepository,
+            ai = xpkNarrationAiServices,
+            storyAudioModeStore = storyAudioSourceModeStore,
+            freesoundResolver = freesoundAutoAudioResolver,
+        )
     }
     val audioExportScheduler: AudioExportScheduler by lazy { AudioExportScheduler(appContext) }
     val vietPhraseTransferManager: VietPhraseTransferManager by lazy {

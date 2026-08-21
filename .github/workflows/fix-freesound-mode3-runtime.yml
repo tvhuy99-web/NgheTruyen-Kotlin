@@ -1,0 +1,40 @@
+name: Freesound verified patch source
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  patch-source-documentation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Patch source used by legacy verifier reruns
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def read(path):
+              return Path(path).read_text(encoding='utf-8')
+
+          def write(path, text):
+              Path(path).write_text(text, encoding='utf-8')
+
+          def replace_once(path, old, new):
+              text = read(path)
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected exactly 1 occurrence, found {count}: {old[:120]!r}")
+              write(path, text.replace(old, new, 1))
+
+          def replace_count(path, old, new, expected):
+              text = read(path)
+              count = text.count(old)
+              if count != expected:
+                  raise SystemExit(f"{path}: expected {expected} occurrences, found {count}: {old[:120]!r}")
+              write(path, text.replace(old, new))
+
+          exec(Path('.github/scripts/run_fix_all_runtime_20260821.py').read_text(encoding='utf-8'))
+          PY

@@ -1,0 +1,15 @@
+RUN_ID=32397939205
+RUN_ATTEMPT=1
+TRIGGER_SHA=e22ade31c7a72ed195b86a19170a7f43d08429a5
+SUCCESS=false
+PATCH_STATUS=1
+TEST_STATUS=99
+BUILD_STATUS=99
+ARTIFACT_NAME=NgheTruyen-freesound-mode3-v7-debug
+
+=== PATCH LOG ===
+resolver clear methods: expected exactly 1 occurrence, found 0: '    private val importer = FreesoundImporter(\n        context = appContext,\n        repository = repository,\n        exi'
+
+=== TEST LOG ===
+
+=== BUILD LOG ===

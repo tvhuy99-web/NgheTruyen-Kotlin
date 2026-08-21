@@ -1,0 +1,80 @@
+name: One-shot vBook retained heap fix
+
+on:
+  push:
+    branches:
+      - integration/freesound-stage-1-clean
+    paths:
+      - .github/workflows/fix-vbook-heap-budget.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: integration/freesound-stage-1-clean
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Patch heap budget and run focused tests
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one match, got {count}: {old[:120]!r}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          src = 'source-js-sandbox/src/main/kotlin/com/nghetruyen/source/sandbox/JsSandbox.kt'
+          test = 'source-js-sandbox/src/test/kotlin/com/nghetruyen/source/sandbox/SafeRhinoSandboxTest.kt'
+
+          replace_once(
+              src,
+              '''    private val memoryUsageBytes: () -> Long = {\n        val runtime = Runtime.getRuntime()\n        runtime.totalMemory() - runtime.freeMemory()\n    },\n) {''',
+              '''    private val memoryUsageBytes: () -> Long = {\n        val runtime = Runtime.getRuntime()\n        runtime.totalMemory() - runtime.freeMemory()\n    },\n    private val memoryPressureRelief: () -> Unit = { System.gc() },\n) {''',
+          )
+          replace_once(
+              src,
+              '''            clockMs = clockMs,\n            memoryUsageBytes = memoryUsageBytes,\n        )''',
+              '''            clockMs = clockMs,\n            memoryUsageBytes = memoryUsageBytes,\n            memoryPressureRelief = memoryPressureRelief,\n        )''',
+          )
+          replace_once(
+              src,
+              '''    private val clockMs: () -> Long,\n    private val memoryUsageBytes: () -> Long,\n) {''',
+              '''    private val clockMs: () -> Long,\n    private val memoryUsageBytes: () -> Long,\n    private val memoryPressureRelief: () -> Unit,\n) {''',
+          )
+          old = '''        val baseline = baselineHeapBytes ?: memoryUsageBytes().also { baselineHeapBytes = it }\n        val growth = (memoryUsageBytes() - baseline).coerceAtLeast(0L)\n        peakHeapGrowthBytes = maxOf(peakHeapGrowthBytes, growth)\n        val limit = policy.maxHeapGrowthBytes\n        if (limit != null && growth > limit) {\n            throw BudgetExceededException(\n                JsSandboxFailure.MEMORY_LIMIT,\n                "JavaScript exceeded $limit bytes of observed heap growth " +\n                    "(observedInstructions=$instructions, peakHeapGrowthBytes=$peakHeapGrowthBytes)",\n            )\n        }'''
+          new = '''        val baseline = baselineHeapBytes ?: memoryUsageBytes().also { baselineHeapBytes = it }\n        var growth = (memoryUsageBytes() - baseline).coerceAtLeast(0L)\n        peakHeapGrowthBytes = maxOf(peakHeapGrowthBytes, growth)\n        val limit = policy.maxHeapGrowthBytes\n        if (limit != null && growth > limit) {\n            // Runtime.usedMemory is process-wide and can temporarily include garbage or unrelated\n            // JVM allocations. Before failing closed, request one pressure-relief cycle and measure\n            // retained growth again. A script that really keeps more than the budget still fails;\n            // transient allocation/GC timing no longer makes unrelated small scripts flaky.\n            memoryPressureRelief()\n            growth = (memoryUsageBytes() - baseline).coerceAtLeast(0L)\n            if (growth > limit) {\n                throw BudgetExceededException(\n                    JsSandboxFailure.MEMORY_LIMIT,\n                    "JavaScript exceeded $limit bytes of retained heap growth " +\n                        "(observedInstructions=$instructions, retainedHeapGrowthBytes=$growth, " +\n                        "peakObservedHeapGrowthBytes=$peakHeapGrowthBytes)",\n                )\n            }\n        }'''
+          replace_once(src, old, new)
+
+          replace_once(
+              test,
+              '''            policy = JsSandboxPolicy(maxHeapGrowthBytes = 10),\n            memoryUsageBytes = { usedHeap },\n        )''',
+              '''            policy = JsSandboxPolicy(maxHeapGrowthBytes = 10),\n            memoryUsageBytes = { usedHeap },\n            memoryPressureRelief = {},\n        )''',
+          )
+          p = Path(test)
+          text = p.read_text(encoding='utf-8')
+          marker = '''    private data class ContextResult(val value: String)'''
+          addition = '''    @Test\n    fun transientHeapGrowthIsRecheckedAfterPressureRelief() {\n        var usedHeap = 100L\n        var reliefCalls = 0\n        val executor = SafeRhinoExecutor(\n            policy = JsSandboxPolicy(maxHeapGrowthBytes = 10),\n            memoryUsageBytes = { usedHeap },\n            memoryPressureRelief = {\n                reliefCalls += 1\n                usedHeap = 105L\n            },\n        )\n\n        val result = executor.execute { _, _, budget ->\n            usedHeap = 111L\n            budget.charge(1)\n            "ok"\n        }\n\n        assertEquals("ok", result.value)\n        assertEquals(1, reliefCalls)\n        assertEquals(11L, result.peakHeapGrowthBytes)\n    }\n\n    private data class ContextResult(val value: String)'''
+          replace_once(test, marker, addition)
+          PY
+          rm -f .github/workflows/fix-vbook-heap-budget.yml
+          ./gradlew :source-js-sandbox:test :source-vbook:test --stacktrace
+      - name: Commit verified fix
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix: validate retained heap before sandbox memory failure'
+          git push origin HEAD:integration/freesound-stage-1-clean

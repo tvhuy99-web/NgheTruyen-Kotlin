@@ -7,6 +7,7 @@ on:
     paths:
       - ".github/workflows/build-freesound-mode3-v14.yml"
       - ".github/scripts/mode3_parallel_cache_v14.py"
+      - ".github/scripts/mode3_v14_test_fix.py"
 
 permissions:
   contents: write
@@ -54,6 +55,10 @@ jobs:
 
           python3 .github/scripts/mode3_parallel_cache_v14.py > /tmp/patch_v14.log 2>&1
           PATCH_STATUS=$?
+          if [ "$PATCH_STATUS" -eq 0 ]; then
+            python3 .github/scripts/mode3_v14_test_fix.py >> /tmp/patch_v14.log 2>&1
+            PATCH_STATUS=$?
+          fi
 
           TEST_STATUS=99
           BUILD_STATUS=99
@@ -116,6 +121,7 @@ jobs:
               app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt \
               app/src/main/java/vn/nghetruyen/app/freesound/FreesoundImporter.kt \
               app/src/main/java/vn/nghetruyen/app/audio/SceneMusicAnalysisWorker.kt \
+              app/src/test/java/vn/nghetruyen/app/audio/Mode3FastNormalizationPolicyTest.kt \
               app/src/test/java/vn/nghetruyen/app/freesound/FreesoundRetryQueryTest.kt \
               app/src/test/java/vn/nghetruyen/app/freesound/FreesoundParallelSearchPolicyTest.kt
           else

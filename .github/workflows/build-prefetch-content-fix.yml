@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - scripts/apply_prefetch_content_fix.py
+      - scripts/fix_generated_kotlin_escapes.py
       - .github/workflows/build-prefetch-content-fix.yml
 
 permissions:
@@ -30,7 +31,9 @@ jobs:
           cache: gradle
 
       - name: Apply fixes
-        run: python3 scripts/apply_prefetch_content_fix.py
+        run: |
+          python3 scripts/apply_prefetch_content_fix.py
+          python3 scripts/fix_generated_kotlin_escapes.py
 
       - name: Build debug APK
         run: |
@@ -53,6 +56,7 @@ jobs:
       - name: Commit product changes
         run: |
           rm -f scripts/apply_prefetch_content_fix.py
+          rm -f scripts/fix_generated_kotlin_escapes.py
           rm -f .github/workflows/build-prefetch-content-fix.yml
           git restore --worktree -- gradlew || true
           git config user.name "github-actions[bot]"
@@ -63,6 +67,7 @@ jobs:
             app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt \
             source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookStoryNormalizer.kt \
             scripts/apply_prefetch_content_fix.py \
+            scripts/fix_generated_kotlin_escapes.py \
             .github/workflows/build-prefetch-content-fix.yml
           git commit -m "fix: preserve prefetch counts and chapter text [skip ci]"
           git push origin HEAD:fix/freesound-latency-status-cloudflare

@@ -186,5 +186,67 @@ class FreesoundMode3RegressionTest {
         assertEquals(1, coverage.missingSfxUsages)
         assertFalse(coverage.complete)
     }
-}
 
+    @Test
+    fun planBuilderPreservesExactOneUnitMusicRunChosenByAi() {
+        val units = listOf("U1", "U2", "U3")
+        val usage = FreesoundAutoRequirement(
+            kind = AudioAssetKind.MUSIC,
+            query = "tense guqin",
+            importance = FreesoundRequirementImportance.REQUIRED,
+            startUnitId = "U2",
+            endUnitId = "U2",
+        )
+        val need = FreesoundAutoSearchNeed(
+            kind = AudioAssetKind.MUSIC,
+            query = usage.query,
+            importance = usage.importance,
+            usages = listOf(usage),
+        )
+        val cues = FreesoundAutoPlanBuilder.musicCues(
+            resolved = listOf(FreesoundAutoResolvedNeed(need, "music-1", "CACHE")),
+            validUnitIds = units,
+            validTrackIds = setOf("music-1"),
+        )
+        assertTrue(
+            cues.any {
+                it.trackId == "music-1" && it.startUnitId == "U2" && it.endUnitId == "U2"
+            },
+        )
+    }
+
+    @Test
+    fun planBuilderKeepsPartiallyOverlappingSameAmbienceSoTailIsNotLost() {
+        val units = listOf("U1", "U2", "U3", "U4", "U5")
+        val first = FreesoundAutoRequirement(
+            kind = AudioAssetKind.AMBIENCE,
+            query = "snow mountain wind",
+            importance = FreesoundRequirementImportance.REQUIRED,
+            startUnitId = "U1",
+            endUnitId = "U3",
+        )
+        val second = first.copy(startUnitId = "U3", endUnitId = "U5")
+        val need = FreesoundAutoSearchNeed(
+            kind = AudioAssetKind.AMBIENCE,
+            query = first.query,
+            importance = FreesoundRequirementImportance.REQUIRED,
+            usages = listOf(first, second),
+        )
+        val scenes = FreesoundAutoPlanBuilder.ambienceScenes(
+            resolved = listOf(FreesoundAutoResolvedNeed(need, "amb-1", "CACHE")),
+            validUnitIds = units,
+        )
+        assertEquals(2, scenes.size)
+        assertTrue(scenes.any { it.startUnitId == "U1" && it.endUnitId == "U3" && it.ambienceId == "amb-1" })
+        assertTrue(scenes.any { it.startUnitId == "U3" && it.endUnitId == "U5" && it.ambienceId == "amb-1" })
+    }
+
+    @Test
+    fun authFailuresAreNotRetriedButTransientSearchFailuresAre() {
+        assertFalse(FreesoundAutoAudioResolver.isRetryableSearchFailure(401))
+        assertFalse(FreesoundAutoAudioResolver.isRetryableSearchFailure(403))
+        assertTrue(FreesoundAutoAudioResolver.isRetryableSearchFailure(429))
+        assertTrue(FreesoundAutoAudioResolver.isRetryableSearchFailure(500))
+        assertTrue(FreesoundAutoAudioResolver.isRetryableSearchFailure(null))
+    }
+}

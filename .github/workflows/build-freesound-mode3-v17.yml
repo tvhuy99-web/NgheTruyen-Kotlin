@@ -7,6 +7,7 @@ on:
     paths:
       - ".github/workflows/build-freesound-mode3-v17.yml"
       - ".github/scripts/mode3_ai_unbounded_audio_v17.py"
+      - ".github/scripts/mode3_ai_unbounded_audio_v17_runner.py"
       - ".github/scripts/mode3_ai_unbounded_audio_v17_testfix.py"
 
 permissions:
@@ -53,7 +54,7 @@ jobs:
           set +e
           rm -f /tmp/patch_v17.log /tmp/test_v17.log /tmp/build_v17.log /tmp/result_v17.txt
 
-          python3 .github/scripts/mode3_ai_unbounded_audio_v17.py > /tmp/patch_v17.log 2>&1
+          python3 .github/scripts/mode3_ai_unbounded_audio_v17_runner.py > /tmp/patch_v17.log 2>&1
           PATCH_STATUS=$?
           if [ "$PATCH_STATUS" -eq 0 ]; then
             python3 .github/scripts/mode3_ai_unbounded_audio_v17_testfix.py >> /tmp/patch_v17.log 2>&1

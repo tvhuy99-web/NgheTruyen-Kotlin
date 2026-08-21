@@ -210,7 +210,7 @@ replace_once(
         val rows = (1..30).map { index ->
             FreesoundAutoRequirement(
                 kind = AudioAssetKind.SFX,
-                query = "unique impact number $index",
+                query = "hit code$index",
                 unitId = "P0001-U01",
             )
         }

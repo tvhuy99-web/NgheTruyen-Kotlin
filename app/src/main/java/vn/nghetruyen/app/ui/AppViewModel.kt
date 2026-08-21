@@ -2093,6 +2093,35 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun submitSearch(
+        query: String,
+        searchAllSources: Boolean,
+        sortMode: SearchSortMode,
+    ) {
+        val normalized = query.take(240).trim()
+        suggestionJob?.cancel()
+        suggestionJob = null
+        mutableState.update { current ->
+            current.copy(
+                query = normalized,
+                searchAllSources = searchAllSources,
+                searchSortMode = sortMode,
+                sourceSuggestions = emptyList(),
+                stories = emptyList(),
+                genreEntries = emptyList(),
+                explorePage = 1,
+                exploreMode = if (searchAllSources || normalized.isNotBlank()) ExploreMode.SEARCH else ExploreMode.HOME,
+                activeCategory = null,
+                activeCategoryLabel = null,
+                canLoadMoreStories = false,
+                searchedSourceCount = 0,
+                totalSearchSourceCount = 0,
+                message = null,
+            )
+        }
+        search(normalized)
+    }
+
     fun search(query: String = state.value.query) {
         searchJob?.cancel()
         searchJob = viewModelScope.launch {

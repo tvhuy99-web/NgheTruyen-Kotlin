@@ -173,4 +173,41 @@ class FreesoundAutoAudioTest {
         assertFalse(payload.contains("username", ignoreCase = true))
         assertFalse(payload.contains("author", ignoreCase = true))
     }
+
+    @Test
+    fun vagueMusicQueriesReceiveARealMusicStyleAnchor() {
+        assertEquals(
+            "mysterious magic cinematic",
+            FreesoundAutoRequirementCodec.canonicalSearchQuery("mysterious magic", AudioAssetKind.MUSIC),
+        )
+        assertEquals(
+            "light fantasy cinematic",
+            FreesoundAutoRequirementCodec.canonicalSearchQuery("light fantasy", AudioAssetKind.MUSIC),
+        )
+        assertEquals(
+            "fantasy orchestral",
+            FreesoundAutoRequirementCodec.canonicalSearchQuery("fantasy orchestral", AudioAssetKind.MUSIC),
+        )
+    }
+
+    @Test
+    fun persistentBedsAreNotDownloadedAsOneShotSfxAndValidRowsSurvive() {
+        assertEquals("", FreesoundAutoRequirementCodec.canonicalSearchQuery("ethereal drone", AudioAssetKind.SFX))
+        assertEquals("wind gust", FreesoundAutoRequirementCodec.canonicalSearchQuery("forest wind", AudioAssetKind.SFX))
+
+        val root = JSONObject(
+            """{"freesound_requirements":[
+                {"kind":"SFX","query":"ethereal drone","importance":"OPTIONAL","unit_id":"P0001-U01"},
+                {"kind":"SFX","query":"paper burn","importance":"REQUIRED","unit_id":"P0002-U01"}
+            ]}""",
+        )
+        val parsed = FreesoundAutoRequirementCodec.parse(
+            root = root,
+            validUnitIds = listOf("P0001-U01", "P0002-U01"),
+            enabledKinds = setOf(AudioAssetKind.SFX),
+        )
+        assertEquals(1, parsed.size)
+        assertEquals("paper burn", parsed.single().query)
+    }
+
 }

@@ -97,6 +97,11 @@ private data class ActiveSpeechAttempt(
     val recovery: SpeechRecoveryState = SpeechRecoveryState(),
 )
 
+internal object NarrationAutomaticPlanPolicy {
+    // Automatic playback preparation is cache-first. Explicit user re-cast paths may still force.
+    const val FORCE_REGENERATION = false
+}
+
 class ReaderPlaybackService : Service() {
     private lateinit var tts: TextToSpeech
     private lateinit var mediaSession: MediaSession
@@ -1967,17 +1972,13 @@ class ReaderPlaybackService : Service() {
                     Result.failure(IllegalStateException("Không tải được chương để chuẩn bị phân vai."))
                 } else {
                     runCatching {
-                        if (attempt == 1) {
-                            container.narrationPlanCoordinator.resetChapterNarrationState(
-                                content = content,
-                                clearFreesoundCaches = true,
-                            )
-                        }
+                        // Do not reset/force here. If prefetch is still running, ensurePlans waits on
+                        // the coordinator mutex and then reuses its completed transforms/assets.
                         container.narrationPlanCoordinator.ensurePlans(
                             content = content,
                             voice = true,
                             music = shouldPlanAutoSceneMusic(),
-                            force = true,
+                            force = NarrationAutomaticPlanPolicy.FORCE_REGENERATION,
                             activeTrackId = sceneMusicController.activeTrackId,
                         )
                     }
@@ -2142,17 +2143,13 @@ class ReaderPlaybackService : Service() {
             repeat(narrationPrefetchWindowChapters.coerceIn(1, 5)) { offset ->
                 val chapter = current ?: return@repeat
                 val attempt = runCatching {
-                    if (planVoice) {
-                        container.narrationPlanCoordinator.resetChapterNarrationState(
-                            content = chapter,
-                            clearFreesoundCaches = true,
-                        )
-                    }
+                    // Prefetch is idempotent: reuse an existing valid plan and only create missing/
+                    // stale pieces. This prevents repeated prefetches from redownloading assets.
                     container.narrationPlanCoordinator.ensurePlans(
                         content = chapter,
                         voice = planVoice,
                         music = shouldPlanAutoSceneMusic(),
-                        force = planVoice,
+                        force = NarrationAutomaticPlanPolicy.FORCE_REGENERATION,
                         activeTrackId = if (offset == 0) sceneMusicController.activeTrackId else null,
                     )
                 }

@@ -193,7 +193,7 @@ object XpkUnifiedNarrationPrompt {
                 appendLine("- Chỉ đổi trạng thái MUSIC khi chuyển biến đủ bền. Không đổi vì một câu thoại, một cảm xúc thoáng qua, một SFX/AMBIENCE đơn lẻ hay một từ khóa.")
                 appendLine("- Giữ cùng nhu cầu nhạc trong toàn vùng còn phù hợp. Vùng MUSIC nằm giữa chương phải bền ít nhất 2 UNIT; không tạo đoạn một UNIT phản ứng quá nhanh.")
                 appendLine("- Tại một UNIT chỉ có một trạng thái MUSIC. Không tạo hai query MUSIC khác nhau chồng lên cùng khoảng timeline. Khoảng không có requirement MUSIC nghĩa là im lặng.")
-                appendLine("- Query MUSIC mô tả mood + nhạc cụ/phong cách nghe được, không mô tả cốt truyện. Ví dụ: tense guqin, sad flute, epic drums.")
+                appendLine("- Query MUSIC bắt buộc có ít nhất một neo âm nhạc nghe được (nhạc cụ, dàn nhạc hoặc phong cách như guzheng, flute, strings, orchestral, cinematic); không dùng query chỉ gồm khái niệm/mood như mysterious magic hoặc light fantasy. Ví dụ: tense guqin, sad flute, epic drums.")
             }
             if (AudioAssetKind.AMBIENCE in kinds) {
                 appendLine()
@@ -214,7 +214,7 @@ object XpkUnifiedNarrationPrompt {
                 appendLine("- COUNTED REPEAT chỉ dùng khi số lần/nhịp có bằng chứng; ACTION LOOP bắt buộc có stop_unit_id và stop_unit_id là ranh giới loại trừ đầu tiên nơi âm thanh không còn nghe.")
                 appendLine("- Tối đa 3 SFX đồng thời trên một UNIT, kể cả cue kéo dài từ trước. Không tạo lớp thừa để đạt quota.")
                 appendLine("- Query SFX phải là một sự kiện rời rạc nghe được, ưu tiên vật/chất liệu + hành động âm học: debris crash, wood thud, sword clash, wind gust.")
-                appendLine("- Nguồn kéo dài như heavy wind, forest wind, steady rain thuộc AMBIENCE, không phải SFX.")
+                appendLine("- Nguồn kéo dài như heavy wind, forest wind, steady rain, drone, hum hoặc room tone thuộc AMBIENCE, không phải SFX. Query SFX bắt buộc có một sự kiện nghe được rời rạc như hit, burst, pulse, clash, shout, splash.")
             }
         }.trim()
         return """

@@ -54,7 +54,9 @@ object FreesoundAutoRequirementCodec {
                 }.getOrElse { error("$JSON_KEY[$index] có kind không hợp lệ.") }
                 require(kind in enabledKinds) { "$JSON_KEY[$index] yêu cầu lớp âm thanh đang tắt." }
                 val query = canonicalSearchQuery(oneLine(row.optString("query")).take(MAX_QUERY_CHARS), kind)
-                require(query.isNotBlank()) { "$JSON_KEY[$index] thiếu query Freesound." }
+                // A semantically wrong-layer query is safer to omit than to download an unrelated
+                // asset. Other valid requirements in the same AI response must still survive.
+                if (query.isBlank()) continue
                 val importance = runCatching {
                     FreesoundRequirementImportance.valueOf(
                         row.optString("importance", FreesoundRequirementImportance.OPTIONAL.name)
@@ -171,8 +173,21 @@ object FreesoundAutoRequirementCodec {
             .filterNot { token -> token in QUERY_GENERIC_TERMS && token != "music" && kind == AudioAssetKind.MUSIC }
         if (tokens.isEmpty()) return normalized.split(' ').filter(String::isNotBlank).take(MAX_QUERY_TERMS).joinToString(" ")
         val selected = tokens.take(MAX_QUERY_TERMS)
-        if (kind == AudioAssetKind.SFX && "wind" in selected && selected.none(SFX_EVENT_TERMS::contains)) {
-            return "wind gust"
+        if (kind == AudioAssetKind.MUSIC && selected.none(MUSIC_ANCHOR_TERMS::contains)) {
+            // Abstract mood-only queries such as "mysterious magic" are poor music searches.
+            // Add a neutral musical style anchor without imposing any duration restriction.
+            return (selected.take(MAX_QUERY_TERMS - 1) + "cinematic")
+                .distinct()
+                .take(MAX_QUERY_TERMS)
+                .joinToString(" ")
+        }
+        if (kind == AudioAssetKind.SFX) {
+            if ("wind" in selected && selected.none(SFX_EVENT_TERMS::contains)) return "wind gust"
+            if (selected.any(SFX_PERSISTENT_BED_TERMS::contains) && selected.none(SFX_EVENT_TERMS::contains)) {
+                // Persistent beds belong to AMBIENCE. Do not waste a network request/download on a
+                // wrong-layer SFX such as "ethereal drone" or "room tone".
+                return ""
+            }
         }
         return selected.joinToString(" ")
     }
@@ -184,9 +199,20 @@ object FreesoundAutoRequirementCodec {
         "very", "single", "one", "some", "and", "or",
     )
     private val QUERY_GENERIC_TERMS = setOf("sound", "audio", "effect", "ambience")
+    private val MUSIC_ANCHOR_TERMS = setOf(
+        "music", "cinematic", "orchestral", "orchestra", "score", "trailer", "ambient", "electronic",
+        "classical", "folk", "rock", "jazz", "acoustic", "guzheng", "guqin", "erhu", "dizi", "koto",
+        "shamisen", "flute", "piano", "violin", "cello", "harp", "strings", "drums", "percussion",
+        "choir", "synth",
+    )
     private val SFX_EVENT_TERMS = setOf(
         "gust", "whoosh", "slash", "hit", "thud", "crash", "clash", "strike", "slam", "break",
-        "burst", "snap", "drop", "knock", "creak", "step", "steps", "footstep", "footsteps", "splash",
+        "burst", "pulse", "snap", "drop", "knock", "creak", "step", "steps", "footstep", "footsteps", "splash",
+        "shout", "bang", "boom", "click", "ring", "tear", "rip", "burn",
+    )
+    private val SFX_PERSISTENT_BED_TERMS = setOf(
+        "drone", "hum", "humming", "tone", "roomtone", "room", "ambience", "ambient", "atmosphere",
+        "forest", "river", "ocean", "sea", "crowd", "rain", "storm", "waterfall", "traffic",
     )
     private const val MIN_MUSIC_REQUIREMENT_UNITS = 2
     private const val MAX_QUERY_TERMS = 3

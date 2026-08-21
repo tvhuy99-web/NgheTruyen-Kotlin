@@ -1,0 +1,152 @@
+from pathlib import Path
+
+
+def replace_once(path: str, old: str, new: str) -> None:
+    p = Path(path)
+    text = p.read_text(encoding="utf-8")
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"{path}: expected exactly one match, got {count}: {old[:120]!r}")
+    p.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+coordinator = "app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt"
+resolver = "app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt"
+reader = "app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt"
+gate = "scripts/check_reference_workflow_parity.py"
+
+replace_once(
+    coordinator,
+    '''        val freesoundPlanCreated: Boolean = false,\n        val freesoundResolvedAssets: Int = 0,\n        val freesoundRetryRequired: Boolean = false,''',
+    '''        val freesoundPlanCreated: Boolean = false,\n        val freesoundResolvedAssets: Int = 0,\n        val freesoundDownloadedAssets: Int = 0,\n        val freesoundReusedAssets: Int = 0,\n        val freesoundRetryRequired: Boolean = false,''',
+)
+replace_once(
+    coordinator,
+    '''        val resolvedAssets: Int,\n        val warnings: List<String>,\n        val retryableFailure: Boolean = false,''',
+    '''        val resolvedAssets: Int,\n        val warnings: List<String>,\n        val downloadedTrackIds: Set<String> = emptySet(),\n        val reusedTrackIds: Set<String> = emptySet(),\n        val retryableFailure: Boolean = false,''',
+)
+
+replace_once(
+    coordinator,
+    '''        val voiceNeeded = effectiveVoice && needsVoicePlan(content, force)''',
+    '''        if (\n            freesoundMode &&\n            restoredFreesound.resolvedAssets == 0 &&\n            !cachedFreesoundRetryRequired &&\n            !cachedFreesoundRetryExhausted &&\n            cachedFreesoundRequirements != null &&\n            cachedFreesoundRequirements.isNotEmpty() &&\n            standardFreesoundPlanCurrent(content, freesoundKinds, cachedFreesoundRequirements)\n        ) {\n            val reusedTrackIds = cachedFreesoundTrackIds(cachedFreesoundRequirements, freesoundKinds)\n            if (reusedTrackIds.isNotEmpty()) {\n                restoredFreesound = restoredFreesound.copy(\n                    resolvedAssets = reusedTrackIds.size,\n                    reusedTrackIds = reusedTrackIds,\n                    diagnostics = (restoredFreesound.diagnostics +\n                        "CACHE_PLAN_REUSE uniqueTracks=${reusedTrackIds.size}").distinct(),\n                )\n            }\n        }\n\n        val voiceNeeded = effectiveVoice && needsVoicePlan(content, force)''',
+)
+replace_once(
+    coordinator,
+    '''    private suspend fun standardFreesoundPlanCurrent(\n''',
+    '''    private suspend fun cachedFreesoundTrackIds(\n        requirements: List<FreesoundAutoRequirement>,\n        kinds: Set<AudioAssetKind>,\n    ): Set<String> {\n        if (requirements.isEmpty() || kinds.isEmpty()) return emptySet()\n        val result = linkedSetOf<String>()\n        requirements.forEach { requirement ->\n            if (requirement.kind in kinds) {\n                freesoundResolver.cachedManagedTrackId(requirement.kind, requirement.query)?.let(result::add)\n            }\n        }\n        return result\n    }\n\n    private suspend fun standardFreesoundPlanCurrent(\n''',
+)
+
+p = Path(coordinator)
+text = p.read_text(encoding="utf-8")
+needle = '''                freesoundResolvedAssets = restoredFreesound.resolvedAssets,\n                freesoundRetryRequired = restoredFreesound.retryableFailure,'''
+if text.count(needle) != 2:
+    raise SystemExit(f"{coordinator}: expected two restored Result propagation sites, got {text.count(needle)}")
+text = text.replace(
+    needle,
+    '''                freesoundResolvedAssets = restoredFreesound.resolvedAssets,\n                freesoundDownloadedAssets = restoredFreesound.downloadedTrackIds.size,\n                freesoundReusedAssets = (restoredFreesound.reusedTrackIds - restoredFreesound.downloadedTrackIds).size,\n                freesoundRetryRequired = restoredFreesound.retryableFailure,''',
+)
+needle = '''                    freesoundResolvedAssets = autoApplied.resolvedAssets,\n                    freesoundRetryRequired = autoApplied.retryableFailure,'''
+if text.count(needle) != 1:
+    raise SystemExit(f"{coordinator}: expected one autoApplied propagation site, got {text.count(needle)}")
+text = text.replace(
+    needle,
+    '''                    freesoundResolvedAssets = autoApplied.resolvedAssets,\n                    freesoundDownloadedAssets = autoApplied.downloadedTrackIds.size,\n                    freesoundReusedAssets = (autoApplied.reusedTrackIds - autoApplied.downloadedTrackIds).size,\n                    freesoundRetryRequired = autoApplied.retryableFailure,''',
+    1,
+)
+p.write_text(text, encoding="utf-8")
+
+replace_once(
+    coordinator,
+    '''        var latest = FreesoundApplyResult(false, false, 0, emptyList())\n        val warnings = mutableListOf<String>()\n        val diagnostics = mutableListOf<String>()''',
+    '''        var latest = FreesoundApplyResult(false, false, 0, emptyList())\n        val warnings = mutableListOf<String>()\n        val diagnostics = mutableListOf<String>()\n        val downloadedTrackIds = linkedSetOf<String>()\n        val reusedTrackIds = linkedSetOf<String>()''',
+)
+replace_once(
+    coordinator,
+    '''            latest = applyFreesoundRequirementsOnce(content, requirements, kinds, attempt)\n            warnings += latest.warnings\n            diagnostics += latest.diagnostics''',
+    '''            latest = applyFreesoundRequirementsOnce(content, requirements, kinds, attempt)\n            downloadedTrackIds += latest.downloadedTrackIds\n            reusedTrackIds += latest.reusedTrackIds\n            warnings += latest.warnings\n            diagnostics += latest.diagnostics''',
+)
+replace_once(
+    coordinator,
+    '''                    warnings = warnings.distinct(),\n                    diagnostics = diagnostics.distinct(),\n                    attempts = attempt,''',
+    '''                    warnings = warnings.distinct(),\n                    downloadedTrackIds = downloadedTrackIds,\n                    reusedTrackIds = reusedTrackIds - downloadedTrackIds,\n                    diagnostics = diagnostics.distinct(),\n                    attempts = attempt,''',
+)
+replace_once(
+    coordinator,
+    '''            warnings = (warnings + "Freesound không tạo được kế hoạch âm thanh hợp lệ sau 3 lần thử.").distinct(),\n            retryableFailure = true,\n            diagnostics = (diagnostics + "RUNTIME_RETRY_EXHAUSTED attempts=$MAX_FREESOUND_RUNTIME_ATTEMPTS").distinct(),''',
+    '''            warnings = (warnings + "Freesound không tạo được kế hoạch âm thanh hợp lệ sau 3 lần thử.").distinct(),\n            downloadedTrackIds = downloadedTrackIds,\n            reusedTrackIds = reusedTrackIds - downloadedTrackIds,\n            retryableFailure = true,\n            diagnostics = (diagnostics + "RUNTIME_RETRY_EXHAUSTED attempts=$MAX_FREESOUND_RUNTIME_ATTEMPTS").distinct(),''',
+)
+replace_once(
+    coordinator,
+    '''        diagnostics += "PLAN_BUILD_DONE musicCreated=$musicCreated audioCreated=$audioCreated resolvedAssets=${resolved.resolvedCount} unresolved=${resolved.unresolvedCount} unresolvedRequired=${resolved.unresolvedRequiredCount} retryableFailure=${resolved.retryableFailure} requiredPlanMissing=$requiredPlanMissing retryRecommended=$retryRecommended"\n        return FreesoundApplyResult(''',
+    '''        val resolvedTrackIds = resolved.resolved.mapNotNull { it.trackId?.takeIf(String::isNotBlank) }.toSet()\n        val downloadedTrackIds = resolved.importedTrackIds\n        val reusedTrackIds = resolvedTrackIds - downloadedTrackIds\n        diagnostics += "PLAN_BUILD_DONE musicCreated=$musicCreated audioCreated=$audioCreated resolvedAssets=${resolved.resolvedCount} uniqueTracks=${resolvedTrackIds.size} downloaded=${downloadedTrackIds.size} reused=${reusedTrackIds.size} unresolved=${resolved.unresolvedCount} unresolvedRequired=${resolved.unresolvedRequiredCount} retryableFailure=${resolved.retryableFailure} requiredPlanMissing=$requiredPlanMissing retryRecommended=$retryRecommended"\n        return FreesoundApplyResult(''',
+)
+replace_once(
+    coordinator,
+    '''            resolvedAssets = resolved.resolvedCount,\n            warnings = warnings.distinct(),\n            retryableFailure = retryRecommended,''',
+    '''            resolvedAssets = resolved.resolvedCount,\n            warnings = warnings.distinct(),\n            downloadedTrackIds = downloadedTrackIds,\n            reusedTrackIds = reusedTrackIds,\n            retryableFailure = retryRecommended,''',
+)
+
+replace_once(
+    resolver,
+    '''    val resolvedCount: Int get() = resolved.count { !it.trackId.isNullOrBlank() }\n    val unresolvedCount: Int get() = resolved.size - resolvedCount''',
+    '''    val resolvedCount: Int get() = resolved.count { !it.trackId.isNullOrBlank() }\n    val resolvedTrackIds: Set<String> get() = resolved.mapNotNull { it.trackId?.takeIf(String::isNotBlank) }.toSet()\n    val downloadedTrackCount: Int get() = importedTrackIds.size\n    val reusedTrackCount: Int get() = (resolvedTrackIds - importedTrackIds).size\n    val unresolvedCount: Int get() = resolved.size - resolvedCount''',
+)
+
+Path("app/src/main/java/vn/nghetruyen/app/playback/FreesoundPlaybackStatusFormatter.kt").write_text(
+    '''package vn.nghetruyen.app.playback\n\ninternal object FreesoundPlaybackStatusFormatter {\n    fun format(\n        resultPresent: Boolean,\n        downloadedAssets: Int,\n        reusedAssets: Int,\n        retryRequired: Boolean,\n        audioLayersEnabled: Boolean,\n    ): String {\n        if (!audioLayersEnabled) return " • các lớp âm thanh Mode 3 đang tắt"\n        if (!resultPresent) return " • Mode 3 chưa tạo được kế hoạch âm thanh"\n        val downloaded = downloadedAssets.coerceAtLeast(0)\n        val reused = reusedAssets.coerceAtLeast(0)\n        val base = " • Freesound: tải mới $downloaded tệp, dùng lại $reused tệp đã có"\n        return if (retryRequired) "$base; đang thử lại phần còn thiếu" else base\n    }\n}\n''',
+    encoding="utf-8",
+)
+replace_once(
+    reader,
+    '''                        val audioStatus = when {\n                            !mode3 -> if (musicApplied) " và đã áp dụng nhạc cảnh" else ""\n                            planResult == null -> " • Mode 3 chưa tạo được kế hoạch âm thanh"\n                            planResult.freesoundRetryRequired ->\n                                " • Freesound đang lỗi tạm thời; sẽ thử resolve lại"\n                            planResult.freesoundResolvedAssets > 0 ->\n                                " • Freesound đã resolve ${planResult.freesoundResolvedAssets} tệp"\n                            shouldPlanAutoStoryAudio() -> " • Freesound chưa resolve được tệp nào"\n                            else -> " • các lớp âm thanh Mode 3 đang tắt"\n                        }''',
+    '''                        val audioStatus = if (!mode3) {\n                            if (musicApplied) " và đã áp dụng nhạc cảnh" else ""\n                        } else {\n                            FreesoundPlaybackStatusFormatter.format(\n                                resultPresent = planResult != null,\n                                downloadedAssets = planResult?.freesoundDownloadedAssets ?: 0,\n                                reusedAssets = planResult?.freesoundReusedAssets ?: 0,\n                                retryRequired = planResult?.freesoundRetryRequired ?: false,\n                                audioLayersEnabled = shouldPlanAutoStoryAudio(),\n                            )\n                        }''',
+)
+
+Path("app/src/test/java/vn/nghetruyen/app/playback/FreesoundPlaybackStatusFormatterTest.kt").write_text(
+    '''package vn.nghetruyen.app.playback\n\nimport org.junit.Assert.assertEquals\nimport org.junit.Assert.assertFalse\nimport org.junit.Test\n\nclass FreesoundPlaybackStatusFormatterTest {\n    @Test\n    fun reportsNewAndReusedFilesSeparately() {\n        assertEquals(\n            " • Freesound: tải mới 3 tệp, dùng lại 5 tệp đã có",\n            FreesoundPlaybackStatusFormatter.format(true, 3, 5, false, true),\n        )\n    }\n\n    @Test\n    fun cacheOnlyRunNeverClaimsNothingResolved() {\n        val message = FreesoundPlaybackStatusFormatter.format(true, 0, 6, false, true)\n        assertEquals(" • Freesound: tải mới 0 tệp, dùng lại 6 tệp đã có", message)\n        assertFalse(message.contains("chưa resolve được tệp nào"))\n    }\n\n    @Test\n    fun incompleteRunKeepsCountsAndRetryState() {\n        assertEquals(\n            " • Freesound: tải mới 2 tệp, dùng lại 4 tệp đã có; đang thử lại phần còn thiếu",\n            FreesoundPlaybackStatusFormatter.format(true, 2, 4, true, true),\n        )\n    }\n}\n''',
+    encoding="utf-8",
+)
+
+resolver_test = Path("app/src/test/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioTest.kt")
+rt = resolver_test.read_text(encoding="utf-8")
+if "resolveResultCountsUniqueDownloadedAndReusedTracks" not in rt:
+    addition = '''\n    @Test\n    fun resolveResultCountsUniqueDownloadedAndReusedTracks() {\n        val needA = FreesoundAutoSearchNeed(\n            kind = vn.nghetruyen.app.audio.AudioAssetKind.AMBIENCE,\n            query = "snow mountain wind",\n            importance = FreesoundRequirementImportance.REQUIRED,\n            usages = emptyList(),\n        )\n        val needB = FreesoundAutoSearchNeed(\n            kind = vn.nghetruyen.app.audio.AudioAssetKind.SFX,\n            query = "sword clash",\n            importance = FreesoundRequirementImportance.OPTIONAL,\n            usages = emptyList(),\n        )\n        val result = FreesoundAutoResolveResult(\n            resolved = listOf(\n                FreesoundAutoResolvedNeed(needA, "track-new", "FREESOUND"),\n                FreesoundAutoResolvedNeed(needA, "track-new", "FREESOUND"),\n                FreesoundAutoResolvedNeed(needB, "track-cache", "CACHE"),\n            ),\n            warnings = emptyList(),\n            importedTrackIds = setOf("track-new"),\n        )\n        assertEquals(setOf("track-new", "track-cache"), result.resolvedTrackIds)\n        assertEquals(1, result.downloadedTrackCount)\n        assertEquals(1, result.reusedTrackCount)\n    }\n'''
+    closing = rt.rfind("\n}")
+    if closing < 0:
+        raise SystemExit("FreesoundAutoAudioTest.kt: class closing brace not found")
+    resolver_test.write_text(rt[:closing] + addition + rt[closing:], encoding="utf-8")
+
+# Replace stale reference-workflow expectations with the current three-mode audio UI and protect
+# the user-visible Freesound search/similar entry points.
+gp = Path(gate)
+gt = gp.read_text(encoding="utf-8")
+replacements = [
+    (
+        '''for marker in [\n    'label = "QUẢN LÝ NHẠC ($musicTrackCount)"',\n    'label = "QUẢN LÝ ÂM THANH MÔI TRƯỜNG',\n    'label = "QUẢN LÝ HIỆU ỨNG ÂM THANH',\n    "UnifiedAudioAssetManagerDialog(",\n]:''',
+        '''for marker in [\n    "StoryAudioSourceMode.LOCAL_MANUAL",\n    "StoryAudioSourceMode.AI_LOCAL",\n    "StoryAudioSourceMode.AI_FREESOUND",\n    'label = "QUẢN LÝ NHẠC ($musicTrackCount)"',\n    'label = "QUẢN LÝ NHẠC LOCAL',\n    'label = "QUẢN LÝ MÔI TRƯỜNG LOCAL',\n    'label = "QUẢN LÝ SFX LOCAL',\n    'label = "QUẢN LÝ NHẠC ĐÃ TẢI',\n    'label = "QUẢN LÝ MÔI TRƯỜNG ĐÃ TẢI',\n    'label = "QUẢN LÝ SFX ĐÃ TẢI',\n    "UnifiedAudioAssetManagerDialog(",\n]:''',
+    ),
+    (
+        '''manager_positions = [\n    component.find('label = "QUẢN LÝ NHẠC ($musicTrackCount)"'),\n    component.find('label = "QUẢN LÝ ÂM THANH MÔI TRƯỜNG'),\n    component.find('label = "QUẢN LÝ HIỆU ỨNG ÂM THANH'),\n]''',
+        '''manager_positions = [\n    component.find('label = "QUẢN LÝ NHẠC LOCAL'),\n    component.find('label = "QUẢN LÝ MÔI TRƯỜNG LOCAL'),\n    component.find('label = "QUẢN LÝ SFX LOCAL'),\n]''',
+    ),
+    (
+        '''for marker in [\n    'label = { Text("Mô tả") }',\n    'UnifiedAssetActionButton("CHUẨN HÓA")',\n    'Text("LƯU")',\n    'Text("XÓA")',\n]:''',
+        '''for marker in [\n    'label = { Text("Mô tả") }',\n    'UnifiedAssetActionButton("CHUẨN HÓA")',\n    'Text("TÌM TRÊN FREESOUND")',\n    'Text("TÌM & TẢI THÊM TRÊN FREESOUND")',\n    'Text("CÔNG CỤ FREESOUND NÂNG CAO")',\n    'UnifiedAssetActionButton("TÌM ÂM THANH TƯƠNG TỰ")',\n    'Text("LƯU")',\n    'Text("XÓA")',\n]:''',
+    ),
+    (
+        '''    'Text("Bật nhạc nền", Modifier.weight(1f))',\n    "AudioDirectionLayerSwitches(",''',
+        '''    "AudioDirectionLayerSwitches(",\n    "onSourceModeChanged = { mode ->",\n    'Text("Bật nhạc nền thủ công", Modifier.weight(1f))',''',
+    ),
+    (
+        '''if music_dialog.find('Text("Bật nhạc nền"') > music_dialog.find("AudioDirectionLayerSwitches("):\n    raise SystemExit("REFERENCE_WORKFLOW master Background Music switch must be first")''',
+        '''if music_dialog.find("AudioDirectionLayerSwitches(") > music_dialog.find('Text("Bật nhạc nền thủ công"'):\n    raise SystemExit("REFERENCE_WORKFLOW source-mode controls must precede the manual-only music switch")''',
+    ),
+]
+for old, new in replacements:
+    if gt.count(old) != 1:
+        raise SystemExit(f"reference gate: expected one stale block, got {gt.count(old)} for {old[:100]!r}")
+    gt = gt.replace(old, new, 1)
+gp.write_text(gt, encoding="utf-8")
+
+print("MODE3_STATUS_REPAIR_PATCHED=1")

@@ -25,6 +25,8 @@ import vn.nghetruyen.app.data.settings.SettingsRepository
 import vn.nghetruyen.app.freesound.FreesoundAutoAudioResolver
 import vn.nghetruyen.app.freesound.FreesoundAutoPlanBuilder
 import vn.nghetruyen.app.freesound.FreesoundAutoRequirement
+import vn.nghetruyen.app.freesound.FreesoundAutoResolvedNeed
+import vn.nghetruyen.app.freesound.FreesoundAutoSearchNeed
 import vn.nghetruyen.app.freesound.FreesoundAutoRequirementCodec
 import vn.nghetruyen.app.freesound.FreesoundImporter
 import vn.nghetruyen.app.freesound.FreesoundRequirementImportance
@@ -542,32 +544,29 @@ class NarrationPlanCoordinator(
         requirements: List<FreesoundAutoRequirement>,
     ): Boolean {
         if (requirements.isEmpty()) return false
-        val requiredKinds = requirements
-            .filter { it.importance == FreesoundRequirementImportance.REQUIRED }
-            .map(FreesoundAutoRequirement::kind)
-            .toSet()
         val usableIds = freesoundResolver.usableManagedTrackIds(kinds)
         val enabled = library.listEnabledSceneMusicTracks()
             .filter { it.id in usableIds && FreesoundImporter.soundIdFromManagedUri(it.uri) != null }
+        val unitIds = XpkVoiceCastSplitter.buildUnits(content.chapter.title, chapterBody(content)).map { it.id }
+        var musicCues = emptyList<SceneMusicCue>()
+        var audioPlan = AmbienceSfxPlan()
 
         if (AudioAssetKind.MUSIC in kinds) {
             val musicTracks = enabled.filter { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }
-            if (AudioAssetKind.MUSIC in requiredKinds && musicTracks.isEmpty()) return false
             val cached = library.getChapterTransform(content.chapter.id, ChapterAiWorkflow.KIND_SCENE_MUSIC) ?: return false
             if (cached.sourceSha256 != mode3MusicSourceHash(content)) return false
             if (!isExpectedAudioSourceMode(cached.transformedText, StoryAudioSourceMode.AI_FREESOUND)) return false
             if (!isCurrentTimelineTransform(cached.transformedText, MUSIC_TRANSFORM_ENGINE, content)) return false
-            if (AudioAssetKind.MUSIC in requiredKinds) {
-                val allowed = musicTracks.map(SceneMusicTrackEntity::id).toSet()
-                val scenes = runCatching { JSONObject(cached.transformedText).optJSONArray("music_scenes") }.getOrNull()
-                    ?: return false
-                var playable = false
-                for (index in 0 until scenes.length()) {
-                    val trackId = scenes.optJSONObject(index)?.optString("track_id")?.trim().orEmpty()
-                    if (trackId in allowed) { playable = true; break }
+            val rows = JSONObject(cached.transformedText).optJSONArray("music_scenes") ?: return false
+            val raw = buildList {
+                for (index in 0 until rows.length()) {
+                    val row = rows.optJSONObject(index) ?: return false
+                    add(XpkSceneMusicParity.RawScene(row.optString("start_id"), row.optString("end_id"), row.optString("track_id")))
                 }
-                if (!playable) return false
             }
+            musicCues = runCatching {
+                XpkSceneMusicParity.validateScenes(raw, unitIds, musicTracks.map(SceneMusicTrackEntity::id))
+            }.getOrNull() ?: return false
         }
 
         if (AudioAssetKind.AMBIENCE in kinds || AudioAssetKind.SFX in kinds) {
@@ -577,42 +576,51 @@ class NarrationPlanCoordinator(
             val sfxTracks = if (AudioAssetKind.SFX in kinds) {
                 enabled.filter { AudioAssetClassifier.classify(it) == AudioAssetKind.SFX }
             } else emptyList()
-            if (AudioAssetKind.AMBIENCE in requiredKinds && ambienceTracks.isEmpty()) return false
-            if (AudioAssetKind.SFX in requiredKinds && sfxTracks.isEmpty()) return false
-
             val cached = library.getChapterTransform(content.chapter.id, KIND_AUDIO_DIRECTION) ?: return false
-            val hash = mode3AudioDirectionSourceHash(
-                content = content,
-                ambienceEnabled = AudioAssetKind.AMBIENCE in kinds,
-                soundEffectsEnabled = AudioAssetKind.SFX in kinds,
-            )
-            if (cached.sourceSha256 != hash) return false
+            if (cached.sourceSha256 != mode3AudioDirectionSourceHash(
+                    content,
+                    AudioAssetKind.AMBIENCE in kinds,
+                    AudioAssetKind.SFX in kinds,
+                )
+            ) return false
             if (!isExpectedAudioSourceMode(cached.transformedText, StoryAudioSourceMode.AI_FREESOUND)) return false
             if (!isCurrentTimelineTransform(cached.transformedText, XpkAmbienceSfxDirector.ENGINE, content)) return false
-
-            val root = runCatching { JSONObject(cached.transformedText) }.getOrNull() ?: return false
-            if (AudioAssetKind.AMBIENCE in requiredKinds) {
-                val allowed = ambienceTracks.map(SceneMusicTrackEntity::id).toSet()
-                val rows = root.optJSONArray("ambience_scenes") ?: return false
-                var playable = false
-                for (index in 0 until rows.length()) {
-                    val id = rows.optJSONObject(index)?.optString("ambience_id")?.trim().orEmpty()
-                    if (id in allowed) { playable = true; break }
-                }
-                if (!playable) return false
-            }
-            if (AudioAssetKind.SFX in requiredKinds) {
-                val allowed = sfxTracks.map(SceneMusicTrackEntity::id).toSet()
-                val rows = root.optJSONArray("sfx_cues") ?: return false
-                var playable = false
-                for (index in 0 until rows.length()) {
-                    val id = rows.optJSONObject(index)?.optString("effect_id")?.trim().orEmpty()
-                    if (id in allowed) { playable = true; break }
-                }
-                if (!playable) return false
-            }
+            audioPlan = runCatching {
+                XpkAmbienceSfxDirector.decodePersisted(
+                    text = cached.transformedText,
+                    validUnitIds = unitIds,
+                    validAmbienceIds = ambienceTracks.map(SceneMusicTrackEntity::id).toSet(),
+                    validSfxIds = sfxTracks.map(SceneMusicTrackEntity::id).toSet(),
+                    ambienceEnabled = AudioAssetKind.AMBIENCE in kinds,
+                    soundEffectsEnabled = AudioAssetKind.SFX in kinds,
+                )
+            }.getOrNull() ?: return false
         }
-        return true
+
+        val required = requirements.filter { it.importance == FreesoundRequirementImportance.REQUIRED }
+        if (required.isEmpty()) return true
+        val resolvedRequired = mutableListOf<FreesoundAutoResolvedNeed>()
+        required.forEach { usage ->
+            val trackId = freesoundResolver.cachedManagedTrackId(usage.kind, usage.query) ?: return false
+            val track = enabled.firstOrNull { it.id == trackId && AudioAssetClassifier.classify(it) == usage.kind } ?: return false
+            resolvedRequired += FreesoundAutoResolvedNeed(
+                need = FreesoundAutoSearchNeed(
+                    kind = usage.kind,
+                    query = usage.query,
+                    importance = FreesoundRequirementImportance.REQUIRED,
+                    usages = listOf(usage),
+                ),
+                trackId = track.id,
+                source = "CACHE",
+            )
+        }
+        return FreesoundAutoPlanBuilder.requiredCoverage(
+            resolved = resolvedRequired,
+            validUnitIds = unitIds,
+            musicCues = musicCues,
+            ambienceScenes = audioPlan.ambienceScenes,
+            soundEffectCues = audioPlan.soundEffectCues,
+        ).complete
     }
 
     private suspend fun applyFreesoundRequirements(
@@ -710,19 +718,33 @@ class NarrationPlanCoordinator(
 
         if (AudioAssetKind.MUSIC in kinds) {
             val musicTracks = enabled.filter { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }
-            val rawCues = FreesoundAutoPlanBuilder.musicCues(resolved.resolved, unitIds)
+            val musicIds = musicTracks.map(SceneMusicTrackEntity::id).toSet()
+            val rawCues = FreesoundAutoPlanBuilder.musicCues(resolved.resolved, unitIds, musicIds)
             val validated = runCatching {
                 XpkSceneMusicParity.validateScenes(
                     rawCues.map { cue -> XpkSceneMusicParity.RawScene(cue.startUnitId, cue.endUnitId, cue.trackId) },
                     unitIds,
                     musicTracks.map(SceneMusicTrackEntity::id),
                 )
-            }.getOrElse { error ->
-                warnings += error.message ?: "Kế hoạch MUSIC Freesound không hợp lệ; đã dùng im lặng."
-                XpkSceneMusicParity.fallbackScene(unitIds, emptyList(), null)
+            }.getOrElse { firstError ->
+                warnings += "Kế hoạch MUSIC Freesound có vùng chưa hợp lệ; chỉ vùng lỗi được đưa về im lặng/ghép ổn định thay vì làm im lặng cả chương: ${firstError.message.orEmpty()}"
+                val salvaged = FreesoundAutoPlanBuilder.salvageMusicCues(rawCues, unitIds, musicIds)
+                runCatching {
+                    XpkSceneMusicParity.validateScenes(
+                        salvaged.map { cue -> XpkSceneMusicParity.RawScene(cue.startUnitId, cue.endUnitId, cue.trackId) },
+                        unitIds,
+                        musicTracks.map(SceneMusicTrackEntity::id),
+                    )
+                }.getOrElse {
+                    XpkSceneMusicParity.fallbackScene(unitIds, emptyList(), null)
+                }
             }
-            requiredMusicMissing = AudioAssetKind.MUSIC in requiredKinds &&
-                validated.none { it.trackId != XpkSceneMusicParity.SILENCE_TRACK_ID }
+            val musicCoverage = FreesoundAutoPlanBuilder.requiredCoverage(
+                resolved = resolved.resolved.filter { it.need.kind == AudioAssetKind.MUSIC },
+                validUnitIds = unitIds,
+                musicCues = validated,
+            )
+            requiredMusicMissing = musicCoverage.missingMusicUsages > 0
             diagnostics += "PLAN_MUSIC rawCues=${rawCues.size} validatedCues=${validated.size} managedMusicTracks=${musicTracks.size} requiredMissing=$requiredMusicMissing"
             runCatching {
                 persistMusicPlan(
@@ -750,65 +772,54 @@ class NarrationPlanCoordinator(
             } else emptyList()
 
             var ambienceCandidate = if (AudioAssetKind.AMBIENCE in kinds) {
-                FreesoundAutoPlanBuilder.ambienceScenes(resolved.resolved)
+                FreesoundAutoPlanBuilder.ambienceScenes(resolved.resolved, unitIds)
             } else emptyList()
             val originalAmbienceCount = ambienceCandidate.size
-            var validatedAmbience = AmbienceSfxPlan()
-            while (true) {
-                val parsed = runCatching {
-                    XpkAmbienceSfxDirector.parseAndValidate(
-                        XpkAmbienceSfxDirector.encode(AmbienceSfxPlan(ambienceScenes = ambienceCandidate)),
-                        validUnitIds = unitIds,
-                        validAmbienceIds = ambienceTracks.map(SceneMusicTrackEntity::id).toSet(),
-                        validSfxIds = emptySet(),
-                        ambienceEnabled = AudioAssetKind.AMBIENCE in kinds,
-                        soundEffectsEnabled = false,
-                    )
-                }.getOrNull()
-                if (parsed != null) {
-                    validatedAmbience = parsed
-                    break
-                }
-                if (ambienceCandidate.isEmpty()) break
-                ambienceCandidate = ambienceCandidate.dropLast(1)
-            }
-            if (validatedAmbience.ambienceScenes.size < originalAmbienceCount) {
-                warnings += "Đã loại ${originalAmbienceCount - validatedAmbience.ambienceScenes.size} cue AMBIENCE không hợp lệ; SFX được giữ nguyên."
+            val validatedAmbience = runCatching {
+                XpkAmbienceSfxDirector.parseAndValidate(
+                    XpkAmbienceSfxDirector.encode(AmbienceSfxPlan(ambienceScenes = ambienceCandidate)),
+                    validUnitIds = unitIds,
+                    validAmbienceIds = ambienceTracks.map(SceneMusicTrackEntity::id).toSet(),
+                    validSfxIds = emptySet(),
+                    ambienceEnabled = AudioAssetKind.AMBIENCE in kinds,
+                    soundEffectsEnabled = false,
+                )
+            }.getOrElse { error ->
+                warnings += "AMBIENCE Mode 3 còn cue không hợp lệ sau bước sắp xếp/lọc xung đột: ${error.message.orEmpty()}"
+                AmbienceSfxPlan()
             }
 
             var sfxCandidate = if (AudioAssetKind.SFX in kinds) {
-                FreesoundAutoPlanBuilder.soundEffectCues(resolved.resolved)
+                FreesoundAutoPlanBuilder.soundEffectCues(resolved.resolved, unitIds)
             } else emptyList()
             val originalSfxCount = sfxCandidate.size
-            var validatedSfx = AmbienceSfxPlan()
-            while (true) {
-                val parsed = runCatching {
-                    XpkAmbienceSfxDirector.parseAndValidate(
-                        XpkAmbienceSfxDirector.encode(AmbienceSfxPlan(soundEffectCues = sfxCandidate)),
-                        validUnitIds = unitIds,
-                        validAmbienceIds = emptySet(),
-                        validSfxIds = sfxTracks.map(SceneMusicTrackEntity::id).toSet(),
-                        ambienceEnabled = false,
-                        soundEffectsEnabled = AudioAssetKind.SFX in kinds,
-                    )
-                }.getOrNull()
-                if (parsed != null) {
-                    validatedSfx = parsed
-                    break
-                }
-                if (sfxCandidate.isEmpty()) break
-                sfxCandidate = sfxCandidate.dropLast(1)
+            val validatedSfx = runCatching {
+                XpkAmbienceSfxDirector.parseAndValidate(
+                    XpkAmbienceSfxDirector.encode(AmbienceSfxPlan(soundEffectCues = sfxCandidate)),
+                    validUnitIds = unitIds,
+                    validAmbienceIds = emptySet(),
+                    validSfxIds = sfxTracks.map(SceneMusicTrackEntity::id).toSet(),
+                    ambienceEnabled = false,
+                    soundEffectsEnabled = AudioAssetKind.SFX in kinds,
+                )
+            }.getOrElse { error ->
+                warnings += "SFX Mode 3 còn cue không hợp lệ sau bước sắp xếp/lọc xung đột: ${error.message.orEmpty()}"
+                AmbienceSfxPlan()
             }
-            if (validatedSfx.soundEffectCues.size < originalSfxCount) {
-                warnings += "Đã loại ${originalSfxCount - validatedSfx.soundEffectCues.size} cue SFX không hợp lệ; AMBIENCE được giữ nguyên."
-            }
+
+            val audioCoverage = FreesoundAutoPlanBuilder.requiredCoverage(
+                resolved = resolved.resolved.filter { it.need.kind == AudioAssetKind.AMBIENCE || it.need.kind == AudioAssetKind.SFX },
+                validUnitIds = unitIds,
+                ambienceScenes = validatedAmbience.ambienceScenes,
+                soundEffectCues = validatedSfx.soundEffectCues,
+            )
 
             val validated = AmbienceSfxPlan(
                 ambienceScenes = validatedAmbience.ambienceScenes,
                 soundEffectCues = validatedSfx.soundEffectCues,
             )
-            requiredAmbienceMissing = AudioAssetKind.AMBIENCE in requiredKinds && validatedAmbience.ambienceScenes.isEmpty()
-            requiredSfxMissing = AudioAssetKind.SFX in requiredKinds && validatedSfx.soundEffectCues.isEmpty()
+            requiredAmbienceMissing = audioCoverage.missingAmbienceUsages > 0
+            requiredSfxMissing = audioCoverage.missingSfxUsages > 0
             diagnostics += "PLAN_AUDIO ambienceCandidates=$originalAmbienceCount ambienceValidated=${validatedAmbience.ambienceScenes.size} ambienceTracks=${ambienceTracks.size} ambienceRequiredMissing=$requiredAmbienceMissing sfxCandidates=$originalSfxCount sfxValidated=${validatedSfx.soundEffectCues.size} sfxTracks=${sfxTracks.size} sfxRequiredMissing=$requiredSfxMissing"
             runCatching {
                 persistAudioDirectionPlan(
@@ -1283,7 +1294,7 @@ class NarrationPlanCoordinator(
         const val KIND_FREESOUND_AUTO_AUDIO = "FREESOUND_AUTO_AUDIO"
         private const val VOICE_TRANSFORM_ENGINE = "xpk-unit-v8"
         private const val MUSIC_TRANSFORM_ENGINE = "xpk-ai-full-authority-v1"
-        private const val FREESOUND_AUTO_ENGINE = "freesound-auto-audio-v2"
+        private const val FREESOUND_AUTO_ENGINE = "freesound-auto-audio-v3-semantic-parity"
         private const val MAX_FREESOUND_RUNTIME_ATTEMPTS = 3
         private const val FREESOUND_RUNTIME_RETRY_DELAY_MS = 1_200L
         private const val FREESOUND_EMPTY_AI_RETRY_COOLDOWN_MS = 60_000L

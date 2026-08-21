@@ -60,6 +60,7 @@ fun UnifiedAudioAssetManagerDialog(
     kind: AudioAssetKind,
     tracks: List<SceneMusicTrackEntity>,
     normalizationTargetLufs: Float,
+    managedFreesoundOnly: Boolean = false,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -198,7 +199,7 @@ fun UnifiedAudioAssetManagerDialog(
 
     AlertDialog(
         onDismissRequest = ::cancelLibrary,
-        title = { Text(libraryTitle(kind)) },
+        title = { Text(if (managedFreesoundOnly) "${libraryTitle(kind)} · FREESOUND ĐÃ TẢI" else libraryTitle(kind)) },
         text = {
             Column(Modifier.heightIn(max = 620.dp).verticalScroll(rememberScrollState())) {
                 OutlinedTextField(
@@ -227,19 +228,29 @@ fun UnifiedAudioAssetManagerDialog(
         },
         confirmButton = {
             Column(Modifier.fillMaxWidth()) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Button(
-                        onClick = { launcher.launch(arrayOf("audio/*")) },
-                        enabled = draft.size < 500,
-                        modifier = Modifier.weight(1f),
-                    ) { Text("THÊM TỆP") }
+                if (!managedFreesoundOnly) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Button(
+                            onClick = { launcher.launch(arrayOf("audio/*")) },
+                            enabled = draft.size < 500,
+                            modifier = Modifier.weight(1f),
+                        ) { Text("THÊM TỆP") }
+                        Button(
+                            onClick = {
+                                stopPreview()
+                                showFreesoundDialog = true
+                            },
+                            modifier = Modifier.weight(1f),
+                        ) { Text("TÌM TRÊN FREESOUND") }
+                    }
+                } else {
                     Button(
                         onClick = {
                             stopPreview()
                             showFreesoundDialog = true
                         },
-                        modifier = Modifier.weight(1f),
-                    ) { Text("TÌM TRÊN FREESOUND") }
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("TÌM & TẢI THÊM TRÊN FREESOUND") }
                 }
                 Button(
                     onClick = {
@@ -298,7 +309,10 @@ fun UnifiedAudioAssetManagerDialog(
                                 scope.launch {
                                     val dao = application.container.database.sceneMusicTrackDao()
                                     val existing = dao.listAll()
-                                    val existingKind = existing.filter { AudioAssetClassifier.classify(it) == kind }
+                                    val existingKind = existing.filter { track ->
+                                        AudioAssetClassifier.classify(track) == kind &&
+                                            (!managedFreesoundOnly || FreesoundImporter.soundIdFromManagedUri(track.uri) != null)
+                                    }
                                     val now = System.currentTimeMillis()
                                     val normalized = draft.mapIndexed { index, row -> row.copy(orderIndex = index, updatedAt = now) }
                                     val destinationCounts = AudioAssetKind.entries.associateWith { destination ->

@@ -331,7 +331,7 @@ fun AudioDirectionLayerSwitches(
 
             StoryAudioSourceMode.AI_FREESOUND -> {
                 Text("MODE 3 · AI TỰ TÌM TRÊN FREESOUND")
-                Text("AI chỉ mô tả nhu cầu tìm kiếm theo timeline; Mode 3 không gửi catalog local và không dùng quy tắc chọn track_id của Mode 2.")
+                Text("Mode 3 dùng cùng quy tắc đạo diễn MUSIC / AMBIENCE / SFX của Mode 2, nhưng KHÔNG gửi catalog local. AI chỉ mô tả nhu cầu theo timeline; ứng dụng tự tìm và tải asset Freesound phù hợp.")
                 AudioLayerSwitchRow(
                     title = "Tự tìm nhạc nền trên Freesound",
                     checked = musicEnabled,
@@ -372,20 +372,37 @@ fun AudioDirectionLayerSwitches(
                     )
                 }
                 HorizontalDivider(Modifier.padding(vertical = 6.dp))
+                val mode3Tracks = tracks.filter { FreesoundImporter.soundIdFromManagedUri(it.uri) != null }
                 AudioManagerButton(
                     label = "CHUẨN HÓA / BẢO TRÌ FILE ÂM THANH MODE 3",
-            enabled = tracks.any { FreesoundImporter.soundIdFromManagedUri(it.uri) != null },
+                    enabled = mode3Tracks.isNotEmpty(),
                     onClick = { openNormalization(AudioAssetKind.entries.toSet()) },
                 )
+                AudioManagerButton(
+                    label = "QUẢN LÝ NHẠC ĐÃ TẢI (${mode3Tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }})",
+                    onClick = { managerKind = AudioAssetKind.MUSIC },
+                )
+                AudioManagerButton(
+                    label = "QUẢN LÝ MÔI TRƯỜNG ĐÃ TẢI (${mode3Tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.AMBIENCE }})",
+                    onClick = { managerKind = AudioAssetKind.AMBIENCE },
+                )
+                AudioManagerButton(
+                    label = "QUẢN LÝ SFX ĐÃ TẢI (${mode3Tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.SFX }})",
+                    onClick = { managerKind = AudioAssetKind.SFX },
+                )
+                Text("Ba mục trên chỉ hiển thị file Freesound đã tải về. Asset local của Mode 1/2 không xuất hiện và không bị sửa/xóa khi lưu Mode 3.")
                 Text("Mode 3 chỉ phát các file Freesound đã resolve cho kế hoạch hiện tại. Nếu một nhu cầu không resolve được, lớp tương ứng giữ im lặng; không dùng kho local làm fallback.")
             }
         }
     }
 
     if (showNormalizationDialog) {
-        val musicCount = tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }
-        val ambienceCount = tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.AMBIENCE }
-        val sfxCount = tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.SFX }
+        val normalizationTracks = if (sourceMode == StoryAudioSourceMode.AI_FREESOUND) {
+            tracks.filter { FreesoundImporter.soundIdFromManagedUri(it.uri) != null }
+        } else tracks
+        val musicCount = normalizationTracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }
+        val ambienceCount = normalizationTracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.AMBIENCE }
+        val sfxCount = normalizationTracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.SFX }
         AlertDialog(
             onDismissRequest = {
                 if (!normalizationSaving) showNormalizationDialog = false
@@ -523,10 +540,15 @@ fun AudioDirectionLayerSwitches(
             AudioAssetKind.AMBIENCE -> snapshot.ambienceNormalizationTargetLufs
             AudioAssetKind.SFX -> snapshot.soundEffectsNormalizationTargetLufs
         }
+        val managedFreesoundOnly = sourceMode == StoryAudioSourceMode.AI_FREESOUND
         UnifiedAudioAssetManagerDialog(
             kind = kind,
-            tracks = tracks.filter { AudioAssetClassifier.classify(it) == kind },
+            tracks = tracks.filter { track ->
+                AudioAssetClassifier.classify(track) == kind &&
+                    (!managedFreesoundOnly || FreesoundImporter.soundIdFromManagedUri(track.uri) != null)
+            },
             normalizationTargetLufs = target,
+            managedFreesoundOnly = managedFreesoundOnly,
             onDismiss = { managerKind = null },
         )
     }

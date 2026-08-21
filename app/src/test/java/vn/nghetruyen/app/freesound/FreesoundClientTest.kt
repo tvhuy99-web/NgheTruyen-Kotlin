@@ -54,7 +54,7 @@ class FreesoundClientTest {
         )
 
         assertEquals("sword clash", url.queryParameter("query"))
-        assertEquals("duration:[0.1 TO 15]", url.queryParameter("filter"))
+        assertEquals("category:\"Sound effects\" duration:[0.1 TO 15]", url.queryParameter("filter"))
         assertEquals("duration_asc", url.queryParameter("sort"))
         assertEquals("3", url.queryParameter("page"))
         assertEquals("20", url.queryParameter("page_size"))
@@ -66,6 +66,10 @@ class FreesoundClientTest {
         assertTrue(fields.contains("duration"))
         assertTrue(fields.contains("previews"))
         assertTrue(fields.contains("username"))
+        assertTrue(fields.contains("tags"))
+        assertTrue(fields.contains("category"))
+        assertTrue(fields.contains("avg_rating"))
+        assertTrue(fields.contains("num_downloads"))
     assertTrue(fields.contains("license"))
     assertTrue(fields.contains("url"))
     }
@@ -82,9 +86,9 @@ class FreesoundClientTest {
             FreesoundSearchRequest("sword", category = FreesoundCategory.SFX),
         )
 
-        assertEquals("duration:[30 TO 900]", music.queryParameter("filter"))
-        assertEquals("duration:[10 TO 300]", ambience.queryParameter("filter"))
-        assertEquals("duration:[0.1 TO 15]", sfx.queryParameter("filter"))
+        assertEquals("category:\"Music\" duration:[30 TO 900]", music.queryParameter("filter"))
+        assertEquals("category:\"Soundscapes\" duration:[10 TO 300]", ambience.queryParameter("filter"))
+        assertEquals("category:\"Sound effects\" duration:[0.1 TO 15]", sfx.queryParameter("filter"))
     }
 
     @Test
@@ -140,6 +144,14 @@ class FreesoundClientTest {
                 "username": "fieldrecorder",
                 "license": "Creative Commons 0",
                 "url": "https://freesound.org/people/fieldrecorder/sounds/123/",
+                "tags": ["thunder", "impact", "storm"],
+                "category": "Sound effects",
+                "subcategory": "Natural elements and explosions",
+                "category_code": "fx-n",
+                "avg_rating": 4.5,
+                "num_ratings": 12,
+                "num_downloads": 3456,
+                "score": 7.25,
                   "previews": {
                     "preview-hq-mp3": "https://cdn.freesound.org/previews/123/123-hq.mp3",
                     "preview-hq-ogg": "https://cdn.freesound.org/previews/123/123-hq.ogg"
@@ -174,6 +186,12 @@ class FreesoundClientTest {
     assertEquals("fieldrecorder", sound.username)
     assertEquals("Creative Commons 0", sound.license)
     assertEquals("https://freesound.org/people/fieldrecorder/sounds/123/", sound.webUrl)
+        assertEquals(listOf("thunder", "impact", "storm"), sound.tags)
+        assertEquals("Sound effects", sound.category)
+        assertEquals("fx-n", sound.categoryCode)
+        assertEquals(4.5, sound.avgRating, 0.001)
+        assertEquals(12, sound.numRatings)
+        assertEquals(3456, sound.numDownloads)
     }
 
     @Test

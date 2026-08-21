@@ -69,13 +69,24 @@ object FreesoundAutoRequirementCodec {
                         val startIndex = order[start] ?: error("$JSON_KEY[$index] dùng start_id không tồn tại.")
                         val endIndex = order[end] ?: error("$JSON_KEY[$index] dùng end_id không tồn tại.")
                         require(endIndex >= startIndex) { "$JSON_KEY[$index] có ranh giới đảo ngược." }
+                        val requestedMinSpan = when (kind) {
+                            AudioAssetKind.MUSIC -> MIN_MUSIC_REQUIREMENT_UNITS
+                            AudioAssetKind.AMBIENCE -> AudioDirectionLimits.MIN_AMBIENCE_SCENE_UNITS
+                            else -> 1
+                        }.coerceAtMost(validUnitIds.size.coerceAtLeast(1))
+                        val (safeStartIndex, safeEndIndex) = expandDurableRange(
+                            startIndex = startIndex,
+                            endIndex = endIndex,
+                            minimumSpan = requestedMinSpan,
+                            lastIndex = validUnitIds.lastIndex,
+                        )
                         add(
                             FreesoundAutoRequirement(
                                 kind = kind,
                                 query = query,
                                 importance = importance,
-                                startUnitId = start,
-                                endUnitId = end,
+                                startUnitId = validUnitIds[safeStartIndex],
+                                endUnitId = validUnitIds[safeEndIndex],
                             ),
                         )
                     }
@@ -138,6 +149,19 @@ object FreesoundAutoRequirementCodec {
         }
     }
 
+    private fun expandDurableRange(
+        startIndex: Int,
+        endIndex: Int,
+        minimumSpan: Int,
+        lastIndex: Int,
+    ): Pair<Int, Int> {
+        var start = startIndex
+        var end = endIndex
+        while (end - start + 1 < minimumSpan && end < lastIndex) end += 1
+        while (end - start + 1 < minimumSpan && start > 0) start -= 1
+        return start to end
+    }
+
     internal fun canonicalSearchQuery(value: String, kind: AudioAssetKind): String {
         val normalized = FreesoundAutoRequirementAggregator.normalizeQuery(value)
         if (normalized.isBlank()) return ""
@@ -145,8 +169,8 @@ object FreesoundAutoRequirementCodec {
             .map(String::trim)
             .filter { it.length >= 2 && it !in QUERY_STOPWORDS }
             .filterNot { token -> token in QUERY_GENERIC_TERMS && token != "music" && kind == AudioAssetKind.MUSIC }
-        if (tokens.isEmpty()) return normalized.split(' ').filter(String::isNotBlank).takeLast(MAX_QUERY_TERMS).joinToString(" ")
-        val selected = tokens.takeLast(MAX_QUERY_TERMS)
+        if (tokens.isEmpty()) return normalized.split(' ').filter(String::isNotBlank).take(MAX_QUERY_TERMS).joinToString(" ")
+        val selected = tokens.take(MAX_QUERY_TERMS)
         if (kind == AudioAssetKind.SFX && "wind" in selected && selected.none(SFX_EVENT_TERMS::contains)) {
             return "wind gust"
         }
@@ -164,6 +188,7 @@ object FreesoundAutoRequirementCodec {
         "gust", "whoosh", "slash", "hit", "thud", "crash", "clash", "strike", "slam", "break",
         "burst", "snap", "drop", "knock", "creak", "step", "steps", "footstep", "footsteps", "splash",
     )
+    private const val MIN_MUSIC_REQUIREMENT_UNITS = 2
     private const val MAX_QUERY_TERMS = 3
 }
 

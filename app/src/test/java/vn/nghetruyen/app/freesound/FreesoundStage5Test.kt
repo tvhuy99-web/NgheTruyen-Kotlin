@@ -21,7 +21,7 @@ class FreesoundStage5Test {
         )
 
         assertEquals("/apiv2/sounds/80408/similar/", url.encodedPath)
-        assertEquals("duration:[10 TO 300]", url.queryParameter("filter"))
+        assertEquals("category:\"Soundscapes\" duration:[10 TO 300]", url.queryParameter("filter"))
         assertEquals("2", url.queryParameter("page"))
         assertEquals("20", url.queryParameter("page_size"))
         assertNull(url.queryParameter("query"))

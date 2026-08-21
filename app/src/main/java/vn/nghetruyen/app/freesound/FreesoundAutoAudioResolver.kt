@@ -3,6 +3,7 @@ package vn.nghetruyen.app.freesound
 import android.content.Context
 import java.security.MessageDigest
 import java.util.UUID
+import kotlin.math.ln
 import kotlin.math.max
 import vn.nghetruyen.app.NgheTruyenApplication
 import vn.nghetruyen.app.ai.SceneMusicCue
@@ -10,6 +11,7 @@ import vn.nghetruyen.app.ai.XpkSceneMusicParity
 import vn.nghetruyen.app.audio.AmbienceScene
 import vn.nghetruyen.app.audio.AudioAssetClassifier
 import vn.nghetruyen.app.audio.AudioAssetKind
+import vn.nghetruyen.app.audio.AudioDirectionLimits
 import vn.nghetruyen.app.audio.AudioDirectionPreferences
 import vn.nghetruyen.app.audio.SoundEffectCue
 import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
@@ -132,6 +134,20 @@ class FreesoundAutoAudioResolver(
             }
             .map(SceneMusicTrackEntity::id)
             .toSet()
+    }
+
+    suspend fun cachedManagedTrackId(kind: AudioAssetKind, query: String): String? {
+        val cachedId = queryCache.get(kind, query) ?: return null
+        val track = runCatching { existingTracksProvider() }.getOrDefault(emptyList())
+            .firstOrNull { it.id == cachedId }
+            ?.takeIf {
+                it.enabled &&
+                    AudioAssetClassifier.classify(it) == kind &&
+                    FreesoundImporter.soundIdFromManagedUri(it.uri) != null &&
+                    FreesoundImporter.managedFileExists(appContext, it.uri)
+            }
+        if (track == null) queryCache.remove(kind, query)
+        return track?.id
     }
 
     fun clearResolutionCaches() {
@@ -415,7 +431,7 @@ class FreesoundAutoAudioResolver(
             )
             is FreesoundSearchResult.Success -> FreesoundAutoSearchOutcome(
                 sound = result.page.results
-                    .mapIndexed { index, sound -> sound to scoreCandidate(need.query, sound, index) }
+                    .mapIndexed { index, sound -> sound to scoreCandidate(need, sound, index) }
                     .filter { it.first.preferredPreviewUrl != null }
                     .maxByOrNull { it.second }
                     ?.takeIf { it.second >= REMOTE_MIN_SCORE }
@@ -449,38 +465,120 @@ class FreesoundAutoAudioResolver(
                 .filter { it.length >= 2 && it !in RETRY_QUERY_STOPWORDS }
             if (tokens.isEmpty()) return original
             val keep = if (retryAttempt == 2) 2 else 1
-            return tokens.takeLast(keep.coerceAtMost(tokens.size)).joinToString(" ").ifBlank { original }
+            return tokens.take(keep.coerceAtMost(tokens.size)).joinToString(" ").ifBlank { original }
         }
 
-        internal fun scoreCandidate(query: String, sound: FreesoundSound, rankIndex: Int): Double {
-            val queryNorm = FreesoundAutoRequirementAggregator.normalizeQuery(query)
+        internal fun scoreCandidate(
+            need: FreesoundAutoSearchNeed,
+            sound: FreesoundSound,
+            rankIndex: Int,
+        ): Double {
+            val queryNorm = FreesoundAutoRequirementAggregator.normalizeQuery(need.query)
             val queryTokens = FreesoundAutoRequirementAggregator.queryTokens(queryNorm)
             if (queryTokens.isEmpty()) return 0.0
             val titleNorm = FreesoundAutoRequirementAggregator.normalizeQuery(sound.name)
             val descriptionNorm = FreesoundAutoRequirementAggregator.normalizeQuery(sound.description)
+            val tagNorm = FreesoundAutoRequirementAggregator.normalizeQuery(sound.tags.joinToString(" "))
             val titleTokens = FreesoundAutoRequirementAggregator.queryTokens(titleNorm)
             val descriptionTokens = FreesoundAutoRequirementAggregator.queryTokens(descriptionNorm)
+            val tagTokens = FreesoundAutoRequirementAggregator.queryTokens(tagNorm)
             fun coverage(tokens: Set<String>): Double =
                 queryTokens.count(tokens::contains).toDouble() / queryTokens.size.toDouble()
             val titleCoverage = coverage(titleTokens)
             val descriptionCoverage = coverage(descriptionTokens)
+            val tagCoverage = coverage(tagTokens)
+            val lexicalCoverage = max(titleCoverage, max(tagCoverage * 0.96, descriptionCoverage * 0.78))
+            if (lexicalCoverage <= 0.0) return 0.0
+
             val phraseBonus = when {
-                titleNorm.contains(queryNorm) -> 0.30
-                descriptionNorm.contains(queryNorm) -> 0.15
+                titleNorm.contains(queryNorm) -> 0.20
+                tagNorm.contains(queryNorm) -> 0.14
+                descriptionNorm.contains(queryNorm) -> 0.08
                 else -> 0.0
             }
-            val rankBonus = 0.15 / (rankIndex.coerceAtLeast(0) + 1.0)
-            return (max(titleCoverage, descriptionCoverage * 0.82) * 0.72 + phraseBonus + rankBonus)
-                .coerceIn(0.0, 1.0)
+            val expectedCategory = when (need.kind) {
+                AudioAssetKind.MUSIC -> "Music"
+                AudioAssetKind.AMBIENCE -> "Soundscapes"
+                AudioAssetKind.SFX -> "Sound effects"
+            }
+            val categoryBonus = when {
+                sound.category.isBlank() -> 0.0
+                sound.category.equals(expectedCategory, ignoreCase = true) -> 0.18
+                else -> -0.24
+            }
+            val durationBonus = when (need.kind) {
+                AudioAssetKind.MUSIC -> when (sound.durationSeconds) {
+                    in 45.0..360.0 -> 0.10
+                    in 30.0..<45.0 -> 0.05
+                    in 360.0..900.0 -> 0.03
+                    else -> -0.10
+                }
+                AudioAssetKind.AMBIENCE -> when (sound.durationSeconds) {
+                    in 30.0..180.0 -> 0.12
+                    in 15.0..300.0 -> 0.07
+                    in 10.0..<15.0 -> 0.02
+                    else -> -0.10
+                }
+                AudioAssetKind.SFX -> {
+                    val actionLoop = need.usages.any { it.loopUntilStop }
+                    if (actionLoop) {
+                        when (sound.durationSeconds) {
+                            in 2.0..15.0 -> 0.10
+                            in 0.1..<2.0 -> 0.04
+                            else -> -0.10
+                        }
+                    } else {
+                        when (sound.durationSeconds) {
+                            in 0.1..6.0 -> 0.12
+                            in 6.0..10.0 -> 0.06
+                            in 10.0..15.0 -> 0.01
+                            else -> -0.10
+                        }
+                    }
+                }
+            }
+            val ratingConfidence = (sound.numRatings / 8.0).coerceIn(0.0, 1.0)
+            val ratingBonus = (sound.avgRating / 5.0).coerceIn(0.0, 1.0) * 0.07 * ratingConfidence
+            val downloadsBonus = if (sound.numDownloads > 0) {
+                (ln(1.0 + sound.numDownloads.toDouble()) / ln(10_001.0)).coerceIn(0.0, 1.0) * 0.05
+            } else 0.0
+            val apiScoreBonus = if (sound.searchScore > 0.0) {
+                (sound.searchScore / (1.0 + sound.searchScore)).coerceIn(0.0, 1.0) * 0.04
+            } else 0.0
+            val rankBonus = 0.08 / (rankIndex.coerceAtLeast(0) + 1.0)
+            return (
+                lexicalCoverage * 0.62 + phraseBonus + categoryBonus + durationBonus +
+                    ratingBonus + downloadsBonus + apiScoreBonus + rankBonus
+                ).coerceIn(0.0, 1.0)
         }
     }
 }
 
 /** Converts resolved search needs into the same local runtime cue types used by the existing player. */
 object FreesoundAutoPlanBuilder {
+    data class RequiredCoverage(
+        val missingMusicUsages: Int = 0,
+        val missingAmbienceUsages: Int = 0,
+        val missingSfxUsages: Int = 0,
+    ) {
+        val complete: Boolean
+            get() = missingMusicUsages == 0 && missingAmbienceUsages == 0 && missingSfxUsages == 0
+    }
+
+    private data class MusicRun(val start: Int, val end: Int, val trackId: String)
+    private data class PrioritizedAmbience(
+        val scene: AmbienceScene,
+        val importance: FreesoundRequirementImportance,
+    )
+    private data class PrioritizedSfx(
+        val cue: SoundEffectCue,
+        val importance: FreesoundRequirementImportance,
+    )
+
     fun musicCues(
         resolved: List<FreesoundAutoResolvedNeed>,
         validUnitIds: List<String>,
+        validTrackIds: Set<String>? = null,
     ): List<SceneMusicCue> {
         if (validUnitIds.isEmpty()) return emptyList()
         val order = validUnitIds.withIndex().associate { it.value to it.index }
@@ -488,65 +586,242 @@ object FreesoundAutoPlanBuilder {
         val music = resolved.filter { it.need.kind == AudioAssetKind.MUSIC && !it.trackId.isNullOrBlank() }
             .sortedWith(compareBy<FreesoundAutoResolvedNeed> { it.need.importance != FreesoundRequirementImportance.REQUIRED })
         music.forEach { resolution ->
-            val trackId = resolution.trackId ?: return@forEach
-            resolution.need.usages.forEach { usage ->
-                val start = usage.startUnitId?.let(order::get) ?: return@forEach
-                val end = usage.endUnitId?.let(order::get) ?: return@forEach
-                for (index in start..end) {
-                    if (selectedByUnit[index] == XpkSceneMusicParity.SILENCE_TRACK_ID) selectedByUnit[index] = trackId
+            val rawTrackId = resolution.trackId ?: return@forEach
+            val trackId = if (validTrackIds == null || rawTrackId in validTrackIds) rawTrackId
+            else XpkSceneMusicParity.SILENCE_TRACK_ID
+            resolution.need.usages
+                .sortedBy { usage -> usage.startUnitId?.let(order::get) ?: Int.MAX_VALUE }
+                .forEach { usage ->
+                    val start = usage.startUnitId?.let(order::get) ?: return@forEach
+                    val end = usage.endUnitId?.let(order::get) ?: return@forEach
+                    for (index in start..end) {
+                        if (selectedByUnit[index] == XpkSceneMusicParity.SILENCE_TRACK_ID) {
+                            selectedByUnit[index] = trackId
+                        }
+                    }
+                }
+        }
+        stabilizeMusicAssignments(selectedByUnit)
+        return musicAssignmentsToCues(selectedByUnit, validUnitIds)
+    }
+
+    fun salvageMusicCues(
+        cues: List<SceneMusicCue>,
+        validUnitIds: List<String>,
+        validTrackIds: Set<String>,
+    ): List<SceneMusicCue> {
+        if (validUnitIds.isEmpty()) return emptyList()
+        val order = validUnitIds.withIndex().associate { it.value to it.index }
+        val selected = MutableList(validUnitIds.size) { XpkSceneMusicParity.SILENCE_TRACK_ID }
+        cues.forEach { cue ->
+            val start = order[cue.startUnitId] ?: return@forEach
+            val end = order[cue.endUnitId] ?: return@forEach
+            if (end < start) return@forEach
+            val safeTrack = cue.trackId.takeIf { it in validTrackIds } ?: XpkSceneMusicParity.SILENCE_TRACK_ID
+            for (index in start..end) selected[index] = safeTrack
+        }
+        stabilizeMusicAssignments(selected)
+        return musicAssignmentsToCues(selected, validUnitIds)
+    }
+
+    private fun stabilizeMusicAssignments(rows: MutableList<String>) {
+        if (rows.size < 3) return
+        while (true) {
+            val runs = musicRuns(rows)
+            if (runs.size <= 2) return
+            val short = runs.subList(1, runs.lastIndex).firstOrNull { it.end - it.start + 1 < 2 } ?: return
+            val runIndex = runs.indexOf(short)
+            val left = runs[runIndex - 1]
+            val right = runs[runIndex + 1]
+            val replacement = when {
+                left.trackId == right.trackId -> left.trackId
+                left.trackId != XpkSceneMusicParity.SILENCE_TRACK_ID -> left.trackId
+                else -> right.trackId
+            }
+            for (index in short.start..short.end) rows[index] = replacement
+        }
+    }
+
+    private fun musicRuns(rows: List<String>): List<MusicRun> {
+        if (rows.isEmpty()) return emptyList()
+        val out = mutableListOf<MusicRun>()
+        var start = 0
+        var track = rows.first()
+        for (index in 1..rows.size) {
+            if (index == rows.size || rows[index] != track) {
+                out += MusicRun(start, index - 1, track)
+                if (index < rows.size) {
+                    start = index
+                    track = rows[index]
                 }
             }
         }
-        val cues = mutableListOf<SceneMusicCue>()
-        var start = 0
-        var track = selectedByUnit.first()
-        for (index in 1..selectedByUnit.size) {
-            val changed = index == selectedByUnit.size || selectedByUnit[index] != track
-            if (!changed) continue
-            cues += SceneMusicCue(
-                startParagraph = start,
-                endParagraph = index - 1,
-                trackId = track,
-                startUnitId = validUnitIds[start],
-                endUnitId = validUnitIds[index - 1],
+        return out
+    }
+
+    private fun musicAssignmentsToCues(rows: List<String>, validUnitIds: List<String>): List<SceneMusicCue> =
+        musicRuns(rows).map { run ->
+            SceneMusicCue(
+                startParagraph = run.start,
+                endParagraph = run.end,
+                trackId = run.trackId,
+                startUnitId = validUnitIds[run.start],
+                endUnitId = validUnitIds[run.end],
             )
-            if (index < selectedByUnit.size) {
-                start = index
-                track = selectedByUnit[index]
-            }
         }
-        return cues
+
+    fun ambienceScenes(
+        resolved: List<FreesoundAutoResolvedNeed>,
+        validUnitIds: List<String>,
+    ): List<AmbienceScene> {
+        val order = validUnitIds.withIndex().associate { it.value to it.index }
+        val candidates = buildList {
+            resolved.filter { it.need.kind == AudioAssetKind.AMBIENCE && !it.trackId.isNullOrBlank() }.forEach { resolution ->
+                val trackId = resolution.trackId ?: return@forEach
+                resolution.need.usages.forEach { usage ->
+                    val start = usage.startUnitId ?: return@forEach
+                    val end = usage.endUnitId ?: return@forEach
+                    if (order[start] == null || order[end] == null) return@forEach
+                    add(PrioritizedAmbience(AmbienceScene(start, end, trackId), usage.importance))
+                }
+            }
+        }.sortedWith(
+            compareBy<PrioritizedAmbience> { it.importance != FreesoundRequirementImportance.REQUIRED }
+                .thenBy { order[it.scene.startUnitId] ?: Int.MAX_VALUE }
+                .thenBy { order[it.scene.endUnitId] ?: Int.MAX_VALUE },
+        )
+        val accepted = mutableListOf<PrioritizedAmbience>()
+        candidates.forEach { candidate ->
+            val start = order.getValue(candidate.scene.startUnitId)
+            val end = order.getValue(candidate.scene.endUnitId)
+            val duplicate = accepted.any { existing ->
+                existing.scene.ambienceId == candidate.scene.ambienceId &&
+                    rangesOverlap(start, end, order.getValue(existing.scene.startUnitId), order.getValue(existing.scene.endUnitId))
+            }
+            if (duplicate) return@forEach
+            val wouldOverflow = (start..end).any { unit ->
+                accepted.count { row ->
+                    val rowStart = order.getValue(row.scene.startUnitId)
+                    val rowEnd = order.getValue(row.scene.endUnitId)
+                    unit in rowStart..rowEnd
+                } >= AudioDirectionLimits.MAX_CONCURRENT_AMBIENCE
+            }
+            if (!wouldOverflow) accepted += candidate
+        }
+        return accepted.map(PrioritizedAmbience::scene)
+            .sortedWith(compareBy<AmbienceScene> { order[it.startUnitId] ?: Int.MAX_VALUE }.thenBy { order[it.endUnitId] ?: Int.MAX_VALUE })
     }
 
-    fun ambienceScenes(resolved: List<FreesoundAutoResolvedNeed>): List<AmbienceScene> = buildList {
-        resolved.filter { it.need.kind == AudioAssetKind.AMBIENCE && !it.trackId.isNullOrBlank() }.forEach { resolution ->
-            val trackId = resolution.trackId ?: return@forEach
-            resolution.need.usages.forEach { usage ->
-                val start = usage.startUnitId ?: return@forEach
-                val end = usage.endUnitId ?: return@forEach
-                add(AmbienceScene(startUnitId = start, endUnitId = end, ambienceId = trackId))
+    fun soundEffectCues(
+        resolved: List<FreesoundAutoResolvedNeed>,
+        validUnitIds: List<String>,
+    ): List<SoundEffectCue> {
+        val order = validUnitIds.withIndex().associate { it.value to it.index }
+        val candidates = buildList {
+            resolved.filter { it.need.kind == AudioAssetKind.SFX && !it.trackId.isNullOrBlank() }.forEach { resolution ->
+                val trackId = resolution.trackId ?: return@forEach
+                resolution.need.usages.forEach { usage ->
+                    val unit = usage.unitId ?: return@forEach
+                    if (order[unit] == null) return@forEach
+                    add(
+                        PrioritizedSfx(
+                            SoundEffectCue(
+                                unitId = unit,
+                                effectId = trackId,
+                                stopUnitId = usage.stopUnitId,
+                                repeatCount = usage.repeatCount,
+                                cadence = usage.cadence,
+                                loopUntilStop = usage.loopUntilStop,
+                            ),
+                            usage.importance,
+                        ),
+                    )
+                }
             }
+        }.distinctBy { row ->
+            listOf(
+                row.cue.unitId, row.cue.effectId, row.cue.stopUnitId.orEmpty(), row.cue.repeatCount.toString(),
+                row.cue.cadence.name, row.cue.loopUntilStop.toString(),
+            ).joinToString("|")
+        }.sortedWith(
+            compareBy<PrioritizedSfx> { it.importance != FreesoundRequirementImportance.REQUIRED }
+                .thenBy { order[it.cue.unitId] ?: Int.MAX_VALUE },
+        )
+        val accepted = mutableListOf<PrioritizedSfx>()
+        candidates.forEach { candidate ->
+            val start = order.getValue(candidate.cue.unitId)
+            val stopExclusive = candidate.cue.stopUnitId?.let(order::get) ?: (start + 1)
+            val wouldOverflow = (start until stopExclusive.coerceAtMost(validUnitIds.size)).any { unit ->
+                accepted.count { row ->
+                    val rowStart = order.getValue(row.cue.unitId)
+                    val rowStop = row.cue.stopUnitId?.let(order::get) ?: (rowStart + 1)
+                    unit in rowStart until rowStop.coerceAtMost(validUnitIds.size)
+                } >= AudioDirectionLimits.MAX_CONCURRENT_SFX
+            }
+            if (!wouldOverflow) accepted += candidate
         }
+        return accepted.map(PrioritizedSfx::cue)
+            .sortedWith(compareBy<SoundEffectCue> { order[it.unitId] ?: Int.MAX_VALUE }.thenBy { it.effectId })
     }
 
-    fun soundEffectCues(resolved: List<FreesoundAutoResolvedNeed>): List<SoundEffectCue> = buildList {
-        resolved.filter { it.need.kind == AudioAssetKind.SFX && !it.trackId.isNullOrBlank() }.forEach { resolution ->
+    fun requiredCoverage(
+        resolved: List<FreesoundAutoResolvedNeed>,
+        validUnitIds: List<String>,
+        musicCues: List<SceneMusicCue> = emptyList(),
+        ambienceScenes: List<AmbienceScene> = emptyList(),
+        soundEffectCues: List<SoundEffectCue> = emptyList(),
+    ): RequiredCoverage {
+        val order = validUnitIds.withIndex().associate { it.value to it.index }
+        var missingMusic = 0
+        var missingAmbience = 0
+        var missingSfx = 0
+        resolved.forEach { resolution ->
             val trackId = resolution.trackId ?: return@forEach
-            resolution.need.usages.forEach { usage ->
-                val unit = usage.unitId ?: return@forEach
-                add(
-                    SoundEffectCue(
-                        unitId = unit,
-                        effectId = trackId,
-                        stopUnitId = usage.stopUnitId,
-                        repeatCount = usage.repeatCount,
-                        cadence = usage.cadence,
-                        loopUntilStop = usage.loopUntilStop,
-                    ),
-                )
+            resolution.need.usages.filter { it.importance == FreesoundRequirementImportance.REQUIRED }.forEach { usage ->
+                when (usage.kind) {
+                    AudioAssetKind.MUSIC -> {
+                        val start = usage.startUnitId?.let(order::get)
+                        val end = usage.endUnitId?.let(order::get)
+                        val covered = start != null && end != null && (start..end).all { unit ->
+                            musicCues.any { cue ->
+                                cue.trackId == trackId &&
+                                    unit >= (order[cue.startUnitId] ?: Int.MAX_VALUE) &&
+                                    unit <= (order[cue.endUnitId] ?: Int.MIN_VALUE)
+                            }
+                        }
+                        if (!covered) missingMusic += 1
+                    }
+                    AudioAssetKind.AMBIENCE -> {
+                        val start = usage.startUnitId?.let(order::get)
+                        val end = usage.endUnitId?.let(order::get)
+                        val covered = start != null && end != null && (start..end).all { unit ->
+                            ambienceScenes.any { scene ->
+                                scene.ambienceId == trackId &&
+                                    unit >= (order[scene.startUnitId] ?: Int.MAX_VALUE) &&
+                                    unit <= (order[scene.endUnitId] ?: Int.MIN_VALUE)
+                            }
+                        }
+                        if (!covered) missingAmbience += 1
+                    }
+                    AudioAssetKind.SFX -> {
+                        val covered = soundEffectCues.any { cue ->
+                            cue.unitId == usage.unitId &&
+                                cue.effectId == trackId &&
+                                cue.stopUnitId == usage.stopUnitId &&
+                                cue.repeatCount == usage.repeatCount &&
+                                cue.cadence == usage.cadence &&
+                                cue.loopUntilStop == usage.loopUntilStop
+                        }
+                        if (!covered) missingSfx += 1
+                    }
+                }
             }
         }
+        return RequiredCoverage(missingMusic, missingAmbience, missingSfx)
     }
+
+    private fun rangesOverlap(firstStart: Int, firstEnd: Int, secondStart: Int, secondEnd: Int): Boolean =
+        firstStart <= secondEnd && secondStart <= firstEnd
 }
 
 private fun AudioAssetKind.toFreesoundCategory(): FreesoundCategory = when (this) {

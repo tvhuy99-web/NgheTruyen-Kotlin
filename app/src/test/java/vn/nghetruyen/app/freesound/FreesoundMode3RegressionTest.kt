@@ -103,7 +103,7 @@ class FreesoundMode3RegressionTest {
             "heavy landing thud on wood",
             AudioAssetKind.SFX,
         )
-        assertEquals("landing thud wood", query)
+        assertEquals("heavy landing thud", query)
         assertTrue(query.split(' ').size <= 3)
     }
 
@@ -134,4 +134,55 @@ class FreesoundMode3RegressionTest {
             FreesoundAutoRequirementCodec.canonicalSearchQuery("wind whoosh", AudioAssetKind.SFX),
         )
     }
+
+    @Test
+    fun parserExpandsOneUnitMusicAndAmbienceToDurableRanges() {
+        val units = listOf("U1", "U2", "U3", "U4")
+        val root = org.json.JSONObject(
+            """{"freesound_requirements":[
+              {"kind":"MUSIC","query":"tense guqin","start_id":"U2","end_id":"U2"},
+              {"kind":"AMBIENCE","query":"forest wind","start_id":"U3","end_id":"U3"}
+            ]}""",
+        )
+        val parsed = FreesoundAutoRequirementCodec.parse(root, units, setOf(AudioAssetKind.MUSIC, AudioAssetKind.AMBIENCE))
+        assertTrue(units.indexOf(parsed[0].endUnitId) - units.indexOf(parsed[0].startUnitId) + 1 >= 2)
+        assertTrue(units.indexOf(parsed[1].endUnitId) - units.indexOf(parsed[1].startUnitId) + 1 >= 2)
+    }
+
+    @Test
+    fun planBuilderSortsTimelineInsteadOfDroppingValidLateAndEarlyCues() {
+        val units = listOf("U1", "U2", "U3", "U4", "U5", "U6")
+        val lateNeed = FreesoundAutoSearchNeed(
+            AudioAssetKind.SFX, "door slam", FreesoundRequirementImportance.REQUIRED,
+            listOf(FreesoundAutoRequirement(AudioAssetKind.SFX, "door slam", FreesoundRequirementImportance.REQUIRED, unitId = "U5")),
+        )
+        val earlyNeed = FreesoundAutoSearchNeed(
+            AudioAssetKind.SFX, "sword clash", FreesoundRequirementImportance.REQUIRED,
+            listOf(FreesoundAutoRequirement(AudioAssetKind.SFX, "sword clash", FreesoundRequirementImportance.REQUIRED, unitId = "U2")),
+        )
+        val cues = FreesoundAutoPlanBuilder.soundEffectCues(
+            listOf(FreesoundAutoResolvedNeed(lateNeed, "late", "CACHE"), FreesoundAutoResolvedNeed(earlyNeed, "early", "CACHE")),
+            units,
+        )
+        assertEquals(listOf("U2", "U5"), cues.map { it.unitId })
+    }
+
+    @Test
+    fun requiredCoverageChecksEveryUsageNotJustTheKind() {
+        val units = listOf("U1", "U2", "U3", "U4")
+        val first = FreesoundAutoRequirement(AudioAssetKind.SFX, "sword clash", FreesoundRequirementImportance.REQUIRED, unitId = "U1")
+        val second = FreesoundAutoRequirement(AudioAssetKind.SFX, "door slam", FreesoundRequirementImportance.REQUIRED, unitId = "U3")
+        val resolved = listOf(
+            FreesoundAutoResolvedNeed(FreesoundAutoSearchNeed(AudioAssetKind.SFX, first.query, first.importance, listOf(first)), "a", "CACHE"),
+            FreesoundAutoResolvedNeed(FreesoundAutoSearchNeed(AudioAssetKind.SFX, second.query, second.importance, listOf(second)), "b", "CACHE"),
+        )
+        val coverage = FreesoundAutoPlanBuilder.requiredCoverage(
+            resolved = resolved,
+            validUnitIds = units,
+            soundEffectCues = listOf(SoundEffectCue(unitId = "U1", effectId = "a")),
+        )
+        assertEquals(1, coverage.missingSfxUsages)
+        assertFalse(coverage.complete)
+    }
 }
+

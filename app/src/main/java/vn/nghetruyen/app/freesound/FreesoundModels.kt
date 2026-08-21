@@ -5,9 +5,9 @@ enum class FreesoundCategory(
     internal val recommendedDurationFilter: String?,
 ) {
     ALL("Tất cả", null),
-    MUSIC("Nhạc nền", "duration:[30 TO 900]"),
-    AMBIENCE("Âm thanh môi trường", "duration:[10 TO 300]"),
-    SFX("Hiệu ứng âm thanh", "duration:[0.1 TO 15]"),
+    MUSIC("Nhạc nền", "category:\"Music\" duration:[30 TO 900]"),
+    AMBIENCE("Âm thanh môi trường", "category:\"Soundscapes\" duration:[10 TO 300]"),
+    SFX("Hiệu ứng âm thanh", "category:\"Sound effects\" duration:[0.1 TO 15]"),
 }
 
 enum class FreesoundDuration(
@@ -71,6 +71,14 @@ data class FreesoundSound(
     val username: String = "",
     val license: String = "",
     val webUrl: String = "",
+    val tags: List<String> = emptyList(),
+    val category: String = "",
+    val subcategory: String = "",
+    val categoryCode: String = "",
+    val avgRating: Double = 0.0,
+    val numRatings: Int = 0,
+    val numDownloads: Int = 0,
+    val searchScore: Double = 0.0,
 ) {
     val preferredPreviewUrl: String?
         get() = previewHqMp3 ?: previewHqOgg

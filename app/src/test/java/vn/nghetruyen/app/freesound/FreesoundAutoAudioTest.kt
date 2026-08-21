@@ -125,10 +125,35 @@ class FreesoundAutoAudioTest {
             previewHqMp3 = "https://cdn.example/2.mp3",
             previewHqOgg = null,
         )
-        val query = "close dry thunder strike"
+        val need = FreesoundAutoSearchNeed(
+            kind = AudioAssetKind.SFX,
+            query = "close dry thunder strike",
+            importance = FreesoundRequirementImportance.REQUIRED,
+            usages = emptyList(),
+        )
         assertTrue(
-            FreesoundAutoAudioResolver.scoreCandidate(query, matching, rankIndex = 4) >
-                FreesoundAutoAudioResolver.scoreCandidate(query, unrelated, rankIndex = 0),
+            FreesoundAutoAudioResolver.scoreCandidate(need, matching.copy(category = "Sound effects"), rankIndex = 4) >
+                FreesoundAutoAudioResolver.scoreCandidate(need, unrelated.copy(category = "Sound effects"), rankIndex = 0),
+        )
+    }
+
+    @Test
+    fun candidateRankingPrefersCorrectTaxonomyAndUsefulQualityMetadata() {
+        val need = FreesoundAutoSearchNeed(
+            kind = AudioAssetKind.AMBIENCE,
+            query = "forest wind",
+            importance = FreesoundRequirementImportance.REQUIRED,
+            usages = emptyList(),
+        )
+        val base = FreesoundSound(
+            id = 1, name = "forest wind", description = "forest wind", durationSeconds = 60.0,
+            previewHqMp3 = "https://cdn.example/a.mp3", previewHqOgg = null, tags = listOf("forest", "wind"),
+        )
+        val soundscape = base.copy(category = "Soundscapes", avgRating = 4.8, numRatings = 20, numDownloads = 5000)
+        val wrong = base.copy(id = 2, category = "Music", avgRating = 5.0, numRatings = 100, numDownloads = 100000)
+        assertTrue(
+            FreesoundAutoAudioResolver.scoreCandidate(need, soundscape, 2) >
+                FreesoundAutoAudioResolver.scoreCandidate(need, wrong, 0),
         )
     }
 

@@ -13,34 +13,16 @@ class FreesoundRetryQueryTest {
     }
 
     @Test
-    fun secondAttemptKeepsTwoBroadCoreTerms() {
-        assertEquals(
-            "flute music",
-            FreesoundAutoAudioResolver.searchQueryForRetry("lighthearted comedic chinese flute music", 2),
-        )
-        assertEquals(
-            "thud wood",
-            FreesoundAutoAudioResolver.searchQueryForRetry("heavy landing thud on wood", 2),
-        )
-        assertEquals(
-            "drop wood",
-            FreesoundAutoAudioResolver.searchQueryForRetry("single gold coin drop on wood", 2),
-        )
+    fun secondAttemptKeepsTheFirstTwoImportantTerms() {
+        assertEquals("sword clash", FreesoundAutoAudioResolver.searchQueryForRetry("sword clash close metal", 2))
+        assertEquals("forest wind", FreesoundAutoAudioResolver.searchQueryForRetry("forest wind distant trees", 2))
+        assertEquals("tense guqin", FreesoundAutoAudioResolver.searchQueryForRetry("tense guqin dark music", 2))
     }
 
     @Test
-    fun thirdAttemptKeepsOneBroadestCoreTerm() {
-        assertEquals(
-            "music",
-            FreesoundAutoAudioResolver.searchQueryForRetry("lighthearted comedic chinese flute music", 3),
-        )
-        assertEquals(
-            "crash",
-            FreesoundAutoAudioResolver.searchQueryForRetry("wall breaking debris crash", 3),
-        )
-        assertEquals(
-            "wood",
-            FreesoundAutoAudioResolver.searchQueryForRetry("heavy landing thud on wood", 3),
-        )
+    fun thirdAttemptKeepsTheFirstImportantTerm() {
+        assertEquals("sword", FreesoundAutoAudioResolver.searchQueryForRetry("sword clash close metal", 3))
+        assertEquals("forest", FreesoundAutoAudioResolver.searchQueryForRetry("forest wind distant trees", 3))
+        assertEquals("tense", FreesoundAutoAudioResolver.searchQueryForRetry("tense guqin dark music", 3))
     }
 }

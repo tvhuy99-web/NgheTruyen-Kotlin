@@ -178,7 +178,7 @@ class FreesoundClient(
         private const val SEARCH_URL = "https://freesound.org/apiv2/search/"
         private const val API_BASE_URL = "https://freesound.org/apiv2/"
         private const val USER_AGENT = "NgheTruyen-Android/Freesound"
-        private const val SEARCH_FIELDS = "id,url,name,description,duration,previews,username,license"
+        private const val SEARCH_FIELDS = "id,url,name,description,duration,previews,username,license,tags,category,subcategory,category_code,avg_rating,num_ratings,num_downloads,score"
         private const val CACHE_MAX_ENTRIES = 48
         private const val CACHE_TTL_MS = 5L * 60L * 1_000L
         private const val RATE_WINDOW_MS = 60_000L
@@ -282,6 +282,21 @@ class FreesoundClient(
                                 webUrl = item.optString("url").trim()
                                     .takeIf { it.startsWith("https://freesound.org/", ignoreCase = true) }
                                     .orEmpty(),
+                                tags = buildList {
+                                    val tagsArray = item.optJSONArray("tags")
+                                    if (tagsArray != null) {
+                                        for (tagIndex in 0 until tagsArray.length()) {
+                                            tagsArray.optString(tagIndex).trim().takeIf(String::isNotBlank)?.let(::add)
+                                        }
+                                    }
+                                },
+                                category = item.optString("category").trim().take(120),
+                                subcategory = item.optString("subcategory").trim().take(160),
+                                categoryCode = item.optString("category_code").trim().take(40),
+                                avgRating = item.optDouble("avg_rating", 0.0).takeIf(Double::isFinite)?.coerceIn(0.0, 5.0) ?: 0.0,
+                                numRatings = item.optInt("num_ratings", 0).coerceAtLeast(0),
+                                numDownloads = item.optInt("num_downloads", 0).coerceAtLeast(0),
+                                searchScore = item.optDouble("score", 0.0).takeIf(Double::isFinite)?.coerceAtLeast(0.0) ?: 0.0,
                             ),
                         )
                     }

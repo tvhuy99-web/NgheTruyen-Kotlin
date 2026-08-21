@@ -216,5 +216,15 @@ class XpkAudioPromptQualityTest {
         assertTrue(prompt.contains("Freesound mặc định coi các term là bắt buộc"))
         assertTrue(prompt.contains("debris crash"))
         assertTrue(prompt.contains("forest wind"))
+        assertTrue(prompt.contains("CÙNG NGUYÊN TẮC VỚI MODE 2"))
+        assertTrue(prompt.contains("Im lặng là lựa chọn bình đẳng với nhạc"))
+        assertTrue(prompt.contains("không tạo một lớp chỉ cho một UNIT"))
+        assertTrue(prompt.contains("ONE-SHOT"))
+        assertTrue(prompt.contains("COUNTED REPEAT"))
+        assertTrue(prompt.contains("ACTION LOOP"))
+        assertTrue(prompt.contains("không gửi catalog local", ignoreCase = true))
+        assertFalse(prompt.contains("TRACK_CATALOG"))
+        assertFalse(prompt.contains("AMBIENCE_CATALOG"))
+        assertFalse(prompt.contains("SFX_CATALOG"))
     }
 }

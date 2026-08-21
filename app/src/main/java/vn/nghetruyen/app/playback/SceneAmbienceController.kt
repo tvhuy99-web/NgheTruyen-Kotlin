@@ -7,6 +7,7 @@ import android.media.audiofx.LoudnessEnhancer
 import android.net.Uri
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 import kotlin.random.Random
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -17,11 +18,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import vn.nghetruyen.app.audio.AudioDirectionAsset
-import vn.nghetruyen.app.audio.AudioDirectionLimits
 import vn.nghetruyen.app.audio.PcmLoudnessEstimator
 
 /**
- * Voice-first ambience bus with at most two logical layers.
+ * Voice-first ambience bus with any number of logical layers selected by the AI.
  *
  * Each logical layer owns its own loop clock. Short ambience clips are never hard-looped: a second
  * MediaPlayer is started before the current clip ends and the two overlap/crossfade. Independent
@@ -77,7 +77,6 @@ class SceneAmbienceController(context: Context) {
             .asSequence()
             .filter { it.id.isNotBlank() && it.uri.isNotBlank() }
             .distinctBy(AudioDirectionAsset::id)
-            .take(AudioDirectionLimits.MAX_CONCURRENT_AMBIENCE)
             .toList()
         val safeCrossfade = crossfadeMillis.coerceIn(500, 3_000)
         val safeOverlapMin = overlapMinMillis.coerceIn(350, 3_000)
@@ -176,7 +175,7 @@ class SceneAmbienceController(context: Context) {
         val requestedById = requested.associateBy(AudioDirectionAsset::id)
         val targetIds = requested.map(AudioDirectionAsset::id)
         activeIdsSnapshot = targetIds
-        val mixScale = if (requested.size > 1) DUAL_LAYER_SCALE else 1f
+        val mixScale = if (requested.size <= 1) 1f else 1f / sqrt(requested.size.toFloat())
 
         layers.keys.toList().forEach { id ->
             val current = layers[id] ?: return@forEach
@@ -512,7 +511,6 @@ class SceneAmbienceController(context: Context) {
     }
 
     companion object {
-        private const val DUAL_LAYER_SCALE = 0.78f
         private const val MAX_VARIANTS_PER_FAMILY = 12
         private const val SFX_DUCK_FACTOR = 0.72f
         private const val SFX_DUCK_HOLD_MS = 650L

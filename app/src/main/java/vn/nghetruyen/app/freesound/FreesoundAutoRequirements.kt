@@ -34,7 +34,6 @@ data class FreesoundAutoSearchNeed(
 object FreesoundAutoRequirementCodec {
     const val JSON_KEY = "freesound_requirements"
     private const val MAX_QUERY_CHARS = 160
-    private const val MAX_RAW_REQUIREMENTS = 80
 
     fun parse(
         root: JSONObject,
@@ -44,7 +43,6 @@ object FreesoundAutoRequirementCodec {
         require(root.has(JSON_KEY)) { "AI không trả $JSON_KEY dù chế độ Freesound tự động đang bật." }
         if (enabledKinds.isEmpty()) return emptyList()
         val source = root.optJSONArray(JSON_KEY) ?: error("$JSON_KEY phải là một mảng JSON.")
-        require(source.length() <= MAX_RAW_REQUIREMENTS) { "AI trả quá nhiều nhu cầu âm thanh Freesound." }
         val order = validUnitIds.withIndex().associate { it.value to it.index }
         val rows = buildList {
             for (index in 0 until source.length()) {
@@ -71,11 +69,9 @@ object FreesoundAutoRequirementCodec {
                         val startIndex = order[start] ?: error("$JSON_KEY[$index] dùng start_id không tồn tại.")
                         val endIndex = order[end] ?: error("$JSON_KEY[$index] dùng end_id không tồn tại.")
                         require(endIndex >= startIndex) { "$JSON_KEY[$index] có ranh giới đảo ngược." }
-                        val requestedMinSpan = when (kind) {
-                            AudioAssetKind.MUSIC -> MIN_MUSIC_REQUIREMENT_UNITS
-                            AudioAssetKind.AMBIENCE -> AudioDirectionLimits.MIN_AMBIENCE_SCENE_UNITS
-                            else -> 1
-                        }.coerceAtMost(validUnitIds.size.coerceAtLeast(1))
+                        // No artificial minimum duration: a one-UNIT region is valid when the
+                        // story really changes there. AI decides duration from narrative evidence.
+                        val requestedMinSpan = 1
                         val (safeStartIndex, safeEndIndex) = expandDurableRange(
                             startIndex = startIndex,
                             endIndex = endIndex,
@@ -103,7 +99,7 @@ object FreesoundAutoRequirementCodec {
                         }.getOrDefault(SfxCadence.NORMAL)
                         val loop = row.optBoolean("loop_until_stop", false)
                         require(stopIndex == null || stopIndex > unitIndex) { "$JSON_KEY[$index] có stop_unit_id không nằm sau cue." }
-                        require(repeat in 1..AudioDirectionLimits.MAX_SFX_REPEAT_COUNT) { "$JSON_KEY[$index] có repeat_count ngoài giới hạn." }
+                        require(repeat >= 1) { "$JSON_KEY[$index] có repeat_count phải lớn hơn hoặc bằng 1." }
                         require(!loop || stop != null) { "$JSON_KEY[$index] loop_until_stop bắt buộc có stop_unit_id." }
                         require(!loop || repeat == 1) { "$JSON_KEY[$index] không được vừa loop vừa repeat_count > 1." }
                         add(
@@ -214,7 +210,6 @@ object FreesoundAutoRequirementCodec {
         "drone", "hum", "humming", "tone", "roomtone", "room", "ambience", "ambient", "atmosphere",
         "forest", "river", "ocean", "sea", "crowd", "rain", "storm", "waterfall", "traffic",
     )
-    private const val MIN_MUSIC_REQUIREMENT_UNITS = 2
     private const val MAX_QUERY_TERMS = 3
 }
 
@@ -223,18 +218,14 @@ object FreesoundAutoRequirementCodec {
  * Freesound lookup and one downloaded asset; the resulting track can then be reused at every cue.
  */
 object FreesoundAutoRequirementAggregator {
-    const val MAX_MUSIC_SEARCHES = 3
-    const val MAX_AMBIENCE_SEARCHES = 6
-    const val MAX_SFX_SEARCHES = 15
+    // Kept for source compatibility with older diagnostics/tests. They no longer cap AI output.
+    const val MAX_MUSIC_SEARCHES = Int.MAX_VALUE
+    const val MAX_AMBIENCE_SEARCHES = Int.MAX_VALUE
+    const val MAX_SFX_SEARCHES = Int.MAX_VALUE
 
     fun aggregate(requirements: List<FreesoundAutoRequirement>): List<FreesoundAutoSearchNeed> {
         if (requirements.isEmpty()) return emptyList()
         return AudioAssetKind.entries.flatMap { kind ->
-            val limit = when (kind) {
-                AudioAssetKind.MUSIC -> MAX_MUSIC_SEARCHES
-                AudioAssetKind.AMBIENCE -> MAX_AMBIENCE_SEARCHES
-                AudioAssetKind.SFX -> MAX_SFX_SEARCHES
-            }
             val kindRows = requirements.filter { it.kind == kind }
                 .sortedWith(compareBy<FreesoundAutoRequirement> { it.importance != FreesoundRequirementImportance.REQUIRED })
             val groups = mutableListOf<MutableList<FreesoundAutoRequirement>>()
@@ -254,7 +245,6 @@ object FreesoundAutoRequirementAggregator {
                         group.any { it.importance == FreesoundRequirementImportance.REQUIRED }
                     }.thenByDescending { it.size },
                 )
-                .take(limit)
                 .map { group ->
                     val representative = group.minWithOrNull(
                         compareBy<FreesoundAutoRequirement> { queryTokens(normalizeQuery(it.query)).size }

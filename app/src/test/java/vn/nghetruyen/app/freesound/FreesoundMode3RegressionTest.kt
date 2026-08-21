@@ -136,7 +136,7 @@ class FreesoundMode3RegressionTest {
     }
 
     @Test
-    fun parserExpandsOneUnitMusicAndAmbienceToDurableRanges() {
+    fun parserPreservesOneUnitMusicAndAmbienceWhenAiChoosesExactBriefRanges() {
         val units = listOf("U1", "U2", "U3", "U4")
         val root = org.json.JSONObject(
             """{"freesound_requirements":[
@@ -145,8 +145,10 @@ class FreesoundMode3RegressionTest {
             ]}""",
         )
         val parsed = FreesoundAutoRequirementCodec.parse(root, units, setOf(AudioAssetKind.MUSIC, AudioAssetKind.AMBIENCE))
-        assertTrue(units.indexOf(parsed[0].endUnitId) - units.indexOf(parsed[0].startUnitId) + 1 >= 2)
-        assertTrue(units.indexOf(parsed[1].endUnitId) - units.indexOf(parsed[1].startUnitId) + 1 >= 2)
+        assertEquals("U2", parsed[0].startUnitId)
+        assertEquals("U2", parsed[0].endUnitId)
+        assertEquals("U3", parsed[1].startUnitId)
+        assertEquals("U3", parsed[1].endUnitId)
     }
 
     @Test

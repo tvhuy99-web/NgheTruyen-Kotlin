@@ -18,7 +18,6 @@ import vn.nghetruyen.app.audio.AudioAssetClassifier
 import vn.nghetruyen.app.audio.AudioAssetKind
 import vn.nghetruyen.app.audio.AudioAssetVariantFamily
 import vn.nghetruyen.app.audio.AudioDirectionAsset
-import vn.nghetruyen.app.audio.AudioDirectionLimits
 import vn.nghetruyen.app.audio.AudioDirectionPreferences
 import vn.nghetruyen.app.audio.PcmLoudnessEstimator
 import vn.nghetruyen.app.audio.SoundEffectCue
@@ -94,7 +93,6 @@ class AudioDirectionRuntime(
     private var boundedSfxCueKeys: Set<String> = emptySet()
     private var allowedBoundedSfxKeysByUnitId: Map<String, Set<String>> = emptyMap()
     private var lastTriggeredSfxKey = ""
-    private val lastEffectAtMillis = linkedMapOf<String, Long>()
     private var lastSettings: AudioDirectionPreferences.Snapshot? = null
     private var validatedFastKey = ""
     private var validatedFastAtMillis = 0L
@@ -484,9 +482,7 @@ class AudioDirectionRuntime(
             for (index in start..end) {
                 val unitId = validUnits[index]
                 val ids = ambienceMap.getOrPut(unitId) { mutableListOf() }
-                if (scene.ambienceId !in ids && ids.size < AudioDirectionLimits.MAX_CONCURRENT_AMBIENCE) {
-                    ids += scene.ambienceId
-                }
+                if (scene.ambienceId !in ids) ids += scene.ambienceId
             }
         }
         ambienceByUnitId = ambienceMap.mapValues { (_, ids) -> ids.toList() }
@@ -519,7 +515,6 @@ class AudioDirectionRuntime(
         preparedChapterId = chapterId
         preparedSignature = signature
         lastTriggeredSfxKey = ""
-        lastEffectAtMillis.clear()
         if (mode3Active()) {
             diagnostic(
                 "FREESOUND_RUNTIME_AUDIO_PLAN_INSTALLED",
@@ -549,7 +544,6 @@ class AudioDirectionRuntime(
             .mapNotNull(assetsById::get)
             .filter { it.kind == AudioAssetKind.AMBIENCE }
             .distinctBy(AudioDirectionAsset::id)
-            .take(AudioDirectionLimits.MAX_CONCURRENT_AMBIENCE)
             .toList()
         val state = assets.joinToString(",") { it.id }.ifBlank { "empty" }
         if (mode3Active() && state != lastAmbienceTraceState) {
@@ -601,10 +595,6 @@ class AudioDirectionRuntime(
             .filterNot(allowedBoundedKeys::contains)
             .forEach(sfxController::stopCue)
 
-        val maxConcurrent = minOf(
-            settings.maxConcurrentSfx,
-            AudioDirectionLimits.MAX_CONCURRENT_SFX,
-        ).coerceAtLeast(1)
         val candidates = mutableListOf<RuntimeSfxCue>()
 
         allowedBoundedKeys.asSequence()
@@ -627,26 +617,20 @@ class AudioDirectionRuntime(
                 mapOf(
                     "unitId" to unitId,
                     "candidateCount" to candidates.size.toString(),
-                    "maxConcurrent" to maxConcurrent.toString(),
+                    "appLevelConcurrencyQuota" to "none",
                 ),
             )
         }
 
-        val now = System.currentTimeMillis()
         var startedAny = false
-        candidates.take(maxConcurrent).forEach { runtimeCue ->
+        candidates.forEach { runtimeCue ->
             if (sfxController.isCueActive(runtimeCue.key)) return@forEach
             val cue = runtimeCue.cue
             val asset = assetsById[cue.effectId]?.takeIf { it.kind == AudioAssetKind.SFX } ?: return@forEach
-            val explicitlyRhythmic = cue.repeatCount > 1 || cue.loopUntilStop
-            val sameEffectLast = lastEffectAtMillis[cue.effectId] ?: 0L
-            val cooldown = maxOf(settings.minimumSfxGapMillis, settings.sameEffectCooldownMillis)
-            if (!explicitlyRhythmic && now - sameEffectLast < cooldown) return@forEach
-
             val started = sfxController.play(
                 asset = asset,
                 masterVolume = 1f,
-                maxConcurrent = maxConcurrent,
+                maxConcurrent = Int.MAX_VALUE,
                 cueKey = runtimeCue.key,
                 loopUntilStopped = cue.loopUntilStop,
                 repeatCount = cue.repeatCount,
@@ -667,17 +651,10 @@ class AudioDirectionRuntime(
                     ),
                 )
             }
-            if (started) {
-                startedAny = true
-                lastEffectAtMillis[cue.effectId] = now
-            }
+            if (started) startedAny = true
         }
         if (!startedAny) return
 
-        if (lastEffectAtMillis.size > MAX_EFFECT_HISTORY) {
-            val cutoff = now - settings.sameEffectCooldownMillis * 2
-            lastEffectAtMillis.entries.removeAll { it.value < cutoff }
-        }
 
         ambienceController.duckForImportantSfx(SFX_DUCK_FACTOR, SFX_DUCK_HOLD_MS)
         SceneMusicSfxDuckBus.duck(SFX_DUCK_FACTOR, SFX_DUCK_HOLD_MS)
@@ -717,7 +694,6 @@ class AudioDirectionRuntime(
         boundedSfxCueKeys = emptySet()
         allowedBoundedSfxKeysByUnitId = emptyMap()
         lastTriggeredSfxKey = ""
-        lastEffectAtMillis.clear()
         validatedFastKey = ""
         validatedFastAtMillis = 0L
         cachedParagraphChapterId = ""

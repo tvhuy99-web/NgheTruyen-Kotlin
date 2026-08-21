@@ -96,15 +96,15 @@ class FreesoundAutoAudioTest {
     }
 
     @Test
-    fun aggregatorEnforcesPerKindSearchCaps() {
+    fun aggregatorKeepsAllDistinctAiDirectedNeedsWithoutPerKindQuota() {
         val rows = (1..30).map { index ->
             FreesoundAutoRequirement(
                 kind = AudioAssetKind.SFX,
-                query = "unique impact number $index",
+                query = "hit code$index",
                 unitId = "P0001-U01",
             )
         }
-        assertEquals(FreesoundAutoRequirementAggregator.MAX_SFX_SEARCHES, FreesoundAutoRequirementAggregator.aggregate(rows).size)
+        assertEquals(30, FreesoundAutoRequirementAggregator.aggregate(rows).size)
     }
 
     @Test

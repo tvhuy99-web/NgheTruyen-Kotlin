@@ -1,0 +1,63 @@
+name: One-shot audio oldest-first repair
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/run-audio-oldest-first-fix.yml
+      - .github/scripts/apply_audio_oldest_first_fix.py
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout integration branch
+        uses: actions/checkout@v6
+        with:
+          ref: integration/freesound-stage-1-clean
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Apply patch and verify targeted behavior
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+          python3 .github/scripts/apply_audio_oldest_first_fix.py
+          python3 scripts/check_ui_control_parity.py
+          python3 scripts/check_reference_workflow_parity.py
+          ./gradlew :source-js-sandbox:test :source-vbook:test --stacktrace
+          ./gradlew :app:testDebugUnitTest --tests 'vn.nghetruyen.app.ui.components.UnifiedAudioAssetManagerOrderingTest' --stacktrace
+          ./gradlew :app:assembleDebug --stacktrace
+
+      - name: Commit verified production fix and remove one-shot tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/scripts/apply_audio_oldest_first_fix.py .github/workflows/run-audio-oldest-first-fix.yml
+          git add \
+            app/src/main/java/vn/nghetruyen/app/data/local/AppDatabase.kt \
+            app/src/main/java/vn/nghetruyen/app/data/repository/LibraryRepository.kt \
+            app/src/main/java/vn/nghetruyen/app/ui/components/UnifiedAudioAssetManagerDialog.kt \
+            app/src/test/java/vn/nghetruyen/app/ui/components/UnifiedAudioAssetManagerOrderingTest.kt
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo "No verified changes to commit"
+            exit 1
+          fi
+          git commit -m "fix: keep audio assets oldest first"
+          git push origin HEAD:integration/freesound-stage-1-clean

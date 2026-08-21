@@ -39,6 +39,11 @@ enum class NarrationAutomationStage {
     FAILED,
 }
 
+data class FreesoundTransferSummary(
+    val downloadedAssets: Int = 0,
+    val reusedAssets: Int = 0,
+)
+
 data class PlaybackSnapshot(
     val sourceId: String = "",
     val storyId: String = "",
@@ -100,6 +105,10 @@ data class PlaybackSnapshot(
 object PlaybackQueueStore {
     private val mutable = MutableStateFlow(PlaybackSnapshot())
     val state: StateFlow<PlaybackSnapshot> = mutable.asStateFlow()
+    private val narrationTransferLock = Any()
+    private val prefetchedFreesoundTransfers = LinkedHashMap<String, FreesoundTransferSummary>()
+
+    private const val MAX_PREFETCH_TRANSFER_ENTRIES = 8
 
     fun load(
         sourceId: String,
@@ -201,6 +210,70 @@ object PlaybackQueueStore {
             narrationStage = stage,
             narrationProgress = progress.coerceIn(0f, 1f),
             narrationMessage = message?.take(260),
+        )
+    }
+
+    fun publishPrefetchNarrationAutomation(
+        parentChapterId: String,
+        targetChapterId: String,
+        stage: NarrationAutomationStage,
+        progress: Float,
+        parentMessage: String?,
+        targetMessage: String?,
+        downloadedAssets: Int,
+        reusedAssets: Int,
+    ) {
+        val parentId = parentChapterId.trim()
+        val targetId = targetChapterId.trim()
+        if (targetId.isNotEmpty() && (downloadedAssets > 0 || reusedAssets > 0)) {
+            synchronized(narrationTransferLock) {
+                prefetchedFreesoundTransfers[targetId] = FreesoundTransferSummary(
+                    downloadedAssets = downloadedAssets.coerceAtLeast(0),
+                    reusedAssets = reusedAssets.coerceAtLeast(0),
+                )
+                while (prefetchedFreesoundTransfers.size > MAX_PREFETCH_TRANSFER_ENTRIES) {
+                    val oldest = prefetchedFreesoundTransfers.keys.firstOrNull() ?: break
+                    prefetchedFreesoundTransfers.remove(oldest)
+                }
+            }
+        }
+
+        val current = mutable.value
+        when {
+            parentId.isNotEmpty() && current.chapterId == parentId ->
+                setNarrationAutomation(stage, progress, parentMessage)
+            targetId.isNotEmpty() && current.chapterId == targetId &&
+                current.narrationStage != NarrationAutomationStage.CURRENT_PLANNING &&
+                current.narrationStage != NarrationAutomationStage.CURRENT_APPLYING ->
+                setNarrationAutomation(
+                    stage = if (stage == NarrationAutomationStage.NEXT_READY) NarrationAutomationStage.CURRENT_READY else stage,
+                    progress = progress,
+                    message = targetMessage,
+                )
+        }
+    }
+
+    fun consumeFreesoundTransferSummary(
+        chapterId: String,
+        currentDownloadedAssets: Int,
+        currentReusedAssets: Int,
+    ): FreesoundTransferSummary {
+        val current = FreesoundTransferSummary(
+            downloadedAssets = currentDownloadedAssets.coerceAtLeast(0),
+            reusedAssets = currentReusedAssets.coerceAtLeast(0),
+        )
+        val id = chapterId.trim()
+        if (id.isEmpty()) return current
+        val prefetched = synchronized(narrationTransferLock) {
+            prefetchedFreesoundTransfers.remove(id)
+        } ?: return current
+
+        return FreesoundTransferSummary(
+            downloadedAssets = prefetched.downloadedAssets + current.downloadedAssets,
+            reusedAssets = maxOf(
+                prefetched.reusedAssets,
+                current.reusedAssets - prefetched.downloadedAssets,
+            ).coerceAtLeast(0),
         )
     }
 

@@ -2047,14 +2047,19 @@ class ReaderPlaybackService : Service() {
                         val musicApplied = hasSceneMusicPlan()
                         val mode3 = StoryAudioModeRouter.usesAiFreesound(storyAudioSourceMode)
                         val warning = warnings.firstOrNull()?.takeIf(String::isNotBlank)
+                        val transferSummary = PlaybackQueueStore.consumeFreesoundTransferSummary(
+                            chapterId = snapshot.chapterId,
+                            currentDownloadedAssets = planResult?.freesoundDownloadedAssets ?: 0,
+                            currentReusedAssets = planResult?.freesoundReusedAssets ?: 0,
+                        )
                         PlaybackQueueStore.setNarrationAutomation(
                             stage = NarrationAutomationStage.CURRENT_READY,
                             progress = 1f,
                             message = NarrationAutomationStatusFormatter.ready(
                                 assignmentCount = assignmentCount,
                                 resultPresent = planResult != null,
-                                downloadedAssets = planResult?.freesoundDownloadedAssets ?: 0,
-                                reusedAssets = planResult?.freesoundReusedAssets ?: 0,
+                                downloadedAssets = transferSummary.downloadedAssets,
+                                reusedAssets = transferSummary.reusedAssets,
                                 retryRequired = planResult?.freesoundRetryRequired ?: false,
                                 audioLayersEnabled = mode3 && shouldPlanAutoStoryAudio(),
                                 beginPlayback = true,
@@ -2209,15 +2214,32 @@ class ReaderPlaybackService : Service() {
                             warning = warning,
                         )
                     }
-                    // Do not let a late prefetch result overwrite CURRENT_PLANNING/READY after the
-                    // reader has already promoted this chapter into the foreground.
-                    if (PlaybackQueueStore.state.value.chapterId == parentChapterId) {
-                        PlaybackQueueStore.setNarrationAutomation(
-                            stage = if (failed) NarrationAutomationStage.FAILED else NarrationAutomationStage.NEXT_READY,
-                            progress = 1f,
-                            message = baseMessage,
+                    val downloadedAssets = result?.freesoundDownloadedAssets ?: 0
+                    val reusedAssets = result?.freesoundReusedAssets ?: 0
+                    val targetMessage = if (!failed && result != null && planVoice && assignmentCount > 0) {
+                        NarrationAutomationStatusFormatter.ready(
+                            assignmentCount = assignmentCount,
+                            resultPresent = true,
+                            downloadedAssets = downloadedAssets,
+                            reusedAssets = reusedAssets,
+                            retryRequired = result.freesoundRetryRequired,
+                            audioLayersEnabled = mode3 && planAudio,
+                            beginPlayback = false,
+                            warning = warning,
                         )
+                    } else {
+                        baseMessage
                     }
+                    PlaybackQueueStore.publishPrefetchNarrationAutomation(
+                        parentChapterId = parentChapterId,
+                        targetChapterId = chapter.chapter.id,
+                        stage = if (failed) NarrationAutomationStage.FAILED else NarrationAutomationStage.NEXT_READY,
+                        progress = 1f,
+                        parentMessage = baseMessage,
+                        targetMessage = targetMessage,
+                        downloadedAssets = downloadedAssets,
+                        reusedAssets = reusedAssets,
+                    )
                     if (failed) return@launch
                 } else if (result == null) {
                     return@launch

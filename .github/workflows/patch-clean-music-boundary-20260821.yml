@@ -1,0 +1,66 @@
+name: Patch clean Mode 3 music boundary
+
+on:
+  push:
+    branches:
+      - integration/freesound-stage-1-clean
+    paths:
+      - ".github/workflows/patch-clean-music-boundary-20260821.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: integration/freesound-stage-1-clean
+          fetch-depth: 0
+      - name: Remove hidden minimum music-scene length
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt')
+          text = p.read_text(encoding='utf-8')
+          text = text.replace('        stabilizeMusicAssignments(selectedByUnit)\n', '', 1)
+          text = text.replace('        stabilizeMusicAssignments(selected)\n', '', 1)
+          old = '''    private fun stabilizeMusicAssignments(rows: MutableList<String>) {
+              if (rows.size < 3) return
+              while (true) {
+                  val runs = musicRuns(rows)
+                  if (runs.size <= 2) return
+                  val short = runs.subList(1, runs.lastIndex).firstOrNull { it.end - it.start + 1 < 2 } ?: return
+                  val runIndex = runs.indexOf(short)
+                  val left = runs[runIndex - 1]
+                  val right = runs[runIndex + 1]
+                  val replacement = when {
+                      left.trackId == right.trackId -> left.trackId
+                      left.trackId != XpkSceneMusicParity.SILENCE_TRACK_ID -> left.trackId
+                      else -> right.trackId
+                  }
+                  for (index in short.start..short.end) rows[index] = replacement
+              }
+          }
+
+          '''
+          # Normalize indentation from YAML block before matching Kotlin source.
+          old = '\n'.join(line[4:] if line.startswith('    ') else line for line in old.split('\n'))
+          if old not in text:
+              raise SystemExit('stabilizeMusicAssignments block not found')
+          text = text.replace(old, '', 1)
+          if 'stabilizeMusicAssignments' in text:
+              raise SystemExit('stabilizeMusicAssignments still referenced')
+          p.write_text(text, encoding='utf-8')
+          PY
+      - name: Commit product fix and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt
+          git rm -- .github/workflows/patch-clean-music-boundary-20260821.yml
+          git commit -m "Preserve valid one-unit Mode 3 music scenes"
+          git push origin HEAD:integration/freesound-stage-1-clean

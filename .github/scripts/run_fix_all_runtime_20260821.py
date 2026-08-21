@@ -3,6 +3,7 @@ import runpy
 import subprocess
 
 runpy.run_path(str(Path('.github/scripts/fix_all_runtime_20260821.py')), run_name='__main__')
+runpy.run_path(str(Path('.github/scripts/improve_audio_selection_continuity_20260821.py')), run_name='__main__')
 
 # The legacy verifier stages app/src/main itself only after tests succeed. Keep the two
 # non-app runtime fixes in the index so the verifier's final success commit includes them.
@@ -12,4 +13,4 @@ subprocess.run([
     'source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt',
     'source-diagnostics/src/main/kotlin/vn/nghetruyen/source/diagnostics/SourceDiagnostics.kt',
 ], check=True)
-print('Prepared non-app runtime fixes for verified commit.')
+print('Prepared runtime + audio-continuity fixes for verified commit.')

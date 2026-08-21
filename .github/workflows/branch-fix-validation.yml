@@ -6,12 +6,14 @@ on:
       - fix/freesound-latency-status-cloudflare
     paths:
       - scripts/apply_mode3_runtime_fixes.py
+      - scripts/fix_mode3_test_framework.py
       - .github/workflows/branch-fix-validation.yml
   pull_request:
     branches:
       - main
     paths:
       - scripts/apply_mode3_runtime_fixes.py
+      - scripts/fix_mode3_test_framework.py
       - .github/workflows/branch-fix-validation.yml
 
 permissions:
@@ -37,7 +39,9 @@ jobs:
           cache: gradle
 
       - name: Apply fixes
-        run: python3 scripts/apply_mode3_runtime_fixes.py
+        run: |
+          python3 scripts/apply_mode3_runtime_fixes.py
+          python3 scripts/fix_mode3_test_framework.py
 
       - name: Validate focused tests
         run: |
@@ -53,6 +57,7 @@ jobs:
       - name: Remove temporary patch machinery
         run: |
           rm -f scripts/apply_mode3_runtime_fixes.py
+          rm -f scripts/fix_mode3_test_framework.py
           rm -f .github/workflows/branch-fix-validation.yml
 
       - name: Commit validated fixes
@@ -71,6 +76,7 @@ jobs:
             source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt \
             source-vbook/src/test/kotlin/vn/nghetruyen/source/vbook/VBookBrowserChallengeDetectorTest.kt \
             scripts/apply_mode3_runtime_fixes.py \
+            scripts/fix_mode3_test_framework.py \
             .github/workflows/branch-fix-validation.yml
           git commit -m "fix: stabilize Mode 3 preparation and status [skip ci]"
           git push origin HEAD:fix/freesound-latency-status-cloudflare

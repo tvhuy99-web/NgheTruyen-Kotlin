@@ -1,6 +1,6 @@
-RUN_ID=32451725138
+RUN_ID=32451802546
 RUN_ATTEMPT=1
-TRIGGER_SHA=a25e07e30318ad125620517a30f6897a0135c111
+TRIGGER_SHA=ab928a20a0e093562736ca4bba450aabb1b8780f
 SUCCESS=false
 PATCH_STATUS=1
 TEST_STATUS=99
@@ -8,7 +8,7 @@ BUILD_STATUS=99
 ARTIFACT_NAME=NgheTruyen-freesound-mode3-v17-debug
 
 === PATCH LOG ===
-V17 runner could not locate selector end
+app/src/main/java/vn/nghetruyen/app/playback/AudioDirectionRuntime.kt: expected exactly one match, got 2: '        lastEffectAtMillis.clear()\n'
 
 === TEST LOG ===
 

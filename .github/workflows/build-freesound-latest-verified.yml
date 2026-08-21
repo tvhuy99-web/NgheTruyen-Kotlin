@@ -46,7 +46,9 @@ jobs:
 
       - name: Apply all runtime fixes
         shell: bash
-        run: python3 .github/scripts/fix_all_runtime_20260821.py
+        run: |
+          python3 .github/scripts/fix_all_runtime_20260821.py
+          python3 .github/scripts/smooth_short_ambience_loops_20260821.py
 
       - name: Test and build
         id: verify
@@ -105,6 +107,8 @@ jobs:
               app/src/main/java/vn/nghetruyen/app/freesound/FreesoundImporter.kt \
               app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt \
               app/src/main/java/vn/nghetruyen/app/playback/AudioDirectionRuntime.kt \
+              app/src/main/java/vn/nghetruyen/app/playback/SceneAmbienceController.kt \
+              app/src/test/java/vn/nghetruyen/app/playback/AmbienceLoopTransitionPolicyTest.kt \
               source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt \
               source-diagnostics/src/main/kotlin/vn/nghetruyen/source/diagnostics/SourceDiagnostics.kt
             do
@@ -118,7 +122,7 @@ jobs:
             exit 0
           fi
           if [ "${{ steps.verify.outputs.success }}" = "true" ]; then
-            git commit -m "Fix Freesound latency and runtime diagnostics"
+            git commit -m "Smooth short ambience loops and runtime audio"
           else
             git commit -m "Record all-fixes verification failure"
           fi

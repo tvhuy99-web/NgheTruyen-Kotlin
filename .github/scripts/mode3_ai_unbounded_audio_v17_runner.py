@@ -31,5 +31,11 @@ ambiguous = "replace_once(runtime, '        lastEffectAtMillis.clear()\\n', '')\
 if patched.count(ambiguous) != 1:
     raise SystemExit(f'V17 runner expected one ambiguous history patch call, got {patched.count(ambiguous)}')
 patched = patched.replace(ambiguous, '', 1)
+# The generated 100-row stress test must use tokens that survive canonicalization. A bare one-digit
+# suffix is intentionally discarded by query normalization and would make distinct rows merge.
+stress_query = '.put("query", "impact hit $index")'
+if patched.count(stress_query) != 1:
+    raise SystemExit(f'V17 runner expected one stress query template, got {patched.count(stress_query)}')
+patched = patched.replace(stress_query, '.put("query", "hit code$index")', 1)
 compiled = compile(patched, str(path), 'exec')
 exec(compiled, {'__name__': '__main__', '__file__': str(path)})

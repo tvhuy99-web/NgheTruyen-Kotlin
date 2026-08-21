@@ -4,85 +4,51 @@ from pathlib import Path
 def replace_once(path: Path, old: str, new: str) -> None:
     text = path.read_text(encoding="utf-8")
     if old not in text:
-        raise SystemExit(f"Expected block not found in {path}: {old[:200]!r}")
+        raise SystemExit(f"Expected block not found in {path}: {old[:180]!r}")
     path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+def replace_between(path: Path, start: str, end: str, new: str) -> None:
+    text = path.read_text(encoding="utf-8")
+    i = text.find(start)
+    if i < 0:
+        raise SystemExit(f"Start marker not found in {path}: {start!r}")
+    j = text.find(end, i)
+    if j < 0:
+        raise SystemExit(f"End marker not found in {path}: {end!r}")
+    path.write_text(text[:i] + new + text[j:], encoding="utf-8")
 
 
 formatter = Path("app/src/main/java/vn/nghetruyen/app/playback/FreesoundPlaybackStatusFormatter.kt")
 replace_once(
     formatter,
-    '''        val parts = buildList {
-            val downloaded = downloadedAssets.coerceAtLeast(0)
-            val reused = reusedAssets.coerceAtLeast(0)
-            if (downloaded > 0) add("$downloaded tải mới")
+    '''            if (downloaded > 0) add("$downloaded tải mới")
             if (reused > 0) add("$reused bộ nhớ tạm")
-            if (!resultPresent) add("chưa có kế hoạch âm thanh")
-            else if (retryRequired) add("còn thiếu")
-        }
 ''',
-    '''        val parts = buildList {
-            val downloaded = downloadedAssets.coerceAtLeast(0)
-            val reused = reusedAssets.coerceAtLeast(0)
-            add("$downloaded tải mới")
+    '''            add("$downloaded tải mới")
             add("$reused bộ nhớ tạm")
-            if (!resultPresent) add("chưa có kế hoạch âm thanh")
-            else if (retryRequired) add("còn thiếu")
-        }
 ''',
 )
 
 queue = Path("app/src/main/java/vn/nghetruyen/app/playback/PlaybackQueueStore.kt")
-replace_once(
+replace_between(
     queue,
     '''        val parentId = parentChapterId.trim()
         val targetId = targetChapterId.trim()
-        if (targetId.isNotEmpty() && (downloadedAssets > 0 || reusedAssets > 0)) {
-            synchronized(narrationTransferLock) {
-                prefetchedFreesoundTransfers[targetId] = FreesoundTransferSummary(
-                    downloadedAssets = downloadedAssets.coerceAtLeast(0),
-                    reusedAssets = reusedAssets.coerceAtLeast(0),
-                )
-                while (prefetchedFreesoundTransfers.size > MAX_PREFETCH_TRANSFER_ENTRIES) {
-                    val oldest = prefetchedFreesoundTransfers.keys.firstOrNull() ?: break
-                    prefetchedFreesoundTransfers.remove(oldest)
-                }
-            }
-        }
-
-        val current = mutable.value
+''',
+    '''        val current = mutable.value
 ''',
     '''        val parentId = parentChapterId.trim()
         val targetId = targetChapterId.trim()
         rememberFreesoundTransferSummary(targetId, downloadedAssets, reusedAssets)
 
-        val current = mutable.value
 ''',
 )
-replace_once(
+replace_between(
     queue,
     '''    fun consumeFreesoundTransferSummary(
-        chapterId: String,
-        currentDownloadedAssets: Int,
-        currentReusedAssets: Int,
-    ): FreesoundTransferSummary {
-        val current = FreesoundTransferSummary(
-            downloadedAssets = currentDownloadedAssets.coerceAtLeast(0),
-            reusedAssets = currentReusedAssets.coerceAtLeast(0),
-        )
-        val id = chapterId.trim()
-        if (id.isEmpty()) return current
-        val prefetched = synchronized(narrationTransferLock) {
-            prefetchedFreesoundTransfers.remove(id)
-        } ?: return current
-
-        return FreesoundTransferSummary(
-            downloadedAssets = prefetched.downloadedAssets + current.downloadedAssets,
-            reusedAssets = maxOf(
-                prefetched.reusedAssets,
-                current.reusedAssets - prefetched.downloadedAssets,
-            ).coerceAtLeast(0),
-        )
-    }
+''',
+    '''    fun setPlaying(value: Boolean) {
 ''',
     '''    fun rememberFreesoundTransferSummary(
         chapterId: String,
@@ -139,6 +105,7 @@ replace_once(
             ).coerceAtLeast(0),
         )
     }
+
 ''',
 )
 
@@ -212,39 +179,28 @@ replace_once(
 )
 
 normalizer = Path("source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookStoryNormalizer.kt")
-replace_once(
+replace_between(
     normalizer,
     '''    private fun htmlToParagraphs(html: String): List<String> {
-        if (html.isBlank()) return emptyList()
-        val doc = Jsoup.parseBodyFragment(html)
-        doc.select("script,style,noscript,iframe").remove()
-        val blockTexts = doc.select("p,blockquote,li").mapNotNull { element ->
-            element.text().trim().takeIf(String::isNotBlank)
-        }
-        if (blockTexts.isNotEmpty()) return blockTexts
-        val whole = doc.body().wholeText()
-        return whole.split(Regex("\\r?\\n+"))
-            .map(String::trim)
-            .filter(String::isNotBlank)
-            .ifEmpty { listOfNotNull(doc.text().trim().takeIf(String::isNotBlank)) }
-    }
 ''',
-    '''    private fun htmlToParagraphs(html: String): List<String> {
+    '''    fun resolveUrl(host: String?, raw: String?): String? {
+''',
+    r'''    private fun htmlToParagraphs(html: String): List<String> {
         if (html.isBlank()) return emptyList()
         val doc = Jsoup.parseBodyFragment(html)
         doc.select("script,style,noscript,iframe,template,[hidden]").remove()
         doc.select("[style]").forEach { element ->
-            val style = element.attr("style").lowercase().replace(Regex("\\s+"), "")
+            val style = element.attr("style").lowercase().replace(Regex("\s+"), "")
             if ("display:none" in style || "visibility:hidden" in style) element.remove()
         }
-        doc.select("br").forEach { it.after("\\n") }
+        doc.select("br").forEach { it.after("\n") }
         doc.select("p,blockquote,li,div,section,article").forEach { element ->
-            element.before("\\n")
-            element.after("\\n")
+            element.before("\n")
+            element.after("\n")
         }
         val lines = doc.body().wholeText()
-            .split(Regex("[\\r\\n]+"))
-            .map { it.replace(Regex("\\s+"), " ").trim() }
+            .split(Regex("[\r\n]+"))
+            .map { it.replace(Regex("\s+"), " ").trim() }
             .filter(String::isNotBlank)
         val withoutDuplicateHeader = if (lines.firstOrNull()?.matches(CHAPTER_HEADER_PATTERN) == true) {
             lines.drop(1)
@@ -253,7 +209,7 @@ replace_once(
         }
         val cleaned = withoutDuplicateHeader.filterNot(::isChapterBoilerplate)
         if (cleaned.isNotEmpty()) return cleaned
-        val fallback = doc.text().replace(Regex("\\s+"), " ").trim()
+        val fallback = doc.text().replace(Regex("\s+"), " ").trim()
         return listOfNotNull(
             fallback.takeIf(String::isNotBlank)
                 ?.takeUnless { CHAPTER_HEADER_PATTERN.matches(it) || isChapterBoilerplate(it) },
@@ -267,19 +223,18 @@ replace_once(
         if (tokens.isEmpty()) return true
         return tokens.all { token -> token in TRUYENFULL_BOILERPLATE_TOKENS }
     }
+
 ''',
 )
 replace_once(
     normalizer,
     '''    private const val MAX_EXPLORE_ITEMS = 20_000
-}
 ''',
-    '''    private val CHAPTER_HEADER_PATTERN = Regex("(?i)^chương\\s+\\d+\\s*[:：].*")
+    r'''    private val CHAPTER_HEADER_PATTERN = Regex("(?i)^chương\s+\d+\s*[:：].*")
     private val TRUYENFULL_BOILERPLATE_TOKENS = setOf(
         "truyen", "full", "truyenfull", "truyenfullvn", "truyenfulllive",
     )
     private const val MAX_EXPLORE_ITEMS = 20_000
-}
 ''',
 )
 

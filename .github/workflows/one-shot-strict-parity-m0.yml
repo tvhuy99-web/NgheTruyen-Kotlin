@@ -42,7 +42,7 @@ jobs:
       - name: Install validation dependencies
         run: python3 -m pip install --disable-pip-version-check beautifulsoup4 cryptography
 
-      - name: Patch strict Mode 3 and uncapped audio wiring
+      - name: Patch strict Mode 3 and current audio wiring
         shell: bash
         run: |
           python3 - <<'PY'
@@ -80,6 +80,23 @@ jobs:
           if s.count(old_runtime) != 1:
               raise SystemExit(f'expected exactly one old runtime quota block, got {s.count(old_runtime)}')
           s = s.replace(old_runtime, new_runtime)
+
+          old_volume = '    "volume = (track.volume * sceneVolume * normalizationGain).coerceIn(0f, 1f)",\n'
+          new_volume = '''    "val effectiveSceneVolume = (track.volume * sceneVolume * normalizationGain).coerceIn(0f, 1f)",
+              "volume = effectiveSceneVolume",
+          '''
+          if s.count(old_volume) != 1:
+              raise SystemExit(f'expected exactly one old music volume anchor, got {s.count(old_volume)}')
+          s = s.replace(old_volume, new_volume)
+
+          old_retry = '    "Phân vai chưa thành công. Sẽ tự thử lại sau 5 giây.",\n'
+          new_retry = '''    "Phân vai/Mode 3 thất bại sau $MAX_NARRATION_ATTEMPTS lần.",
+              "Chưa chuẩn bị xong. Sẽ thử lại sau 5 giây (lần ${attempt + 1}/$MAX_NARRATION_ATTEMPTS).",
+          '''
+          if s.count(old_retry) != 1:
+              raise SystemExit(f'expected exactly one old narration retry anchor, got {s.count(old_retry)}')
+          s = s.replace(old_retry, new_retry)
+
           p.write_text(s)
           PY
           python3 scripts/check_xpk_strict_parity.py

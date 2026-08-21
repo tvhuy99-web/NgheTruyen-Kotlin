@@ -84,19 +84,27 @@ class SceneMusicAnalysisWorker(
             )
         }
 
-        val temp = File(applicationContext.cacheDir, "scene-analysis/$trackId.wav")
+        val temp = if (fastFreesound) null else File(applicationContext.cacheDir, "scene-analysis/$trackId.wav")
         return try {
             analysisMutex.withLock {
-                temp.parentFile?.mkdirs()
-                AndroidAudioTrackDecoder.decodeToWave(
-                    context = applicationContext,
-                    uri = Uri.parse(track.uri),
-                    targetSampleRate = 44_100,
-                    targetChannels = 2,
-                    destination = temp,
-                    maxDecodeDurationUs = if (fastFreesound) fastAnalysisDurationUs(kind) else null,
-                )
-                val analysis = PcmLoudnessEstimator.analyze(temp)
+                val analysis = if (fastFreesound) {
+                    AndroidAudioLoudnessAnalyzer.analyze(
+                        context = applicationContext,
+                        uri = Uri.parse(track.uri),
+                        maxDecodeDurationUs = fastAnalysisDurationUs(kind),
+                    )
+                } else {
+                    val destination = requireNotNull(temp)
+                    destination.parentFile?.mkdirs()
+                    AndroidAudioTrackDecoder.decodeToWave(
+                        context = applicationContext,
+                        uri = Uri.parse(track.uri),
+                        targetSampleRate = 44_100,
+                        targetChannels = 2,
+                        destination = destination,
+                    )
+                    PcmLoudnessEstimator.analyze(destination)
+                }
                 val normalization = PcmLoudnessEstimator.calculateNormalization(
                     analysis.loudnessLufs,
                     analysis.peakDbfs,
@@ -128,7 +136,7 @@ class SceneMusicAnalysisWorker(
                 Result.failure(workDataOf(KEY_ERROR to message.take(300)))
             }
         } finally {
-            temp.delete()
+            temp?.delete()
         }
     }
 

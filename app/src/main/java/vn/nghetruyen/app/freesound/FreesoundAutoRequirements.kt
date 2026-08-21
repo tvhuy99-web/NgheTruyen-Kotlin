@@ -146,7 +146,11 @@ object FreesoundAutoRequirementCodec {
             .filter { it.length >= 2 && it !in QUERY_STOPWORDS }
             .filterNot { token -> token in QUERY_GENERIC_TERMS && token != "music" && kind == AudioAssetKind.MUSIC }
         if (tokens.isEmpty()) return normalized.split(' ').filter(String::isNotBlank).takeLast(MAX_QUERY_TERMS).joinToString(" ")
-        return tokens.takeLast(MAX_QUERY_TERMS).joinToString(" ")
+        val selected = tokens.takeLast(MAX_QUERY_TERMS)
+        if (kind == AudioAssetKind.SFX && "wind" in selected && selected.none(SFX_EVENT_TERMS::contains)) {
+            return "wind gust"
+        }
+        return selected.joinToString(" ")
     }
 
     private fun oneLine(value: String): String = value.replace(Regex("\\s+"), " ").trim()
@@ -156,6 +160,10 @@ object FreesoundAutoRequirementCodec {
         "very", "single", "one", "some", "and", "or",
     )
     private val QUERY_GENERIC_TERMS = setOf("sound", "audio", "effect", "ambience")
+    private val SFX_EVENT_TERMS = setOf(
+        "gust", "whoosh", "slash", "hit", "thud", "crash", "clash", "strike", "slam", "break",
+        "burst", "snap", "drop", "knock", "creak", "step", "steps", "footstep", "footsteps", "splash",
+    )
     private const val MAX_QUERY_TERMS = 3
 }
 

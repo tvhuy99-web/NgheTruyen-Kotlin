@@ -118,4 +118,20 @@ class FreesoundMode3RegressionTest {
         val need = FreesoundAutoRequirementAggregator.aggregate(listOf(long, short)).single()
         assertEquals("debris wall stone crash", need.query)
     }
+
+    @Test
+    fun vagueContinuousWindIsNotKeptAsAnSfxQuery() {
+        assertEquals(
+            "wind gust",
+            FreesoundAutoRequirementCodec.canonicalSearchQuery("heavy wind", AudioAssetKind.SFX),
+        )
+        assertEquals(
+            "heavy wind",
+            FreesoundAutoRequirementCodec.canonicalSearchQuery("heavy wind", AudioAssetKind.AMBIENCE),
+        )
+        assertEquals(
+            "wind whoosh",
+            FreesoundAutoRequirementCodec.canonicalSearchQuery("wind whoosh", AudioAssetKind.SFX),
+        )
+    }
 }

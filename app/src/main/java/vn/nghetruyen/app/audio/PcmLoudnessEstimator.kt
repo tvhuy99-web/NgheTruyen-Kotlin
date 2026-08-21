@@ -63,6 +63,80 @@ object PcmLoudnessEstimator {
 
     private data class Segment(val energy: Double, val frames: Int)
 
+    internal class StreamingAnalyzer(
+        private val sampleRate: Int,
+        private val channels: Int,
+    ) {
+        private val shelf: Coefficients
+        private val highPass: Coefficients
+        private val states: Array<ChannelState>
+        private val weights: DoubleArray
+        private val stepFrames: Int
+        private val frameBytes: Int
+        private val segments = mutableListOf<Segment>()
+        private var segmentEnergy = 0.0
+        private var segmentFrames = 0
+        private var peak = 0.0
+        private var finished = false
+
+        init {
+            require(sampleRate in 8_000..384_000) { "Sample rate PCM không hợp lệ." }
+            require(channels in 1..8) { "Số kênh PCM không được hỗ trợ." }
+            shelf = shelfCoefficients(sampleRate.toDouble())
+            highPass = highPassCoefficients(sampleRate.toDouble())
+            states = Array(channels) { ChannelState() }
+            weights = channelWeights(channels)
+            stepFrames = (sampleRate / 10.0 + 0.5).toInt().coerceAtLeast(1)
+            frameBytes = channels * 2
+        }
+
+        fun acceptPcm16(bytes: ByteArray, offset: Int = 0, length: Int = bytes.size - offset) {
+            check(!finished) { "Bộ đo loudness đã kết thúc." }
+            require(offset >= 0 && length >= 0 && offset + length <= bytes.size)
+            require(length % frameBytes == 0) { "PCM16 không thẳng hàng theo frame." }
+            var cursor = offset
+            val end = offset + length
+            while (cursor < end) {
+                var weighted = 0.0
+                for (channel in 0 until channels) {
+                    val lo = bytes[cursor].toInt() and 0xff
+                    val hi = bytes[cursor + 1].toInt()
+                    val sample = ((lo or (hi shl 8)).toShort().toDouble() / 32768.0)
+                    peak = maxOf(peak, abs(sample))
+                    val state = states[channel]
+                    var filtered = filterSample(state.shelf, shelf, sample)
+                    filtered = filterSample(state.highPass, highPass, filtered)
+                    weighted += filtered * filtered * weights[channel]
+                    cursor += 2
+                }
+                segmentEnergy += weighted
+                segmentFrames += 1
+                if (segmentFrames >= stepFrames) {
+                    segments += Segment(segmentEnergy, segmentFrames)
+                    segmentEnergy = 0.0
+                    segmentFrames = 0
+                }
+            }
+        }
+
+        fun finish(): Analysis {
+            check(!finished) { "Bộ đo loudness đã kết thúc." }
+            finished = true
+            if (segmentFrames > 0) {
+                segments += Segment(segmentEnergy, segmentFrames)
+                segmentEnergy = 0.0
+                segmentFrames = 0
+            }
+            val loudness = integratedLoudness(segments)
+                ?: throw IOException("Bản nhạc không có đủ tín hiệu để đo độ lớn.")
+            val peakDbfs = if (peak > 0.0) 20.0 * log10(peak) else -120.0
+            return Analysis(
+                loudnessLufs = loudness.toFloat(),
+                peakDbfs = peakDbfs.toFloat(),
+            )
+        }
+    }
+
     fun analyze(wavFile: File): Analysis {
         val wave = WaveFileAssembler.inspect(wavFile)
         if (wave.audioFormat != 1 || wave.bitsPerSample != 16) {
@@ -74,18 +148,10 @@ object PcmLoudnessEstimator {
             throw IOException("Định dạng âm thanh không được hỗ trợ để chuẩn hóa.")
         }
 
-        val shelf = shelfCoefficients(sampleRate.toDouble())
-        val highPass = highPassCoefficients(sampleRate.toDouble())
-        val states = Array(channels) { ChannelState() }
-        val weights = channelWeights(channels)
-        val stepFrames = (sampleRate / 10.0 + 0.5).toInt().coerceAtLeast(1)
         val frameBytes = channels * 2
         val bufferSize = (64 * 1024 / frameBytes) * frameBytes
         val buffer = ByteArray(bufferSize.coerceAtLeast(frameBytes))
-        val segments = mutableListOf<Segment>()
-        var segmentEnergy = 0.0
-        var segmentFrames = 0
-        var peak = 0.0
+        val analyzer = StreamingAnalyzer(sampleRate, channels)
 
         BufferedInputStream(FileInputStream(wavFile)).use { input ->
             skipFully(input, wave.dataOffset)
@@ -99,40 +165,11 @@ object PcmLoudnessEstimator {
                     readTotal += count
                 }
                 val completeBytes = readTotal - (readTotal % frameBytes)
-                var offset = 0
-                while (offset < completeBytes) {
-                    var weighted = 0.0
-                    for (channel in 0 until channels) {
-                        val lo = buffer[offset].toInt() and 0xff
-                        val hi = buffer[offset + 1].toInt()
-                        val sample = ((lo or (hi shl 8)).toShort().toDouble() / 32768.0)
-                        peak = maxOf(peak, abs(sample))
-                        val state = states[channel]
-                        var filtered = filterSample(state.shelf, shelf, sample)
-                        filtered = filterSample(state.highPass, highPass, filtered)
-                        weighted += filtered * filtered * weights[channel]
-                        offset += 2
-                    }
-                    segmentEnergy += weighted
-                    segmentFrames += 1
-                    if (segmentFrames >= stepFrames) {
-                        segments += Segment(segmentEnergy, segmentFrames)
-                        segmentEnergy = 0.0
-                        segmentFrames = 0
-                    }
-                }
+                if (completeBytes > 0) analyzer.acceptPcm16(buffer, 0, completeBytes)
                 remaining -= readTotal
             }
         }
-        if (segmentFrames > 0) segments += Segment(segmentEnergy, segmentFrames)
-
-        val loudness = integratedLoudness(segments)
-            ?: throw IOException("Bản nhạc không có đủ tín hiệu để đo độ lớn.")
-        val peakDbfs = if (peak > 0.0) 20.0 * log10(peak) else -120.0
-        return Analysis(
-            loudnessLufs = loudness.toFloat(),
-            peakDbfs = peakDbfs.toFloat(),
-        )
+        return analyzer.finish()
     }
 
     /** Compatibility helper for callers that only need the measured LUFS value. */

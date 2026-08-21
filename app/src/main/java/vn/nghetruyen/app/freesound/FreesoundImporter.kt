@@ -115,17 +115,17 @@ class FreesoundImporter(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Throwable) {
-        if (error is FreesoundNormalizationException && error.retryable) {
-            // The download is already valid. Keep it plus the marker so a later Mode-3
-            // resolve can resume normalization instead of downloading the same sound again.
-            Result.failure(error)
-        } else {
-            runCatching { repository.deleteSceneMusicTrack(track.id) }
-            deleteManagedFile(appContext, track.uri)
-            marker?.delete()
-            Result.failure(error)
+            if (shouldPreserveImportedFile(error)) {
+                // The download is already valid. Keep it plus the marker so a later Mode-3
+                // resolve can resume normalization instead of downloading the same sound again.
+                Result.failure(error)
+            } else {
+                runCatching { repository.deleteSceneMusicTrack(track.id) }
+                deleteManagedFile(appContext, track.uri)
+                marker?.delete()
+                Result.failure(error)
+            }
         }
-    }
     }
 
     private suspend fun importPreviewLocked(
@@ -243,13 +243,13 @@ class FreesoundImporter(
             val uri = Uri.fromFile(finalFile).toString()
             val title = titleForImport(sound.name, "Âm thanh Freesound ${sound.id}")
             val tagsCsv = tagsForImport(
-        kind = kind,
-        description = sound.description,
-        soundId = sound.id,
-        username = sound.username,
-        license = sound.license,
-        sourceUrl = sound.webUrl,
-    )
+                kind = kind,
+                description = sound.description,
+                soundId = sound.id,
+                username = sound.username,
+                license = sound.license,
+                sourceUrl = sound.webUrl,
+            )
             val trackId = repository.saveSceneMusicTrack(
                 title = title,
                 uri = uri,
@@ -284,10 +284,12 @@ class FreesoundImporter(
             markerFile.delete()
             throw cancelled
         } catch (error: Throwable) {
-            savedTrackId?.let { runCatching { repository.deleteSceneMusicTrack(it) } }
             partFile.delete()
-            finalFile.delete()
-            markerFile.delete()
+            if (!shouldPreserveImportedFile(error)) {
+                savedTrackId?.let { runCatching { repository.deleteSceneMusicTrack(it) } }
+                finalFile.delete()
+                markerFile.delete()
+            }
             Result.failure(error)
         }
     }
@@ -297,10 +299,10 @@ class FreesoundImporter(
         val deadline = System.currentTimeMillis() + NORMALIZATION_TIMEOUT_MS
         while (true) {
             val info = runCatching { workManager.getWorkInfoById(workId).get() }.getOrNull()
-        ?: throw FreesoundNormalizationException(
-            "Không đọc được trạng thái chuẩn hóa của tệp vừa nhập; tệp đã được giữ để thử lại.",
-            retryable = true,
-        )
+                ?: throw FreesoundNormalizationException(
+                    "Không đọc được trạng thái chuẩn hóa của tệp vừa nhập; tệp đã được giữ để thử lại.",
+                    retryable = true,
+                )
             when (info.state) {
                 WorkInfo.State.SUCCEEDED -> {
                     val latest = repository.getSceneMusicTrack(trackId)
@@ -318,15 +320,18 @@ class FreesoundImporter(
                         storedError.ifBlank { "Chuẩn hóa âm thanh Freesound thất bại." },
                     )
                 }
-                WorkInfo.State.CANCELLED -> throw FreesoundNormalizationException("Chuẩn hóa âm thanh Freesound đã bị hủy; tệp đã được giữ để thử lại.", retryable = true)
+                WorkInfo.State.CANCELLED -> throw FreesoundNormalizationException(
+                    "Chuẩn hóa âm thanh Freesound đã bị hủy; tệp đã được giữ để thử lại.",
+                    retryable = true,
+                )
                 else -> Unit
             }
             if (System.currentTimeMillis() >= deadline) {
                 SceneMusicAnalysisWorker.cancel(appContext, workId)
                 throw FreesoundNormalizationException(
-            "Chuẩn hóa âm thanh Freesound quá thời gian cho phép; tệp đã được giữ để thử lại.",
-            retryable = true,
-        )
+                    "Chuẩn hóa âm thanh Freesound quá thời gian cho phép; tệp đã được giữ để thử lại.",
+                    retryable = true,
+                )
             }
             delay(NORMALIZATION_POLL_MS)
         }
@@ -363,6 +368,9 @@ class FreesoundImporter(
                 track.peakDbfs.isFinite() &&
                 track.normalizationGainDb.isFinite()
 
+        internal fun shouldPreserveImportedFile(error: Throwable): Boolean =
+            error is FreesoundNormalizationException && error.retryable
+
         internal fun extensionForPreviewUrl(url: String): String {
             val clean = url.substringBefore('?').substringBefore('#').lowercase(Locale.ROOT)
             return if (clean.endsWith(".ogg")) "ogg" else "mp3"
@@ -377,7 +385,7 @@ class FreesoundImporter(
             return withoutExtension.ifBlank { fallback }.take(120)
         }
 
-                internal fun tagsForImport(
+        internal fun tagsForImport(
             kind: AudioAssetKind,
             description: String,
             soundId: Int? = null,

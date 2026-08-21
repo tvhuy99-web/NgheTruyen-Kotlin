@@ -126,6 +126,7 @@ class XpkAudioPromptQualityTest {
         assertTrue(prompt.contains("tuyệt đối không xuất effect_id=\"NONE\""))
         assertTrue(prompt.contains("Không có trần số SFX trong chương"))
         assertTrue(prompt.contains("Nếu các UNIT sau không nhắc lại nguồn âm"))
+        assertTrue(prompt.contains("Độ dài vật lý của file không quyết định ranh giới scene"))
         assertTrue(prompt.contains("asset tổng hợp"))
         assertFalse(prompt.contains("\"music_scenes\": []"))
     }
@@ -222,6 +223,7 @@ class XpkAudioPromptQualityTest {
         assertTrue(prompt.contains("CÙNG NGUYÊN TẮC VỚI MODE 2"))
         assertTrue(prompt.contains("Im lặng là lựa chọn bình đẳng với nhạc"))
         assertTrue(prompt.contains("Không có độ dài tối thiểu cho AMBIENCE"))
+        assertTrue(prompt.contains("Độ dài vật lý của file ambience KHÔNG quyết định ranh giới scene"))
         assertTrue(prompt.contains("ONE-SHOT"))
         assertTrue(prompt.contains("COUNTED REPEAT"))
         assertTrue(prompt.contains("ACTION LOOP"))

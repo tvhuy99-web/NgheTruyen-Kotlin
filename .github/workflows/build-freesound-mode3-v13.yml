@@ -7,6 +7,7 @@ on:
     paths:
       - ".github/workflows/build-freesound-mode3-v13.yml"
       - ".github/scripts/mode3_semantic_parity_v13.py"
+      - ".github/scripts/mode3_v13_compile_fix.py"
 
 permissions:
   contents: write
@@ -70,6 +71,10 @@ jobs:
 
           python3 .github/scripts/mode3_semantic_parity_v13.py > /tmp/patch_v13.log 2>&1
           PATCH_STATUS=$?
+          if [ "$PATCH_STATUS" -eq 0 ]; then
+            python3 .github/scripts/mode3_v13_compile_fix.py >> /tmp/patch_v13.log 2>&1
+            PATCH_STATUS=$?
+          fi
 
           TEST_STATUS=99
           BUILD_STATUS=99

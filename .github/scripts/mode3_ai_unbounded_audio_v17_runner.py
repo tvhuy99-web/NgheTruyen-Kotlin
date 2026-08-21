@@ -25,5 +25,11 @@ replacement = '''replace_once(
     '',
 )'''
 patched = source[:start] + replacement + source[end:]
+# The runtime intentionally has two cooldown-history clear sites. The base patch already performs
+# a final replace-all after the targeted edits, so remove the earlier ambiguous replace_once call.
+ambiguous = "replace_once(runtime, '        lastEffectAtMillis.clear()\\n', '')\n"
+if patched.count(ambiguous) != 1:
+    raise SystemExit(f'V17 runner expected one ambiguous history patch call, got {patched.count(ambiguous)}')
+patched = patched.replace(ambiguous, '', 1)
 compiled = compile(patched, str(path), 'exec')
 exec(compiled, {'__name__': '__main__', '__file__': str(path)})

@@ -1373,6 +1373,8 @@ private class JsoupElementsObject(private val elements: Elements, private val ow
         "get", "eq" -> fn { args -> elements.getOrNull(Context.toNumber(args.getOrNull(0) ?: 0).toInt())?.let { JsoupElementObject(it, ownerScope) } ?: Context.getUndefinedValue() }
         "first" -> fn { elements.firstOrNull()?.let { JsoupElementObject(it, ownerScope) } ?: Context.getUndefinedValue() }
         "last" -> fn { elements.lastOrNull()?.let { JsoupElementObject(it, ownerScope) } ?: Context.getUndefinedValue() }
+        "select" -> fn { args -> JsoupElementsObject(elements.select(Context.toString(args.getOrNull(0) ?: "")), ownerScope) }
+        "remove" -> fn { elements.toList().forEach { it.remove() }; this }
         "text" -> fn { elements.text() }
         "html" -> fn { elements.joinToString("\n") { it.html() } }
         "outerHtml" -> fn { elements.joinToString("\n") { it.outerHtml() } }
@@ -1404,6 +1406,7 @@ private class JsoupElementObject(private val element: Element, private val owner
         "hasClass" -> fn { args -> element.hasClass(Context.toString(args.getOrNull(0) ?: "")) }
         "parent" -> fn { element.parent()?.let { JsoupElementObject(it, ownerScope) } ?: Context.getUndefinedValue() }
         "children" -> fn { JsoupElementsObject(Elements(element.children()), ownerScope) }
+        "remove" -> fn { element.remove(); this }
         else -> super.get(name, start)
     }
     private fun fn(block: (Array<out Any>) -> Any): BaseFunction = object : BaseFunction() {

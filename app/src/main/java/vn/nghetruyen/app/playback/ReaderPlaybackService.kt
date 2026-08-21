@@ -216,7 +216,11 @@ class ReaderPlaybackService : Service() {
                 "error" to (error?.message ?: "").take(220),
             ),
         )
-        if (result != null && result.freesoundResolvedAssets == 0) {
+        if (
+            result != null &&
+            result.freesoundResolvedAssets == 0 &&
+            (result.freesoundRetryRequired || result.freesoundRetryExhausted)
+        ) {
             diagnostic(
                 "FREESOUND_MODE3_ZERO_AUDIO",
                 DiagnosticSeverity.WARN,
@@ -233,8 +237,15 @@ class ReaderPlaybackService : Service() {
         }
         result?.freesoundDiagnostics.orEmpty().forEachIndexed { index, detail ->
             val stage = detail.substringBefore(' ').take(56).ifBlank { "TRACE" }
-            // BASIC diagnostics must still expose every Freesound stage while debugging Mode 3.
-            val severity = DiagnosticSeverity.WARN
+            // BASIC diagnostics keeps INFO, so normal Freesound stages stay visible without
+            // inflating the warning count. Only actual failed/unresolved stages are warnings.
+            val normalizedDetail = detail.uppercase(Locale.ROOT)
+            val severity = if (
+                normalizedDetail.contains("FAILED") ||
+                normalizedDetail.contains("ERROR") ||
+                normalizedDetail.contains("RETRY_EXHAUSTED") ||
+                normalizedDetail.contains("NEED_UNRESOLVED")
+            ) DiagnosticSeverity.WARN else DiagnosticSeverity.INFO
             diagnostic(
                 "FREESOUND_$stage",
                 severity,
@@ -260,6 +271,7 @@ class ReaderPlaybackService : Service() {
     private var xpkSceneTrackByUnitId: Map<String, String> = emptyMap()
     private var sceneMusicTracks: Map<String, SceneMusicTrackEntity> = emptyMap()
     private var activeSceneTrackId: String? = null
+    private var lastSceneMusicLookupTraceState: String = ""
     private var musicPreviewActive = false
     private var musicPreviewPlainWasPlaying = false
     private var musicPreviewSceneWasActive = false
@@ -2451,6 +2463,7 @@ class ReaderPlaybackService : Service() {
             )
         }
         activeSceneTrackId = sceneMusicController.activeTrackId
+        lastSceneMusicLookupTraceState = ""
         PlaybackQueueStore.updateVoice(config.rate, config.pitch, config.volume)
         withContext(Dispatchers.Main) {
             applyRuntimeVoice(config)
@@ -2588,17 +2601,21 @@ class ReaderPlaybackService : Service() {
         val requestedTrackId = if (canonicalPlanActive) unitId?.let(xpkSceneTrackByUnitId::get) else legacyCue?.trackId
         val snapshot = PlaybackQueueStore.state.value
         if (StoryAudioModeRouter.usesAiFreesound(storyAudioSourceMode)) {
-            diagnostic(
-                "FREESOUND_RUNTIME_MUSIC_LOOKUP",
-                DiagnosticSeverity.INFO,
-                mapOf(
-                    "canonicalPlan" to canonicalPlanActive.toString(),
-                    "requestedTrackId" to requestedTrackId.orEmpty(),
-                    "unitId" to unitId.orEmpty(),
-                    "paragraphIndex" to paragraphIndex.toString(),
-                    "availableTracks" to sceneMusicTracks.size.toString(),
-                ),
-            )
+            val lookupTraceState = "$canonicalPlanActive:${requestedTrackId.orEmpty()}"
+            if (lookupTraceState != lastSceneMusicLookupTraceState) {
+                diagnostic(
+                    "FREESOUND_RUNTIME_MUSIC_LOOKUP",
+                    DiagnosticSeverity.INFO,
+                    mapOf(
+                        "canonicalPlan" to canonicalPlanActive.toString(),
+                        "requestedTrackId" to requestedTrackId.orEmpty(),
+                        "unitId" to unitId.orEmpty(),
+                        "paragraphIndex" to paragraphIndex.toString(),
+                        "availableTracks" to sceneMusicTracks.size.toString(),
+                    ),
+                )
+                lastSceneMusicLookupTraceState = lookupTraceState
+            }
         }
         if (requestedTrackId == XpkSceneMusicParity.SILENCE_TRACK_ID) {
             if (StoryAudioModeRouter.usesAiFreesound(storyAudioSourceMode)) {

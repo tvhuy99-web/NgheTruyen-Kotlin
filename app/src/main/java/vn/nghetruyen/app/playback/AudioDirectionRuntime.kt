@@ -187,6 +187,14 @@ class AudioDirectionRuntime(
         val now = System.currentTimeMillis()
         val sourceMode = narrationPlanCoordinator.storyAudioSourceMode()
         val fastKey = buildFastKey(snapshot, settings, sourceMode)
+        if (!force &&
+            preparedChapterId == snapshot.chapterId &&
+            preparedSignature.isNotBlank() &&
+            validatedFastKey == fastKey &&
+            now - validatedFastAtMillis < PLAN_REVALIDATE_INTERVAL_MS
+        ) {
+            return true
+        }
         if (StoryAudioModeRouter.usesAiFreesound(sourceMode)) {
             diagnostic(
                 "FREESOUND_RUNTIME_AUDIO_PLAN_CHECK",
@@ -196,23 +204,9 @@ class AudioDirectionRuntime(
                     "ambienceEnabled" to settings.ambienceEnabled.toString(),
                     "sfxEnabled" to settings.soundEffectsEnabled.toString(),
                     "preparedChapterId" to preparedChapterId,
+                    "revalidation" to "true",
                 ),
             )
-        }
-        val mode3RuntimeEmpty = StoryAudioModeRouter.usesAiFreesound(sourceMode) &&
-            (settings.ambienceEnabled || settings.soundEffectsEnabled) &&
-            assetsById.values.none { asset ->
-                (settings.ambienceEnabled && asset.kind == AudioAssetKind.AMBIENCE) ||
-                    (settings.soundEffectsEnabled && asset.kind == AudioAssetKind.SFX)
-            }
-        if (!force &&
-            !mode3RuntimeEmpty &&
-            preparedChapterId == snapshot.chapterId &&
-            preparedSignature.isNotBlank() &&
-            validatedFastKey == fastKey &&
-            now - validatedFastAtMillis < PLAN_REVALIDATE_INTERVAL_MS
-        ) {
-            return true
         }
 
         var rawTracks = libraryRepository.listEnabledSceneMusicTracks()
@@ -222,7 +216,7 @@ class AudioDirectionRuntime(
         if (StoryAudioModeRouter.usesAiFreesound(sourceMode)) {
             diagnostic(
                 "FREESOUND_RUNTIME_AUDIO_ASSETS",
-                if (activeAudioAssets.isEmpty()) DiagnosticSeverity.WARN else DiagnosticSeverity.INFO,
+                DiagnosticSeverity.INFO,
                 mapOf(
                     "rawTracks" to rawTracks.size.toString(),
                     "allMode3Assets" to allAssets.size.toString(),
@@ -280,7 +274,7 @@ class AudioDirectionRuntime(
             if (StoryAudioModeRouter.usesAiFreesound(sourceMode)) {
                 diagnostic(
                     "FREESOUND_RUNTIME_AUDIO_PREPARE_RESULT",
-                    if (outcome.freesoundResolvedAssets > 0 && !outcome.freesoundRetryRequired) DiagnosticSeverity.INFO else DiagnosticSeverity.WARN,
+                    if (outcome.freesoundRetryRequired || outcome.freesoundRetryExhausted) DiagnosticSeverity.WARN else DiagnosticSeverity.INFO,
                     mapOf(
                         "resolvedAssets" to outcome.freesoundResolvedAssets.toString(),
                         "audioPlanCreated" to outcome.audioPlanCreated.toString(),
@@ -532,26 +526,37 @@ class AudioDirectionRuntime(
     private fun applyAmbience(unitId: String, settings: AudioDirectionPreferences.Snapshot) {
         if (!settings.ambienceEnabled) {
             if (mode3Active() && lastAmbienceTraceState != "disabled") {
-                diagnostic("FREESOUND_RUNTIME_AMBIENCE_DISABLED", DiagnosticSeverity.WARN)
+                diagnostic("FREESOUND_RUNTIME_AMBIENCE_DISABLED", DiagnosticSeverity.INFO)
                 lastAmbienceTraceState = "disabled"
             }
             ambienceController.stop()
             return
         }
-        val assets = ambienceByUnitId[unitId]
-            .orEmpty()
+        val plannedAssetIds = ambienceByUnitId[unitId].orEmpty()
+        val assets = plannedAssetIds
             .asSequence()
             .mapNotNull(assetsById::get)
             .filter { it.kind == AudioAssetKind.AMBIENCE }
             .distinctBy(AudioDirectionAsset::id)
             .toList()
-        val state = assets.joinToString(",") { it.id }.ifBlank { "empty" }
+        val missingPlannedAssets = plannedAssetIds.isNotEmpty() && assets.size < plannedAssetIds.distinct().size
+        val state = when {
+            assets.isNotEmpty() -> "play:${assets.joinToString(",") { it.id }}"
+            missingPlannedAssets -> "missing:${plannedAssetIds.joinToString(",")}"
+            else -> "silent"
+        }
         if (mode3Active() && state != lastAmbienceTraceState) {
+            val eventName = when {
+                assets.isNotEmpty() -> "FREESOUND_RUNTIME_AMBIENCE_PLAY"
+                missingPlannedAssets -> "FREESOUND_RUNTIME_AMBIENCE_MISSING"
+                else -> "FREESOUND_RUNTIME_AMBIENCE_SILENT"
+            }
             diagnostic(
-                if (assets.isEmpty()) "FREESOUND_RUNTIME_AMBIENCE_EMPTY" else "FREESOUND_RUNTIME_AMBIENCE_PLAY",
-                if (assets.isEmpty()) DiagnosticSeverity.WARN else DiagnosticSeverity.INFO,
+                eventName,
+                if (missingPlannedAssets) DiagnosticSeverity.WARN else DiagnosticSeverity.INFO,
                 mapOf(
                     "unitId" to unitId,
+                    "plannedAssetCount" to plannedAssetIds.distinct().size.toString(),
                     "assetCount" to assets.size.toString(),
                     "assetIds" to assets.joinToString(",") { it.id }.take(260),
                     "filesExist" to (assets.isNotEmpty() &&
@@ -706,7 +711,7 @@ class AudioDirectionRuntime(
     companion object {
         const val KIND_AUDIO_DIRECTION = NarrationPlanCoordinator.KIND_AUDIO_DIRECTION
         private const val FAILURE_RETRY_COOLDOWN_MS = 60_000L
-        private const val PLAN_REVALIDATE_INTERVAL_MS = 5_000L
+        private const val PLAN_REVALIDATE_INTERVAL_MS = 15_000L
         private const val MAX_EFFECT_HISTORY = 64
         private const val SFX_DUCK_FACTOR = 0.72f
         private const val SFX_DUCK_HOLD_MS = 650L

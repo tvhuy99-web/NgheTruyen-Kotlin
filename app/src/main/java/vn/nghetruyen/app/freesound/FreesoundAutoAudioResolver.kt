@@ -35,6 +35,8 @@ internal data class FreesoundAutoSearchOutcome(
     val retryable: Boolean = false,
     val resultCount: Int = 0,
     val httpCode: Int? = null,
+    val queryUsed: String = "",
+    val requestCount: Int = 1,
 )
 
 internal object FreesoundParallelSearchPolicy {
@@ -393,6 +395,8 @@ class FreesoundAutoAudioResolver(
                     "selectedSoundId" to (search.sound?.id ?: 0).toString(),
                     "originalQuery" to seed.need.query.take(180),
                     "effectiveQuery" to seed.effectiveQuery.take(180),
+                    "queryUsed" to search.queryUsed.take(180),
+                    "searchRequests" to search.requestCount.toString(),
                     "strategy" to seed.strategy,
                     "failure" to search.failureMessage.orEmpty().take(220),
                 ),
@@ -472,7 +476,7 @@ class FreesoundAutoAudioResolver(
             val resolvedSearch = requireNotNull(searchedByIndex[seed.index])
             val search = requireNotNull(resolvedSearch.search)
             val remote = search.sound
-            diagnostics += "CLIENT_SEARCH_DONE index=${seed.index + 1} kind=${need.kind.name} elapsedMs=${resolvedSearch.searchElapsedMs} resultCount=${search.resultCount} httpCode=${search.httpCode ?: 0} selectedSoundId=${remote?.id ?: 0} originalQuery=${need.query.take(140)} effectiveQuery=${resolvedSearch.effectiveQuery.take(140)} strategy=${resolvedSearch.strategy}"
+            diagnostics += "CLIENT_SEARCH_DONE index=${seed.index + 1} kind=${need.kind.name} elapsedMs=${resolvedSearch.searchElapsedMs} resultCount=${search.resultCount} httpCode=${search.httpCode ?: 0} selectedSoundId=${remote?.id ?: 0} originalQuery=${need.query.take(140)} effectiveQuery=${resolvedSearch.effectiveQuery.take(140)} queryUsed=${search.queryUsed.take(140)} searchRequests=${search.requestCount} strategy=${resolvedSearch.strategy}"
             if (!search.failureMessage.isNullOrBlank()) {
                 warnings += "Freesound ‘${need.query}’ (${resolvedSearch.effectiveQuery}): ${search.failureMessage}"
                 retryableFailure = retryableFailure || search.retryable
@@ -615,7 +619,7 @@ class FreesoundAutoAudioResolver(
         }
         val retryRecommended = retryableFailure ||
             (resolutions.isNotEmpty() && (resolutions.none { !it.trackId.isNullOrBlank() } || unresolvedRequired > 0))
-        val clientSearches = networkSeeds.size
+        val clientSearches = searched.sumOf { it.search?.requestCount ?: 0 }
         diagnostics += "RESOLVE_DONE requirements=${requirements.size} aggregated=${needs.size} resolved=${resolutions.count { !it.trackId.isNullOrBlank() }} unresolved=${resolutions.count { it.trackId.isNullOrBlank() }} unresolvedRequired=$unresolvedRequired queryCacheHits=$queryCacheHits clientSearches=$clientSearches parallelSearchLimit=${FreesoundParallelSearchPolicy.MAX_PARALLEL_SEARCHES} parallelImportLimit=${FreesoundParallelImportPolicy.MAX_PARALLEL_IMPORTS} cacheLookupMs=$cacheLookupMs networkSearchWallMs=$networkSearchWallMs importWallMs=$parallelImportWallMs importAttempts=$importAttempts localSoundIdReuses=$localSoundIdReuses normalizationResumes=$normalizationResumes imported=${imported.size} importElapsedTotalMs=$importElapsedTotalMs retryableFailure=$retryableFailure retryRecommended=$retryRecommended elapsedMs=$totalElapsedMs"
         liveDiagnostic(
             traceId,
@@ -669,8 +673,45 @@ class FreesoundAutoAudioResolver(
         need: FreesoundAutoSearchNeed,
         effectiveQuery: String,
     ): FreesoundAutoSearchOutcome {
+        val queries = linkedSetOf<String>().apply {
+            effectiveQuery.trim().takeIf(String::isNotBlank)?.let(::add)
+            searchQueryForRetry(need.query, 2).trim().takeIf(String::isNotBlank)?.let(::add)
+            if (need.importance == FreesoundRequirementImportance.REQUIRED) {
+                searchQueryForRetry(need.query, 3).trim().takeIf(String::isNotBlank)?.let(::add)
+            }
+        }.ifEmpty { linkedSetOf(need.query.trim()) }
+
+        var totalResults = 0
+        var requests = 0
+        var lastOutcome: FreesoundAutoSearchOutcome? = null
+        for (query in queries) {
+            requests += 1
+            val outcome = searchBestOnce(need, query)
+            totalResults += outcome.resultCount
+            val withTotals = outcome.copy(
+                resultCount = totalResults,
+                queryUsed = query,
+                requestCount = requests,
+            )
+            if (withTotals.sound != null) return withTotals
+            lastOutcome = withTotals
+            if (!withTotals.failureMessage.isNullOrBlank()) return withTotals
+        }
+        return lastOutcome ?: FreesoundAutoSearchOutcome(
+            sound = null,
+            resultCount = 0,
+            httpCode = 200,
+            queryUsed = effectiveQuery,
+            requestCount = requests,
+        )
+    }
+
+    private suspend fun searchBestOnce(
+        need: FreesoundAutoSearchNeed,
+        query: String,
+    ): FreesoundAutoSearchOutcome {
         val request = FreesoundSearchRequest(
-            query = effectiveQuery,
+            query = query,
             category = need.kind.toFreesoundCategory(),
             duration = FreesoundDuration.RECOMMENDED,
             sort = FreesoundSort.RELEVANCE,
@@ -685,6 +726,7 @@ class FreesoundAutoAudioResolver(
                     (result.httpCode ?: 0) >= 500,
                 resultCount = 0,
                 httpCode = result.httpCode,
+                queryUsed = query,
             )
             is FreesoundSearchResult.Success -> FreesoundAutoSearchOutcome(
                 sound = result.page.results
@@ -695,6 +737,7 @@ class FreesoundAutoAudioResolver(
                     ?.first,
                 resultCount = result.page.results.size,
                 httpCode = 200,
+                queryUsed = query,
             )
         }
     }

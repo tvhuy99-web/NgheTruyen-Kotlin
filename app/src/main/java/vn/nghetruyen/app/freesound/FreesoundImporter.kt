@@ -215,7 +215,7 @@ class FreesoundImporter(
                 var total = 0L
                 body.byteStream().use { input ->
                     partFile.outputStream().buffered().use { output ->
-                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        val buffer = ByteArray(DOWNLOAD_BUFFER_BYTES)
                         while (true) {
                             val read = input.read(buffer)
                             if (read < 0) break
@@ -341,6 +341,7 @@ class FreesoundImporter(
         private const val FREE_SPACE_RESERVE_BYTES = 4L * 1024L * 1024L
         private const val UNKNOWN_LENGTH_REQUIRED_BYTES = 12L * 1024L * 1024L
         private const val NORMALIZATION_POLL_MS = 120L
+        private const val DOWNLOAD_BUFFER_BYTES = 64 * 1024
         private const val NORMALIZATION_TIMEOUT_MS = 10L * 60L * 1_000L
         private const val STALE_PART_AGE_MS = 15L * 60L * 1_000L
         private const val SOUND_LOCK_STRIPES = 64
@@ -501,9 +502,9 @@ class FreesoundImporter(
         }
 
         private fun defaultHttpClient(): OkHttpClient = OkHttpClient.Builder()
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(60, TimeUnit.SECONDS)
-            .callTimeout(90, TimeUnit.SECONDS)
+            .connectTimeout(8, TimeUnit.SECONDS)
+            .readTimeout(20, TimeUnit.SECONDS)
+            .callTimeout(30, TimeUnit.SECONDS)
             .build()
     }
 }

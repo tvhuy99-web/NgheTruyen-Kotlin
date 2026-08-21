@@ -145,6 +145,7 @@ jobs:
               app/src/test/java/vn/nghetruyen/app/freesound/FreesoundClientTest.kt \
               app/src/test/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioTest.kt \
               app/src/test/java/vn/nghetruyen/app/freesound/FreesoundMode3RegressionTest.kt \
+              app/src/test/java/vn/nghetruyen/app/freesound/FreesoundStage5Test.kt \
               app/src/test/java/vn/nghetruyen/app/ai/XpkAudioPromptQualityTest.kt
           else
             git reset --hard HEAD

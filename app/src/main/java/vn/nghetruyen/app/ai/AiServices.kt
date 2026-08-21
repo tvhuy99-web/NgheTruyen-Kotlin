@@ -83,15 +83,18 @@ data class NarrationPlanContext(
     val incomingSource: String = "",
     /** Legacy single field used by the prompt transport; multiple ids are pipe-delimited internally. */
     var incomingAmbienceId: String? = null,
-    /** Up to two ambience layers that were active at the end of the previous chapter. */
+    /** Ambience layers that were active at the end of the previous chapter. Each is only a candidate. */
     val incomingAmbienceIds: List<String> = emptyList(),
+    /** Exact canonical Mode-3 MUSIC query reaching the previous chapter boundary, if any. */
+    val incomingFreesoundMusicQuery: String? = null,
+    /** Exact canonical Mode-3 AMBIENCE queries reaching the previous chapter boundary. */
+    val incomingFreesoundAmbienceQueries: List<String> = emptyList(),
 ) {
     init {
         val normalized = incomingAmbienceIds
             .map(String::trim)
             .filter(String::isNotBlank)
             .distinct()
-            .take(2)
         if (normalized.isNotEmpty()) incomingAmbienceId = normalized.joinToString("|")
     }
 }

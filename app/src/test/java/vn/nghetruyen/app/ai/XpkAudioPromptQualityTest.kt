@@ -210,6 +210,9 @@ class XpkAudioPromptQualityTest {
             soundEffectTracks = emptyList(),
             includeFreesoundAudioRequirements = true,
             freesoundRequirementKinds = setOf(vn.nghetruyen.app.audio.AudioAssetKind.MUSIC, vn.nghetruyen.app.audio.AudioAssetKind.AMBIENCE, vn.nghetruyen.app.audio.AudioAssetKind.SFX),
+            previousChapterTail = "Nhân vật vẫn đứng trên sườn núi tuyết trong gió mạnh.",
+            incomingFreesoundMusicQuery = "dark fantasy cinematic",
+            incomingFreesoundAmbienceQueries = listOf("snow wind", "mountain wind"),
         )
         assertTrue(prompt.contains("ưu tiên 2 từ"))
         assertTrue(prompt.contains("không quá 3 search term"))
@@ -223,6 +226,13 @@ class XpkAudioPromptQualityTest {
         assertTrue(prompt.contains("COUNTED REPEAT"))
         assertTrue(prompt.contains("ACTION LOOP"))
         assertTrue(prompt.contains("không gửi catalog local", ignoreCase = true))
+        assertTrue(prompt.contains("MODE3_PREVIOUS_BOUNDARY_MUSIC_QUERY: dark fantasy cinematic"))
+        assertTrue(prompt.contains("- snow wind"))
+        assertTrue(prompt.contains("- mountain wind"))
+        assertTrue(prompt.contains("không phải lệnh bắt buộc giữ", ignoreCase = true))
+        assertTrue(prompt.contains("giữ NGUYÊN VĂN query"))
+        assertTrue(prompt.contains("sang chương mới KHÔNG phải là lý do đổi ambience"))
+        assertTrue(prompt.contains("im lặng tốt hơn một âm sai cảnh"))
         assertFalse(prompt.contains("TRACK_CATALOG"))
         assertFalse(prompt.contains("AMBIENCE_CATALOG"))
         assertFalse(prompt.contains("SFX_CATALOG"))

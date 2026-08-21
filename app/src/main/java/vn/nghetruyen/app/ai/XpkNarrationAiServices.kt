@@ -264,6 +264,8 @@ class XpkNarrationAiServices(
             soundEffectTracks = request.soundEffectTracks,
             previousChapterTail = request.context.previousChapterEnding,
             incomingAmbienceId = request.context.incomingAmbienceId,
+            incomingFreesoundMusicQuery = request.context.incomingFreesoundMusicQuery,
+            incomingFreesoundAmbienceQueries = request.context.incomingFreesoundAmbienceQueries,
             ambienceCatalog = ambienceCatalog.takeIf { request.includeAmbience },
             sfxCatalog = sfxCatalog.takeIf { request.includeSoundEffects },
             includeFreesoundAudioRequirements = request.includeFreesoundAudioRequirements,

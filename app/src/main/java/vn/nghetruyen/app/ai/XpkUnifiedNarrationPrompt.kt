@@ -45,6 +45,8 @@ object XpkUnifiedNarrationPrompt {
         soundEffectTracks: List<SceneMusicTrackOption>,
         previousChapterTail: String = "",
         incomingAmbienceId: String? = null,
+        incomingFreesoundMusicQuery: String? = null,
+        incomingFreesoundAmbienceQueries: List<String> = emptyList(),
         ambienceCatalog: CatalogBundle? = null,
         sfxCatalog: CatalogBundle? = null,
         includeFreesoundAudioRequirements: Boolean = false,
@@ -91,6 +93,7 @@ object XpkUnifiedNarrationPrompt {
             if (includeFreesoundAudioRequirements) {
                 add("Mode 3 dùng cùng logic đạo diễn MUSIC/AMBIENCE/SFX của Mode 2; khác biệt duy nhất là không gửi catalog local (asset trên máy) và không yêu cầu AI chọn track_id. AI chỉ mô tả nhu cầu tìm kiếm, ứng dụng tự tìm/tải/chuẩn hóa sau phản hồi.")
                 add("FREESOUND_REQUIREMENTS chỉ mô tả âm thanh cần tìm; không chọn ID, tên file hoặc URL. Không tạo một nhu cầu mới cho mỗi lần lặp cùng loại âm thanh; cùng âm thanh phải dùng cùng query để tái sử dụng asset.")
+                add("Khi có nhiều cách mô tả đều hợp, ưu tiên query mô tả đúng nguồn âm/sắc thái cụ thể nhất và dễ tìm nhất; không chọn từ quá chung chỉ vì phổ biến. Nếu không có lựa chọn đủ sát nội dung, im lặng tốt hơn một âm sai cảnh.")
             }
             if (includeSceneMusic || includeAmbience || includeSoundEffects) {
                 add("Mã số catalog của mọi module local đang bật chỉ là định danh tạm. Số nhỏ/lớn, vị trí đầu/cuối và các số liền nhau không biểu thị ưu tiên, độ phù hợp, cường độ hay sự tương đồng.")
@@ -112,17 +115,35 @@ object XpkUnifiedNarrationPrompt {
             }
         }.trim()
 
+        val freesoundMusicContinuity = incomingFreesoundMusicQuery.orEmpty().trim().ifBlank { "NONE" }
+        val freesoundAmbienceContinuity = incomingFreesoundAmbienceQueries
+            .asSequence()
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .distinct()
+            .joinToString("\n") { "- $it" }
+            .ifBlank { "- NONE" }
         val continuityBlock = if (
             includeSceneMusic || includeAmbience ||
             (includeFreesoundAudioRequirements && freesoundRequirementKinds.any { it == AudioAssetKind.MUSIC || it == AudioAssetKind.AMBIENCE })
         ) {
-            """
-                CONTINUITY_CONTEXT CHUNG — CHỈ ĐỂ HIỂU ĐIỂM NỐI CHƯƠNG:
-                PREVIOUS_CHAPTER_TAIL:
-                ${previousChapterTail.trim().ifBlank { "Không có ngữ cảnh chương trước." }.takeLast(3_500)}
-
-                Không tạo cue bằng ID lấy từ phần trên. Không để nội dung chương trước ghi đè bằng chứng của chương hiện tại.
-            """.trimIndent()
+            buildString {
+                appendLine("CONTINUITY_CONTEXT CHUNG — CHỈ ĐỂ HIỂU ĐIỂM NỐI CHƯƠNG:")
+                appendLine("PREVIOUS_CHAPTER_TAIL:")
+                appendLine(previousChapterTail.trim().ifBlank { "Không có ngữ cảnh chương trước." }.takeLast(3_500))
+                if (includeFreesoundAudioRequirements) {
+                    appendLine()
+                    appendLine("MODE3_PREVIOUS_BOUNDARY_MUSIC_QUERY: $freesoundMusicContinuity")
+                    appendLine("MODE3_PREVIOUS_BOUNDARY_AMBIENCE_QUERIES:")
+                    appendLine(freesoundAmbienceContinuity)
+                    appendLine()
+                    appendLine("Các query Mode 3 trên là ỨNG VIÊN continuity, không phải lệnh bắt buộc giữ. Đầu tiên xét chương hiện tại xem cùng trạng thái MUSIC hoặc cùng nguồn AMBIENCE vật lý có thật sự tiếp diễn không.")
+                    appendLine("Nếu thực sự tiếp diễn, giữ NGUYÊN VĂN query tương ứng để ứng dụng tái sử dụng đúng asset đã tải thay vì tìm một biến thể mới chỉ vì sang chương. Nếu bối cảnh/trạng thái đã đổi, bỏ query cũ và chọn query mới hoặc im lặng ngay.")
+                    appendLine("Với AMBIENCE, đánh giá từng lớp độc lập: có thể giữ một số lớp, bỏ một số lớp và thêm lớp mới. Không kế thừa SFX chỉ vì nó xuất hiện ở cuối chương trước.")
+                }
+                appendLine()
+                append("Không tạo cue bằng ID lấy từ phần trên. Không để nội dung chương trước ghi đè bằng chứng của chương hiện tại.")
+            }.trim()
         } else ""
 
         val blocks = buildList {
@@ -201,7 +222,8 @@ object XpkUnifiedNarrationPrompt {
                 appendLine("- Chỉ mở ambience khi môi trường hoặc hiện tượng vật lý kéo dài đủ rõ và có giá trị nghe liên tục. Không bật chỉ vì xuất hiện một từ khóa.")
                 appendLine("- Không giới hạn số lớp AMBIENCE đồng thời. Có thể chồng 3, 4, 5 hoặc nhiều nguồn nếu chúng thực sự cùng tồn tại và bổ sung nhau, ví dụ mưa + gió + rừng + suối + sấm xa. Không nhân đôi cùng một nguồn chỉ để làm dày âm.")
                 appendLine("- Không có độ dài tối thiểu cho AMBIENCE. Một lớp có thể chỉ tồn tại một UNIT hoặc kéo dài nhiều cảnh, miễn ranh giới bắt đầu/dừng đúng với nguồn âm thực tế trong truyện.")
-                appendLine("- Nếu cảnh vẫn liên tục và không có bằng chứng nguồn âm dừng, tiếp tục giữ ambience dù các UNIT sau không nhắc lại nó. Chỉ đổi/dừng tại UNIT đầu nơi môi trường thật sự thay đổi.")
+                appendLine("- Nếu các UNIT sau không nhắc lại nguồn âm nhưng scene vật lý vẫn liên tục và không có bằng chứng nguồn đã dừng, tiếp tục ambience qua các UNIT đó; chỉ đổi/dừng ở biến cố môi trường thật sự.")
+                appendLine("- Ở ranh giới chương cũng áp dụng đúng quy tắc này: sang chương mới KHÔNG phải là lý do đổi ambience. Nếu vẫn cùng núi tuyết, hang động, mưa, gió, sông, đám đông... thì ưu tiên giữ nguồn phù hợp đang có; nhưng không được giữ nếu chương mới cho thấy nguồn/cảnh đã thay đổi hoặc im lặng hợp lý hơn.")
                 appendLine("- Không chồng asset tổng hợp với thành phần đã có sẵn bên trong; không biến hành động foreground thành ambience chỉ vì hành động kéo dài.")
                 appendLine("- Không suy diễn ambience từ so sánh, ẩn dụ, hồi tưởng, dự đoán hoặc lời kể gián tiếp. Query ưu tiên nguồn vật lý + môi trường: forest wind, heavy rain, cave water.")
             }

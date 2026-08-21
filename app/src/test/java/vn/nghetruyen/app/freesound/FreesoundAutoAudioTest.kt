@@ -158,6 +158,41 @@ class FreesoundAutoAudioTest {
     }
 
     @Test
+    fun relaxedSearchStillRejectsAWeakGenericSemanticMatch() {
+        val need = FreesoundAutoSearchNeed(
+            kind = AudioAssetKind.AMBIENCE,
+            query = "snow mountain wind",
+            importance = FreesoundRequirementImportance.REQUIRED,
+            usages = emptyList(),
+        )
+        val weak = FreesoundSound(
+            id = 77,
+            name = "wind",
+            description = "strong wind",
+            durationSeconds = 60.0,
+            previewHqMp3 = "https://cdn.example/wind.mp3",
+            previewHqOgg = null,
+            category = "Soundscapes",
+            tags = listOf("wind"),
+            avgRating = 5.0,
+            numRatings = 100,
+            numDownloads = 100000,
+        )
+        val strong = weak.copy(
+            id = 78,
+            name = "snow mountain wind",
+            description = "cold wind on snowy mountain",
+            tags = listOf("snow", "mountain", "wind"),
+        )
+        assertFalse(FreesoundAutoAudioResolver.candidateMeetsLexicalFloor(need, weak))
+        assertTrue(FreesoundAutoAudioResolver.candidateMeetsLexicalFloor(need, strong))
+        assertTrue(
+            FreesoundAutoAudioResolver.scoreCandidate(need, strong, 4) >
+                FreesoundAutoAudioResolver.scoreCandidate(need, weak, 0),
+        )
+    }
+
+    @Test
     fun requirementCachePayloadContainsNoRightsMetadataContract() {
         val requirement = FreesoundAutoRequirement(
             kind = AudioAssetKind.AMBIENCE,

@@ -731,7 +731,7 @@ class FreesoundAutoAudioResolver(
             is FreesoundSearchResult.Success -> FreesoundAutoSearchOutcome(
                 sound = result.page.results
                     .mapIndexed { index, sound -> sound to scoreCandidate(need, sound, index) }
-                    .filter { it.first.preferredPreviewUrl != null }
+                    .filter { (sound, _) -> sound.preferredPreviewUrl != null && candidateMeetsLexicalFloor(need, sound) }
                     .maxByOrNull { it.second }
                     ?.takeIf { it.second >= REMOTE_MIN_SCORE }
                     ?.first,
@@ -751,6 +751,7 @@ class FreesoundAutoAudioResolver(
     companion object {
         private const val SEARCH_PAGE_SIZE = 15
         private const val REMOTE_MIN_SCORE = 0.22
+        private const val REMOTE_MIN_LEXICAL_COVERAGE = 0.50
         private val RETRY_QUERY_STOPWORDS = setOf(
             "a", "an", "the", "on", "in", "at", "with", "and", "or", "of", "to", "from", "for", "by",
             "into", "onto", "single", "one", "sound", "effect", "audio",
@@ -772,6 +773,31 @@ class FreesoundAutoAudioResolver(
             }.ifBlank { original }
         }
 
+        internal fun candidateLexicalCoverage(
+            need: FreesoundAutoSearchNeed,
+            sound: FreesoundSound,
+        ): Double {
+            val queryTokens = FreesoundAutoRequirementAggregator.queryTokens(
+                FreesoundAutoRequirementAggregator.normalizeQuery(need.query),
+            )
+            if (queryTokens.isEmpty()) return 0.0
+            fun coverage(text: String): Double {
+                val tokens = FreesoundAutoRequirementAggregator.queryTokens(
+                    FreesoundAutoRequirementAggregator.normalizeQuery(text),
+                )
+                return queryTokens.count(tokens::contains).toDouble() / queryTokens.size.toDouble()
+            }
+            val titleCoverage = coverage(sound.name)
+            val descriptionCoverage = coverage(sound.description)
+            val tagCoverage = coverage(sound.tags.joinToString(" "))
+            return max(titleCoverage, max(tagCoverage * 0.96, descriptionCoverage * 0.78))
+        }
+
+        internal fun candidateMeetsLexicalFloor(
+            need: FreesoundAutoSearchNeed,
+            sound: FreesoundSound,
+        ): Boolean = candidateLexicalCoverage(need, sound) >= REMOTE_MIN_LEXICAL_COVERAGE
+
         internal fun scoreCandidate(
             need: FreesoundAutoSearchNeed,
             sound: FreesoundSound,
@@ -783,15 +809,7 @@ class FreesoundAutoAudioResolver(
             val titleNorm = FreesoundAutoRequirementAggregator.normalizeQuery(sound.name)
             val descriptionNorm = FreesoundAutoRequirementAggregator.normalizeQuery(sound.description)
             val tagNorm = FreesoundAutoRequirementAggregator.normalizeQuery(sound.tags.joinToString(" "))
-            val titleTokens = FreesoundAutoRequirementAggregator.queryTokens(titleNorm)
-            val descriptionTokens = FreesoundAutoRequirementAggregator.queryTokens(descriptionNorm)
-            val tagTokens = FreesoundAutoRequirementAggregator.queryTokens(tagNorm)
-            fun coverage(tokens: Set<String>): Double =
-                queryTokens.count(tokens::contains).toDouble() / queryTokens.size.toDouble()
-            val titleCoverage = coverage(titleTokens)
-            val descriptionCoverage = coverage(descriptionTokens)
-            val tagCoverage = coverage(tagTokens)
-            val lexicalCoverage = max(titleCoverage, max(tagCoverage * 0.96, descriptionCoverage * 0.78))
+            val lexicalCoverage = candidateLexicalCoverage(need, sound)
             if (lexicalCoverage <= 0.0) return 0.0
 
             val phraseBonus = when {

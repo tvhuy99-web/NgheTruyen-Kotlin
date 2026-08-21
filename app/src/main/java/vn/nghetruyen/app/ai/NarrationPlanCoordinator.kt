@@ -73,6 +73,11 @@ class NarrationPlanCoordinator(
         val retryExhausted: Boolean = false,
     )
 
+    private data class FreesoundContinuityContext(
+        val musicQuery: String? = null,
+        val ambienceQueries: List<String> = emptyList(),
+    )
+
     suspend fun ensurePlans(
         content: ChapterContent,
         voice: Boolean,
@@ -259,9 +264,12 @@ class NarrationPlanCoordinator(
 
         val baseContext = buildContinuityContext(content, activeTrackId, musicTracks)
         val incomingAmbienceIds = if (localAiMode) buildIncomingAmbienceIds(content, ambienceTracks) else emptyList()
+        val freesoundContinuity = if (freesoundMode) buildFreesoundContinuityContext(content) else FreesoundContinuityContext()
         val context = baseContext.copy(
             incomingAmbienceId = incomingAmbienceIds.firstOrNull(),
             incomingAmbienceIds = incomingAmbienceIds,
+            incomingFreesoundMusicQuery = freesoundContinuity.musicQuery,
+            incomingFreesoundAmbienceQueries = freesoundContinuity.ambienceQueries,
         )
         return when (
             val outcome = ai.planNarration(
@@ -1163,6 +1171,64 @@ class NarrationPlanCoordinator(
                 }
             }
         }.getOrDefault(emptyList())
+    }
+
+    private suspend fun buildFreesoundContinuityContext(content: ChapterContent): FreesoundContinuityContext {
+        val previous = library.loadPreviousCachedChapter(content.chapter.storyId, content.chapter.index)
+            ?: return FreesoundContinuityContext()
+        val transform = library.getChapterTransform(previous.chapter.id, KIND_FREESOUND_AUTO_AUDIO)
+            ?: return FreesoundContinuityContext()
+        if (!isCurrentTimelineTransform(transform.transformedText, FREESOUND_AUTO_ENGINE, previous)) {
+            return FreesoundContinuityContext()
+        }
+        val root = runCatching { JSONObject(transform.transformedText) }.getOrNull()
+            ?: return FreesoundContinuityContext()
+        if (root.optString("audio_source_mode") != StoryAudioSourceMode.AI_FREESOUND.name) {
+            return FreesoundContinuityContext()
+        }
+        val enabledKinds = buildSet {
+            val stored = root.optJSONArray("enabled_kinds")
+            if (stored != null) {
+                for (index in 0 until stored.length()) {
+                    runCatching { AudioAssetKind.valueOf(stored.optString(index).trim()) }
+                        .getOrNull()
+                        ?.let(::add)
+                }
+            }
+        }.ifEmpty { AudioAssetKind.entries.toSet() }
+        val units = XpkVoiceCastSplitter.buildUnits(previous.chapter.title, chapterBody(previous))
+        val unitIds = units.map { it.id }
+        val finalUnitId = unitIds.lastOrNull() ?: return FreesoundContinuityContext()
+        val order = unitIds.withIndex().associate { it.value to it.index }
+        val requirements = runCatching {
+            FreesoundAutoRequirementCodec.parse(root, unitIds, enabledKinds)
+        }.getOrDefault(emptyList())
+        val boundaryRows = requirements.filter { requirement ->
+            requirement.kind in setOf(AudioAssetKind.MUSIC, AudioAssetKind.AMBIENCE) &&
+                requirement.endUnitId == finalUnitId
+        }
+        val priority = compareBy<FreesoundAutoRequirement> {
+            it.importance != FreesoundRequirementImportance.REQUIRED
+        }.thenByDescending { requirement ->
+            requirement.startUnitId?.let(order::get) ?: -1
+        }
+        val musicQuery = boundaryRows
+            .filter { it.kind == AudioAssetKind.MUSIC }
+            .sortedWith(priority)
+            .firstOrNull()
+            ?.query
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+        val ambienceQueries = boundaryRows
+            .filter { it.kind == AudioAssetKind.AMBIENCE }
+            .sortedWith(priority)
+            .map { it.query.trim() }
+            .filter(String::isNotBlank)
+            .distinct()
+        return FreesoundContinuityContext(
+            musicQuery = musicQuery,
+            ambienceQueries = ambienceQueries,
+        )
     }
 
     private fun isExpectedAudioSourceMode(transformedText: String, expected: StoryAudioSourceMode): Boolean = runCatching {

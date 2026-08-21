@@ -25,8 +25,8 @@ jobs:
           from pathlib import Path
           p = Path('app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt')
           text = p.read_text(encoding='utf-8')
-          text = text.replace('        stabilizeMusicAssignments(selectedByUnit)\n', '', 1)
-          text = text.replace('        stabilizeMusicAssignments(selected)\n', '', 1)
+          call_a = '        stabilizeMusicAssignments(selectedByUnit)\n'
+          call_b = '        stabilizeMusicAssignments(selected)\n'
           old = '''    private fun stabilizeMusicAssignments(rows: MutableList<String>) {
               if (rows.size < 3) return
               while (true) {
@@ -46,13 +46,16 @@ jobs:
           }
 
           '''
-          # Normalize indentation from YAML block before matching Kotlin source.
-          old = '\n'.join(line[4:] if line.startswith('    ') else line for line in old.split('\n'))
-          if old not in text:
-              raise SystemExit('stabilizeMusicAssignments block not found')
-          text = text.replace(old, '', 1)
+          # YAML removes the block indentation; the 10 extra spaces above are intentional Python source
+          # indentation inside this here-doc. Convert only that indentation, preserving Kotlin's 4 spaces.
+          old = '\n'.join(line[10:] if line.startswith('          ') else line for line in old.split('\n'))
+          if text.count(call_a) != 1 or text.count(call_b) != 1 or text.count(old) != 1:
+              raise SystemExit(
+                  f'exact music-boundary anchors mismatch: callA={text.count(call_a)} callB={text.count(call_b)} block={text.count(old)}'
+              )
+          text = text.replace(call_a, '', 1).replace(call_b, '', 1).replace(old, '', 1)
           if 'stabilizeMusicAssignments' in text:
-              raise SystemExit('stabilizeMusicAssignments still referenced')
+              raise SystemExit('stabilizeMusicAssignments still referenced after exact patch')
           p.write_text(text, encoding='utf-8')
           PY
       - name: Commit product fix and remove temporary workflow

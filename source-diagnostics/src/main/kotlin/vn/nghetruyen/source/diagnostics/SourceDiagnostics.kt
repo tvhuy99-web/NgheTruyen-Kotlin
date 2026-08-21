@@ -294,8 +294,10 @@ class BoundedDiagnosticRecorder(
         val upper = event.name.uppercase(Locale.ROOT)
         val state = DiagnosticOperationContract.state(event)
         val explicitId = DiagnosticOperationContract.id(event)
-        val operationId = explicitId ?: legacyOperationKey(event, upper)
-        val isStart = state == DiagnosticOperationState.STARTED || state == null && isLegacyStart(upper)
+        val legacyStart = state == null && isLegacyStart(upper)
+        val legacyTerminal = state == null && isLegacyTerminal(upper)
+        val operationId = explicitId ?: if (legacyStart || legacyTerminal) legacyOperationKey(event, upper) else ""
+        val isStart = state == DiagnosticOperationState.STARTED || legacyStart
 
         if (isStart) {
             if (operationId.isNotBlank()) rememberOrigin(operationOrigins, operationId, screenGeneration)
@@ -312,14 +314,17 @@ class BoundedDiagnosticRecorder(
         val traceId = event.traceId.trim()
         val upper = event.name.uppercase(Locale.ROOT)
         val state = DiagnosticOperationContract.state(event)
-        val operationId = DiagnosticOperationContract.id(event) ?: legacyOperationKey(event, upper)
+        val explicitId = DiagnosticOperationContract.id(event)
+        val legacyStart = state == null && isLegacyStart(upper)
+        val legacyTerminal = state == null && isLegacyTerminal(upper)
+        val operationId = explicitId ?: if (legacyStart || legacyTerminal) legacyOperationKey(event, upper) else ""
 
         if (traceId.isNotBlank()) rememberOrigin(traceOrigins, traceId, origin)
-        if (operationId.isNotBlank() && state !in TERMINAL_STATES && !(state == null && isLegacyTerminal(upper))) {
+        if (operationId.isNotBlank() && state !in TERMINAL_STATES && !legacyTerminal) {
             rememberOrigin(operationOrigins, operationId, origin)
         }
 
-        if (state in TERMINAL_STATES || state == null && isLegacyTerminal(upper)) {
+        if (operationId.isNotBlank() && (state in TERMINAL_STATES || legacyTerminal)) {
             operationOrigins.remove(operationId)
         }
     }

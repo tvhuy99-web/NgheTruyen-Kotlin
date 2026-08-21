@@ -28,9 +28,11 @@ object AndroidAudioTrackDecoder {
         targetSampleRate: Int,
         targetChannels: Int,
         destination: File,
+        maxDecodeDurationUs: Long? = null,
     ) {
         require(targetSampleRate in 8_000..192_000)
         require(targetChannels in 1..2)
+        require(maxDecodeDurationUs == null || maxDecodeDurationUs > 0L)
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
         val raw = File(destination.parentFile, "${destination.name}.decoded.pcm")
@@ -62,18 +64,20 @@ object AndroidAudioTrackDecoder {
                             val inputBuffer = codec.getInputBuffer(inputIndex)
                                 ?: throw IOException("Audio decoder không cung cấp input buffer.")
                             inputBuffer.clear()
+                            val sampleTimeUs = extractor.sampleTime.coerceAtLeast(0L)
                             val size = extractor.readSampleData(inputBuffer, 0)
-                            if (size < 0) {
+                            val durationReached = maxDecodeDurationUs != null && sampleTimeUs >= maxDecodeDurationUs
+                            if (size < 0 || durationReached) {
                                 codec.queueInputBuffer(
                                     inputIndex,
                                     0,
                                     0,
-                                    0L,
+                                    sampleTimeUs,
                                     MediaCodec.BUFFER_FLAG_END_OF_STREAM,
                                 )
                                 inputDone = true
                             } else {
-                                codec.queueInputBuffer(inputIndex, 0, size, extractor.sampleTime.coerceAtLeast(0L), 0)
+                                codec.queueInputBuffer(inputIndex, 0, size, sampleTimeUs, 0)
                                 extractor.advance()
                             }
                         }

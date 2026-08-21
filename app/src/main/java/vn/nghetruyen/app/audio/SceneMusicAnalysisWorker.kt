@@ -15,7 +15,9 @@ import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import vn.nghetruyen.app.NgheTruyenApplication
 
 /**
@@ -51,6 +53,7 @@ class SceneMusicAnalysisWorker(
         val target = (requestedTarget.takeIf(Float::isFinite) ?: defaultTarget)
             .coerceIn(PcmLoudnessEstimator.MIN_TARGET_LUFS, maxTarget)
         val forceRemeasure = inputData.getBoolean(KEY_FORCE_REMEASURE, false)
+        val fastFreesound = inputData.getBoolean(KEY_FAST_FREESOUND, false)
 
         if (forceRemeasure) {
             invalidateStoredNormalization(trackId, target)
@@ -83,18 +86,27 @@ class SceneMusicAnalysisWorker(
             )
         }
 
-        val temp = File(applicationContext.cacheDir, "scene-analysis/$trackId.wav")
+        val temp = if (fastFreesound) null else File(applicationContext.cacheDir, "scene-analysis/$trackId.wav")
         return try {
-            analysisMutex.withLock {
-                temp.parentFile?.mkdirs()
-                AndroidAudioTrackDecoder.decodeToWave(
-                    context = applicationContext,
-                    uri = Uri.parse(track.uri),
-                    targetSampleRate = 44_100,
-                    targetChannels = 2,
-                    destination = temp,
-                )
-                val analysis = PcmLoudnessEstimator.analyze(temp)
+            val analyzeAndPersist: suspend () -> Result = {
+                val analysis = if (fastFreesound) {
+                    AndroidAudioLoudnessAnalyzer.analyze(
+                        context = applicationContext,
+                        uri = Uri.parse(track.uri),
+                        maxDecodeDurationUs = fastAnalysisDurationUs(kind),
+                    )
+                } else {
+                    val destination = requireNotNull(temp)
+                    destination.parentFile?.mkdirs()
+                    AndroidAudioTrackDecoder.decodeToWave(
+                        context = applicationContext,
+                        uri = Uri.parse(track.uri),
+                        targetSampleRate = 44_100,
+                        targetChannels = 2,
+                        destination = destination,
+                    )
+                    PcmLoudnessEstimator.analyze(destination)
+                }
                 val normalization = PcmLoudnessEstimator.calculateNormalization(
                     analysis.loudnessLufs,
                     analysis.peakDbfs,
@@ -115,6 +127,11 @@ class SceneMusicAnalysisWorker(
                     ),
                 )
             }
+            if (fastFreesound) {
+                freesoundAnalysisSemaphore.withPermit { analyzeAndPersist() }
+            } else {
+                analysisMutex.withLock { analyzeAndPersist() }
+            }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Throwable) {
@@ -126,7 +143,7 @@ class SceneMusicAnalysisWorker(
                 Result.failure(workDataOf(KEY_ERROR to message.take(300)))
             }
         } finally {
-            temp.delete()
+            temp?.delete()
         }
     }
 
@@ -191,6 +208,7 @@ class SceneMusicAnalysisWorker(
         private const val KEY_TRACK_ID = "track_id"
         private const val KEY_TARGET_LUFS = "target_lufs"
         private const val KEY_FORCE_REMEASURE = "force_remeasure"
+        private const val KEY_FAST_FREESOUND = "fast_freesound"
         private const val KEY_LOUDNESS = "loudness_lufs"
         private const val KEY_PEAK = "peak_dbfs"
         private const val KEY_GAIN_DB = "normalization_gain_db"
@@ -198,17 +216,29 @@ class SceneMusicAnalysisWorker(
         private const val KEY_ERROR = "error"
         private const val MAX_RETRY_ATTEMPTS = 2
         private const val RETRY_BACKOFF_SECONDS = 10L
+        internal const val MAX_PARALLEL_FREESOUND_ANALYSES = 4
         private val analysisMutex = Mutex()
+        private val freesoundAnalysisSemaphore = Semaphore(MAX_PARALLEL_FREESOUND_ANALYSES)
+
+        internal fun fastAnalysisDurationUs(kind: AudioAssetKind): Long = when (kind) {
+            // Mode 3 only: cap the decoded measurement window so 70-150s previews do not
+            // block narration startup for tens of seconds. Original MP3/OGG bytes are untouched.
+            AudioAssetKind.MUSIC -> 24_000_000L
+            AudioAssetKind.AMBIENCE -> 20_000_000L
+            AudioAssetKind.SFX -> 10_000_000L
+        }
 
         fun enqueue(
             context: Context,
             trackId: String,
             targetLufs: Float? = null,
             forceRemeasure: Boolean = false,
+            fastFreesound: Boolean = false,
         ): UUID {
             val data = Data.Builder()
                 .putString(KEY_TRACK_ID, trackId)
                 .putBoolean(KEY_FORCE_REMEASURE, forceRemeasure)
+                .putBoolean(KEY_FAST_FREESOUND, fastFreesound)
             targetLufs?.takeIf(Float::isFinite)?.let { data.putFloat(KEY_TARGET_LUFS, it) }
             val request = OneTimeWorkRequestBuilder<SceneMusicAnalysisWorker>()
                 .setInputData(data.build())

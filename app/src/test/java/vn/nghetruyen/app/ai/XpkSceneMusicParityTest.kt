@@ -53,7 +53,7 @@ class XpkSceneMusicParityTest {
         assertTrue(block.instructions.contains("[PREVIOUS_UNIT offset=-1"))
         assertTrue(block.instructions.contains("Không đặt mục tiêu về số lần đổi nhạc"))
         assertTrue(block.instructions.contains("Đổi tại đúng UNIT đầu tiên"))
-        assertTrue(block.instructions.contains("Ổn định quan trọng hơn phản ứng theo từng câu"))
+        assertTrue(block.instructions.contains("Ổn định quan trọng hơn phản ứng máy móc theo từ khóa"))
         assertTrue(block.instructions.contains("0 | Sắc thái: im lặng"))
         assertTrue(block.instructions.contains("Im lặng là một lựa chọn bình đẳng với track"))
         assertEquals(setOf("1", "2", "3"), block.trackAliasToId.keys)
@@ -188,19 +188,19 @@ class XpkSceneMusicParityTest {
     }
 
     @Test
-    fun validatorRejectsOneUnitMiddleSceneFlicker() {
+    fun validatorAllowsOneUnitMusicSceneWhileKeepingOneTrackAtATime() {
         val units = (1..5).map { "P${it.toString().padStart(4, '0')}-U01" }
-        assertFails {
-            XpkSceneMusicParity.validateScenes(
-                listOf(
-                    XpkSceneMusicParity.RawScene(units[0], units[1], "a"),
-                    XpkSceneMusicParity.RawScene(units[2], units[2], "b"),
-                    XpkSceneMusicParity.RawScene(units[3], units[4], "a"),
-                ),
-                units,
-                listOf("a", "b"),
-            )
-        }
+        val scenes = XpkSceneMusicParity.validateScenes(
+            listOf(
+                XpkSceneMusicParity.RawScene(units[0], units[1], "a"),
+                XpkSceneMusicParity.RawScene(units[2], units[2], "b"),
+                XpkSceneMusicParity.RawScene(units[3], units[4], "a"),
+            ),
+            units,
+            listOf("a", "b"),
+        )
+        assertEquals(3, scenes.size)
+        assertEquals("b", scenes[1].trackId)
     }
 
     @Test

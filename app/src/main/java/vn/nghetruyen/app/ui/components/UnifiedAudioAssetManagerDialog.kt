@@ -42,23 +42,25 @@ import kotlinx.coroutines.launch
 import vn.nghetruyen.app.NgheTruyenApplication
 import vn.nghetruyen.app.audio.AudioAssetClassifier
 import vn.nghetruyen.app.audio.AudioAssetKind
+import vn.nghetruyen.app.audio.AudioAssetManagerJournalStore
 import vn.nghetruyen.app.audio.AudioDirectionPreferences
 import vn.nghetruyen.app.audio.PcmLoudnessEstimator
 import vn.nghetruyen.app.audio.SceneMusicAnalysisWorker
 import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
+import vn.nghetruyen.app.freesound.FreesoundCategory
+import vn.nghetruyen.app.freesound.FreesoundDuration
+import vn.nghetruyen.app.freesound.FreesoundImporter
+import vn.nghetruyen.app.freesound.FreesoundSearchPreferences
+import vn.nghetruyen.app.freesound.FreesoundSort
 import vn.nghetruyen.app.playback.ReaderPlaybackService
 
-/**
- * Canonical asset-library dialog for MUSIC, AMBIENCE and SFX.
- * The Reader music library is the UX reference, so all three kinds expose the same bulk controls:
- * multi-file add, paste descriptions, copy all names/descriptions, clear/save/cancel, plus per-file
- * preview, normalization, edit, copy, enable/disable, reorder, category move and delete.
- */
+/** Canonical asset-library dialog shared by MUSIC, AMBIENCE and SFX. */
 @Composable
 fun UnifiedAudioAssetManagerDialog(
     kind: AudioAssetKind,
     tracks: List<SceneMusicTrackEntity>,
     normalizationTargetLufs: Float,
+    managedFreesoundOnly: Boolean = false,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -66,6 +68,7 @@ fun UnifiedAudioAssetManagerDialog(
     val repository = application.container.libraryRepository
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
+    val managerJournal = remember(context) { AudioAssetManagerJournalStore(context) }
     val normalizationTarget = normalizationTargetLufs
         .coerceIn(PcmLoudnessEstimator.MIN_TARGET_LUFS, PcmLoudnessEstimator.MAX_TARGET_LUFS)
 
@@ -76,6 +79,7 @@ fun UnifiedAudioAssetManagerDialog(
     var draft by remember(kind) { mutableStateOf(initialRows) }
     var movedTracks by remember(kind) { mutableStateOf<Map<String, SceneMusicTrackEntity>>(emptyMap()) }
     var transientAddedIds by remember(kind) { mutableStateOf<Set<String>>(emptySet()) }
+    var journalLoaded by remember(kind) { mutableStateOf(false) }
     val baselineIds = remember(kind) { initialRows.mapTo(linkedSetOf()) { it.id } }
     var search by remember(kind) { mutableStateOf("") }
     var selectedTrackId by remember(kind) { mutableStateOf<String?>(null) }
@@ -87,6 +91,9 @@ fun UnifiedAudioAssetManagerDialog(
     var bulkUpdates by remember(kind) { mutableStateOf<Map<String, String>>(emptyMap()) }
     var bulkErrors by remember(kind) { mutableStateOf<List<String>>(emptyList()) }
     var showClearAllConfirm by remember(kind) { mutableStateOf(false) }
+    var showFreesoundDialog by remember(kind) { mutableStateOf(false) }
+    var showFreesoundAdvancedTools by remember(kind) { mutableStateOf(false) }
+    var similarTrack by remember(kind) { mutableStateOf<SceneMusicTrackEntity?>(null) }
     var previewPlayer by remember(kind) { mutableStateOf<MediaPlayer?>(null) }
 
     fun notify(message: String) {
@@ -115,22 +122,37 @@ fun UnifiedAudioAssetManagerDialog(
             .mapIndexed { index, row -> row.copy(orderIndex = index) }
         selectedTrackId = null
         notify(
-            "Đã đánh dấu chuyển ‘${track.title}’ sang ${kindShortName(destination)}. " +
-                "Nhấn LƯU DANH SÁCH để xác nhận.",
+            "Đã đánh dấu chuyển ‘${track.title}’ sang ${kindShortName(destination)}. Nhấn LƯU DANH SÁCH để xác nhận.",
         )
     }
 
     fun cancelLibrary() {
         stopPreview()
-        val idsToDelete = transientAddedIds.toSet()
-        if (idsToDelete.isNotEmpty()) {
-            val app = application
-            CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-                val dao = app.container.database.sceneMusicTrackDao()
-                idsToDelete.forEach { dao.delete(it) }
+        val stateIds = transientAddedIds.toSet()
+        val app = application
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            val dao = app.container.database.sceneMusicTrackDao()
+            val idsToDelete = stateIds + managerJournal.load(kind)
+            idsToDelete.forEach { id ->
+                dao.get(id)?.let { track -> FreesoundImporter.deleteManagedFile(context, track.uri) }
+                dao.delete(id)
             }
+            managerJournal.clear(kind)
         }
         onDismiss()
+    }
+
+    LaunchedEffect(kind) {
+        val recovered = managerJournal.load(kind)
+        if (recovered.isNotEmpty()) {
+            transientAddedIds = transientAddedIds + recovered
+            notify("Đã khôi phục ${recovered.size} tệp chưa lưu từ phiên quản lý trước.")
+        }
+        journalLoaded = true
+    }
+
+    LaunchedEffect(kind, transientAddedIds, journalLoaded) {
+        if (journalLoaded) managerJournal.save(kind, transientAddedIds)
     }
 
     DisposableEffect(kind) {
@@ -144,9 +166,7 @@ fun UnifiedAudioAssetManagerDialog(
             it.id !in baselineIds && it.id !in draftIds && it.id !in movedIds
         }
         if (added.isNotEmpty()) {
-            draft = (draft + added)
-                .take(500)
-                .mapIndexed { index, row -> row.copy(orderIndex = index) }
+            draft = (draft + added).take(500).mapIndexed { index, row -> row.copy(orderIndex = index) }
         }
     }
 
@@ -179,7 +199,7 @@ fun UnifiedAudioAssetManagerDialog(
 
     AlertDialog(
         onDismissRequest = ::cancelLibrary,
-        title = { Text(libraryTitle(kind)) },
+        title = { Text(if (managedFreesoundOnly) "${libraryTitle(kind)} · FREESOUND ĐÃ TẢI" else libraryTitle(kind)) },
         text = {
             Column(Modifier.heightIn(max = 620.dp).verticalScroll(rememberScrollState())) {
                 OutlinedTextField(
@@ -208,17 +228,41 @@ fun UnifiedAudioAssetManagerDialog(
         },
         confirmButton = {
             Column(Modifier.fillMaxWidth()) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (!managedFreesoundOnly) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Button(
+                            onClick = { launcher.launch(arrayOf("audio/*")) },
+                            enabled = draft.size < 500,
+                            modifier = Modifier.weight(1f),
+                        ) { Text("THÊM TỆP") }
+                        Button(
+                            onClick = {
+                                stopPreview()
+                                showFreesoundDialog = true
+                            },
+                            modifier = Modifier.weight(1f),
+                        ) { Text("TÌM TRÊN FREESOUND") }
+                    }
+                } else {
                     Button(
-                        onClick = { launcher.launch(arrayOf("audio/*")) },
-                        enabled = draft.size < 500,
-                        modifier = Modifier.weight(1f),
-                    ) { Text("THÊM TỆP") }
-                    Button(
-                        onClick = { bulkText = ""; showBulkDialog = true },
-                        modifier = Modifier.weight(1f),
-                    ) { Text("DÁN MÔ TẢ") }
+                        onClick = {
+                            stopPreview()
+                            showFreesoundDialog = true
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("TÌM & TẢI THÊM TRÊN FREESOUND") }
                 }
+                Button(
+                    onClick = {
+                        stopPreview()
+                        showFreesoundAdvancedTools = true
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("CÔNG CỤ FREESOUND NÂNG CAO") }
+                Button(
+                    onClick = { bulkText = ""; showBulkDialog = true },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("DÁN MÔ TẢ") }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Button(
                         onClick = {
@@ -265,15 +309,15 @@ fun UnifiedAudioAssetManagerDialog(
                                 scope.launch {
                                     val dao = application.container.database.sceneMusicTrackDao()
                                     val existing = dao.listAll()
-                                    val existingKind = existing.filter { AudioAssetClassifier.classify(it) == kind }
-                                    val now = System.currentTimeMillis()
-                                    val normalized = draft.mapIndexed { index, row ->
-                                        row.copy(orderIndex = index, updatedAt = now)
+                                    val existingKind = existing.filter { track ->
+                                        AudioAssetClassifier.classify(track) == kind &&
+                                            (!managedFreesoundOnly || FreesoundImporter.soundIdFromManagedUri(track.uri) != null)
                                     }
+                                    val now = System.currentTimeMillis()
+                                    val normalized = draft.mapIndexed { index, row -> row.copy(orderIndex = index, updatedAt = now) }
                                     val destinationCounts = AudioAssetKind.entries.associateWith { destination ->
                                         existing.count {
-                                            it.id !in movedTracks.keys &&
-                                                AudioAssetClassifier.classify(it) == destination
+                                            it.id !in movedTracks.keys && AudioAssetClassifier.classify(it) == destination
                                         }
                                     }.toMutableMap()
                                     val movedRows = movedTracks.values.map { row ->
@@ -282,9 +326,11 @@ fun UnifiedAudioAssetManagerDialog(
                                         destinationCounts[destination] = order + 1
                                         row.copy(orderIndex = order, updatedAt = now)
                                     }
-                                    val keepIds = (normalized.asSequence() + movedRows.asSequence())
-                                        .mapTo(hashSetOf()) { it.id }
-                                    existingKind.filter { it.id !in keepIds }.forEach { dao.delete(it.id) }
+                                    val keepIds = (normalized.asSequence() + movedRows.asSequence()).mapTo(hashSetOf()) { it.id }
+                                    existingKind.filter { it.id !in keepIds }.forEach { track ->
+                                        FreesoundImporter.deleteManagedFile(context, track.uri)
+                                        dao.delete(track.id)
+                                    }
                                     dao.upsertAll(normalized + movedRows)
 
                                     if (movedRows.isNotEmpty()) {
@@ -300,6 +346,7 @@ fun UnifiedAudioAssetManagerDialog(
                                         }
                                     }
 
+                                    managerJournal.clear(kind)
                                     transientAddedIds = emptySet()
                                     movedTracks = emptyMap()
                                     notify("Đã lưu ${kindDisplayName(kind).lowercase()}.")
@@ -314,6 +361,51 @@ fun UnifiedAudioAssetManagerDialog(
             }
         },
     )
+
+    if (showFreesoundDialog) {
+        FreesoundSearchDialog(
+            kind = kind,
+            normalizationTargetLufs = normalizationTarget,
+            onImported = { result -> transientAddedIds = transientAddedIds + result.trackId },
+            onDismiss = { showFreesoundDialog = false },
+        )
+    }
+
+    if (showFreesoundAdvancedTools) {
+        FreesoundAdvancedToolsDialog(
+            kind = kind,
+            tracks = draft,
+            normalizationTargetLufs = normalizationTarget,
+            onUseQuery = { query ->
+                FreesoundSearchPreferences(context).rememberSearch(
+                    category = freesoundCategory(kind),
+                    query = query,
+                    duration = FreesoundDuration.RECOMMENDED,
+                    sort = FreesoundSort.RELEVANCE,
+                )
+                showFreesoundAdvancedTools = false
+                showFreesoundDialog = true
+            },
+            onImported = { result -> transientAddedIds = transientAddedIds + result.trackId },
+            onStageRemoveTrack = { trackId ->
+                draft = draft.filterNot { it.id == trackId }
+                    .mapIndexed { index, row -> row.copy(orderIndex = index) }
+                movedTracks = movedTracks - trackId
+                selectedTrackId = null
+            },
+            onDismiss = { showFreesoundAdvancedTools = false },
+        )
+    }
+
+    similarTrack?.let { track ->
+        FreesoundSimilarAssetDialog(
+            kind = kind,
+            track = track,
+            normalizationTargetLufs = normalizationTarget,
+            onImported = { result -> transientAddedIds = transientAddedIds + result.trackId },
+            onDismiss = { similarTrack = null },
+        )
+    }
 
     selectedTrackId?.let { selectedId ->
         draft.firstOrNull { it.id == selectedId }?.let { track ->
@@ -340,9 +432,7 @@ fun UnifiedAudioAssetManagerDialog(
                                     normalizationTarget,
                                 ).gainDb
                             } else 0f
-                            val previewLevel = (
-                                track.volume * PcmLoudnessEstimator.gainDbToLinear(gainDb)
-                            ).coerceIn(0f, 1f)
+                            val previewLevel = (track.volume * PcmLoudnessEstimator.gainDbToLinear(gainDb)).coerceIn(0f, 1f)
                             previewPlayer = runCatching {
                                 MediaPlayer.create(context, Uri.parse(track.uri))
                             }.getOrNull()?.also { player ->
@@ -351,10 +441,7 @@ fun UnifiedAudioAssetManagerDialog(
                                     runCatching { completed.release() }
                                     if (previewPlayer === completed) {
                                         previewPlayer = null
-                                        ReaderPlaybackService.command(
-                                            context,
-                                            ReaderPlaybackService.ACTION_MUSIC_PREVIEW_END,
-                                        )
+                                        ReaderPlaybackService.command(context, ReaderPlaybackService.ACTION_MUSIC_PREVIEW_END)
                                     }
                                 }
                                 player.start()
@@ -364,10 +451,7 @@ fun UnifiedAudioAssetManagerDialog(
                                         runCatching { player.stop() }
                                         runCatching { player.release() }
                                         previewPlayer = null
-                                        ReaderPlaybackService.command(
-                                            context,
-                                            ReaderPlaybackService.ACTION_MUSIC_PREVIEW_END,
-                                        )
+                                        ReaderPlaybackService.command(context, ReaderPlaybackService.ACTION_MUSIC_PREVIEW_END)
                                     }
                                 }
                             }
@@ -384,6 +468,11 @@ fun UnifiedAudioAssetManagerDialog(
                             editingTrack = track
                             selectedTrackId = null
                         }
+                        UnifiedAssetActionButton("TÌM ÂM THANH TƯƠNG TỰ") {
+                            stopPreview()
+                            similarTrack = track
+                            selectedTrackId = null
+                        }
                         UnifiedAssetActionButton("SAO CHÉP TÊN") {
                             clipboard.setText(AnnotatedString(track.title))
                             notify("Đã sao chép tên.")
@@ -393,9 +482,7 @@ fun UnifiedAudioAssetManagerDialog(
                             notify(if (description.isBlank()) "Mô tả đang trống." else "Đã sao chép mô tả.")
                         }
                         UnifiedAssetActionButton(if (track.enabled) "TẮT TỆP NÀY" else "BẬT TỆP NÀY") {
-                            draft = draft.map {
-                                if (it.id == track.id) it.copy(enabled = !track.enabled) else it
-                            }
+                            draft = draft.map { if (it.id == track.id) it.copy(enabled = !track.enabled) else it }
                             selectedTrackId = null
                         }
                         AudioAssetKind.entries.filter { it != kind }.forEach { destination ->
@@ -439,9 +526,7 @@ fun UnifiedAudioAssetManagerDialog(
 
     editingTrack?.let { track ->
         var title by remember(track.id, track.title) { mutableStateOf(track.title) }
-        var description by remember(track.id, track.tagsCsv) {
-            mutableStateOf(assetDescription(kind, track.tagsCsv))
-        }
+        var description by remember(track.id, track.tagsCsv) { mutableStateOf(assetDescription(kind, track.tagsCsv)) }
         AlertDialog(
             onDismissRequest = { editingTrack = null },
             title = { Text("CHỈNH SỬA TỆP ÂM THANH") },
@@ -484,9 +569,7 @@ fun UnifiedAudioAssetManagerDialog(
                 TextButton(onClick = {
                     val cleanTitle = title.trim().ifBlank { track.title }
                     draft = draft.map {
-                        if (it.id == track.id) {
-                            it.copy(title = cleanTitle, tagsCsv = tagsWithDescription(kind, description))
-                        } else it
+                        if (it.id == track.id) it.copy(title = cleanTitle, tagsCsv = tagsWithDescription(kind, description)) else it
                     }
                     editingTrack = null
                 }) { Text("LƯU") }
@@ -503,8 +586,7 @@ fun UnifiedAudioAssetManagerDialog(
             confirmButton = {
                 TextButton(onClick = {
                     stopPreview()
-                    draft = draft.filterNot { it.id == track.id }
-                        .mapIndexed { index, row -> row.copy(orderIndex = index) }
+                    draft = draft.filterNot { it.id == track.id }.mapIndexed { index, row -> row.copy(orderIndex = index) }
                     deleteTrack = null
                 }) { Text("XÓA") }
             },
@@ -549,9 +631,7 @@ fun UnifiedAudioAssetManagerDialog(
                             name.isBlank() -> errors += "Dòng ${index + 1}: thiếu tên tệp."
                             track == null -> errors += "Dòng ${index + 1}: không tìm thấy tệp “$name”."
                             description.isBlank() -> Unit
-                            description != "[XÓA]" && description.length > 300 -> {
-                                errors += "Dòng ${index + 1}: mô tả có ${description.length} ký tự, vượt giới hạn 300."
-                            }
+                            description != "[XÓA]" && description.length > 300 -> errors += "Dòng ${index + 1}: mô tả có ${description.length} ký tự, vượt giới hạn 300."
                             else -> updates[track.id] = if (description == "[XÓA]") "" else description
                         }
                     }
@@ -581,9 +661,7 @@ fun UnifiedAudioAssetManagerDialog(
                 if (bulkUpdates.isNotEmpty()) {
                     TextButton(onClick = {
                         draft = draft.map { row ->
-                            bulkUpdates[row.id]?.let {
-                                row.copy(tagsCsv = tagsWithDescription(kind, it))
-                            } ?: row
+                            bulkUpdates[row.id]?.let { row.copy(tagsCsv = tagsWithDescription(kind, it)) } ?: row
                         }
                         showBulkResult = false
                         showBulkDialog = false
@@ -651,6 +729,12 @@ private fun kindShortName(kind: AudioAssetKind): String = when (kind) {
     AudioAssetKind.SFX -> "hiệu ứng âm thanh"
 }
 
+private fun freesoundCategory(kind: AudioAssetKind): FreesoundCategory = when (kind) {
+    AudioAssetKind.MUSIC -> FreesoundCategory.MUSIC
+    AudioAssetKind.AMBIENCE -> FreesoundCategory.AMBIENCE
+    AudioAssetKind.SFX -> FreesoundCategory.SFX
+}
+
 private fun displayName(context: android.content.Context, uri: Uri): String {
     val fromProvider = runCatching {
         context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
@@ -686,8 +770,7 @@ private fun stripAssetTypeMarkers(value: String): String =
         .trim()
 
 @Suppress("UNUSED_PARAMETER")
-private fun assetDescription(kind: AudioAssetKind, tagsCsv: String): String =
-    stripAssetTypeMarkers(tagsCsv)
+private fun assetDescription(kind: AudioAssetKind, tagsCsv: String): String = stripAssetTypeMarkers(tagsCsv)
 
 private fun tagsWithDescription(kind: AudioAssetKind, description: String): String {
     val marker = typeMarker(kind)

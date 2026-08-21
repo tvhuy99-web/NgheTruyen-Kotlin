@@ -4364,8 +4364,28 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     message = "Đang phân vai chương hiện tại.",
                 )
             }
+            if (includeVoice) {
+                val reset = runCatching {
+                    container.narrationPlanCoordinator.resetChapterNarrationState(
+                        content = original,
+                        clearFreesoundCaches = true,
+                    )
+                }
+                if (reset.isFailure) {
+                    val message = reset.exceptionOrNull()?.message ?: "Không xóa được dữ liệu phân vai cũ."
+                    PlaybackQueueStore.setNarrationAutomation(
+                        stage = NarrationAutomationStage.FAILED,
+                        progress = 1f,
+                        message = message,
+                    )
+                    mutableState.update { it.copy(aiBusy = false, message = message) }
+                    return@launch
+                }
+            }
             var attempt = 0
-            while (state.value.chapterContent?.chapter?.id == original.chapter.id) {
+            while (state.value.chapterContent?.chapter?.id == original.chapter.id &&
+                attempt < MAX_MANUAL_NARRATION_ATTEMPTS
+            ) {
                 attempt += 1
                 val planningAttempt = runCatching {
                     container.narrationPlanCoordinator.ensurePlans(
@@ -4390,7 +4410,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 val assignmentCount = container.narrationPlanCoordinator.voicePlanAssignmentCount(original)
-                if (assignmentCount > 0) {
+                if (result?.freesoundRetryExhausted == true) {
+                    val message = "Freesound thất bại sau 3 lần. Không có kế hoạch âm thanh hợp lệ để phát."
+                    PlaybackQueueStore.setNarrationAutomation(
+                        stage = NarrationAutomationStage.FAILED,
+                        progress = 1f,
+                        message = message,
+                    )
+                    mutableState.update { it.copy(aiBusy = false, message = message) }
+                    return@launch
+                }
+                val mode3Incomplete = container.narrationPlanCoordinator.storyAudioSourceMode() ==
+                    vn.nghetruyen.app.audio.StoryAudioSourceMode.AI_FREESOUND &&
+                    result?.freesoundRetryRequired == true
+                if (assignmentCount > 0 && !mode3Incomplete) {
                     PlaybackQueueStore.setNarrationAutomation(
                         stage = NarrationAutomationStage.CURRENT_READY,
                         progress = 1f,
@@ -4429,11 +4462,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     message = retryMessage,
                 )
                 mutableState.update { it.copy(message = null) }
+                if (attempt >= MAX_MANUAL_NARRATION_ATTEMPTS) {
+                    val finalMessage = "Phân vai/Mode 3 thất bại sau $MAX_MANUAL_NARRATION_ATTEMPTS lần."
+                    PlaybackQueueStore.setNarrationAutomation(
+                        stage = NarrationAutomationStage.FAILED,
+                        progress = 1f,
+                        message = finalMessage,
+                    )
+                    mutableState.update { it.copy(aiBusy = false, message = finalMessage) }
+                    return@launch
+                }
                 delay(MANUAL_NARRATION_RETRY_DELAY_MS)
                 PlaybackQueueStore.setNarrationAutomation(
                     stage = NarrationAutomationStage.CURRENT_PLANNING,
                     progress = 0.2f,
-                    message = "Đang thử phân vai lại lần ${attempt + 1}.",
+                    message = "Đang thử phân vai lại lần ${attempt + 1}/$MAX_MANUAL_NARRATION_ATTEMPTS.",
                 )
             }
             mutableState.update { it.copy(aiBusy = false) }
@@ -4756,6 +4799,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private companion object {
         const val MANUAL_NARRATION_RETRY_DELAY_MS = 5_000L
+        const val MAX_MANUAL_NARRATION_ATTEMPTS = 3
         const val MAX_READER_CATALOG_PAGE_HOPS = 30
         const val DIAGNOSTIC_UI_DEBOUNCE_MS = 120L
     }

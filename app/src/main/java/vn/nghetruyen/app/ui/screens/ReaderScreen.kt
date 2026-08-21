@@ -83,6 +83,7 @@ import vn.nghetruyen.app.audio.AudioAssetClassifier
 import vn.nghetruyen.app.audio.AudioAssetKind
 import vn.nghetruyen.app.audio.AudioExportRequest
 import vn.nghetruyen.app.audio.AudioExportScope
+import vn.nghetruyen.app.audio.StoryAudioSourceMode
 import vn.nghetruyen.app.core.common.AppResult
 import vn.nghetruyen.app.core.model.AudioExportFormat
 import vn.nghetruyen.app.core.model.ReaderLayoutMode
@@ -253,6 +254,7 @@ fun ReaderScreen(
     var musicDuckDb by remember { mutableStateOf((-20.0 * log10(state.backgroundMusicDuckFactor.coerceAtLeast(0.0630957f).toDouble())).toFloat().coerceIn(0f, 24f)) }
     var musicAttackMs by remember { mutableIntStateOf(1850) }
     var musicReleaseMs by remember { mutableIntStateOf(2050) }
+    var storyAudioSourceMode by remember { mutableStateOf(app.container.storyAudioSourceModeStore.get()) }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -299,6 +301,7 @@ fun ReaderScreen(
 
     LaunchedEffect(showMusicDialog) {
         if (showMusicDialog) {
+            storyAudioSourceMode = app.container.storyAudioSourceModeStore.get()
             val settings = app.container.settingsRepository.snapshot()
             musicEnabled = settings.backgroundMusicEnabled
             musicMode = if (settings.sceneMusicPlaybackMode == SceneMusicPlaybackMode.SHUFFLE) SceneMusicPlaybackMode.SHUFFLE else SceneMusicPlaybackMode.SEQUENTIAL
@@ -746,15 +749,11 @@ fun ReaderScreen(
     if (showMusicDialog) {
         var musicModeExpanded by remember { mutableStateOf(false) }
         val musicTracks = state.sceneMusicTracks.filter { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }
+        val manualMode = storyAudioSourceMode == StoryAudioSourceMode.LOCAL_MANUAL
         AlertDialog(
             onDismissRequest = { showMusicDialog = false },
-            title = { Text("NHẠC NỀN") },
+            title = { Text("ÂM THANH TRUYỆN") },
             text = { Column(Modifier.heightIn(max = 620.dp).verticalScroll(rememberScrollState())) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Bật nhạc nền", Modifier.weight(1f))
-                    Switch(musicEnabled, { musicEnabled = it })
-                }
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 vn.nghetruyen.app.ui.components.AudioDirectionLayerSwitches(
                     musicTrackCount = musicTracks.size,
                     onManageMusic = {
@@ -765,32 +764,48 @@ fun ReaderScreen(
                         showMusicLibrary = true
                     },
                     modifier = Modifier.fillMaxWidth(),
+                    onSourceModeChanged = { mode ->
+                        storyAudioSourceMode = mode
+                        musicModeExpanded = false
+                    },
                 )
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                Text("Chế độ phát", fontWeight = FontWeight.SemiBold)
-                Button(onClick = { musicModeExpanded = true }, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (musicMode == SceneMusicPlaybackMode.SHUFFLE) "Phát ngẫu nhiên" else "Phát lần lượt")
+                if (manualMode) {
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Bật nhạc nền thủ công", Modifier.weight(1f))
+                        Switch(musicEnabled, { musicEnabled = it })
+                    }
+                    Text("Chế độ phát", fontWeight = FontWeight.SemiBold)
+                    Button(onClick = { musicModeExpanded = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (musicMode == SceneMusicPlaybackMode.SHUFFLE) "Phát ngẫu nhiên" else "Phát lần lượt")
+                    }
+                    DropdownMenu(expanded = musicModeExpanded, onDismissRequest = { musicModeExpanded = false }) {
+                        DropdownMenuItem(text = { Text("Phát lần lượt") }, onClick = { musicMode = SceneMusicPlaybackMode.SEQUENTIAL; musicModeExpanded = false })
+                        DropdownMenuItem(text = { Text("Phát ngẫu nhiên") }, onClick = { musicMode = SceneMusicPlaybackMode.SHUFFLE; musicModeExpanded = false })
+                    }
+                    ReaderFloatSlider("Giảm nhạc khi giọng đọc phát", musicDuckDb, 0f, 24f, steps = 23, shown = { "%.0f dB".format(it) }) { musicDuckDb = it }
                 }
-                DropdownMenu(expanded = musicModeExpanded, onDismissRequest = { musicModeExpanded = false }) {
-                    DropdownMenuItem(text = { Text("Phát lần lượt") }, onClick = { musicMode = SceneMusicPlaybackMode.SEQUENTIAL; musicModeExpanded = false })
-                    DropdownMenuItem(text = { Text("Phát ngẫu nhiên") }, onClick = { musicMode = SceneMusicPlaybackMode.SHUFFLE; musicModeExpanded = false })
-                }
-                ReaderFloatSlider("Giảm nhạc khi giọng đọc phát", musicDuckDb, 0f, 24f, steps = 23, shown = { "%.0f dB".format(it) }) { musicDuckDb = it }
             } },
             confirmButton = { TextButton(onClick = {
-                val activeCount = musicTracks.count { it.enabled }
-                if (musicEnabled && activeCount == 0) onMessage("Hãy bật ít nhất một bài trong danh sách nhạc trước.")
-                else scope.launch {
-                    val settings = app.container.settingsRepository
-                    settings.setBackgroundMusicEnabled(musicEnabled)
-                    settings.setSceneMusicPlaybackMode(musicMode)
-                    settings.setBackgroundMusicDuckFactor(10.0.pow(-musicDuckDb / 20.0).toFloat())
-                    settings.setBackgroundMusicAttackMillis(musicAttackMs)
-                    settings.setBackgroundMusicReleaseMillis(musicReleaseMs)
+                if (!manualMode) {
                     ReaderPlaybackService.command(context, ReaderPlaybackService.ACTION_REFRESH)
-                    onMessage("Đã lưu cài đặt nhạc nền."); showMusicDialog = false
+                    onMessage("Đã áp dụng ${storyAudioSourceMode.label}.")
+                    showMusicDialog = false
+                } else {
+                    val activeCount = musicTracks.count { it.enabled }
+                    if (musicEnabled && activeCount == 0) onMessage("Hãy bật ít nhất một bài trong danh sách nhạc trước.")
+                    else scope.launch {
+                        val settings = app.container.settingsRepository
+                        settings.setBackgroundMusicEnabled(musicEnabled)
+                        settings.setSceneMusicPlaybackMode(musicMode)
+                        settings.setBackgroundMusicDuckFactor(10.0.pow(-musicDuckDb / 20.0).toFloat())
+                        settings.setBackgroundMusicAttackMillis(musicAttackMs)
+                        settings.setBackgroundMusicReleaseMillis(musicReleaseMs)
+                        ReaderPlaybackService.command(context, ReaderPlaybackService.ACTION_REFRESH)
+                        onMessage("Đã lưu cài đặt phát thủ công."); showMusicDialog = false
+                    }
                 }
-            }) { Text("LƯU CÀI ĐẶT") } },
+            }) { Text(if (manualMode) "LƯU CÀI ĐẶT" else "ÁP DỤNG") } },
             dismissButton = { TextButton(onClick = { showMusicDialog = false }) { Text("ĐÓNG") } },
         )
     }

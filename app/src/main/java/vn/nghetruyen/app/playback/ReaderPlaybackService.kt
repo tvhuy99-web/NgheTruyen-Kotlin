@@ -205,6 +205,8 @@ class ReaderPlaybackService : Service() {
                 "phase" to phase,
                 "resultPresent" to (result != null).toString(),
                 "resolvedAssets" to (result?.freesoundResolvedAssets ?: 0).toString(),
+                "downloadedAssets" to (result?.freesoundDownloadedAssets ?: 0).toString(),
+                "reusedAssets" to (result?.freesoundReusedAssets ?: 0).toString(),
                 "musicPlanCreated" to (result?.musicPlanCreated ?: false).toString(),
                 "audioPlanCreated" to (result?.audioPlanCreated ?: false).toString(),
                 "freesoundPlanCreated" to (result?.freesoundPlanCreated ?: false).toString(),
@@ -2171,6 +2173,15 @@ class ReaderPlaybackService : Service() {
                 }
                 val result = attempt.getOrNull()
                 if (offset == 0) {
+                    val transferSummary = if (result == null) {
+                        FreesoundTransferSummary()
+                    } else {
+                        PlaybackQueueStore.consumeFreesoundTransferSummary(
+                            chapterId = chapter.chapter.id,
+                            currentDownloadedAssets = result.freesoundDownloadedAssets,
+                            currentReusedAssets = result.freesoundReusedAssets,
+                        )
+                    }
                     val assignmentCount = if (!planVoice || result == null) {
                         0
                     } else {
@@ -2205,8 +2216,8 @@ class ReaderPlaybackService : Service() {
                         else -> NarrationAutomationStatusFormatter.ready(
                             assignmentCount = assignmentCount,
                             resultPresent = true,
-                            downloadedAssets = result.freesoundDownloadedAssets,
-                            reusedAssets = result.freesoundReusedAssets,
+                            downloadedAssets = transferSummary.downloadedAssets,
+                            reusedAssets = transferSummary.reusedAssets,
                             retryRequired = result.freesoundRetryRequired,
                             audioLayersEnabled = mode3 && planAudio,
                             prefix = "Đã tải xong chương tiếp theo: ${chapter.chapter.title}",
@@ -2214,8 +2225,8 @@ class ReaderPlaybackService : Service() {
                             warning = warning,
                         )
                     }
-                    val downloadedAssets = result?.freesoundDownloadedAssets ?: 0
-                    val reusedAssets = result?.freesoundReusedAssets ?: 0
+                    val downloadedAssets = transferSummary.downloadedAssets
+                    val reusedAssets = transferSummary.reusedAssets
                     val targetMessage = if (!failed && result != null && planVoice && assignmentCount > 0) {
                         NarrationAutomationStatusFormatter.ready(
                             assignmentCount = assignmentCount,
@@ -2241,8 +2252,13 @@ class ReaderPlaybackService : Service() {
                         reusedAssets = reusedAssets,
                     )
                     if (failed) return@launch
-                } else if (result == null) {
-                    return@launch
+                } else {
+                    if (result == null) return@launch
+                    PlaybackQueueStore.rememberFreesoundTransferSummary(
+                        chapterId = chapter.chapter.id,
+                        downloadedAssets = result.freesoundDownloadedAssets,
+                        reusedAssets = result.freesoundReusedAssets,
+                    )
                 }
                 current = loadNextChapter(
                     PlaybackQueueStore.state.value.copy(

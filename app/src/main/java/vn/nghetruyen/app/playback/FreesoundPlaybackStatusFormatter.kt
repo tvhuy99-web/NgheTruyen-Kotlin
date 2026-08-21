@@ -12,8 +12,8 @@ internal object FreesoundPlaybackStatusFormatter {
         val parts = buildList {
             val downloaded = downloadedAssets.coerceAtLeast(0)
             val reused = reusedAssets.coerceAtLeast(0)
-            if (downloaded > 0) add("$downloaded tải mới")
-            if (reused > 0) add("$reused bộ nhớ tạm")
+            add("$downloaded tải mới")
+            add("$reused bộ nhớ tạm")
             if (!resultPresent) add("chưa có kế hoạch âm thanh")
             else if (retryRequired) add("còn thiếu")
         }

@@ -225,18 +225,7 @@ object PlaybackQueueStore {
     ) {
         val parentId = parentChapterId.trim()
         val targetId = targetChapterId.trim()
-        if (targetId.isNotEmpty() && (downloadedAssets > 0 || reusedAssets > 0)) {
-            synchronized(narrationTransferLock) {
-                prefetchedFreesoundTransfers[targetId] = FreesoundTransferSummary(
-                    downloadedAssets = downloadedAssets.coerceAtLeast(0),
-                    reusedAssets = reusedAssets.coerceAtLeast(0),
-                )
-                while (prefetchedFreesoundTransfers.size > MAX_PREFETCH_TRANSFER_ENTRIES) {
-                    val oldest = prefetchedFreesoundTransfers.keys.firstOrNull() ?: break
-                    prefetchedFreesoundTransfers.remove(oldest)
-                }
-            }
-        }
+        rememberFreesoundTransferSummary(targetId, downloadedAssets, reusedAssets)
 
         val current = mutable.value
         when {
@@ -250,6 +239,30 @@ object PlaybackQueueStore {
                     progress = progress,
                     message = targetMessage,
                 )
+        }
+    }
+
+    fun rememberFreesoundTransferSummary(
+        chapterId: String,
+        downloadedAssets: Int,
+        reusedAssets: Int,
+    ) {
+        val id = chapterId.trim()
+        if (id.isEmpty()) return
+        val incoming = FreesoundTransferSummary(
+            downloadedAssets = downloadedAssets.coerceAtLeast(0),
+            reusedAssets = reusedAssets.coerceAtLeast(0),
+        )
+        if (incoming.downloadedAssets == 0 && incoming.reusedAssets == 0) return
+        synchronized(narrationTransferLock) {
+            prefetchedFreesoundTransfers[id] = mergeFreesoundTransferSummaries(
+                previous = prefetchedFreesoundTransfers[id],
+                current = incoming,
+            )
+            while (prefetchedFreesoundTransfers.size > MAX_PREFETCH_TRANSFER_ENTRIES) {
+                val oldest = prefetchedFreesoundTransfers.keys.firstOrNull() ?: break
+                prefetchedFreesoundTransfers.remove(oldest)
+            }
         }
     }
 
@@ -267,12 +280,20 @@ object PlaybackQueueStore {
         val prefetched = synchronized(narrationTransferLock) {
             prefetchedFreesoundTransfers.remove(id)
         } ?: return current
+        return mergeFreesoundTransferSummaries(prefetched, current)
+    }
 
+    private fun mergeFreesoundTransferSummaries(
+        previous: FreesoundTransferSummary?,
+        current: FreesoundTransferSummary,
+    ): FreesoundTransferSummary {
+        if (previous == null) return current
+        val previousDownloads = previous.downloadedAssets.coerceAtLeast(0)
         return FreesoundTransferSummary(
-            downloadedAssets = prefetched.downloadedAssets + current.downloadedAssets,
+            downloadedAssets = previousDownloads + current.downloadedAssets.coerceAtLeast(0),
             reusedAssets = maxOf(
-                prefetched.reusedAssets,
-                current.reusedAssets - prefetched.downloadedAssets,
+                previous.reusedAssets.coerceAtLeast(0),
+                current.reusedAssets.coerceAtLeast(0) - previousDownloads,
             ).coerceAtLeast(0),
         )
     }

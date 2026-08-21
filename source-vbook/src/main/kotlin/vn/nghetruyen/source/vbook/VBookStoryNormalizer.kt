@@ -168,16 +168,40 @@ object VBookStoryNormalizer {
     private fun htmlToParagraphs(html: String): List<String> {
         if (html.isBlank()) return emptyList()
         val doc = Jsoup.parseBodyFragment(html)
-        doc.select("script,style,noscript,iframe").remove()
-        val blockTexts = doc.select("p,blockquote,li").mapNotNull { element ->
-            element.text().trim().takeIf(String::isNotBlank)
+        doc.select("script,style,noscript,iframe,template,[hidden]").remove()
+        doc.select("[style]").forEach { element ->
+            val style = element.attr("style").lowercase().replace(Regex("""\s+"""), "")
+            if ("display:none" in style || "visibility:hidden" in style) element.remove()
         }
-        if (blockTexts.isNotEmpty()) return blockTexts
-        val whole = doc.body().wholeText()
-        return whole.split(Regex("\\r?\\n+"))
-            .map(String::trim)
+        doc.select("br").forEach { it.after("\n") }
+        doc.select("p,blockquote,li,div,section,article").forEach { element ->
+            element.before("\n")
+            element.after("\n")
+        }
+        val lines = doc.body().wholeText()
+            .split(Regex("""[\r\n]+"""))
+            .map { it.replace(Regex("""\s+"""), " ").trim() }
             .filter(String::isNotBlank)
-            .ifEmpty { listOfNotNull(doc.text().trim().takeIf(String::isNotBlank)) }
+        val withoutDuplicateHeader = if (lines.firstOrNull()?.matches(CHAPTER_HEADER_PATTERN) == true) {
+            lines.drop(1)
+        } else {
+            lines
+        }
+        val cleaned = withoutDuplicateHeader.filterNot(::isChapterBoilerplate)
+        if (cleaned.isNotEmpty()) return cleaned
+        val fallback = doc.text().replace(Regex("""\s+"""), " ").trim()
+        return listOfNotNull(
+            fallback.takeIf(String::isNotBlank)
+                ?.takeUnless { CHAPTER_HEADER_PATTERN.matches(it) || isChapterBoilerplate(it) },
+        )
+    }
+
+    private fun isChapterBoilerplate(text: String): Boolean {
+        val tokens = text.lowercase()
+            .split(Regex("[^a-z0-9]+"))
+            .filter(String::isNotBlank)
+        if (tokens.isEmpty()) return true
+        return tokens.all { token -> token in TRUYENFULL_BOILERPLATE_TOKENS }
     }
 
     fun resolveUrl(host: String?, raw: String?): String? {
@@ -196,5 +220,9 @@ object VBookStoryNormalizer {
         .take(12)
         .joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
+    private val CHAPTER_HEADER_PATTERN = Regex("""(?i)^chương\s+\d+\s*[:：].*""")
+    private val TRUYENFULL_BOILERPLATE_TOKENS = setOf(
+        "truyen", "full", "truyenfull", "truyenfullvn", "truyenfulllive",
+    )
     private const val MAX_EXPLORE_ITEMS = 20_000
 }

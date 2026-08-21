@@ -55,6 +55,14 @@ import vn.nghetruyen.app.freesound.FreesoundSort
 import vn.nghetruyen.app.playback.ReaderPlaybackService
 
 /** Canonical asset-library dialog shared by MUSIC, AMBIENCE and SFX. */
+internal fun audioAssetRowsOldestFirst(
+    tracks: List<SceneMusicTrackEntity>,
+): List<SceneMusicTrackEntity> = tracks.sortedWith(
+    compareBy<SceneMusicTrackEntity> { it.orderIndex }
+        .thenBy { it.updatedAt }
+        .thenBy { it.id },
+)
+
 @Composable
 fun UnifiedAudioAssetManagerDialog(
     kind: AudioAssetKind,
@@ -73,7 +81,7 @@ fun UnifiedAudioAssetManagerDialog(
         .coerceIn(PcmLoudnessEstimator.MIN_TARGET_LUFS, PcmLoudnessEstimator.MAX_TARGET_LUFS)
 
     val initialRows = remember(kind) {
-        tracks.sortedWith(compareBy<SceneMusicTrackEntity> { it.orderIndex }.thenBy { it.title.lowercase() })
+        audioAssetRowsOldestFirst(tracks)
             .mapIndexed { index, row -> row.copy(orderIndex = index) }
     }
     var draft by remember(kind) { mutableStateOf(initialRows) }
@@ -162,9 +170,11 @@ fun UnifiedAudioAssetManagerDialog(
     LaunchedEffect(tracks, kind, movedTracks.keys) {
         val draftIds = draft.mapTo(linkedSetOf()) { it.id }
         val movedIds = movedTracks.keys
-        val added = tracks.filter {
-            it.id !in baselineIds && it.id !in draftIds && it.id !in movedIds
-        }
+        val added = audioAssetRowsOldestFirst(
+            tracks.filter {
+                it.id !in baselineIds && it.id !in draftIds && it.id !in movedIds
+            },
+        )
         if (added.isNotEmpty()) {
             draft = (draft + added).take(500).mapIndexed { index, row -> row.copy(orderIndex = index) }
         }
@@ -315,16 +325,12 @@ fun UnifiedAudioAssetManagerDialog(
                                     }
                                     val now = System.currentTimeMillis()
                                     val normalized = draft.mapIndexed { index, row -> row.copy(orderIndex = index, updatedAt = now) }
-                                    val destinationCounts = AudioAssetKind.entries.associateWith { destination ->
-                                        existing.count {
-                                            it.id !in movedTracks.keys && AudioAssetClassifier.classify(it) == destination
-                                        }
-                                    }.toMutableMap()
+                                    var nextMovedOrder = (existing.asSequence()
+                                        .filterNot { it.id in movedTracks.keys }
+                                        .map { it.orderIndex }
+                                        .maxOrNull() ?: -1) + 1
                                     val movedRows = movedTracks.values.map { row ->
-                                        val destination = AudioAssetClassifier.classify(row)
-                                        val order = destinationCounts.getValue(destination)
-                                        destinationCounts[destination] = order + 1
-                                        row.copy(orderIndex = order, updatedAt = now)
+                                        row.copy(orderIndex = nextMovedOrder++, updatedAt = now)
                                     }
                                     val keepIds = (normalized.asSequence() + movedRows.asSequence()).mapTo(hashSetOf()) { it.id }
                                     existingKind.filter { it.id !in keepIds }.forEach { track ->

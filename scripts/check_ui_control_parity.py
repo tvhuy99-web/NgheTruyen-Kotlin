@@ -29,7 +29,9 @@ required = {
     "ReaderScreen.kt": [
         'ReaderIntSlider("Cỡ chữ"',
         'ReaderIntSlider("Khoảng cách dòng"',
-        'Text("Bật nhạc nền", Modifier.weight(1f))',
+        'vn.nghetruyen.app.ui.components.AudioDirectionLayerSwitches(',
+        'onSourceModeChanged = { mode ->',
+        'Text("Bật nhạc nền thủ công", Modifier.weight(1f))',
         'ReaderFloatSlider("Giảm nhạc khi giọng đọc phát"',
         'TtsSlider("Tốc độ đọc"',
         'TtsSlider("Cao độ"',

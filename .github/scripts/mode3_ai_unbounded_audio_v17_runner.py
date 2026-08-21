@@ -6,7 +6,7 @@ start_marker = "replace_regex_once(\n    director,\n    r'''\\n            val s
 start = source.find(start_marker)
 if start < 0:
     raise SystemExit('V17 runner could not locate faulty signature selector')
-end_marker = "\n\n# ---------------------------------------------------------------------------\n# Mode 2/local validator"
+end_marker = "\nreplace_once(\n    director,\n    '''    private fun maxSfxForUnits"
 end = source.find(end_marker, start)
 if end < 0:
     raise SystemExit('V17 runner could not locate selector end')

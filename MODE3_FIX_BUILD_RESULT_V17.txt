@@ -1,15 +1,389 @@
-RUN_ID=32451802546
+RUN_ID=32451871447
 RUN_ATTEMPT=1
-TRIGGER_SHA=ab928a20a0e093562736ca4bba450aabb1b8780f
+TRIGGER_SHA=f7d199d4cee4228648364c5b0a5d26b13f82c943
 SUCCESS=false
-PATCH_STATUS=1
-TEST_STATUS=99
+PATCH_STATUS=0
+TEST_STATUS=1
 BUILD_STATUS=99
 ARTIFACT_NAME=NgheTruyen-freesound-mode3-v17-debug
 
 === PATCH LOG ===
-app/src/main/java/vn/nghetruyen/app/playback/AudioDirectionRuntime.kt: expected exactly one match, got 2: '        lastEffectAtMillis.clear()\n'
+Mode 3 V17 unbounded AI audio policy applied: MUSIC one-at-a-time; AMBIENCE/SFX quotas removed; long files unchanged.
+V17 regression tests updated for AI-directed unbounded AMBIENCE/SFX and one-at-a-time MUSIC.
 
 === TEST LOG ===
+Gradle Wrapper JAR is already verified.
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.13/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :source-api:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :source-api:processResources NO-SOURCE
+> Task :source-diagnostics:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :source-diagnostics:processResources NO-SOURCE
+> Task :source-package:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :source-package:processResources NO-SOURCE
+> Task :source-repository:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :source-store:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :source-store:processResources NO-SOURCE
+> Task :source-js-sandbox:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :source-runtime:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :source-runtime:processResources NO-SOURCE
+> Task :source-vbook:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :source-vbook:processResources NO-SOURCE
+> Task :source-repository:processResources NO-SOURCE
+> Task :source-lua:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :source-lua:processResources
+> Task :source-network:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :source-network:processResources NO-SOURCE
+> Task :source-js-sandbox:processResources NO-SOURCE
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugBuildConfig
+> Task :app:checkDebugAarMetadata
+> Task :app:processDebugNavigationResources
+> Task :app:compileDebugNavigationResources
+> Task :app:mapDebugSourceSetPaths
+> Task :app:generateDebugResources
+> Task :app:packageDebugResources
+> Task :app:mergeDebugResources
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:extractDeepLinksDebug
+> Task :app:parseDebugLocalResources
+> Task :app:processDebugMainManifest
+> Task :app:processDebugManifest
+> Task :app:processDebugManifestForPackage
+> Task :app:javaPreCompileDebug
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:javaPreCompileDebugUnitTest
+> Task :app:mergeDebugShaders
+> Task :app:compileDebugShaders NO-SOURCE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets
+> Task :app:processDebugResources
+> Task :app:processDebugUnitTestManifest
+> Task :app:packageDebugUnitTestForUnitTest
+> Task :app:generateDebugUnitTestConfig
+
+> Task :source-js-sandbox:compileKotlin
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/source-js-sandbox/src/main/kotlin/com/nghetruyen/source/sandbox/JsSandbox.kt:358:13 'fun setOptimizationLevel(p0: Int): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/source-js-sandbox/src/main/kotlin/com/nghetruyen/source/sandbox/JsSyntaxValidator.kt:26:20 'var optimizationLevel: Int' is deprecated. Deprecated in Java.
+
+> Task :source-js-sandbox:compileJava NO-SOURCE
+> Task :source-js-sandbox:classes UP-TO-DATE
+> Task :source-js-sandbox:jar
+> Task :source-api:compileKotlin
+> Task :source-api:compileJava NO-SOURCE
+> Task :source-api:classes UP-TO-DATE
+> Task :source-api:jar
+> Task :source-diagnostics:compileKotlin
+> Task :source-diagnostics:compileJava NO-SOURCE
+> Task :source-diagnostics:classes UP-TO-DATE
+> Task :source-diagnostics:jar
+> Task :source-package:compileKotlin
+> Task :source-package:compileJava NO-SOURCE
+> Task :source-package:classes UP-TO-DATE
+> Task :source-package:jar
+> Task :source-network:compileKotlin
+> Task :source-network:compileJava NO-SOURCE
+> Task :source-network:classes UP-TO-DATE
+> Task :source-network:jar
+
+> Task :source-runtime:compileKotlin
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/source-runtime/src/main/kotlin/vn/nghetruyen/source/runtime/DeclarativeSourceRuntime.kt:469:53 Type annotation class 'org.jspecify.annotations.Nullable' of the inferred type is inaccessible. Check the module classpath for missing or conflicting dependencies. This will become an error in language version 2.4. See https://youtrack.jetbrains.com/issue/KT-80247.
+
+> Task :source-runtime:compileJava NO-SOURCE
+> Task :source-runtime:classes UP-TO-DATE
+> Task :source-runtime:jar
+> Task :source-store:compileKotlin
+> Task :source-store:compileJava NO-SOURCE
+> Task :source-store:classes UP-TO-DATE
+> Task :source-store:jar
+
+> Task :source-vbook:compileKotlin
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt:1351:117 Type annotation class 'org.jspecify.annotations.Nullable' of the inferred type is inaccessible. Check the module classpath for missing or conflicting dependencies. This will become an error in language version 2.4. See https://youtrack.jetbrains.com/issue/KT-80247.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt:1394:107 Type annotation class 'org.jspecify.annotations.Nullable' of the inferred type is inaccessible. Check the module classpath for missing or conflicting dependencies. This will become an error in language version 2.4. See https://youtrack.jetbrains.com/issue/KT-80247.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt:1405:48 Type annotation class 'org.jspecify.annotations.Nullable' of the inferred type is inaccessible. Check the module classpath for missing or conflicting dependencies. This will become an error in language version 2.4. See https://youtrack.jetbrains.com/issue/KT-80247.
+
+> Task :source-vbook:compileJava NO-SOURCE
+> Task :source-vbook:classes UP-TO-DATE
+> Task :source-vbook:jar
+> Task :source-repository:compileKotlin
+> Task :source-repository:compileJava NO-SOURCE
+> Task :source-repository:classes UP-TO-DATE
+> Task :source-repository:jar
+> Task :source-lua:compileKotlin
+> Task :source-lua:compileJava NO-SOURCE
+> Task :source-lua:classes
+> Task :source-lua:jar
+> Task :app:kaptGenerateStubsDebugKotlin
+> Task :app:kaptDebugKotlin
+> Task :app:compileDebugKotlin
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ai/OnlineAiServices.kt:41:53 'interface VoiceCastEngine : Any' is deprecated. Use XpkNarrationAiServices; paragraph voice-cast protocol is retired from production wiring.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ai/OnlineAiServices.kt:41:70 'interface SceneMusicPlanner : Any' is deprecated. Use XpkNarrationAiServices; paragraph scene-cue protocol is retired from production wiring.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ai/OnlineAiServices.kt:41:89 'interface NarrationPlanner : Any' is deprecated. Use XpkNarrationAiServices; legacy narration planner is retired from production wiring.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ai/OnlineAiServices.kt:356:55 'fun parseVoiceCast(raw: String): VoiceCastPlan' is deprecated. Use parseXpkNarration; paragraph ROLE/ASSIGN protocol is not used by XPK narration runtime.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ai/OnlineAiServices.kt:383:66 'fun parseSceneCues(raw: String): List<SceneMusicCue>' is deprecated. Use parseXpkNarration; paragraph CUE protocol is not used by XPK narration runtime.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ai/OnlineAiServices.kt:483:59 'fun parseVoiceCast(raw: String): VoiceCastPlan' is deprecated. Use parseXpkNarration; paragraph ROLE/ASSIGN protocol is not used by XPK narration runtime.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ai/OnlineAiServices.kt:485:74 'fun parseSceneCues(raw: String): List<SceneMusicCue>' is deprecated. Use parseXpkNarration; paragraph CUE protocol is not used by XPK narration runtime.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ai/XpkNarrationAiServices.kt:416:44 Unnecessary safe call on a non-null receiver of type 'ResponseBody'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/audio/AudioExportWorker.kt:325:36 Unnecessary non-null assertion (!!) on a non-null receiver of type 'TtsFileSynthesizer'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/audio/AudioExportWorker.kt:331:32 Unnecessary non-null assertion (!!) on a non-null receiver of type 'TtsFileSynthesizer'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/audio/AudioExportWorker.kt:781:44 'constructor(p0: Int, p1: CharSequence!, p2: PendingIntent?): Notification.Action.Builder' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/audio/TtsFileSynthesizer.kt:41:26 This declaration overrides a deprecated member but is not marked as deprecated itself. Add the '@Deprecated' annotation or suppress the diagnostic.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/downloads/ChapterDownloadWorker.kt:451:37 'constructor(p0: Int, p1: CharSequence!, p2: PendingIntent?): Notification.Action.Builder' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt:685:38 Elvis operator (?:) always returns the left operand of non-nullable type 'Int'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt:791:30 This declaration overrides a deprecated member but is not marked as deprecated itself. Add the '@Deprecated' annotation or suppress the diagnostic.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt:2425:48 Unnecessary non-null assertion (!!) on a non-null receiver of type 'ChapterTransformEntity'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt:3082:36 'constructor(p0: Int, p1: CharSequence!, p2: PendingIntent?): Notification.Action.Builder' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/playback/TtsVoiceCatalog.kt:33:45 Redundant call of conversion method.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidChromiumVBookRuntime.kt:240:21 'var databaseEnabled: Boolean' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sourceplatform/AndroidSourceBrowserBroker.kt:395:51 'var databaseEnabled: Boolean' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sourceplatform/ExtensionWebViewAuthority.kt:23:13 'var databaseEnabled: Boolean' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sourceplatform/SourceBrowserViewportHost.kt:91:21 Unnecessary safe call on a non-null receiver of type 'ViewGroup'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sourceplatform/SourcePlatformModels.kt:183:29 Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'SimpleDateFormat?'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sources/SourceDiagnosticBrowserActivity.kt:222:51 'var databaseEnabled: Boolean' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sources/SourceLoginActivity.kt:115:22 'var databaseEnabled: Boolean' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sources/TruyenComSource.kt:216:37 Unnecessary safe call on a non-null receiver of type 'Element'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sources/TruyenComSource.kt:320:35 Unnecessary safe call on a non-null receiver of type 'Element'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sources/TruyenComSource.kt:332:35 Unnecessary safe call on a non-null receiver of type 'Element'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sources/TruyenCvSource.kt:272:39 Unnecessary safe call on a non-null receiver of type 'Element'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sources/TruyenCvSource.kt:401:44 Unnecessary safe call on a non-null receiver of type 'Element'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sources/TruyenCvSource.kt:409:61 Unnecessary safe call on a non-null receiver of type 'Element'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sources/TruyenCvSource.kt:422:35 Unnecessary safe call on a non-null receiver of type 'Element'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sources/TruyenFullSource.kt:365:35 Unnecessary safe call on a non-null receiver of type 'Element'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/sources/TruyenFullSource.kt:378:35 Unnecessary safe call on a non-null receiver of type 'Element'.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/components/FreesoundAdvancedToolsDialogs.kt:252:73 'fun announceForAccessibility(p0: CharSequence!): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/components/FreesoundAdvancedToolsDialogs.kt:598:68 'fun announceForAccessibility(p0: CharSequence!): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/components/FreesoundSearchDialog.kt:407:43 'fun announceForAccessibility(p0: CharSequence!): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/components/FreesoundSettingsCard.kt:46:62 'fun announceForAccessibility(p0: CharSequence!): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/components/ReferenceDiagnosticsChrome.kt:97:21 'val LocalClipboardManager: ProvidableCompositionLocal<ClipboardManager>' is deprecated. Use LocalClipboard instead which supports suspend functions.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/components/UnifiedAudioAssetManagerDialog.kt:70:21 'val LocalClipboardManager: ProvidableCompositionLocal<ClipboardManager>' is deprecated. Use LocalClipboard instead which supports suspend functions.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/screens/ExploreScreen.kt:144:18 'fun announceForAccessibility(p0: CharSequence!): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/screens/LibraryScreen.kt:118:14 'fun announceForAccessibility(p0: CharSequence!): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt:257:14 'fun announceForAccessibility(p0: CharSequence!): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt:1297:29 'val LocalClipboardManager: ProvidableCompositionLocal<ClipboardManager>' is deprecated. Use LocalClipboard instead which supports suspend functions.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt:1639:25 'val LocalClipboardManager: ProvidableCompositionLocal<ClipboardManager>' is deprecated. Use LocalClipboard instead which supports suspend functions.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt:179:21 'val LocalClipboardManager: ProvidableCompositionLocal<ClipboardManager>' is deprecated. Use LocalClipboard instead which supports suspend functions.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt:337:14 'fun announceForAccessibility(p0: CharSequence!): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/screens/ReaderScreen.kt:343:18 'fun announceForAccessibility(p0: CharSequence!): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ui/screens/StoryDetailScreen.kt:279:14 'fun announceForAccessibility(p0: CharSequence!): Unit' is deprecated. Deprecated in Java.
+
+> Task :app:compileDebugJavaWithJavac
+> Task :app:processDebugJavaRes
+> Task :app:bundleDebugClassesToCompileJar
+> Task :app:bundleDebugClassesToRuntimeJar
+> Task :app:kaptGenerateStubsDebugUnitTestKotlin
+
+> Task :app:kaptDebugUnitTestKotlin
+warning: The following options were not recognized by any processor: '[room.schemaLocation, kapt.kotlin.generated, room.incremental]'
+
+> Task :app:compileDebugUnitTestKotlin
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/test/java/vn/nghetruyen/app/ai/AiLineProtocolTest.kt:9:35 'fun parseVoiceCast(raw: String): VoiceCastPlan' is deprecated. Use parseXpkNarration; paragraph ROLE/ASSIGN protocol is not used by XPK narration runtime.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/test/java/vn/nghetruyen/app/ai/AiLineProtocolTest.kt:22:35 'fun parseSceneCues(raw: String): List<SceneMusicCue>' is deprecated. Use parseXpkNarration; paragraph CUE protocol is not used by XPK narration runtime.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/test/java/vn/nghetruyen/app/playback/XpkStrictParityTest.kt:11:8 'interface NarrationPlanner : Any' is deprecated. Use XpkNarrationAiServices; legacy narration planner is retired from production wiring.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/test/java/vn/nghetruyen/app/playback/XpkStrictParityTest.kt:13:8 'interface SceneMusicPlanner : Any' is deprecated. Use XpkNarrationAiServices; paragraph scene-cue protocol is retired from production wiring.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/test/java/vn/nghetruyen/app/playback/XpkStrictParityTest.kt:15:8 'interface VoiceCastEngine : Any' is deprecated. Use XpkNarrationAiServices; paragraph voice-cast protocol is retired from production wiring.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/test/java/vn/nghetruyen/app/playback/XpkStrictParityTest.kt:180:21 'interface VoiceCastEngine : Any' is deprecated. Use XpkNarrationAiServices; paragraph voice-cast protocol is retired from production wiring.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/test/java/vn/nghetruyen/app/playback/XpkStrictParityTest.kt:181:21 'interface SceneMusicPlanner : Any' is deprecated. Use XpkNarrationAiServices; paragraph scene-cue protocol is retired from production wiring.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/test/java/vn/nghetruyen/app/playback/XpkStrictParityTest.kt:182:21 'interface NarrationPlanner : Any' is deprecated. Use XpkNarrationAiServices; legacy narration planner is retired from production wiring.
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/test/java/vn/nghetruyen/app/sources/HostRequestGovernorTest.kt:14:36 This declaration needs opt-in. Its usage should be marked with '@kotlinx.coroutines.ExperimentalCoroutinesApi' or '@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)'
+w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/test/java/vn/nghetruyen/app/sources/HostRequestGovernorTest.kt:16:34 This declaration needs opt-in. Its usage should be marked with '@kotlinx.coroutines.ExperimentalCoroutinesApi' or '@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)'
+
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processDebugUnitTestJavaRes
+
+> Task :app:testDebugUnitTest
+
+UnboundedAudioDirectionPolicyTest > freesoundParserAndAggregatorDoNotApplyOldQuantityCaps FAILED
+    java.lang.AssertionError at UnboundedAudioDirectionPolicyTest.kt:71
+
+XpkSceneMusicParityTest > promptShufflesThenAliasesWithoutLeakingNameOrRealIdAndMapsIncomingTrack FAILED
+    java.lang.AssertionError at XpkSceneMusicParityTest.kt:56
+
+FreesoundAutoAudioTest > aggregatorKeepsAllDistinctAiDirectedNeedsWithoutPerKindQuota FAILED
+    java.lang.AssertionError at FreesoundAutoAudioTest.kt:107
+
+FreesoundMode3RegressionTest > parserExpandsOneUnitMusicAndAmbienceToDurableRanges FAILED
+    java.lang.AssertionError at FreesoundMode3RegressionTest.kt:148
+
+398 tests completed, 4 failed
+
+> Task :app:testDebugUnitTest FAILED
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/verify-1787291308199.json
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:testDebugUnitTest'.
+> There were failing tests. See the report at: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/build/reports/tests/testDebugUnitTest/index.html
+
+* Try:
+> Run with --scan to get full insights.
+
+* Exception is:
+org.gradle.api.tasks.TaskExecutionException: Execution failed for task ':app:testDebugUnitTest'.
+	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.lambda$executeIfValid$1(ExecuteActionsTaskExecuter.java:130)
+	at org.gradle.internal.Try$Failure.ifSuccessfulOrElse(Try.java:293)
+	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.executeIfValid(ExecuteActionsTaskExecuter.java:128)
+	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.execute(ExecuteActionsTaskExecuter.java:116)
+	at org.gradle.api.internal.tasks.execution.ProblemsTaskPathTrackingTaskExecuter.execute(ProblemsTaskPathTrackingTaskExecuter.java:40)
+	at org.gradle.api.internal.tasks.execution.FinalizePropertiesTaskExecuter.execute(FinalizePropertiesTaskExecuter.java:46)
+	at org.gradle.api.internal.tasks.execution.ResolveTaskExecutionModeExecuter.execute(ResolveTaskExecutionModeExecuter.java:51)
+	at org.gradle.api.internal.tasks.execution.SkipTaskWithNoActionsExecuter.execute(SkipTaskWithNoActionsExecuter.java:57)
+	at org.gradle.api.internal.tasks.execution.SkipOnlyIfTaskExecuter.execute(SkipOnlyIfTaskExecuter.java:74)
+	at org.gradle.api.internal.tasks.execution.CatchExceptionTaskExecuter.execute(CatchExceptionTaskExecuter.java:36)
+	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter$1.executeTask(EventFiringTaskExecuter.java:77)
+	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter$1.call(EventFiringTaskExecuter.java:55)
+	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter$1.call(EventFiringTaskExecuter.java:52)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:210)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:205)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:67)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:60)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:167)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:60)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.call(DefaultBuildOperationRunner.java:54)
+	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter.execute(EventFiringTaskExecuter.java:52)
+	at org.gradle.execution.plan.LocalTaskNodeExecutor.execute(LocalTaskNodeExecutor.java:42)
+	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$InvokeNodeExecutorsAction.execute(DefaultTaskExecutionGraph.java:331)
+	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$InvokeNodeExecutorsAction.execute(DefaultTaskExecutionGraph.java:318)
+	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$BuildOperationAwareExecutionAction.lambda$execute$0(DefaultTaskExecutionGraph.java:314)
+	at org.gradle.internal.operations.CurrentBuildOperationRef.with(CurrentBuildOperationRef.java:85)
+	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$BuildOperationAwareExecutionAction.execute(DefaultTaskExecutionGraph.java:314)
+	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$BuildOperationAwareExecutionAction.execute(DefaultTaskExecutionGraph.java:303)
+	at org.gradle.execution.plan.DefaultPlanExecutor$ExecutorWorker.execute(DefaultPlanExecutor.java:459)
+	at org.gradle.execution.plan.DefaultPlanExecutor$ExecutorWorker.run(DefaultPlanExecutor.java:376)
+	at org.gradle.internal.concurrent.ExecutorPolicy$CatchAndRecordFailures.onExecute(ExecutorPolicy.java:64)
+	at org.gradle.internal.concurrent.AbstractManagedExecutor$1.run(AbstractManagedExecutor.java:48)
+Caused by: org.gradle.api.internal.exceptions.MarkedVerificationException: There were failing tests. See the report at: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/build/reports/tests/testDebugUnitTest/index.html
+	at org.gradle.api.tasks.testing.AbstractTestTask.handleTestFailures(AbstractTestTask.java:714)
+	at org.gradle.api.tasks.testing.AbstractTestTask.handleCollectedResults(AbstractTestTask.java:545)
+	at org.gradle.api.tasks.testing.AbstractTestTask.executeTests(AbstractTestTask.java:540)
+	at org.gradle.api.tasks.testing.Test.executeTests(Test.java:719)
+	at com.android.build.gradle.tasks.factory.AndroidUnitTest.executeTests(AndroidUnitTest.java:172)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at org.gradle.internal.reflect.JavaMethod.invoke(JavaMethod.java:125)
+	at org.gradle.api.internal.project.taskfactory.StandardTaskAction.doExecute(StandardTaskAction.java:58)
+	at org.gradle.api.internal.project.taskfactory.StandardTaskAction.execute(StandardTaskAction.java:51)
+	at org.gradle.api.internal.project.taskfactory.StandardTaskAction.execute(StandardTaskAction.java:29)
+	at org.gradle.api.internal.tasks.execution.TaskExecution$3.run(TaskExecution.java:244)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$1.execute(DefaultBuildOperationRunner.java:30)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$1.execute(DefaultBuildOperationRunner.java:27)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:67)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:60)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:167)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:60)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.run(DefaultBuildOperationRunner.java:48)
+	at org.gradle.api.internal.tasks.execution.TaskExecution.executeAction(TaskExecution.java:229)
+	at org.gradle.api.internal.tasks.execution.TaskExecution.executeActions(TaskExecution.java:212)
+	at org.gradle.api.internal.tasks.execution.TaskExecution.executeWithPreviousOutputFiles(TaskExecution.java:195)
+	at org.gradle.api.internal.tasks.execution.TaskExecution.execute(TaskExecution.java:162)
+	at org.gradle.internal.execution.steps.ExecuteStep.executeInternal(ExecuteStep.java:105)
+	at org.gradle.internal.execution.steps.ExecuteStep.access$000(ExecuteStep.java:44)
+	at org.gradle.internal.execution.steps.ExecuteStep$1.call(ExecuteStep.java:59)
+	at org.gradle.internal.execution.steps.ExecuteStep$1.call(ExecuteStep.java:56)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:210)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:205)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:67)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:60)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:167)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:60)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.call(DefaultBuildOperationRunner.java:54)
+	at org.gradle.internal.execution.steps.ExecuteStep.execute(ExecuteStep.java:56)
+	at org.gradle.internal.execution.steps.ExecuteStep.execute(ExecuteStep.java:44)
+	at org.gradle.internal.execution.steps.CancelExecutionStep.execute(CancelExecutionStep.java:42)
+	at org.gradle.internal.execution.steps.TimeoutStep.executeWithoutTimeout(TimeoutStep.java:75)
+	at org.gradle.internal.execution.steps.TimeoutStep.execute(TimeoutStep.java:55)
+	at org.gradle.internal.execution.steps.PreCreateOutputParentsStep.execute(PreCreateOutputParentsStep.java:50)
+	at org.gradle.internal.execution.steps.PreCreateOutputParentsStep.execute(PreCreateOutputParentsStep.java:28)
+	at org.gradle.internal.execution.steps.RemovePreviousOutputsStep.execute(RemovePreviousOutputsStep.java:67)
+	at org.gradle.internal.execution.steps.RemovePreviousOutputsStep.execute(RemovePreviousOutputsStep.java:37)
+	at org.gradle.internal.execution.steps.BroadcastChangingOutputsStep.execute(BroadcastChangingOutputsStep.java:61)
+	at org.gradle.internal.execution.steps.BroadcastChangingOutputsStep.execute(BroadcastChangingOutputsStep.java:26)
+	at org.gradle.internal.execution.steps.CaptureOutputsAfterExecutionStep.execute(CaptureOutputsAfterExecutionStep.java:69)
+	at org.gradle.internal.execution.steps.CaptureOutputsAfterExecutionStep.execute(CaptureOutputsAfterExecutionStep.java:46)
+	at org.gradle.internal.execution.steps.ResolveInputChangesStep.execute(ResolveInputChangesStep.java:40)
+	at org.gradle.internal.execution.steps.ResolveInputChangesStep.execute(ResolveInputChangesStep.java:29)
+	at org.gradle.internal.execution.steps.BuildCacheStep.executeWithoutCache(BuildCacheStep.java:189)
+	at org.gradle.internal.execution.steps.BuildCacheStep.lambda$execute$1(BuildCacheStep.java:75)
+	at org.gradle.internal.Either$Right.fold(Either.java:175)
+	at org.gradle.internal.execution.caching.CachingState.fold(CachingState.java:62)
+	at org.gradle.internal.execution.steps.BuildCacheStep.execute(BuildCacheStep.java:73)
+	at org.gradle.internal.execution.steps.BuildCacheStep.execute(BuildCacheStep.java:48)
+	at org.gradle.internal.execution.steps.StoreExecutionStateStep.execute(StoreExecutionStateStep.java:46)
+	at org.gradle.internal.execution.steps.StoreExecutionStateStep.execute(StoreExecutionStateStep.java:35)
+	at org.gradle.internal.execution.steps.SkipUpToDateStep.executeBecause(SkipUpToDateStep.java:75)
+	at org.gradle.internal.execution.steps.SkipUpToDateStep.lambda$execute$2(SkipUpToDateStep.java:53)
+	at org.gradle.internal.execution.steps.SkipUpToDateStep.execute(SkipUpToDateStep.java:53)
+	at org.gradle.internal.execution.steps.SkipUpToDateStep.execute(SkipUpToDateStep.java:35)
+	at org.gradle.internal.execution.steps.legacy.MarkSnapshottingInputsFinishedStep.execute(MarkSnapshottingInputsFinishedStep.java:37)
+	at org.gradle.internal.execution.steps.legacy.MarkSnapshottingInputsFinishedStep.execute(MarkSnapshottingInputsFinishedStep.java:27)
+	at org.gradle.internal.execution.steps.ResolveIncrementalCachingStateStep.executeDelegate(ResolveIncrementalCachingStateStep.java:49)
+	at org.gradle.internal.execution.steps.ResolveIncrementalCachingStateStep.executeDelegate(ResolveIncrementalCachingStateStep.java:27)
+	at org.gradle.internal.execution.steps.AbstractResolveCachingStateStep.execute(AbstractResolveCachingStateStep.java:71)
+	at org.gradle.internal.execution.steps.AbstractResolveCachingStateStep.execute(AbstractResolveCachingStateStep.java:39)
+	at org.gradle.internal.execution.steps.ResolveChangesStep.execute(ResolveChangesStep.java:65)
+	at org.gradle.internal.execution.steps.ResolveChangesStep.execute(ResolveChangesStep.java:36)
+	at org.gradle.internal.execution.steps.ValidateStep.execute(ValidateStep.java:107)
+	at org.gradle.internal.execution.steps.ValidateStep.execute(ValidateStep.java:56)
+	at org.gradle.internal.execution.steps.AbstractCaptureStateBeforeExecutionStep.execute(AbstractCaptureStateBeforeExecutionStep.java:64)
+	at org.gradle.internal.execution.steps.AbstractCaptureStateBeforeExecutionStep.execute(AbstractCaptureStateBeforeExecutionStep.java:43)
+	at org.gradle.internal.execution.steps.AbstractSkipEmptyWorkStep.executeWithNonEmptySources(AbstractSkipEmptyWorkStep.java:125)
+	at org.gradle.internal.execution.steps.AbstractSkipEmptyWorkStep.execute(AbstractSkipEmptyWorkStep.java:61)
+	at org.gradle.internal.execution.steps.AbstractSkipEmptyWorkStep.execute(AbstractSkipEmptyWorkStep.java:36)
+	at org.gradle.internal.execution.steps.legacy.MarkSnapshottingInputsStartedStep.execute(MarkSnapshottingInputsStartedStep.java:38)
+	at org.gradle.internal.execution.steps.LoadPreviousExecutionStateStep.execute(LoadPreviousExecutionStateStep.java:36)
+	at org.gradle.internal.execution.steps.LoadPreviousExecutionStateStep.execute(LoadPreviousExecutionStateStep.java:23)
+	at org.gradle.internal.execution.steps.HandleStaleOutputsStep.execute(HandleStaleOutputsStep.java:75)
+	at org.gradle.internal.execution.steps.HandleStaleOutputsStep.execute(HandleStaleOutputsStep.java:41)
+	at org.gradle.internal.execution.steps.AssignMutableWorkspaceStep.lambda$execute$0(AssignMutableWorkspaceStep.java:35)
+	at org.gradle.api.internal.tasks.execution.TaskExecution$4.withWorkspace(TaskExecution.java:289)
+	at org.gradle.internal.execution.steps.AssignMutableWorkspaceStep.execute(AssignMutableWorkspaceStep.java:31)
+	at org.gradle.internal.execution.steps.AssignMutableWorkspaceStep.execute(AssignMutableWorkspaceStep.java:22)
+	at org.gradle.internal.execution.steps.ChoosePipelineStep.execute(ChoosePipelineStep.java:40)
+	at org.gradle.internal.execution.steps.ChoosePipelineStep.execute(ChoosePipelineStep.java:23)
+	at org.gradle.internal.execution.steps.ExecuteWorkBuildOperationFiringStep.lambda$execute$2(ExecuteWorkBuildOperationFiringStep.java:67)
+	at org.gradle.internal.execution.steps.ExecuteWorkBuildOperationFiringStep.execute(ExecuteWorkBuildOperationFiringStep.java:67)
+	at org.gradle.internal.execution.steps.ExecuteWorkBuildOperationFiringStep.execute(ExecuteWorkBuildOperationFiringStep.java:39)
+	at org.gradle.internal.execution.steps.IdentityCacheStep.execute(IdentityCacheStep.java:46)
+	at org.gradle.internal.execution.steps.IdentityCacheStep.execute(IdentityCacheStep.java:34)
+	at org.gradle.internal.execution.steps.IdentifyStep.execute(IdentifyStep.java:48)
+	at org.gradle.internal.execution.steps.IdentifyStep.execute(IdentifyStep.java:35)
+	at org.gradle.internal.execution.impl.DefaultExecutionEngine$1.execute(DefaultExecutionEngine.java:61)
+	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.executeIfValid(ExecuteActionsTaskExecuter.java:127)
+	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.execute(ExecuteActionsTaskExecuter.java:116)
+	at org.gradle.api.internal.tasks.execution.ProblemsTaskPathTrackingTaskExecuter.execute(ProblemsTaskPathTrackingTaskExecuter.java:40)
+	at org.gradle.api.internal.tasks.execution.FinalizePropertiesTaskExecuter.execute(FinalizePropertiesTaskExecuter.java:46)
+	at org.gradle.api.internal.tasks.execution.ResolveTaskExecutionModeExecuter.execute(ResolveTaskExecutionModeExecuter.java:51)
+	at org.gradle.api.internal.tasks.execution.SkipTaskWithNoActionsExecuter.execute(SkipTaskWithNoActionsExecuter.java:57)
+	at org.gradle.api.internal.tasks.execution.SkipOnlyIfTaskExecuter.execute(SkipOnlyIfTaskExecuter.java:74)
+	at org.gradle.api.internal.tasks.execution.CatchExceptionTaskExecuter.execute(CatchExceptionTaskExecuter.java:36)
+	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter$1.executeTask(EventFiringTaskExecuter.java:77)
+	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter$1.call(EventFiringTaskExecuter.java:55)
+	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter$1.call(EventFiringTaskExecuter.java:52)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:210)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:205)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:67)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:60)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:167)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:60)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.call(DefaultBuildOperationRunner.java:54)
+	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter.execute(EventFiringTaskExecuter.java:52)
+	at org.gradle.execution.plan.LocalTaskNodeExecutor.execute(LocalTaskNodeExecutor.java:42)
+	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$InvokeNodeExecutorsAction.execute(DefaultTaskExecutionGraph.java:331)
+	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$InvokeNodeExecutorsAction.execute(DefaultTaskExecutionGraph.java:318)
+	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$BuildOperationAwareExecutionAction.lambda$execute$0(DefaultTaskExecutionGraph.java:314)
+	at org.gradle.internal.operations.CurrentBuildOperationRef.with(CurrentBuildOperationRef.java:85)
+	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$BuildOperationAwareExecutionAction.execute(DefaultTaskExecutionGraph.java:314)
+	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$BuildOperationAwareExecutionAction.execute(DefaultTaskExecutionGraph.java:303)
+	at org.gradle.execution.plan.DefaultPlanExecutor$ExecutorWorker.execute(DefaultPlanExecutor.java:459)
+	at org.gradle.execution.plan.DefaultPlanExecutor$ExecutorWorker.run(DefaultPlanExecutor.java:376)
+	at org.gradle.internal.concurrent.ExecutorPolicy$CatchAndRecordFailures.onExecute(ExecutorPolicy.java:64)
+	at org.gradle.internal.concurrent.AbstractManagedExecutor$1.run(AbstractManagedExecutor.java:48)
+
+
+BUILD FAILED in 2m 51s
+55 actionable tasks: 55 executed
 
 === BUILD LOG ===

@@ -1,6 +1,6 @@
-RUN_ID=32435273606
+RUN_ID=32435481415
 RUN_ATTEMPT=1
-TRIGGER_SHA=55876aa9c08e8e83ba15632a545b233012b7b412
+TRIGGER_SHA=2c830869afe3bc2df7e889dcd28f7393ef38e5cd
 SUCCESS=false
 PATCH_STATUS=0
 TEST_STATUS=1
@@ -9,6 +9,7 @@ ARTIFACT_NAME=NgheTruyen-freesound-mode3-v13-debug
 
 === PATCH LOG ===
 Mode 3 V13 semantic parity, selection quality, required coverage and downloaded-library UI patch applied.
+V13 generated-source syntax fix applied.
 
 === TEST LOG ===
 Gradle Wrapper JAR is already verified.
@@ -44,10 +45,10 @@ Daemon will be stopped at the end of the build
 > Task :app:mapDebugSourceSetPaths
 > Task :app:generateDebugResources
 > Task :app:packageDebugResources
-> Task :app:parseDebugLocalResources
 > Task :app:mergeDebugResources
 > Task :app:createDebugCompatibleScreenManifests
 > Task :app:extractDeepLinksDebug
+> Task :app:parseDebugLocalResources
 > Task :app:processDebugMainManifest
 > Task :app:processDebugManifest
 > Task :app:processDebugManifestForPackage
@@ -114,25 +115,18 @@ w: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/source-vbook/src
 > Task :source-lua:compileJava NO-SOURCE
 > Task :source-lua:classes
 > Task :source-lua:jar
+> Task :app:kaptGenerateStubsDebugKotlin
+> Task :app:kaptDebugKotlin
 
-> Task :app:kaptGenerateStubsDebugKotlin FAILED
-e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt:819:13 Syntax error: Expecting an argument.
-e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt:819:13 Syntax error: Expecting ')'.
-e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt:819:27 Syntax error: Expecting an element.
-e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt:820:66 Syntax error: Expecting ')'.
-e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt:820:66 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
-e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt:821:63 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
-e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt:822:13 Syntax error: Expecting an element.
-e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt:1294:14 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
-e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/ai/NarrationPlanCoordinator.kt:1307:2 Syntax error: Missing '}.
-e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt:556:5 Syntax error: Expecting a top level declaration.
-e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt:557:1 Syntax error: Expecting a top level declaration.
-gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/verify-1787274581085.json
+> Task :app:compileDebugKotlin FAILED
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt:706:22 Unresolved reference 'AudioDirectionLimits'.
+e: file:///home/runner/work/NgheTruyen-Kotlin/NgheTruyen-Kotlin/app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt:758:22 Unresolved reference 'AudioDirectionLimits'.
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/verify-1787274798682.json
 
 FAILURE: Build failed with an exception.
 
 * What went wrong:
-Execution failed for task ':app:kaptGenerateStubsDebugKotlin'.
+Execution failed for task ':app:compileDebugKotlin'.
 > A failure occurred while executing org.jetbrains.kotlin.compilerRunner.btapi.BuildToolsApiCompilationWork
    > Compilation error. See log for more details
 
@@ -142,7 +136,7 @@ Execution failed for task ':app:kaptGenerateStubsDebugKotlin'.
 > Get more help at https://help.gradle.org.
 
 * Exception is:
-org.gradle.api.tasks.TaskExecutionException: Execution failed for task ':app:kaptGenerateStubsDebugKotlin'.
+org.gradle.api.tasks.TaskExecutionException: Execution failed for task ':app:compileDebugKotlin'.
 	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.lambda$executeIfValid$1(ExecuteActionsTaskExecuter.java:130)
 	at org.gradle.internal.Try$Failure.ifSuccessfulOrElse(Try.java:293)
 	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.executeIfValid(ExecuteActionsTaskExecuter.java:128)
@@ -249,7 +243,7 @@ Caused by: org.gradle.workers.internal.DefaultWorkerExecutor$WorkExecutionExcept
 	at org.gradle.internal.execution.steps.AbstractCaptureStateBeforeExecutionStep.execute(AbstractCaptureStateBeforeExecutionStep.java:64)
 	at org.gradle.internal.execution.steps.AbstractCaptureStateBeforeExecutionStep.execute(AbstractCaptureStateBeforeExecutionStep.java:43)
 	at org.gradle.internal.execution.steps.AbstractSkipEmptyWorkStep.executeWithNonEmptySources(AbstractSkipEmptyWorkStep.java:125)
-	at org.gradle.internal.execution.steps.AbstractSkipEmptyWorkStep.execute(AbstractSkipEmptyWorkStep.java:56)
+	at org.gradle.internal.execution.steps.AbstractSkipEmptyWorkStep.execute(AbstractSkipEmptyWorkStep.java:61)
 	at org.gradle.internal.execution.steps.AbstractSkipEmptyWorkStep.execute(AbstractSkipEmptyWorkStep.java:36)
 	at org.gradle.internal.execution.steps.legacy.MarkSnapshottingInputsStartedStep.execute(MarkSnapshottingInputsStartedStep.java:38)
 	at org.gradle.internal.execution.steps.LoadPreviousExecutionStateStep.execute(LoadPreviousExecutionStateStep.java:36)
@@ -332,7 +326,7 @@ Caused by: org.jetbrains.kotlin.gradle.tasks.CompilationErrorException: Compilat
 	... 2 more
 
 
-BUILD FAILED in 1m 17s
-44 actionable tasks: 44 executed
+BUILD FAILED in 2m 11s
+46 actionable tasks: 46 executed
 
 === BUILD LOG ===

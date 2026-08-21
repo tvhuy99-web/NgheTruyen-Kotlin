@@ -15,7 +15,9 @@ import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import vn.nghetruyen.app.NgheTruyenApplication
 
 /**
@@ -86,7 +88,7 @@ class SceneMusicAnalysisWorker(
 
         val temp = if (fastFreesound) null else File(applicationContext.cacheDir, "scene-analysis/$trackId.wav")
         return try {
-            analysisMutex.withLock {
+            val analyzeAndPersist: suspend () -> Result = {
                 val analysis = if (fastFreesound) {
                     AndroidAudioLoudnessAnalyzer.analyze(
                         context = applicationContext,
@@ -124,6 +126,11 @@ class SceneMusicAnalysisWorker(
                         KEY_REUSED_MEASUREMENT to false,
                     ),
                 )
+            }
+            if (fastFreesound) {
+                freesoundAnalysisSemaphore.withPermit { analyzeAndPersist() }
+            } else {
+                analysisMutex.withLock { analyzeAndPersist() }
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -209,7 +216,9 @@ class SceneMusicAnalysisWorker(
         private const val KEY_ERROR = "error"
         private const val MAX_RETRY_ATTEMPTS = 2
         private const val RETRY_BACKOFF_SECONDS = 10L
+        internal const val MAX_PARALLEL_FREESOUND_ANALYSES = 4
         private val analysisMutex = Mutex()
+        private val freesoundAnalysisSemaphore = Semaphore(MAX_PARALLEL_FREESOUND_ANALYSES)
 
         internal fun fastAnalysisDurationUs(kind: AudioAssetKind): Long = when (kind) {
             // Mode 3 only: cap the decoded measurement window so 70-150s previews do not

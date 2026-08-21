@@ -11,5 +11,6 @@ class Mode3FastNormalizationPolicyTest {
         assertEquals(20_000_000L, SceneMusicAnalysisWorker.fastAnalysisDurationUs(AudioAssetKind.AMBIENCE))
         assertEquals(10_000_000L, SceneMusicAnalysisWorker.fastAnalysisDurationUs(AudioAssetKind.SFX))
         assertTrue(SceneMusicAnalysisWorker.fastAnalysisDurationUs(AudioAssetKind.AMBIENCE) < 60_000_000L)
+        assertEquals(4, SceneMusicAnalysisWorker.MAX_PARALLEL_FREESOUND_ANALYSES)
     }
 }

@@ -55,7 +55,7 @@ class FreesoundImporter(
         kind: AudioAssetKind,
         normalizationTargetLufs: Float,
     ): Result<FreesoundImportResult> = withContext(Dispatchers.IO) {
-        importMutex.withLock {
+        soundImportLock(sound.id).withLock {
             cleanupStalePartFiles(appContext)
             val duplicateCheck = runCatching { existingTracksProvider() }
             if (duplicateCheck.isFailure) {
@@ -342,7 +342,9 @@ class FreesoundImporter(
         private const val UNKNOWN_LENGTH_REQUIRED_BYTES = 12L * 1024L * 1024L
         private const val NORMALIZATION_POLL_MS = 120L
         private const val NORMALIZATION_TIMEOUT_MS = 10L * 60L * 1_000L
-        private val importMutex = Mutex()
+        private const val STALE_PART_AGE_MS = 15L * 60L * 1_000L
+        private const val SOUND_LOCK_STRIPES = 64
+        private val soundImportLocks = List(SOUND_LOCK_STRIPES) { Mutex() }
         private val managedSoundIdRegex = Regex(
             """(?i)(?:^|/)audio/freesound/(?:music|ambience|sfx)/freesound_(\d+)_[-0-9a-f]+\.(?:ogg|mp3)$""",
         )
@@ -433,14 +435,23 @@ class FreesoundImporter(
         internal fun cleanupStalePartFiles(context: Context): Int {
             val root = File(context.applicationContext.filesDir, MANAGED_ROOT)
             if (!root.isDirectory) return 0
+            val staleBefore = System.currentTimeMillis() - STALE_PART_AGE_MS
             var deleted = 0
             root.walkTopDown().forEach { file ->
-                if (file.isFile && file.name.endsWith(".part", ignoreCase = true) && file.delete()) {
+                if (
+                    file.isFile &&
+                    file.name.endsWith(".part", ignoreCase = true) &&
+                    file.lastModified() <= staleBefore &&
+                    file.delete()
+                ) {
                     deleted += 1
                 }
             }
             return deleted
         }
+
+        private fun soundImportLock(soundId: Int): Mutex =
+            soundImportLocks[(soundId and Int.MAX_VALUE) % SOUND_LOCK_STRIPES]
 
         private fun managedFile(context: Context, uri: String): File? {
             val parsed = runCatching { Uri.parse(uri) }.getOrNull() ?: return null

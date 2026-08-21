@@ -51,6 +51,20 @@ internal object FreesoundParallelSearchPolicy {
     }
 }
 
+internal object FreesoundParallelImportPolicy {
+    const val MAX_PARALLEL_IMPORTS = 4
+
+    suspend fun <T, R> mapOrdered(
+        values: List<T>,
+        transform: suspend (T) -> R,
+    ): List<R> = coroutineScope {
+        val semaphore = Semaphore(MAX_PARALLEL_IMPORTS)
+        values.map { value ->
+            async { semaphore.withPermit { transform(value) } }
+        }.awaitAll()
+    }
+}
+
 private data class FreesoundAutoPreparedNeed(
     val index: Int,
     val need: FreesoundAutoSearchNeed,
@@ -59,6 +73,12 @@ private data class FreesoundAutoPreparedNeed(
     val strategy: String = "CACHE",
     val search: FreesoundAutoSearchOutcome? = null,
     val searchElapsedMs: Long = 0L,
+)
+
+private data class FreesoundAutoImportOutcome(
+    val index: Int,
+    val result: Result<FreesoundImportResult>,
+    val elapsedMs: Long,
 )
 
 data class FreesoundAutoResolvedNeed(
@@ -222,7 +242,7 @@ class FreesoundAutoAudioResolver(
             "retryMax" to retryMax.coerceAtLeast(1).toString(),
         )
         val diagnostics = mutableListOf<String>()
-        diagnostics += "RESOLVE_START requirements=${requirements.size} aggregated=${needs.size} parallelSearchLimit=${FreesoundParallelSearchPolicy.MAX_PARALLEL_SEARCHES}"
+        diagnostics += "RESOLVE_START requirements=${requirements.size} aggregated=${needs.size} parallelSearchLimit=${FreesoundParallelSearchPolicy.MAX_PARALLEL_SEARCHES} parallelImportLimit=${FreesoundParallelImportPolicy.MAX_PARALLEL_IMPORTS}"
         liveDiagnostic(
             traceId,
             "FREESOUND_RESOLVE_START",
@@ -230,6 +250,7 @@ class FreesoundAutoAudioResolver(
                 "requirements" to requirements.size.toString(),
                 "aggregatedNeeds" to needs.size.toString(),
                 "parallelSearchLimit" to FreesoundParallelSearchPolicy.MAX_PARALLEL_SEARCHES.toString(),
+                "parallelImportLimit" to FreesoundParallelImportPolicy.MAX_PARALLEL_IMPORTS.toString(),
             ),
         )
         if (needs.isEmpty()) {
@@ -382,6 +403,64 @@ class FreesoundAutoAudioResolver(
         else (System.nanoTime() - networkStartedNanos) / 1_000_000L
         val searchedByIndex = searched.associateBy(FreesoundAutoPreparedNeed::index)
 
+        // Resolve known soundIds from the local managed library before any download. Invalidly
+        // normalized files are intentionally NOT counted as reusable: importer will resume their
+        // normalization without downloading the bytes again.
+        val preexistingSoundTrackByIndex = searched.mapNotNull { seed ->
+            val remote = seed.search?.sound ?: return@mapNotNull null
+            val track = knownTracks.firstOrNull { candidate ->
+                candidate.enabled &&
+                    AudioAssetClassifier.classify(candidate) == seed.need.kind &&
+                    FreesoundImporter.soundIdFromManagedUri(candidate.uri) == remote.id &&
+                    FreesoundImporter.managedFileExists(appContext, candidate.uri)
+            } ?: return@mapNotNull null
+            seed.index to track
+        }.toMap()
+        val localReusableByIndex = preexistingSoundTrackByIndex.filterValues(FreesoundImporter::hasValidNormalization)
+
+        // Download + normalization is one bounded unit of work. At most four such units are active.
+        // FreesoundImporter additionally serializes identical soundIds, so two different queries that
+        // select the same remote sound cannot download or normalize it twice.
+        val importSeeds = searched.filter { seed ->
+            seed.search?.sound != null && localReusableByIndex[seed.index] == null
+        }
+        val parallelImportStartedNanos = System.nanoTime()
+        val parallelImports = FreesoundParallelImportPolicy.mapOrdered(importSeeds) { seed ->
+            val remote = requireNotNull(seed.search?.sound)
+            liveDiagnostic(
+                traceId,
+                "FREESOUND_IMPORT_START",
+                attributes = baseAttributes + mapOf(
+                    "index" to (seed.index + 1).toString(),
+                    "kind" to seed.need.kind.name,
+                    "soundId" to remote.id.toString(),
+                    "durationSec" to "%.2f".format(java.util.Locale.US, remote.durationSeconds),
+                    "previewAvailable" to (remote.preferredPreviewUrl != null).toString(),
+                    "query" to seed.need.query.take(180),
+                    "parallelImportLimit" to FreesoundParallelImportPolicy.MAX_PARALLEL_IMPORTS.toString(),
+                ),
+            )
+            val importStartedNanos = System.nanoTime()
+            val result = importer.importPreview(
+                sound = remote,
+                kind = seed.need.kind,
+                normalizationTargetLufs = normalizationTarget(seed.need.kind),
+            )
+            FreesoundAutoImportOutcome(
+                index = seed.index,
+                result = result,
+                elapsedMs = (System.nanoTime() - importStartedNanos) / 1_000_000L,
+            )
+        }
+        val parallelImportWallMs = if (importSeeds.isEmpty()) 0L
+        else (System.nanoTime() - parallelImportStartedNanos) / 1_000_000L
+        val parallelImportsByIndex = parallelImports.associateBy(FreesoundAutoImportOutcome::index)
+        importAttempts = importSeeds.size
+        importElapsedTotalMs = parallelImports.sumOf(FreesoundAutoImportOutcome::elapsedMs)
+        if (parallelImports.isNotEmpty()) {
+            knownTracks = runCatching { existingTracksProvider() }.getOrDefault(knownTracks)
+        }
+
         for (seed in prepared.sortedBy(FreesoundAutoPreparedNeed::index)) {
             val need = seed.need
             val cachedTrack = seed.cachedTrack
@@ -405,13 +484,8 @@ class FreesoundAutoAudioResolver(
                 // (e.g. after upgrading from an older build). Reuse it before invoking importer or
                 // normalization. This first cold lookup still needed search once to learn the mapping;
                 // queryCache.put below guarantees future identical queries skip network entirely.
-                val existingSoundTrack = knownTracks.firstOrNull { track ->
-                    track.enabled &&
-                        AudioAssetClassifier.classify(track) == need.kind &&
-                        FreesoundImporter.soundIdFromManagedUri(track.uri) == remote.id &&
-                        FreesoundImporter.managedFileExists(appContext, track.uri)
-                }
-                if (existingSoundTrack != null && FreesoundImporter.hasValidNormalization(existingSoundTrack)) {
+                val existingSoundTrack = localReusableByIndex[seed.index]
+                if (existingSoundTrack != null) {
                     resolvedTrack = existingSoundTrack
                     localSoundIdReuses += 1
                     diagnostics += "LOCAL_SOUND_ID_REUSE kind=${need.kind.name} soundId=${remote.id} trackId=${existingSoundTrack.id} importerSkipped=true"
@@ -427,32 +501,13 @@ class FreesoundAutoAudioResolver(
                         ),
                     )
                 } else {
-                    importAttempts += 1
-                    val importStartedNanos = System.nanoTime()
-                    diagnostics += "IMPORT_START kind=${need.kind.name} soundId=${remote.id} durationSec=${"%.2f".format(java.util.Locale.US, remote.durationSeconds)} previewAvailable=${remote.preferredPreviewUrl != null} query=${need.query.take(140)}"
-                    liveDiagnostic(
-                        traceId,
-                        "FREESOUND_IMPORT_START",
-                        attributes = baseAttributes + mapOf(
-                            "kind" to need.kind.name,
-                            "soundId" to remote.id.toString(),
-                            "durationSec" to "%.2f".format(java.util.Locale.US, remote.durationSeconds),
-                            "previewAvailable" to (remote.preferredPreviewUrl != null).toString(),
-                            "query" to need.query.take(180),
-                        ),
-                    )
-                    val import = importer.importPreview(
-                        sound = remote,
-                        kind = need.kind,
-                        normalizationTargetLufs = normalizationTarget(need.kind),
-                    )
-                    val importElapsedMs = (System.nanoTime() - importStartedNanos) / 1_000_000L
-                    importElapsedTotalMs += importElapsedMs
+                    val importOutcome = requireNotNull(parallelImportsByIndex[seed.index])
+                    val import = importOutcome.result
+                    val importElapsedMs = importOutcome.elapsedMs
                     if (import.isSuccess) {
                         val result = import.getOrThrow()
-                        knownTracks = runCatching { existingTracksProvider() }.getOrDefault(knownTracks)
                         resolvedTrack = knownTracks.firstOrNull { it.id == result.trackId && it.enabled }
-                        if (existingSoundTrack == null) imported += result.trackId else normalizationResumes += 1
+                        if (preexistingSoundTrackByIndex[seed.index] == null) imported += result.trackId else normalizationResumes += 1
                         diagnostics += "IMPORT_SUCCESS kind=${need.kind.name} soundId=${remote.id} trackId=${result.trackId} elapsedMs=$importElapsedMs downloadMs=${result.downloadElapsedMs} normalizationMs=${result.normalizationElapsedMs} fileExists=${resolvedTrack?.let { FreesoundImporter.managedFileExists(appContext, it.uri) } == true}"
                         liveDiagnostic(
                             traceId,
@@ -561,7 +616,7 @@ class FreesoundAutoAudioResolver(
         val retryRecommended = retryableFailure ||
             (resolutions.isNotEmpty() && (resolutions.none { !it.trackId.isNullOrBlank() } || unresolvedRequired > 0))
         val clientSearches = networkSeeds.size
-        diagnostics += "RESOLVE_DONE requirements=${requirements.size} aggregated=${needs.size} resolved=${resolutions.count { !it.trackId.isNullOrBlank() }} unresolved=${resolutions.count { it.trackId.isNullOrBlank() }} unresolvedRequired=$unresolvedRequired queryCacheHits=$queryCacheHits clientSearches=$clientSearches parallelSearchLimit=${FreesoundParallelSearchPolicy.MAX_PARALLEL_SEARCHES} cacheLookupMs=$cacheLookupMs networkSearchWallMs=$networkSearchWallMs importAttempts=$importAttempts localSoundIdReuses=$localSoundIdReuses normalizationResumes=$normalizationResumes imported=${imported.size} importElapsedTotalMs=$importElapsedTotalMs retryableFailure=$retryableFailure retryRecommended=$retryRecommended elapsedMs=$totalElapsedMs"
+        diagnostics += "RESOLVE_DONE requirements=${requirements.size} aggregated=${needs.size} resolved=${resolutions.count { !it.trackId.isNullOrBlank() }} unresolved=${resolutions.count { it.trackId.isNullOrBlank() }} unresolvedRequired=$unresolvedRequired queryCacheHits=$queryCacheHits clientSearches=$clientSearches parallelSearchLimit=${FreesoundParallelSearchPolicy.MAX_PARALLEL_SEARCHES} parallelImportLimit=${FreesoundParallelImportPolicy.MAX_PARALLEL_IMPORTS} cacheLookupMs=$cacheLookupMs networkSearchWallMs=$networkSearchWallMs importWallMs=$parallelImportWallMs importAttempts=$importAttempts localSoundIdReuses=$localSoundIdReuses normalizationResumes=$normalizationResumes imported=${imported.size} importElapsedTotalMs=$importElapsedTotalMs retryableFailure=$retryableFailure retryRecommended=$retryRecommended elapsedMs=$totalElapsedMs"
         liveDiagnostic(
             traceId,
             "FREESOUND_RESOLVE_DONE",
@@ -575,8 +630,10 @@ class FreesoundAutoAudioResolver(
                 "queryCacheHits" to queryCacheHits.toString(),
                 "clientSearches" to clientSearches.toString(),
                 "parallelSearchLimit" to FreesoundParallelSearchPolicy.MAX_PARALLEL_SEARCHES.toString(),
+                "parallelImportLimit" to FreesoundParallelImportPolicy.MAX_PARALLEL_IMPORTS.toString(),
                 "cacheLookupMs" to cacheLookupMs.toString(),
                 "networkSearchWallMs" to networkSearchWallMs.toString(),
+                "importWallMs" to parallelImportWallMs.toString(),
                 "importAttempts" to importAttempts.toString(),
                 "localSoundIdReuses" to localSoundIdReuses.toString(),
                 "normalizationResumes" to normalizationResumes.toString(),

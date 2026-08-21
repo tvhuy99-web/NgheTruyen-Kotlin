@@ -23,8 +23,10 @@ for token in [
         raise SystemExit("MUSIC_NORMALIZE_FLOW worker missing: " + token)
 
 for token in [
-    'title = "Attack"',
-    'title = "Release"',
+    'title = "Attack nhạc AI local"',
+    'title = "Release nhạc AI local"',
+    'title = "Attack nhạc Mode 3"',
+    'title = "Release nhạc Mode 3"',
     'label = "CHUẨN HÓA TOÀN BỘ ÂM THANH"',
     'title = { Text("CHUẨN HÓA TOÀN BỘ ÂM THANH") }',
     'title = "Nhạc nền ($musicCount tệp)"',

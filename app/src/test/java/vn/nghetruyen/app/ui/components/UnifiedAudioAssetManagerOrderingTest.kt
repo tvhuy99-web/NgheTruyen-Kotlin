@@ -33,16 +33,44 @@ class UnifiedAudioAssetManagerOrderingTest {
         assertEquals(listOf("a", "b"), audioAssetRowsOldestFirst(listOf(b, a)).map { it.id })
     }
 
+    @Test
+    fun musicAmbienceAndSfxUseTheSameOldestFirstRule() {
+        val kinds = listOf("type:music", "type:ambience", "type:sfx")
+
+        kinds.forEach { marker ->
+            val older = track(
+                id = "$marker-old",
+                title = "Z old",
+                orderIndex = 0,
+                updatedAt = 100L,
+                tagsCsv = marker,
+            )
+            val newer = track(
+                id = "$marker-new",
+                title = "A new",
+                orderIndex = 0,
+                updatedAt = 200L,
+                tagsCsv = marker,
+            )
+
+            assertEquals(
+                listOf(older.id, newer.id),
+                audioAssetRowsOldestFirst(listOf(newer, older)).map { it.id },
+            )
+        }
+    }
+
     private fun track(
         id: String,
         title: String,
         orderIndex: Int,
         updatedAt: Long,
+        tagsCsv: String = "type:music",
     ) = SceneMusicTrackEntity(
         id = id,
         title = title,
         uri = "file:///$id.mp3",
-        tagsCsv = "type:music",
+        tagsCsv = tagsCsv,
         volume = 1f,
         enabled = true,
         orderIndex = orderIndex,

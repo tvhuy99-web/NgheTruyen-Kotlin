@@ -4,6 +4,7 @@ import subprocess
 
 runpy.run_path(str(Path('.github/scripts/fix_all_runtime_20260821.py')), run_name='__main__')
 runpy.run_path(str(Path('.github/scripts/prepare_audio_continuity_patch_20260821.py')), run_name='__main__')
+runpy.run_path(str(Path('.github/scripts/escape_audio_continuity_patch_20260821.py')), run_name='__main__')
 runpy.run_path(str(Path('.github/scripts/improve_audio_selection_continuity_20260821.py')), run_name='__main__')
 
 # The legacy verifier stages app/src/main itself only after tests succeed. Keep the two

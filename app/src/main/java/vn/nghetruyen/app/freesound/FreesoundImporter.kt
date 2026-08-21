@@ -29,6 +29,8 @@ data class FreesoundImportResult(
     val trackId: String,
     val uri: String,
     val title: String,
+    val downloadElapsedMs: Long = 0L,
+    val normalizationElapsedMs: Long = 0L,
 )
 
 class FreesoundDuplicateException(
@@ -91,6 +93,7 @@ class FreesoundImporter(
         return try {
             marker?.parentFile?.mkdirs()
             marker?.writeText("normalizing", Charsets.UTF_8)
+            val normalizationStartedNanos = System.nanoTime()
             val workId = SceneMusicAnalysisWorker.enqueue(
                 context = appContext,
                 trackId = track.id,
@@ -98,12 +101,15 @@ class FreesoundImporter(
                 fastFreesound = true,
             )
             awaitNormalization(workId, track.id)
+            val normalizationElapsedMs = (System.nanoTime() - normalizationStartedNanos) / 1_000_000L
             marker?.delete()
             Result.success(
                 FreesoundImportResult(
                     trackId = track.id,
                     uri = track.uri,
                     title = track.title,
+                    downloadElapsedMs = 0L,
+                    normalizationElapsedMs = normalizationElapsedMs,
                 ),
             )
         } catch (cancelled: CancellationException) {
@@ -187,6 +193,7 @@ class FreesoundImporter(
         var savedTrackId: String? = null
 
         return try {
+            val downloadStartedNanos = System.nanoTime()
             val request = Request.Builder()
                 .url(previewUrl)
                 .header("Accept", "audio/*")
@@ -230,6 +237,7 @@ class FreesoundImporter(
                 partFile.delete()
             }
             validateDownloadedAudio(finalFile)
+            val downloadElapsedMs = (System.nanoTime() - downloadStartedNanos) / 1_000_000L
             markerFile.writeText("normalizing", Charsets.UTF_8)
 
             val uri = Uri.fromFile(finalFile).toString()
@@ -249,6 +257,7 @@ class FreesoundImporter(
             ).getOrThrow()
             savedTrackId = trackId
 
+            val normalizationStartedNanos = System.nanoTime()
             val workId = SceneMusicAnalysisWorker.enqueue(
                 context = appContext,
                 trackId = trackId,
@@ -256,6 +265,7 @@ class FreesoundImporter(
                 fastFreesound = true,
             )
             awaitNormalization(workId, trackId)
+            val normalizationElapsedMs = (System.nanoTime() - normalizationStartedNanos) / 1_000_000L
             markerFile.delete()
 
             Result.success(
@@ -263,6 +273,8 @@ class FreesoundImporter(
                     trackId = trackId,
                     uri = uri,
                     title = title,
+                    downloadElapsedMs = downloadElapsedMs,
+                    normalizationElapsedMs = normalizationElapsedMs,
                 ),
             )
         } catch (cancelled: CancellationException) {

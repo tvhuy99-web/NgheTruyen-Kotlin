@@ -20,6 +20,13 @@ class FreesoundRetryQueryTest {
     }
 
     @Test
+    fun twoTermQueryDoesNotRepeatTheExactSearchOnSecondAttempt() {
+        assertEquals("guzheng", FreesoundAutoAudioResolver.searchQueryForRetry("mysterious guzheng", 2))
+        assertEquals("mysterious", FreesoundAutoAudioResolver.searchQueryForRetry("mysterious guzheng", 3))
+        assertEquals("clash", FreesoundAutoAudioResolver.searchQueryForRetry("sword clash", 2))
+    }
+
+    @Test
     fun thirdAttemptKeepsTheFirstImportantTerm() {
         assertEquals("sword", FreesoundAutoAudioResolver.searchQueryForRetry("sword clash close metal", 3))
         assertEquals("forest", FreesoundAutoAudioResolver.searchQueryForRetry("forest wind distant trees", 3))

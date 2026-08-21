@@ -212,9 +212,11 @@ class SceneMusicAnalysisWorker(
         private val analysisMutex = Mutex()
 
         internal fun fastAnalysisDurationUs(kind: AudioAssetKind): Long = when (kind) {
-            AudioAssetKind.MUSIC -> 45_000_000L
-            AudioAssetKind.AMBIENCE -> 30_000_000L
-            AudioAssetKind.SFX -> 15_000_000L
+            // Mode 3 only: cap the decoded measurement window so 70-150s previews do not
+            // block narration startup for tens of seconds. Original MP3/OGG bytes are untouched.
+            AudioAssetKind.MUSIC -> 24_000_000L
+            AudioAssetKind.AMBIENCE -> 20_000_000L
+            AudioAssetKind.SFX -> 10_000_000L
         }
 
         fun enqueue(

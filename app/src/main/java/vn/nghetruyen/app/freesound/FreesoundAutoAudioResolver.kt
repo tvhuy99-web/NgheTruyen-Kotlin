@@ -3,6 +3,11 @@ package vn.nghetruyen.app.freesound
 import android.content.Context
 import java.security.MessageDigest
 import java.util.UUID
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlin.math.ln
 import kotlin.math.max
 import vn.nghetruyen.app.NgheTruyenApplication
@@ -18,6 +23,8 @@ import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
 import vn.nghetruyen.app.data.repository.LibraryRepository
 import vn.nghetruyen.app.data.settings.SettingsRepository
 import vn.nghetruyen.source.diagnostics.DiagnosticCategory
+import vn.nghetruyen.source.diagnostics.DiagnosticOperationContract
+import vn.nghetruyen.source.diagnostics.DiagnosticOperationState
 import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 
 private enum class FreesoundAutoResolutionSource { CACHE, FREESOUND, UNRESOLVED }
@@ -28,6 +35,30 @@ internal data class FreesoundAutoSearchOutcome(
     val retryable: Boolean = false,
     val resultCount: Int = 0,
     val httpCode: Int? = null,
+)
+
+internal object FreesoundParallelSearchPolicy {
+    const val MAX_PARALLEL_SEARCHES = 4
+
+    suspend fun <T, R> mapOrdered(
+        values: List<T>,
+        transform: suspend (T) -> R,
+    ): List<R> = coroutineScope {
+        val semaphore = Semaphore(MAX_PARALLEL_SEARCHES)
+        values.map { value ->
+            async { semaphore.withPermit { transform(value) } }
+        }.awaitAll()
+    }
+}
+
+private data class FreesoundAutoPreparedNeed(
+    val index: Int,
+    val need: FreesoundAutoSearchNeed,
+    val cachedTrack: SceneMusicTrackEntity? = null,
+    val effectiveQuery: String = "",
+    val strategy: String = "CACHE",
+    val search: FreesoundAutoSearchOutcome? = null,
+    val searchElapsedMs: Long = 0L,
 )
 
 data class FreesoundAutoResolvedNeed(
@@ -112,13 +143,26 @@ class FreesoundAutoAudioResolver(
         severity: DiagnosticSeverity = DiagnosticSeverity.INFO,
         attributes: Map<String, String> = emptyMap(),
     ) {
+        val operationState = when (name) {
+            "FREESOUND_RESOLVE_START" -> DiagnosticOperationState.STARTED
+            "FREESOUND_RESOLVE_DONE", "FREESOUND_RESOLVE_EMPTY" -> DiagnosticOperationState.COMPLETED
+            "FREESOUND_RETRY_EXHAUSTED" -> DiagnosticOperationState.FAILED
+            else -> DiagnosticOperationState.STAGE
+        }
+        val operationAttributes = DiagnosticOperationContract.attributes(
+            id = traceId,
+            kind = "FREESOUND_RESOLVE",
+            flow = "runtime",
+            state = operationState,
+            stage = name,
+        )
         (appContext as? NgheTruyenApplication)?.container?.sourceDiagnostics?.mark(
             name = name,
             category = DiagnosticCategory.RUNTIME,
             severity = severity,
             sourceId = "freesound",
             traceId = traceId,
-            attributes = attributes,
+            attributes = operationAttributes + attributes,
         )
     }
 
@@ -151,8 +195,14 @@ class FreesoundAutoAudioResolver(
     }
 
     fun clearResolutionCaches() {
-        queryCache.clear()
+        // Rebuilding a chapter must invalidate transient HTTP pages, but NOT the durable
+        // query -> downloaded-track index. Keeping that index is what lets the next voice-cast
+        // reuse a verified file on disk without spending another Freesound request or data.
         client.clearSearchCache()
+    }
+
+    fun clearPersistentAssetQueryCache() {
+        queryCache.clear()
     }
 
     fun clearNetworkSearchCache() {
@@ -172,13 +222,14 @@ class FreesoundAutoAudioResolver(
             "retryMax" to retryMax.coerceAtLeast(1).toString(),
         )
         val diagnostics = mutableListOf<String>()
-        diagnostics += "RESOLVE_START requirements=${requirements.size} aggregated=${needs.size}"
+        diagnostics += "RESOLVE_START requirements=${requirements.size} aggregated=${needs.size} parallelSearchLimit=${FreesoundParallelSearchPolicy.MAX_PARALLEL_SEARCHES}"
         liveDiagnostic(
             traceId,
             "FREESOUND_RESOLVE_START",
             attributes = baseAttributes + mapOf(
                 "requirements" to requirements.size.toString(),
                 "aggregatedNeeds" to needs.size.toString(),
+                "parallelSearchLimit" to FreesoundParallelSearchPolicy.MAX_PARALLEL_SEARCHES.toString(),
             ),
         )
         if (needs.isEmpty()) {
@@ -196,15 +247,23 @@ class FreesoundAutoAudioResolver(
                 diagnostics = diagnostics,
             )
         }
+
         val warnings = mutableListOf<String>()
         val imported = linkedSetOf<String>()
         val resolutions = mutableListOf<FreesoundAutoResolvedNeed>()
         var retryableFailure = false
         var queryCacheHits = 0
-        var clientSearches = 0
         var importAttempts = 0
+        var localSoundIdReuses = 0
+        var normalizationResumes = 0
+        var importElapsedTotalMs = 0L
 
-        for ((index, need) in needs.withIndex()) {
+        // One DB snapshot is enough for the local-first pass. A cached mapping is trusted only when
+        // the row is enabled, has the requested kind, belongs to managed Freesound storage and the
+        // physical file still exists. Stale mappings self-evict and fall back to network search.
+        val cacheStartedNanos = System.nanoTime()
+        var knownTracks = runCatching { existingTracksProvider() }.getOrDefault(emptyList())
+        val prepared = needs.mapIndexed { index, need ->
             diagnostics += "NEED_START index=${index + 1}/${needs.size} kind=${need.kind.name} importance=${need.importance.name} usages=${need.usages.size} query=${need.query.take(160)}"
             liveDiagnostic(
                 traceId,
@@ -218,9 +277,8 @@ class FreesoundAutoAudioResolver(
                     "query" to need.query.take(180),
                 ),
             )
-            val currentTracks = runCatching { existingTracksProvider() }.getOrDefault(emptyList())
             val cachedId = queryCache.get(need.kind, need.query)
-            val cachedTrack = cachedId?.let { id -> currentTracks.firstOrNull { it.id == id } }
+            val cachedTrack = cachedId?.let { id -> knownTracks.firstOrNull { it.id == id } }
                 ?.takeIf {
                     it.enabled &&
                         AudioAssetClassifier.classify(it) == need.kind &&
@@ -229,114 +287,230 @@ class FreesoundAutoAudioResolver(
                 }
             if (cachedTrack != null) {
                 queryCacheHits += 1
-                diagnostics += "QUERY_CACHE_HIT kind=${need.kind.name} trackId=${cachedTrack.id} soundId=${FreesoundImporter.soundIdFromManagedUri(cachedTrack.uri)} fileExists=true query=${need.query.take(140)}"
-                liveDiagnostic(traceId, "FREESOUND_QUERY_CACHE_HIT", attributes = baseAttributes + mapOf(
-                    "kind" to need.kind.name, "trackId" to cachedTrack.id,
-                    "soundId" to FreesoundImporter.soundIdFromManagedUri(cachedTrack.uri).toString(),
-                    "fileExists" to "true", "query" to need.query.take(180),
-                ))
-                resolutions += FreesoundAutoResolvedNeed(need, cachedTrack.id, FreesoundAutoResolutionSource.CACHE.name)
-                continue
-            } else if (cachedId != null) {
-                diagnostics += "QUERY_CACHE_STALE kind=${need.kind.name} trackId=$cachedId reason=missing_disabled_wrong_kind_or_file_missing query=${need.query.take(140)}"
-                liveDiagnostic(traceId, "FREESOUND_QUERY_CACHE_STALE", DiagnosticSeverity.WARN, baseAttributes + mapOf(
-                    "kind" to need.kind.name, "trackId" to cachedId, "query" to need.query.take(180),
-                ))
-                queryCache.remove(need.kind, need.query)
+                diagnostics += "LOCAL_QUERY_CACHE_HIT kind=${need.kind.name} trackId=${cachedTrack.id} soundId=${FreesoundImporter.soundIdFromManagedUri(cachedTrack.uri)} fileExists=true query=${need.query.take(140)}"
+                liveDiagnostic(
+                    traceId,
+                    "FREESOUND_LOCAL_QUERY_CACHE_HIT",
+                    attributes = baseAttributes + mapOf(
+                        "kind" to need.kind.name,
+                        "trackId" to cachedTrack.id,
+                        "soundId" to FreesoundImporter.soundIdFromManagedUri(cachedTrack.uri).toString(),
+                        "fileExists" to "true",
+                        "networkSkipped" to "true",
+                        "query" to need.query.take(180),
+                    ),
+                )
+                FreesoundAutoPreparedNeed(index = index, need = need, cachedTrack = cachedTrack)
             } else {
-                diagnostics += "QUERY_CACHE_MISS kind=${need.kind.name} query=${need.query.take(140)}"
+                if (cachedId != null) {
+                    diagnostics += "LOCAL_QUERY_CACHE_STALE kind=${need.kind.name} trackId=$cachedId reason=missing_disabled_wrong_kind_or_file_missing query=${need.query.take(140)}"
+                    liveDiagnostic(
+                        traceId,
+                        "FREESOUND_LOCAL_QUERY_CACHE_STALE",
+                        DiagnosticSeverity.WARN,
+                        baseAttributes + mapOf(
+                            "kind" to need.kind.name,
+                            "trackId" to cachedId,
+                            "query" to need.query.take(180),
+                        ),
+                    )
+                    queryCache.remove(need.kind, need.query)
+                } else {
+                    diagnostics += "LOCAL_QUERY_CACHE_MISS kind=${need.kind.name} query=${need.query.take(140)}"
+                }
+                val effectiveQuery = searchQueryForRetry(need.query, retryAttempt)
+                val tokenCount = FreesoundAutoRequirementAggregator.normalizeQuery(need.query)
+                    .split(' ').count(String::isNotBlank)
+                val strategy = when {
+                    retryAttempt <= 1 -> "EXACT"
+                    retryAttempt == 2 && tokenCount <= 2 -> "RELAXED_1_TERM_ALTERNATE"
+                    retryAttempt == 2 -> "RELAXED_2_TERMS"
+                    else -> "RELAXED_1_TERM_ANCHOR"
+                }
+                FreesoundAutoPreparedNeed(
+                    index = index,
+                    need = need,
+                    effectiveQuery = effectiveQuery,
+                    strategy = strategy,
+                )
             }
+        }
+        val cacheLookupMs = (System.nanoTime() - cacheStartedNanos) / 1_000_000L
 
-            clientSearches += 1
+        // Network misses are the only work that enters this bounded pool. Four requests may be in
+        // flight at once; cache hits never consume a permit. awaitAll preserves the seed order, and
+        // final resolution is still committed in original need order for deterministic plans.
+        val networkSeeds = prepared.filter { it.cachedTrack == null }
+        val networkStartedNanos = System.nanoTime()
+        val searched = FreesoundParallelSearchPolicy.mapOrdered(networkSeeds) { seed ->
+            liveDiagnostic(
+                traceId,
+                "FREESOUND_CLIENT_SEARCH_START",
+                attributes = baseAttributes + mapOf(
+                    "index" to (seed.index + 1).toString(),
+                    "total" to needs.size.toString(),
+                    "kind" to seed.need.kind.name,
+                    "query" to seed.need.query.take(180),
+                    "effectiveQuery" to seed.effectiveQuery.take(180),
+                    "strategy" to seed.strategy,
+                    "parallelSearchLimit" to FreesoundParallelSearchPolicy.MAX_PARALLEL_SEARCHES.toString(),
+                ),
+            )
             val searchStartedNanos = System.nanoTime()
-            val effectiveQuery = searchQueryForRetry(need.query, retryAttempt)
-            val searchStrategy = when {
-                retryAttempt <= 1 -> "EXACT"
-                retryAttempt == 2 -> "RELAXED_2_TERMS"
-                else -> "RELAXED_1_TERM"
-            }
-            diagnostics += "CLIENT_SEARCH_START index=${index + 1} kind=${need.kind.name} query=${need.query.take(160)} effectiveQuery=${effectiveQuery.take(160)} strategy=$searchStrategy"
-            liveDiagnostic(traceId, "FREESOUND_CLIENT_SEARCH_START", attributes = baseAttributes + mapOf(
-                "index" to (index + 1).toString(), "total" to needs.size.toString(),
-                "kind" to need.kind.name, "query" to need.query.take(180),
-                "effectiveQuery" to effectiveQuery.take(180), "strategy" to searchStrategy,
-            ))
-            val search = searchBest(need, effectiveQuery)
-            val searchElapsedMs = (System.nanoTime() - searchStartedNanos) / 1_000_000L
-            val remote = search.sound
-            diagnostics += "CLIENT_SEARCH_DONE index=${index + 1} kind=${need.kind.name} elapsedMs=$searchElapsedMs resultCount=${search.resultCount} httpCode=${search.httpCode ?: 0} selectedSoundId=${remote?.id ?: 0} failure=${search.failureMessage.orEmpty().take(180)}"
+            val search = searchBest(seed.need, seed.effectiveQuery)
+            val elapsedMs = (System.nanoTime() - searchStartedNanos) / 1_000_000L
             liveDiagnostic(
                 traceId,
                 "FREESOUND_CLIENT_SEARCH_DONE",
                 if (search.failureMessage.isNullOrBlank()) DiagnosticSeverity.INFO else DiagnosticSeverity.WARN,
                 baseAttributes + mapOf(
-                    "index" to (index + 1).toString(), "kind" to need.kind.name,
-                    "elapsedMs" to searchElapsedMs.toString(), "resultCount" to search.resultCount.toString(),
-                    "httpCode" to (search.httpCode ?: 0).toString(), "selectedSoundId" to (remote?.id ?: 0).toString(),
-                    "effectiveQuery" to effectiveQuery.take(180), "strategy" to searchStrategy,
+                    "index" to (seed.index + 1).toString(),
+                    "kind" to seed.need.kind.name,
+                    "elapsedMs" to elapsedMs.toString(),
+                    "resultCount" to search.resultCount.toString(),
+                    "httpCode" to (search.httpCode ?: 0).toString(),
+                    "selectedSoundId" to (search.sound?.id ?: 0).toString(),
+                    "originalQuery" to seed.need.query.take(180),
+                    "effectiveQuery" to seed.effectiveQuery.take(180),
+                    "strategy" to seed.strategy,
                     "failure" to search.failureMessage.orEmpty().take(220),
                 ),
             )
+            seed.copy(search = search, searchElapsedMs = elapsedMs)
+        }
+        val networkSearchWallMs = if (networkSeeds.isEmpty()) 0L
+        else (System.nanoTime() - networkStartedNanos) / 1_000_000L
+        val searchedByIndex = searched.associateBy(FreesoundAutoPreparedNeed::index)
+
+        for (seed in prepared.sortedBy(FreesoundAutoPreparedNeed::index)) {
+            val need = seed.need
+            val cachedTrack = seed.cachedTrack
+            if (cachedTrack != null) {
+                resolutions += FreesoundAutoResolvedNeed(need, cachedTrack.id, FreesoundAutoResolutionSource.CACHE.name)
+                continue
+            }
+
+            val resolvedSearch = requireNotNull(searchedByIndex[seed.index])
+            val search = requireNotNull(resolvedSearch.search)
+            val remote = search.sound
+            diagnostics += "CLIENT_SEARCH_DONE index=${seed.index + 1} kind=${need.kind.name} elapsedMs=${resolvedSearch.searchElapsedMs} resultCount=${search.resultCount} httpCode=${search.httpCode ?: 0} selectedSoundId=${remote?.id ?: 0} originalQuery=${need.query.take(140)} effectiveQuery=${resolvedSearch.effectiveQuery.take(140)} strategy=${resolvedSearch.strategy}"
             if (!search.failureMessage.isNullOrBlank()) {
-                warnings += "Freesound ‘${need.query}’: ${search.failureMessage}"
+                warnings += "Freesound ‘${need.query}’ (${resolvedSearch.effectiveQuery}): ${search.failureMessage}"
                 retryableFailure = retryableFailure || search.retryable
             }
 
             var resolvedTrack: SceneMusicTrackEntity? = null
             if (remote != null) {
-                importAttempts += 1
-                val importStartedNanos = System.nanoTime()
-                diagnostics += "IMPORT_START kind=${need.kind.name} soundId=${remote.id} durationSec=${"%.2f".format(java.util.Locale.US, remote.durationSeconds)} previewAvailable=${remote.preferredPreviewUrl != null} query=${need.query.take(140)}"
-                liveDiagnostic(traceId, "FREESOUND_IMPORT_START", attributes = baseAttributes + mapOf(
-                    "kind" to need.kind.name, "soundId" to remote.id.toString(),
-                    "durationSec" to "%.2f".format(java.util.Locale.US, remote.durationSeconds),
-                    "previewAvailable" to (remote.preferredPreviewUrl != null).toString(), "query" to need.query.take(180),
-                ))
-                val import = importer.importPreview(
-                    sound = remote,
-                    kind = need.kind,
-                    normalizationTargetLufs = normalizationTarget(need.kind),
-                )
-                val importElapsedMs = (System.nanoTime() - importStartedNanos) / 1_000_000L
-                if (import.isSuccess) {
-                    val result = import.getOrThrow()
-                    imported += result.trackId
-                    resolvedTrack = runCatching { existingTracksProvider() }.getOrDefault(emptyList())
-                        .firstOrNull { it.id == result.trackId && it.enabled }
-                    diagnostics += "IMPORT_SUCCESS kind=${need.kind.name} soundId=${remote.id} trackId=${result.trackId} elapsedMs=$importElapsedMs fileExists=${resolvedTrack?.let { FreesoundImporter.managedFileExists(appContext, it.uri) } == true}"
-                    liveDiagnostic(traceId, "FREESOUND_IMPORT_SUCCESS", attributes = baseAttributes + mapOf(
-                        "kind" to need.kind.name, "soundId" to remote.id.toString(), "trackId" to result.trackId,
-                        "elapsedMs" to importElapsedMs.toString(),
-                        "fileExists" to (resolvedTrack?.let { FreesoundImporter.managedFileExists(appContext, it.uri) } == true).toString(),
-                    ))
-                } else if (import.exceptionOrNull() is FreesoundDuplicateException) {
-                    resolvedTrack = runCatching { existingTracksProvider() }.getOrDefault(emptyList())
-                        .firstOrNull { track ->
+                // A cold query cache can still point the search at a sound already stored on disk
+                // (e.g. after upgrading from an older build). Reuse it before invoking importer or
+                // normalization. This first cold lookup still needed search once to learn the mapping;
+                // queryCache.put below guarantees future identical queries skip network entirely.
+                val existingSoundTrack = knownTracks.firstOrNull { track ->
+                    track.enabled &&
+                        AudioAssetClassifier.classify(track) == need.kind &&
+                        FreesoundImporter.soundIdFromManagedUri(track.uri) == remote.id &&
+                        FreesoundImporter.managedFileExists(appContext, track.uri)
+                }
+                if (existingSoundTrack != null && FreesoundImporter.hasValidNormalization(existingSoundTrack)) {
+                    resolvedTrack = existingSoundTrack
+                    localSoundIdReuses += 1
+                    diagnostics += "LOCAL_SOUND_ID_REUSE kind=${need.kind.name} soundId=${remote.id} trackId=${existingSoundTrack.id} importerSkipped=true"
+                    liveDiagnostic(
+                        traceId,
+                        "FREESOUND_LOCAL_SOUND_ID_REUSE",
+                        attributes = baseAttributes + mapOf(
+                            "kind" to need.kind.name,
+                            "soundId" to remote.id.toString(),
+                            "trackId" to existingSoundTrack.id,
+                            "importerSkipped" to "true",
+                            "query" to need.query.take(180),
+                        ),
+                    )
+                } else {
+                    importAttempts += 1
+                    val importStartedNanos = System.nanoTime()
+                    diagnostics += "IMPORT_START kind=${need.kind.name} soundId=${remote.id} durationSec=${"%.2f".format(java.util.Locale.US, remote.durationSeconds)} previewAvailable=${remote.preferredPreviewUrl != null} query=${need.query.take(140)}"
+                    liveDiagnostic(
+                        traceId,
+                        "FREESOUND_IMPORT_START",
+                        attributes = baseAttributes + mapOf(
+                            "kind" to need.kind.name,
+                            "soundId" to remote.id.toString(),
+                            "durationSec" to "%.2f".format(java.util.Locale.US, remote.durationSeconds),
+                            "previewAvailable" to (remote.preferredPreviewUrl != null).toString(),
+                            "query" to need.query.take(180),
+                        ),
+                    )
+                    val import = importer.importPreview(
+                        sound = remote,
+                        kind = need.kind,
+                        normalizationTargetLufs = normalizationTarget(need.kind),
+                    )
+                    val importElapsedMs = (System.nanoTime() - importStartedNanos) / 1_000_000L
+                    importElapsedTotalMs += importElapsedMs
+                    if (import.isSuccess) {
+                        val result = import.getOrThrow()
+                        knownTracks = runCatching { existingTracksProvider() }.getOrDefault(knownTracks)
+                        resolvedTrack = knownTracks.firstOrNull { it.id == result.trackId && it.enabled }
+                        if (existingSoundTrack == null) imported += result.trackId else normalizationResumes += 1
+                        diagnostics += "IMPORT_SUCCESS kind=${need.kind.name} soundId=${remote.id} trackId=${result.trackId} elapsedMs=$importElapsedMs downloadMs=${result.downloadElapsedMs} normalizationMs=${result.normalizationElapsedMs} fileExists=${resolvedTrack?.let { FreesoundImporter.managedFileExists(appContext, it.uri) } == true}"
+                        liveDiagnostic(
+                            traceId,
+                            "FREESOUND_IMPORT_SUCCESS",
+                            attributes = baseAttributes + mapOf(
+                                "kind" to need.kind.name,
+                                "soundId" to remote.id.toString(),
+                                "trackId" to result.trackId,
+                                "elapsedMs" to importElapsedMs.toString(),
+                                "downloadMs" to result.downloadElapsedMs.toString(),
+                                "normalizationMs" to result.normalizationElapsedMs.toString(),
+                                "fileExists" to (resolvedTrack?.let { FreesoundImporter.managedFileExists(appContext, it.uri) } == true).toString(),
+                            ),
+                        )
+                    } else if (import.exceptionOrNull() is FreesoundDuplicateException) {
+                        knownTracks = runCatching { existingTracksProvider() }.getOrDefault(knownTracks)
+                        resolvedTrack = knownTracks.firstOrNull { track ->
                             track.enabled &&
                                 FreesoundImporter.managedFileExists(appContext, track.uri) &&
                                 FreesoundImporter.soundIdFromManagedUri(track.uri) == remote.id &&
                                 AudioAssetClassifier.classify(track) == need.kind
                         }
-                    diagnostics += "IMPORT_DUPLICATE kind=${need.kind.name} soundId=${remote.id} reusedTrackId=${resolvedTrack?.id.orEmpty()} elapsedMs=$importElapsedMs fileExists=${resolvedTrack != null}"
-                    liveDiagnostic(traceId, "FREESOUND_IMPORT_DUPLICATE", attributes = baseAttributes + mapOf(
-                        "kind" to need.kind.name, "soundId" to remote.id.toString(),
-                        "reusedTrackId" to resolvedTrack?.id.orEmpty(), "elapsedMs" to importElapsedMs.toString(),
-                    ))
-                } else {
-                    val error = import.exceptionOrNull()
-                    val message = error?.message?.takeIf(String::isNotBlank)
-                        ?: "Không nhập/chuẩn hóa được preview đã chọn."
-                    warnings += "Freesound ‘${need.query}’: $message"
-                    if (error is FreesoundNormalizationException && error.retryable) retryableFailure = true
-                    diagnostics += "IMPORT_FAILED kind=${need.kind.name} soundId=${remote.id} elapsedMs=$importElapsedMs retryable=${error is FreesoundNormalizationException && error.retryable} errorType=${error?.javaClass?.simpleName.orEmpty()} error=${message.take(220)}"
-                    liveDiagnostic(traceId, "FREESOUND_IMPORT_FAILED", DiagnosticSeverity.WARN, baseAttributes + mapOf(
-                        "kind" to need.kind.name, "soundId" to remote.id.toString(), "elapsedMs" to importElapsedMs.toString(),
-                        "retryable" to (error is FreesoundNormalizationException && error.retryable).toString(),
-                        "errorType" to error?.javaClass?.simpleName.orEmpty(), "error" to message.take(240),
-                    ))
+                        if (resolvedTrack != null) localSoundIdReuses += 1
+                        diagnostics += "IMPORT_DUPLICATE kind=${need.kind.name} soundId=${remote.id} reusedTrackId=${resolvedTrack?.id.orEmpty()} elapsedMs=$importElapsedMs fileExists=${resolvedTrack != null}"
+                        liveDiagnostic(
+                            traceId,
+                            "FREESOUND_IMPORT_DUPLICATE",
+                            attributes = baseAttributes + mapOf(
+                                "kind" to need.kind.name,
+                                "soundId" to remote.id.toString(),
+                                "reusedTrackId" to resolvedTrack?.id.orEmpty(),
+                                "elapsedMs" to importElapsedMs.toString(),
+                            ),
+                        )
+                    } else {
+                        val error = import.exceptionOrNull()
+                        val message = error?.message?.takeIf(String::isNotBlank)
+                            ?: "Không nhập/chuẩn hóa được preview đã chọn."
+                        warnings += "Freesound ‘${need.query}’: $message"
+                        if (error is FreesoundNormalizationException && error.retryable) retryableFailure = true
+                        diagnostics += "IMPORT_FAILED kind=${need.kind.name} soundId=${remote.id} elapsedMs=$importElapsedMs retryable=${error is FreesoundNormalizationException && error.retryable} errorType=${error?.javaClass?.simpleName.orEmpty()} error=${message.take(220)}"
+                        liveDiagnostic(
+                            traceId,
+                            "FREESOUND_IMPORT_FAILED",
+                            DiagnosticSeverity.WARN,
+                            baseAttributes + mapOf(
+                                "kind" to need.kind.name,
+                                "soundId" to remote.id.toString(),
+                                "elapsedMs" to importElapsedMs.toString(),
+                                "retryable" to (error is FreesoundNormalizationException && error.retryable).toString(),
+                                "errorType" to error?.javaClass?.simpleName.orEmpty(),
+                                "error" to message.take(240),
+                            ),
+                        )
+                    }
                 }
             } else {
-                diagnostics += "SEARCH_NO_SELECTION kind=${need.kind.name} resultCount=${search.resultCount} query=${need.query.take(160)}"
+                diagnostics += "SEARCH_NO_SELECTION kind=${need.kind.name} resultCount=${search.resultCount} originalQuery=${need.query.take(140)} effectiveQuery=${resolvedSearch.effectiveQuery.take(140)} strategy=${resolvedSearch.strategy}"
             }
 
             if (resolvedTrack != null && resolvedTrack.enabled &&
@@ -345,20 +519,35 @@ class FreesoundAutoAudioResolver(
             ) {
                 queryCache.put(need.kind, need.query, resolvedTrack.id)
                 resolutions += FreesoundAutoResolvedNeed(need, resolvedTrack.id, FreesoundAutoResolutionSource.FREESOUND.name)
-                diagnostics += "NEED_RESOLVED kind=${need.kind.name} source=FREESOUND trackId=${resolvedTrack.id} soundId=${FreesoundImporter.soundIdFromManagedUri(resolvedTrack.uri)} query=${need.query.take(140)}"
-                liveDiagnostic(traceId, "FREESOUND_NEED_RESOLVED", attributes = baseAttributes + mapOf(
-                    "kind" to need.kind.name, "trackId" to resolvedTrack.id,
-                    "soundId" to FreesoundImporter.soundIdFromManagedUri(resolvedTrack.uri).toString(),
-                    "query" to need.query.take(180),
-                ))
+                diagnostics += "NEED_RESOLVED kind=${need.kind.name} source=FREESOUND trackId=${resolvedTrack.id} soundId=${FreesoundImporter.soundIdFromManagedUri(resolvedTrack.uri)} query=${need.query.take(140)} cachePersisted=true"
+                liveDiagnostic(
+                    traceId,
+                    "FREESOUND_NEED_RESOLVED",
+                    attributes = baseAttributes + mapOf(
+                        "kind" to need.kind.name,
+                        "trackId" to resolvedTrack.id,
+                        "soundId" to FreesoundImporter.soundIdFromManagedUri(resolvedTrack.uri).toString(),
+                        "query" to need.query.take(180),
+                        "cachePersisted" to "true",
+                    ),
+                )
                 continue
             }
 
             resolutions += FreesoundAutoResolvedNeed(need, null, FreesoundAutoResolutionSource.UNRESOLVED.name)
-            diagnostics += "NEED_UNRESOLVED kind=${need.kind.name} query=${need.query.take(160)}"
-            liveDiagnostic(traceId, "FREESOUND_NEED_UNRESOLVED", DiagnosticSeverity.WARN, baseAttributes + mapOf(
-                "kind" to need.kind.name, "importance" to need.importance.name, "query" to need.query.take(180),
-            ))
+            diagnostics += "NEED_UNRESOLVED kind=${need.kind.name} originalQuery=${need.query.take(140)} effectiveQuery=${resolvedSearch.effectiveQuery.take(140)} strategy=${resolvedSearch.strategy}"
+            liveDiagnostic(
+                traceId,
+                "FREESOUND_NEED_UNRESOLVED",
+                DiagnosticSeverity.WARN,
+                baseAttributes + mapOf(
+                    "kind" to need.kind.name,
+                    "importance" to need.importance.name,
+                    "originalQuery" to need.query.take(180),
+                    "effectiveQuery" to resolvedSearch.effectiveQuery.take(180),
+                    "strategy" to resolvedSearch.strategy,
+                ),
+            )
             if (search.failureMessage.isNullOrBlank() && remote == null) {
                 val prefix = if (need.importance == FreesoundRequirementImportance.REQUIRED) "Âm thanh quan trọng" else "Âm thanh tùy chọn"
                 warnings += "$prefix ‘${need.query}’ chưa tìm thấy kết quả đủ phù hợp trên Freesound; khoảng đó sẽ im lặng ở lớp tương ứng."
@@ -371,18 +560,29 @@ class FreesoundAutoAudioResolver(
         }
         val retryRecommended = retryableFailure ||
             (resolutions.isNotEmpty() && (resolutions.none { !it.trackId.isNullOrBlank() } || unresolvedRequired > 0))
-        diagnostics += "RESOLVE_DONE requirements=${requirements.size} aggregated=${needs.size} resolved=${resolutions.count { !it.trackId.isNullOrBlank() }} unresolved=${resolutions.count { it.trackId.isNullOrBlank() }} unresolvedRequired=$unresolvedRequired queryCacheHits=$queryCacheHits clientSearches=$clientSearches importAttempts=$importAttempts imported=${imported.size} retryableFailure=$retryableFailure retryRecommended=$retryRecommended elapsedMs=$totalElapsedMs"
+        val clientSearches = networkSeeds.size
+        diagnostics += "RESOLVE_DONE requirements=${requirements.size} aggregated=${needs.size} resolved=${resolutions.count { !it.trackId.isNullOrBlank() }} unresolved=${resolutions.count { it.trackId.isNullOrBlank() }} unresolvedRequired=$unresolvedRequired queryCacheHits=$queryCacheHits clientSearches=$clientSearches parallelSearchLimit=${FreesoundParallelSearchPolicy.MAX_PARALLEL_SEARCHES} cacheLookupMs=$cacheLookupMs networkSearchWallMs=$networkSearchWallMs importAttempts=$importAttempts localSoundIdReuses=$localSoundIdReuses normalizationResumes=$normalizationResumes imported=${imported.size} importElapsedTotalMs=$importElapsedTotalMs retryableFailure=$retryableFailure retryRecommended=$retryRecommended elapsedMs=$totalElapsedMs"
         liveDiagnostic(
             traceId,
             "FREESOUND_RESOLVE_DONE",
             if (retryRecommended) DiagnosticSeverity.WARN else DiagnosticSeverity.INFO,
             baseAttributes + mapOf(
-                "requirements" to requirements.size.toString(), "aggregatedNeeds" to needs.size.toString(),
+                "requirements" to requirements.size.toString(),
+                "aggregatedNeeds" to needs.size.toString(),
                 "resolved" to resolutions.count { !it.trackId.isNullOrBlank() }.toString(),
                 "unresolved" to resolutions.count { it.trackId.isNullOrBlank() }.toString(),
-                "unresolvedRequired" to unresolvedRequired.toString(), "queryCacheHits" to queryCacheHits.toString(),
-                "clientSearches" to clientSearches.toString(), "importAttempts" to importAttempts.toString(),
-                "imported" to imported.size.toString(), "retryRecommended" to retryRecommended.toString(),
+                "unresolvedRequired" to unresolvedRequired.toString(),
+                "queryCacheHits" to queryCacheHits.toString(),
+                "clientSearches" to clientSearches.toString(),
+                "parallelSearchLimit" to FreesoundParallelSearchPolicy.MAX_PARALLEL_SEARCHES.toString(),
+                "cacheLookupMs" to cacheLookupMs.toString(),
+                "networkSearchWallMs" to networkSearchWallMs.toString(),
+                "importAttempts" to importAttempts.toString(),
+                "localSoundIdReuses" to localSoundIdReuses.toString(),
+                "normalizationResumes" to normalizationResumes.toString(),
+                "imported" to imported.size.toString(),
+                "importElapsedTotalMs" to importElapsedTotalMs.toString(),
+                "retryRecommended" to retryRecommended.toString(),
                 "elapsedMs" to totalElapsedMs.toString(),
             ),
         )
@@ -464,8 +664,12 @@ class FreesoundAutoAudioResolver(
                 .map(String::trim)
                 .filter { it.length >= 2 && it !in RETRY_QUERY_STOPWORDS }
             if (tokens.isEmpty()) return original
-            val keep = if (retryAttempt == 2) 2 else 1
-            return tokens.take(keep.coerceAtMost(tokens.size)).joinToString(" ").ifBlank { original }
+            return when {
+                retryAttempt == 2 && tokens.size == 1 -> tokens.first()
+                retryAttempt == 2 && tokens.size == 2 -> tokens.last()
+                retryAttempt == 2 -> tokens.take(2).joinToString(" ")
+                else -> tokens.first()
+            }.ifBlank { original }
         }
 
         internal fun scoreCandidate(

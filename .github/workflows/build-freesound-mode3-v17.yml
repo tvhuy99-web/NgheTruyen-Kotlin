@@ -9,6 +9,7 @@ on:
       - ".github/scripts/mode3_ai_unbounded_audio_v17.py"
       - ".github/scripts/mode3_ai_unbounded_audio_v17_runner.py"
       - ".github/scripts/mode3_ai_unbounded_audio_v17_testfix.py"
+      - ".github/scripts/mode3_ai_unbounded_audio_v17_testfix2.py"
 
 permissions:
   contents: write
@@ -60,6 +61,10 @@ jobs:
             python3 .github/scripts/mode3_ai_unbounded_audio_v17_testfix.py >> /tmp/patch_v17.log 2>&1
             PATCH_STATUS=$?
           fi
+          if [ "$PATCH_STATUS" -eq 0 ]; then
+            python3 .github/scripts/mode3_ai_unbounded_audio_v17_testfix2.py >> /tmp/patch_v17.log 2>&1
+            PATCH_STATUS=$?
+          fi
 
           TEST_STATUS=99
           BUILD_STATUS=99
@@ -88,13 +93,13 @@ jobs:
             echo "ARTIFACT_NAME=NgheTruyen-freesound-mode3-v17-debug"
             echo
             echo "=== PATCH LOG ==="
-            tail -n 900 /tmp/patch_v17.log 2>/dev/null || true
+            tail -n 1000 /tmp/patch_v17.log 2>/dev/null || true
             echo
             echo "=== TEST LOG ==="
-            tail -n 1200 /tmp/test_v17.log 2>/dev/null || true
+            tail -n 1400 /tmp/test_v17.log 2>/dev/null || true
             echo
             echo "=== BUILD LOG ==="
-            tail -n 1000 /tmp/build_v17.log 2>/dev/null || true
+            tail -n 1100 /tmp/build_v17.log 2>/dev/null || true
           } > /tmp/result_v17.txt
 
           echo "success=${SUCCESS}" >> "$GITHUB_OUTPUT"
@@ -131,7 +136,8 @@ jobs:
               app/src/test/java/vn/nghetruyen/app/ai/XpkAmbienceSfxDirectorTest.kt \
               app/src/test/java/vn/nghetruyen/app/ai/XpkSceneMusicParityTest.kt \
               app/src/test/java/vn/nghetruyen/app/ai/XpkAudioPromptQualityTest.kt \
-              app/src/test/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioTest.kt
+              app/src/test/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioTest.kt \
+              app/src/test/java/vn/nghetruyen/app/freesound/FreesoundMode3RegressionTest.kt
           else
             git reset --hard "${GITHUB_SHA}"
           fi

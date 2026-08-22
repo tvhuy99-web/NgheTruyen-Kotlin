@@ -234,7 +234,7 @@ class XpkAudioPromptQualityTest {
         assertTrue(prompt.contains("không phải lệnh bắt buộc giữ", ignoreCase = true))
         assertTrue(prompt.contains("giữ NGUYÊN VĂN query"))
         assertTrue(prompt.contains("sang chương mới KHÔNG phải là lý do đổi ambience"))
-        assertTrue(prompt.contains("im lặng tốt hơn một âm sai cảnh"))
+        assertTrue(prompt.contains("local_hint phải do chính AI viết"))
         assertFalse(prompt.contains("TRACK_CATALOG"))
         assertFalse(prompt.contains("AMBIENCE_CATALOG"))
         assertFalse(prompt.contains("SFX_CATALOG"))

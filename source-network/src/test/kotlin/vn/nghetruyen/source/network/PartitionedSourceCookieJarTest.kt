@@ -42,8 +42,13 @@ class PartitionedSourceCookieJarTest {
             "http://example.org/login",
             listOf(
                 "sid=clear; Path=/",
-                "secure=secret; Path=/; Secure",
+                "insecure-secure=ignored; Path=/; Secure",
             ),
+        )
+        jar.mergeSetCookieHeaders(
+            id,
+            "https://example.org/login",
+            listOf("secure=secret; Path=/; Secure"),
         )
 
         assertEquals("sid=clear", jar.readCookieHeader(id, "http://example.org/account"))
@@ -54,6 +59,7 @@ class PartitionedSourceCookieJarTest {
             setOf("sid=clear", "secure=secret"),
             jar.readCookieHeader(id, "https://example.org/account").orEmpty().split("; ").toSet(),
         )
+        assertTrue(jar.snapshot(id).none { it.name == "insecure-secure" })
     }
 
     @Test fun `cookie partition still rejects non http urls`() {

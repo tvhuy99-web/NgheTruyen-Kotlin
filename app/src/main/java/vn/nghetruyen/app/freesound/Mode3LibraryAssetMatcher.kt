@@ -15,14 +15,14 @@ import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 /**
  * Scores existing Mode-3 library assets as source-neutral candidates beside Freesound results.
  *
- * The short English Freesound query remains untouched. New AI responses additionally carry a short
- * Vietnamese local hint in each usage, formatted as "Dùng: ...; Tránh: ...". Local matching compares
- * that hint directly with the asset metadata fields Sắc thái / Dùng / Tránh. There is deliberately no
- * English↔Vietnamese dictionary and no attempt to infer a replacement description from story text.
+ * The short Freesound query remains the network-search signal. New AI responses additionally carry
+ * a Vietnamese local hint in each usage, formatted as "Dùng: ...; Tránh: ...". Local matching compares
+ * that hint directly with the asset metadata fields Sắc thái / Dùng / Tránh. Source provenance never
+ * contributes to fit: user-imported assets and earlier Freesound imports are evaluated identically.
  *
  * Performance rule: expensive metadata parsing/tokenization is cached per library fingerprint. Each
- * need then evaluates only tracks sharing at least one relevant English/local token. This keeps local
- * lookup cheaper than rebuilding metadata for the whole library on every 2–3 word query.
+ * need then evaluates only tracks sharing at least one relevant query/local token. This keeps local
+ * lookup cheaper than rebuilding metadata for the whole library on every short query.
  */
 internal object Mode3LibraryAssetMatcher {
     data class Match(
@@ -186,6 +186,20 @@ internal object Mode3LibraryAssetMatcher {
         return score(profile, indexTrack(track), track, nowMillis)?.takeIf(Match::accepted)
     }
 
+    /**
+     * A decisive library fit can safely stop the network path. This is deliberately source-neutral:
+     * an already-downloaded Freesound asset and a user-imported asset use the exact same rule.
+     * Borderline accepted matches still go online and compete against the remote candidate.
+     */
+    fun isDecisive(match: Match?): Boolean {
+        if (match == null || !match.accepted) return false
+        if (match.selectionScore < LOCAL_NETWORK_SKIP_FIT || match.avoidCoverage >= MAX_CONFLICT) return false
+        return when (match.metadataQuality) {
+            "STRUCTURED" -> match.contextScore >= DECISIVE_CONTEXT_SCORE
+            else -> match.coverage >= EXACT_QUERY_COVERAGE && match.coreCoverage >= CORE_PRESENT_COVERAGE
+        }
+    }
+
     private fun indexFor(
         kind: AudioAssetKind,
         tracks: List<SceneMusicTrackEntity>,
@@ -326,20 +340,24 @@ internal object Mode3LibraryAssetMatcher {
         val coreCoverage = if (core != null && core in remoteTokens) 1.0 else 0.0
         val eventCoverage = if (event != null && event in remoteTokens) 1.0 else 0.0
         val lexical = lexicalCoverage.coerceIn(0.0, 1.0)
+        val corePresent = coreCoverage >= CORE_PRESENT_COVERAGE
+        val eventPresent = eventCoverage >= CORE_PRESENT_COVERAGE
         val qualified = when (need.kind) {
             AudioAssetKind.SFX -> if (event != null) {
-                coreCoverage >= CORE_PRESENT_COVERAGE &&
-                    eventCoverage >= CORE_PRESENT_COVERAGE &&
-                    lexical >= SFX_REMOTE_MIN_QUERY_COVERAGE
+                lexical >= REMOTE_SFX_STRONG_QUERY_COVERAGE ||
+                    (lexical >= REMOTE_SFX_RELAXED_QUERY_COVERAGE && (corePresent || eventPresent))
             } else {
-                coreCoverage >= CORE_PRESENT_COVERAGE && lexical >= RAW_MIN_QUERY_COVERAGE
+                lexical >= RAW_MIN_QUERY_COVERAGE ||
+                    (corePresent && lexical >= CORE_ONLY_MIN_QUERY_COVERAGE)
             }
             else -> lexical >= LEGACY_MIN_QUERY_COVERAGE
         }
         val fit = if (!qualified) {
             0.0
         } else if (need.kind == AudioAssetKind.SFX && event != null) {
-            (coreCoverage * 0.36 + eventCoverage * 0.36 + lexical * 0.28).coerceIn(0.0, 1.0)
+            // Do not require both exact source and exact event words. A strong combined lexical match
+            // is valid evidence on its own; exact core/event tokens add confidence when present.
+            (coreCoverage * 0.24 + eventCoverage * 0.24 + lexical * 0.52).coerceIn(0.0, 1.0)
         } else {
             (coreCoverage * 0.52 + lexical * 0.48).coerceIn(0.0, 1.0)
         }
@@ -418,7 +436,7 @@ internal object Mode3LibraryAssetMatcher {
                 repetitionPenalty
         } else {
             // Weak/raw metadata cannot be judged fairly against Vietnamese local_hint. Fall back to
-            // the unchanged English query/title instead of punishing an otherwise exact asset.
+            // the unchanged query/title instead of punishing an otherwise exact asset.
             queryCoverage * 0.78 +
                 coreCoverage * 0.16 +
                 structuredBonus * 0.30 +
@@ -501,19 +519,18 @@ internal object Mode3LibraryAssetMatcher {
             if (conflict >= MAX_CONFLICT) add("conflict>=$MAX_CONFLICT")
             if (!hintAware) {
                 if (kind == AudioAssetKind.SFX && eventRequired) {
-                    if (
-                        coreCoverage < CORE_PRESENT_COVERAGE ||
-                        eventCoverage < CORE_PRESENT_COVERAGE ||
-                        queryCoverage < SFX_RAW_MIN_QUERY_COVERAGE
-                    ) add("sfxSourceEventMismatch")
+                    val hasStrongQueryEvidence =
+                        queryCoverage >= REMOTE_SFX_STRONG_QUERY_COVERAGE ||
+                            (queryCoverage >= REMOTE_SFX_RELAXED_QUERY_COVERAGE &&
+                                (coreCoverage >= CORE_PRESENT_COVERAGE || eventCoverage >= CORE_PRESENT_COVERAGE))
+                    if (!hasStrongQueryEvidence) add("sfxSourceEventMismatch")
                 } else {
                     if (score < LEGACY_MIN_SCORE) add("score<$LEGACY_MIN_SCORE")
                     if (queryCoverage < LEGACY_MIN_QUERY_COVERAGE) add("queryCoverage<$LEGACY_MIN_QUERY_COVERAGE")
                 }
             } else if (semanticMetadata) {
                 val semanticPass =
-                    (kind == AudioAssetKind.SFX && contextScore >= SFX_CONTEXT_ONLY_SCORE) ||
-                    contextScore >= DECISIVE_CONTEXT_SCORE ||
+                    contextScore >= CONTEXT_ONLY_SCORE ||
                     (
                         contextScore >= BALANCED_CONTEXT_SCORE &&
                             queryCoverage >= BALANCED_QUERY_COVERAGE &&
@@ -522,17 +539,16 @@ internal object Mode3LibraryAssetMatcher {
                     (queryCoverage >= EXACT_QUERY_COVERAGE && coreCoverage >= CORE_PRESENT_COVERAGE)
                 if (!semanticPass) {
                     add(
-                        "semanticEvidence<context=$DECISIVE_CONTEXT_SCORE" +
-                            "|sfxContext=$SFX_CONTEXT_ONLY_SCORE" +
+                        "semanticEvidence<context=$CONTEXT_ONLY_SCORE" +
                             "|balanced=$BALANCED_CONTEXT_SCORE+$BALANCED_QUERY_COVERAGE+$BALANCED_MIN_SCORE" +
                             "|exactQuery=$EXACT_QUERY_COVERAGE",
                     )
                 }
             } else {
                 val queryPass = if (kind == AudioAssetKind.SFX && eventRequired) {
-                    coreCoverage >= CORE_PRESENT_COVERAGE &&
-                        eventCoverage >= CORE_PRESENT_COVERAGE &&
-                        queryCoverage >= SFX_RAW_MIN_QUERY_COVERAGE
+                    queryCoverage >= REMOTE_SFX_STRONG_QUERY_COVERAGE ||
+                        (queryCoverage >= REMOTE_SFX_RELAXED_QUERY_COVERAGE &&
+                            (coreCoverage >= CORE_PRESENT_COVERAGE || eventCoverage >= CORE_PRESENT_COVERAGE))
                 } else {
                     queryCoverage >= RAW_MIN_QUERY_COVERAGE ||
                         (coreCoverage >= CORE_PRESENT_COVERAGE && queryCoverage >= CORE_ONLY_MIN_QUERY_COVERAGE)
@@ -726,14 +742,17 @@ internal object Mode3LibraryAssetMatcher {
                 "acceptedCoreCoverage" to format(evaluation.accepted?.coreCoverage ?: 0.0),
                 "acceptedEventCoverage" to format(evaluation.accepted?.eventCoverage ?: 0.0),
                 "acceptedMetadataQuality" to evaluation.accepted?.metadataQuality.orEmpty(),
+                "acceptedDecisive" to isDecisive(evaluation.accepted).toString(),
                 "bestTrackId" to best?.track?.id.orEmpty(),
                 "bestScore" to format(best?.score ?: 0.0),
                 "bestFit" to format(best?.selectionScore ?: 0.0),
                 "bestCoreCoverage" to format(best?.coreCoverage ?: 0.0),
                 "bestEventCoverage" to format(best?.eventCoverage ?: 0.0),
-          "bestMetadataQuality" to best?.metadataQuality.orEmpty(),
+                "bestMetadataQuality" to best?.metadataQuality.orEmpty(),
                 "bestRejectReason" to (best?.rejectReason ?: if (evaluation.candidateTracks == 0) "NO_LEXICAL_CANDIDATES" else "NO_SCORED_CANDIDATE"),
                 "decisiveContextThreshold" to DECISIVE_CONTEXT_SCORE.toString(),
+                "contextOnlyThreshold" to CONTEXT_ONLY_SCORE.toString(),
+                "localNetworkSkipFit" to LOCAL_NETWORK_SKIP_FIT.toString(),
                 "balancedContextThreshold" to BALANCED_CONTEXT_SCORE.toString(),
                 "rawQueryThreshold" to RAW_MIN_QUERY_COVERAGE.toString(),
                 "coreOnlyMinQueryCoverage" to CORE_ONLY_MIN_QUERY_COVERAGE.toString(),
@@ -754,6 +773,7 @@ internal object Mode3LibraryAssetMatcher {
                     "trackId" to candidate.track.id,
                     "title" to candidate.track.title.take(180),
                     "accepted" to candidate.accepted.toString(),
+                    "decisive" to isDecisive(candidate).toString(),
                     "rejectReason" to candidate.rejectReason,
                     "score" to format(candidate.score),
                     "selectionFit" to format(candidate.selectionScore),
@@ -784,6 +804,7 @@ internal object Mode3LibraryAssetMatcher {
                 "acceptedTitle" to evaluation.accepted?.track?.title.orEmpty().take(180),
                 "acceptedScore" to format(evaluation.accepted?.score ?: 0.0),
                 "acceptedFit" to format(evaluation.accepted?.selectionScore ?: 0.0),
+                "acceptedDecisive" to isDecisive(evaluation.accepted).toString(),
                 "candidateTracks" to evaluation.candidateTracks.toString(),
                 "indexedTracks" to evaluation.indexedTracks.toString(),
                 "elapsedMs" to evaluation.elapsedMs.toString(),
@@ -813,14 +834,15 @@ internal object Mode3LibraryAssetMatcher {
     private fun format(value: Double): String = "%.3f".format(Locale.US, value)
 
     private const val DECISIVE_CONTEXT_SCORE = 0.56
+    private const val CONTEXT_ONLY_SCORE = 0.40
+    private const val LOCAL_NETWORK_SKIP_FIT = 0.80
     private const val BALANCED_CONTEXT_SCORE = 0.38
     private const val BALANCED_QUERY_COVERAGE = 0.33
     private const val BALANCED_MIN_SCORE = 0.40
     private const val EXACT_QUERY_COVERAGE = 0.85
     private const val RAW_MIN_QUERY_COVERAGE = 0.78
-    private const val SFX_RAW_MIN_QUERY_COVERAGE = 0.60
-    private const val SFX_REMOTE_MIN_QUERY_COVERAGE = 0.66
-    private const val SFX_CONTEXT_ONLY_SCORE = 0.40
+    private const val REMOTE_SFX_STRONG_QUERY_COVERAGE = 0.78
+    private const val REMOTE_SFX_RELAXED_QUERY_COVERAGE = 0.60
     private const val CORE_PRESENT_COVERAGE = 0.92
     private const val CORE_ONLY_MIN_QUERY_COVERAGE = 0.32
     private const val LEGACY_MIN_SCORE = 0.56

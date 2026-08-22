@@ -1,0 +1,64 @@
+name: Build APK No Tests
+
+on:
+  push:
+    branches:
+      - build/pr83-apk-no-tests-20260822
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk-no-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install required Android SDK packages
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-36" \
+            "build-tools;36.0.0"
+
+      - name: Bootstrap Gradle Wrapper
+        shell: bash
+        run: |
+          chmod +x gradlew scripts/bootstrap-wrapper.sh
+          ./scripts/bootstrap-wrapper.sh
+
+      - name: Build debug APK only
+        run: ./gradlew --no-daemon --stacktrace :app:assembleDebug
+
+      - name: Package APK
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk dist/NgheTruyen-PR83-latest.apk
+          sha256sum dist/NgheTruyen-PR83-latest.apk > dist/NgheTruyen-PR83-latest.apk.sha256
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NgheTruyen-PR83-latest-apk
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            dist/NgheTruyen-PR83-latest.apk
+            dist/NgheTruyen-PR83-latest.apk.sha256

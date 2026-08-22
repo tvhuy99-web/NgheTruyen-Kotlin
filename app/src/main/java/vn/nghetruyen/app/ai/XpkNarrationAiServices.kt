@@ -17,6 +17,7 @@ import vn.nghetruyen.app.data.repository.LibraryRepository
 import vn.nghetruyen.app.data.settings.AiOnlineSettings
 import vn.nghetruyen.app.data.settings.AiProvider
 import vn.nghetruyen.app.data.settings.SettingsRepository
+import vn.nghetruyen.app.freesound.Mode3LocalContextBinder
 import vn.nghetruyen.app.ui.reference.ReferenceVoiceRoleExtras
 import vn.nghetruyen.source.diagnostics.DiagnosticCategory
 import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
@@ -315,7 +316,13 @@ class XpkNarrationAiServices(
                         },
                     )
                 } else parsed.voiceCast
-                parsed.copy(voiceCast = normalizedVoice)
+                val contextualFreesoundRequirements = if (request.includeFreesoundAudioRequirements) {
+                    Mode3LocalContextBinder.attach(parsed.freesoundRequirements, bundle.units)
+                } else parsed.freesoundRequirements
+                parsed.copy(
+                    voiceCast = normalizedVoice,
+                    freesoundRequirements = contextualFreesoundRequirements,
+                )
             }.fold(
                 {
                     diagnostic(

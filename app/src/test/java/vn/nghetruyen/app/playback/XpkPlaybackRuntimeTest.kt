@@ -54,6 +54,70 @@ class XpkPlaybackRuntimeTest {
     }
 
     @Test
+    fun initialManualReassignClearsOldChapterTransferSummary() {
+        PlaybackQueueStore.load(
+            sourceId = "test",
+            storyId = "story",
+            chapterId = "chapter-reassign",
+            chapterIndex = 1,
+            chapterTitle = "Tiêu đề",
+            paragraphs = listOf("Nội dung."),
+        )
+        PlaybackQueueStore.rememberFreesoundTransferSummary(
+            chapterId = "chapter-reassign",
+            downloadedAssets = 4,
+            reusedAssets = 2,
+        )
+
+        PlaybackQueueStore.setNarrationAutomation(
+            stage = NarrationAutomationStage.CURRENT_PLANNING,
+            progress = 0.2f,
+            message = "Đang phân vai chương hiện tại.",
+        )
+
+        assertEquals(
+            FreesoundTransferSummary(),
+            PlaybackQueueStore.consumeFreesoundTransferSummary(
+                chapterId = "chapter-reassign",
+                currentDownloadedAssets = 0,
+                currentReusedAssets = 0,
+            ),
+        )
+    }
+
+    @Test
+    fun internalRetryDoesNotEraseCurrentTransferSummary() {
+        PlaybackQueueStore.load(
+            sourceId = "test",
+            storyId = "story",
+            chapterId = "chapter-retry",
+            chapterIndex = 1,
+            chapterTitle = "Tiêu đề",
+            paragraphs = listOf("Nội dung."),
+        )
+        PlaybackQueueStore.rememberFreesoundTransferSummary(
+            chapterId = "chapter-retry",
+            downloadedAssets = 3,
+            reusedAssets = 1,
+        )
+
+        PlaybackQueueStore.setNarrationAutomation(
+            stage = NarrationAutomationStage.CURRENT_PLANNING,
+            progress = 0.2f,
+            message = "Đang thử phân vai lại lần 2.",
+        )
+
+        assertEquals(
+            FreesoundTransferSummary(downloadedAssets = 3, reusedAssets = 1),
+            PlaybackQueueStore.consumeFreesoundTransferSummary(
+                chapterId = "chapter-retry",
+                currentDownloadedAssets = 0,
+                currentReusedAssets = 0,
+            ),
+        )
+    }
+
+    @Test
     fun voiceTransformIsAddressedByUnitIdNotParagraphIndex() {
         val json = """
             {

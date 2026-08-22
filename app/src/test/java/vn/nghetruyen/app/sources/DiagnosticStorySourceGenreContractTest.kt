@@ -1,22 +1,34 @@
 package vn.nghetruyen.app.sources
 
+import kotlin.coroutines.Continuation
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DiagnosticStorySourceGenreContractTest {
     @Test
-    fun diagnosticWrapperCoversEveryStorySourceApi() {
-        val sourceApi = StorySource::class.java.declaredMethods
+    fun allStorySourceWrappersCoverEverySuspendOperation() {
+        val sourceOperations = StorySource::class.java.declaredMethods
             .asSequence()
-            .map { it.name }
-            .filterNot { it.endsWith("\$default") }
-            .toSet()
-        val diagnosticApi = DiagnosticStorySource::class.java.declaredMethods
-            .asSequence()
+            .filter { method -> method.parameterTypes.lastOrNull() == Continuation::class.java }
             .map { it.name }
             .toSet()
 
-        val missing = sourceApi - diagnosticApi
-        assertTrue("DiagnosticStorySource is missing StorySource methods: $missing", missing.isEmpty())
+        val wrappers = listOf(
+            DiagnosticStorySource::class.java,
+            Class.forName("vn.nghetruyen.app.sources.StableDefaultLuaSourceAlias"),
+            Class.forName("vn.nghetruyen.app.sources.DeferredStartupStorySource"),
+            Class.forName("vn.nghetruyen.app.sources.IoBoundVBookStorySource"),
+            Class.forName("vn.nghetruyen.app.sources.ChapterCatalogSafetyStorySource"),
+        )
+
+        wrappers.forEach { wrapper ->
+            val wrapperOperations = wrapper.declaredMethods
+                .asSequence()
+                .filter { method -> method.parameterTypes.lastOrNull() == Continuation::class.java }
+                .map { it.name }
+                .toSet()
+            val missing = sourceOperations - wrapperOperations
+            assertTrue("${wrapper.name} is missing StorySource operations: $missing", missing.isEmpty())
+        }
     }
 }

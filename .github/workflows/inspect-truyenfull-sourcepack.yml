@@ -17,14 +17,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: fix/freesound-latency-status-cloudflare
-      - name: Locate result normalization
+      - name: Inspect normalizeResult
         run: |
           set -euxo pipefail
-          echo '=== NORMALIZED MARKER ==='
-          grep -R -n --exclude-dir=.git 'VBOOK_STAGE_RESULT_NORMALIZED' source-* app/src/main/java || true
-          echo '=== RAW MARKER ==='
-          grep -R -n --exclude-dir=.git 'VBOOK_STAGE_RESULT_STRINGIFIED\|executor-result-normalized\|executor-result-raw' source-* app/src/main/java || true
-          echo '=== chapterBody calls ==='
-          grep -R -n --exclude-dir=.git 'chapterBody(' source-* app/src/main/java || true
-          echo '=== VBookStoryNormalizer calls ==='
-          grep -R -n --exclude-dir=.git 'VBookStoryNormalizer' source-* app/src/main/java || true
+          f=source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt
+          line=$(grep -n 'private fun normalizeResult' "$f" | head -1 | cut -d: -f1)
+          start=$((line-20)); end=$((line+260))
+          echo "normalizeResult line=$line"
+          sed -n "${start},${end}p" "$f"

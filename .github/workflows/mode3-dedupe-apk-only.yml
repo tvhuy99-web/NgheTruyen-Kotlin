@@ -28,13 +28,37 @@ jobs:
           cat scripts/mode3_dedupe_fix.b64.* | base64 -d > /tmp/mode3_dedupe_fix.py
           python3 /tmp/mode3_dedupe_fix.py
 
-      - name: Show patched compile-error neighborhoods
+      - name: Repair patched Kotlin syntax
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          matcher = Path("app/src/main/java/vn/nghetruyen/app/freesound/Mode3LibraryAssetMatcher.kt")
+          text = matcher.read_text(encoding="utf-8")
+          broken = """                coreCoverage * 0.36 +\n                    eventCoverage     coreCoverage * 0.36 +\n                    eventCoverage * 0.36 +\n                    queryCoverage * 0.23 +"""
+          fixed = """                coreCoverage * 0.36 +\n                    eventCoverage * 0.36 +\n                    queryCoverage * 0.23 +"""
+          if text.count(broken) != 1:
+              raise SystemExit(f"matcher syntax repair expected 1 match, got {text.count(broken)}")
+          matcher.write_text(text.replace(broken, fixed, 1), encoding="utf-8")
+
+          dialog = Path("app/src/main/java/vn/nghetruyen/app/ui/components/UnifiedAudioAssetManagerDialog.kt")
+          text = dialog.read_text(encoding="utf-8")
+          broken = """                                modifier = Modifier.padding(top = 8.dp),\n                            Text(\"A: ${candidate.first.title}\")"""
+          fixed = """                                modifier = Modifier.padding(top = 8.dp),\n                            )\n                            Text(\"A: ${candidate.first.title}\")"""
+          if text.count(broken) != 1:
+              raise SystemExit(f"dialog syntax repair expected 1 match, got {text.count(broken)}")
+          dialog.write_text(text.replace(broken, fixed, 1), encoding="utf-8")
+          print("Patched Kotlin syntax repaired.")
+          PY
+
+      - name: Show repaired neighborhoods
         shell: bash
         run: |
           echo '--- Mode3LibraryAssetMatcher.kt ---'
-          nl -ba app/src/main/java/vn/nghetruyen/app/freesound/Mode3LibraryAssetMatcher.kt | sed -n '425,450p'
+          nl -ba app/src/main/java/vn/nghetruyen/app/freesound/Mode3LibraryAssetMatcher.kt | sed -n '430,447p'
           echo '--- UnifiedAudioAssetManagerDialog.kt ---'
-          nl -ba app/src/main/java/vn/nghetruyen/app/ui/components/UnifiedAudioAssetManagerDialog.kt | sed -n '760,790p'
+          nl -ba app/src/main/java/vn/nghetruyen/app/ui/components/UnifiedAudioAssetManagerDialog.kt | sed -n '768,780p'
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -93,5 +117,3 @@ jobs:
             app/src/main/java/vn/nghetruyen/app/ui/components/UnifiedAudioAssetManagerDialog.kt
           git commit -m "Fix Mode 3 arbitration and add duplicate audio scanner [skip ci]"
           git push origin HEAD:build/mode3-dedupe-temp
-
-# diagnose patched source

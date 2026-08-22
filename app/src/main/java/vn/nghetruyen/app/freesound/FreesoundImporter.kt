@@ -20,6 +20,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import vn.nghetruyen.app.audio.AudioAssetClassifier
 import vn.nghetruyen.app.audio.AudioAssetKind
 import vn.nghetruyen.app.audio.PcmLoudnessEstimator
 import vn.nghetruyen.app.audio.SceneMusicAnalysisWorker
@@ -75,7 +76,31 @@ class FreesoundImporter(
                 )
             }
 
-            val matches = duplicateCheck.getOrThrow().filter { rawSoundIdFromManagedUri(it.uri) == sound.id }
+            val currentTracks = duplicateCheck.getOrThrow()
+            val incomingTitleKey = duplicateTitleKey(sound.name)
+            val exactTitleTrack = currentTracks
+                .asSequence()
+                .filter { it.enabled && AudioAssetClassifier.classify(it) == kind }
+                .filter { duplicateTitleKey(it.title) == incomingTitleKey }
+                .sortedWith(
+                    compareBy<SceneMusicTrackEntity> {
+                        if (rawSoundIdFromManagedUri(it.uri) == null) 0 else 1
+                    }.thenBy { it.orderIndex }.thenBy { it.updatedAt },
+                )
+                .firstOrNull()
+            if (incomingTitleKey.isNotBlank() && exactTitleTrack != null) {
+                return@withLock Result.success(
+                    FreesoundImportResult(
+                        trackId = exactTitleTrack.id,
+                        uri = exactTitleTrack.uri,
+                        title = exactTitleTrack.title,
+                        downloadedNewFile = false,
+                        reusedExistingFile = true,
+                    ),
+                )
+            }
+
+            val matches = currentTracks.filter { rawSoundIdFromManagedUri(it.uri) == sound.id }
             val existingFileTrack = matches.firstOrNull { managedFileExists(appContext, it.uri) }
             if (existingFileTrack != null) {
                 if (hasValidNormalization(existingFileTrack)) {
@@ -402,6 +427,18 @@ class FreesoundImporter(
     }
 
     companion object {
+        internal fun duplicateTitleKey(value: String): String = java.text.Normalizer
+            .normalize(
+                value.substringBeforeLast('.', value)
+                    .lowercase(Locale.ROOT)
+                    .replace('đ', 'd'),
+                java.text.Normalizer.Form.NFD,
+            )
+            .replace(Regex("\\p{Mn}+"), "")
+            .replace(Regex("[^a-z0-9\\p{IsHan}]+"), " ")
+            .trim()
+            .replace(Regex("\\s+"), " ")
+
         private const val USER_AGENT = "NgheTruyen-Android/Freesound"
         internal const val MAX_PREVIEW_BYTES = 64L * 1024L * 1024L
         internal const val MAX_BATCH_SIZE = 50

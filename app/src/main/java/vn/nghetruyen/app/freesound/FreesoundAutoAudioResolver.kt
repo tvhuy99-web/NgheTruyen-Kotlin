@@ -90,6 +90,9 @@ private data class FreesoundSourceDecision(
     val localFit: Double,
     val remoteFit: Double,
     val remoteCoreCoverage: Double,
+    val remoteEventCoverage: Double,
+    val remoteQualified: Boolean,
+    val sameAsset: Boolean,
     val reason: String,
 )
 
@@ -514,24 +517,29 @@ class FreesoundAutoAudioResolver(
                     lexicalCoverage = search.selectedLexicalCoverage,
                     selectedScore = search.selectedScore,
                 )
-            } else Mode3LibraryAssetMatcher.RemoteFit(0.0, 0.0)
+            } else Mode3LibraryAssetMatcher.RemoteFit(0.0, 0.0, 0.0, false)
             val localFit = local?.selectionScore ?: 0.0
+            val localSoundId = local?.track?.let { FreesoundImporter.soundIdFromManagedUri(it.uri) }
+            val sameAsset = remote != null && localSoundId != null && localSoundId == remote.id
+            val remoteQualified = remote != null && remoteFit.qualified
             val useLibrary = when {
                 local == null -> false
-                remote == null -> true
+                sameAsset -> true
+                !remoteQualified -> true
                 localFit > remoteFit.score + SOURCE_FIT_TIE_EPSILON -> true
                 remoteFit.score > localFit + SOURCE_FIT_TIE_EPSILON -> false
-                else -> true // equal fit: avoid needless I/O; source never changed either score.
+                else -> true
             }
             val reason = when {
-                local == null && remote == null -> "NO_CANDIDATE"
+                local == null && !remoteQualified -> "REMOTE_REJECTED_WEAK_FIT"
                 local == null -> "REMOTE_ONLY"
-                remote == null -> "LIBRARY_ONLY"
+                sameAsset -> "SAME_AS_REMOTE_ALREADY_DOWNLOADED"
+                !remoteQualified -> "REMOTE_REJECTED_WEAK_FIT_LIBRARY_USED"
                 kotlin.math.abs(localFit - remoteFit.score) <= SOURCE_FIT_TIE_EPSILON -> "FIT_TIE_REUSE_EXISTING"
                 useLibrary -> "LIBRARY_HIGHER_FIT"
                 else -> "REMOTE_HIGHER_FIT"
             }
-            diagnostics += "SOURCE_ARBITRATION kind=${searchedSeed.need.kind.name} query=${searchedSeed.need.query.take(140)} localTrackId=${local?.track?.id.orEmpty()} localFit=${"%.3f".format(java.util.Locale.US, localFit)} remoteSoundId=${remote?.id ?: 0} remoteFit=${"%.3f".format(java.util.Locale.US, remoteFit.score)} remoteCoreCoverage=${"%.3f".format(java.util.Locale.US, remoteFit.coreCoverage)} winner=${if (useLibrary) "LIBRARY" else if (remote != null) "FREESOUND" else "NONE"} reason=$reason"
+            diagnostics += "SOURCE_ARBITRATION kind=${searchedSeed.need.kind.name} query=${searchedSeed.need.query.take(140)} localTrackId=${local?.track?.id.orEmpty()} localFit=${"%.3f".format(java.util.Locale.US, localFit)} remoteSoundId=${remote?.id ?: 0} remoteFit=${"%.3f".format(java.util.Locale.US, remoteFit.score)} remoteCoreCoverage=${"%.3f".format(java.util.Locale.US, remoteFit.coreCoverage)} remoteEventCoverage=${"%.3f".format(java.util.Locale.US, remoteFit.eventCoverage)} remoteQualified=$remoteQualified sameAsset=$sameAsset winner=${if (useLibrary) "LIBRARY" else if (remoteQualified) "FREESOUND" else "NONE"} reason=$reason"
             liveDiagnostic(
                 traceId,
                 "FREESOUND_SOURCE_ARBITRATION",
@@ -551,7 +559,10 @@ class FreesoundAutoAudioResolver(
                     "remoteFit" to "%.3f".format(java.util.Locale.US, remoteFit.score),
                     "remoteLexicalCoverage" to "%.3f".format(java.util.Locale.US, search.selectedLexicalCoverage),
                     "remoteCoreCoverage" to "%.3f".format(java.util.Locale.US, remoteFit.coreCoverage),
-                    "winner" to if (useLibrary) "LIBRARY" else if (remote != null) "FREESOUND" else "NONE",
+                    "remoteEventCoverage" to "%.3f".format(java.util.Locale.US, remoteFit.eventCoverage),
+                    "remoteQualified" to remoteQualified.toString(),
+                    "sameAsset" to sameAsset.toString(),
+                    "winner" to if (useLibrary) "LIBRARY" else if (remoteQualified) "FREESOUND" else "NONE",
                     "reason" to reason,
                 ),
             )
@@ -560,6 +571,9 @@ class FreesoundAutoAudioResolver(
                 localFit = localFit,
                 remoteFit = remoteFit.score,
                 remoteCoreCoverage = remoteFit.coreCoverage,
+                remoteEventCoverage = remoteFit.eventCoverage,
+                remoteQualified = remoteQualified,
+                sameAsset = sameAsset,
                 reason = reason,
             )
         }.toMap()
@@ -584,6 +598,7 @@ class FreesoundAutoAudioResolver(
         // select the same remote sound cannot download or normalize it twice.
         val importSeeds = searched.filter { seed ->
             seed.search?.sound != null &&
+                sourceDecisionByIndex.getValue(seed.index).remoteQualified &&
                 sourceDecisionByIndex.getValue(seed.index).useLibrary.not() &&
                 localReusableByIndex[seed.index] == null
         }
@@ -655,8 +670,9 @@ class FreesoundAutoAudioResolver(
 
             val resolvedSearch = requireNotNull(searchedByIndex[seed.index])
             val search = requireNotNull(resolvedSearch.search)
-            val remote = search.sound
-            diagnostics += "CLIENT_SEARCH_DONE index=${seed.index + 1} kind=${need.kind.name} elapsedMs=${resolvedSearch.searchElapsedMs} resultCount=${search.resultCount} httpCode=${search.httpCode ?: 0} selectedSoundId=${remote?.id ?: 0} originalQuery=${need.query.take(140)} effectiveQuery=${resolvedSearch.effectiveQuery.take(140)} queryUsed=${search.queryUsed.take(140)} searchRequests=${search.requestCount} strategy=${resolvedSearch.strategy}"
+            val searchedRemote = search.sound
+            val remote = searchedRemote.takeIf { decision.remoteQualified }
+            diagnostics += "CLIENT_SEARCH_DONE index=${seed.index + 1} kind=${need.kind.name} elapsedMs=${resolvedSearch.searchElapsedMs} resultCount=${search.resultCount} httpCode=${search.httpCode ?: 0} selectedSoundId=${searchedRemote?.id ?: 0} remoteQualified=${decision.remoteQualified} originalQuery=${need.query.take(140)} effectiveQuery=${resolvedSearch.effectiveQuery.take(140)} queryUsed=${search.queryUsed.take(140)} searchRequests=${search.requestCount} strategy=${resolvedSearch.strategy}"
             if (!search.failureMessage.isNullOrBlank()) {
                 warnings += "Freesound ‘${need.query}’ (${resolvedSearch.effectiveQuery}): ${search.failureMessage}"
                 retryableFailure = retryableFailure || search.retryable
@@ -762,20 +778,24 @@ class FreesoundAutoAudioResolver(
                 diagnostics += "SEARCH_NO_SELECTION kind=${need.kind.name} resultCount=${search.resultCount} originalQuery=${need.query.take(140)} effectiveQuery=${resolvedSearch.effectiveQuery.take(140)} strategy=${resolvedSearch.strategy}"
             }
 
-            if (resolvedTrack != null && resolvedTrack.enabled &&
-                FreesoundImporter.managedFileExists(appContext, resolvedTrack.uri) &&
-                FreesoundImporter.soundIdFromManagedUri(resolvedTrack.uri) != null
-            ) {
+            if (resolvedTrack != null && isUsableLibraryTrack(resolvedTrack, need.kind)) {
+                val managedSoundId = FreesoundImporter.soundIdFromManagedUri(resolvedTrack.uri)
+                val resolvedSource = if (managedSoundId != null) {
+                    FreesoundAutoResolutionSource.FREESOUND
+                } else {
+                    FreesoundAutoResolutionSource.LIBRARY
+                }
                 queryCache.put(need.kind, need.query, resolvedTrack.id)
-                resolutions += FreesoundAutoResolvedNeed(need, resolvedTrack.id, FreesoundAutoResolutionSource.FREESOUND.name)
-                diagnostics += "NEED_RESOLVED kind=${need.kind.name} source=FREESOUND trackId=${resolvedTrack.id} soundId=${FreesoundImporter.soundIdFromManagedUri(resolvedTrack.uri)} query=${need.query.take(140)} cachePersisted=true"
+                resolutions += FreesoundAutoResolvedNeed(need, resolvedTrack.id, resolvedSource.name)
+                diagnostics += "NEED_RESOLVED kind=${need.kind.name} source=${resolvedSource.name} trackId=${resolvedTrack.id} soundId=${managedSoundId ?: 0} query=${need.query.take(140)} cachePersisted=true"
                 liveDiagnostic(
                     traceId,
                     "FREESOUND_NEED_RESOLVED",
                     attributes = baseAttributes + mapOf(
                         "kind" to need.kind.name,
+                        "source" to resolvedSource.name,
                         "trackId" to resolvedTrack.id,
-                        "soundId" to FreesoundImporter.soundIdFromManagedUri(resolvedTrack.uri).toString(),
+                        "soundId" to (managedSoundId ?: 0).toString(),
                         "query" to need.query.take(180),
                         "cachePersisted" to "true",
                     ),

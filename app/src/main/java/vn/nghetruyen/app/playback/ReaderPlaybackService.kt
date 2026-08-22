@@ -207,6 +207,7 @@ class ReaderPlaybackService : Service() {
                 "resolvedAssets" to (result?.freesoundResolvedAssets ?: 0).toString(),
                 "downloadedAssets" to (result?.freesoundDownloadedAssets ?: 0).toString(),
                 "reusedAssets" to (result?.freesoundReusedAssets ?: 0).toString(),
+                "transferScope" to "current_call_before_prefetch_merge",
                 "musicPlanCreated" to (result?.musicPlanCreated ?: false).toString(),
                 "audioPlanCreated" to (result?.audioPlanCreated ?: false).toString(),
                 "freesoundPlanCreated" to (result?.freesoundPlanCreated ?: false).toString(),
@@ -1953,6 +1954,27 @@ class ReaderPlaybackService : Service() {
         }
         if (!currentStoryAutoVoiceCastEnabled || snapshot.chapterId.isBlank()) return false
         if (narrationPreparedChapterId == snapshot.chapterId) return false
+        // Prefetch persists the voice plan before Freesound imports finish. If the current chapter
+        // already has canonical voice assignments, start TTS immediately instead of holding the
+        // chapter transition behind a slow background preview download. The next speech chunk will
+        // perform the normal fast reuse/apply pass once prefetch finishes.
+        if (xpkVoiceAssignments.isNotEmpty() && narrationPrefetchJob?.isActive == true) {
+            diagnostic(
+                "TTS_NARRATION_VOICE_READY_AUDIO_PENDING",
+                DiagnosticSeverity.INFO,
+                mapOf(
+                    "chapterId" to snapshot.chapterId,
+                    "voiceAssignments" to xpkVoiceAssignments.size.toString(),
+                    "freesoundPrefetchActive" to "true",
+                ),
+            )
+            PlaybackQueueStore.setNarrationAutomation(
+                stage = NarrationAutomationStage.CURRENT_READY,
+                progress = 0.9f,
+                message = "Đã có phân vai; Freesound tiếp tục chuẩn bị trong nền.",
+            )
+            return false
+        }
         pendingPlay = true
         PlaybackQueueStore.setPlaying(false)
         if (narrationPlanningChapterId == snapshot.chapterId && narrationPlanJob?.isActive == true) return true
@@ -2025,6 +2047,17 @@ class ReaderPlaybackService : Service() {
                         message = "Đã phân vai $assignmentCount mục. Đang áp dụng giọng${if (shouldPlanAutoStoryAudio()) " và âm thanh truyện" else ""}."
                     )
                     val configured = applyConfiguredVoice(useStoryProfile = true)
+                    val audioDirectionSettings = AudioDirectionPreferences.currentSnapshot()
+                    val audioPlanAvailable = if (
+                        content != null &&
+                        (audioDirectionSettings.ambienceEnabled || audioDirectionSettings.soundEffectsEnabled)
+                    ) {
+                        runCatching {
+                            container.narrationPlanCoordinator.loadAudioDirectionPlan(content) != null
+                        }.getOrDefault(false)
+                    } else {
+                        false
+                    }
                     withContext(Dispatchers.Main) {
                         if (PlaybackQueueStore.state.value.chapterId != snapshot.chapterId) return@withContext
                         narrationPreparedChapterId = snapshot.chapterId
@@ -2059,9 +2092,13 @@ class ReaderPlaybackService : Service() {
                                 if (planResult?.freesoundRetryRequired == true || issueMessages.isNotEmpty()) DiagnosticSeverity.WARN else DiagnosticSeverity.INFO,
                                 mapOf(
                                     "resolvedAssets" to (planResult?.freesoundResolvedAssets ?: 0).toString(),
+                                    "downloadedAssets" to transferSummary.downloadedAssets.toString(),
+                                    "reusedAssets" to transferSummary.reusedAssets.toString(),
+                                    "transferScope" to "merged_prefetch_and_current",
                                     "retryRequired" to (planResult?.freesoundRetryRequired ?: false).toString(),
                                     "musicApplied" to musicApplied.toString(),
-                                    "audioPlanCreated" to (planResult?.audioPlanCreated ?: false).toString(),
+                                    "audioPlanCreatedThisCall" to (planResult?.audioPlanCreated ?: false).toString(),
+                                    "audioPlanAvailable" to audioPlanAvailable.toString(),
                                     "issueCount" to issueMessages.size.toString(),
                                     "warning" to firstIssue.orEmpty().take(180),
                                 ),

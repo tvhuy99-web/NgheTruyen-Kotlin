@@ -249,7 +249,7 @@ require(
     "val voicePlanEnabled = currentStoryAutoVoiceCastEnabled || manualNarrationChapterId == chapterId",
     "if (voicePlanEnabled && originalHash != null)",
     "Phân vai/Mode 3 thất bại sau $MAX_NARRATION_ATTEMPTS lần.",
-    "Chưa chuẩn bị xong. Sẽ thử lại sau 5 giây (lần ${attempt + 1}/$MAX_NARRATION_ATTEMPTS).",
+    "Chưa chuẩn bị xong. Sẽ thử lại sau 5 giây (lần ${attempt + 1}/$MAX_NARRATION_ATTEMPTS)",
     "if (currentStoryAutoVoiceCastEnabled && prefetchNarrationPlansEnabled)",
     "if (!PlaybackQueueStore.state.value.isPlaying) pendingPlay = false",
     "private val speechCompletionMonitor = SpeechCompletionMonitor()",

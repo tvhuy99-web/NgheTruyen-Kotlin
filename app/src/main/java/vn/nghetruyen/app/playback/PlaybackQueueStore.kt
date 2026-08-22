@@ -109,6 +109,7 @@ object PlaybackQueueStore {
     private val prefetchedFreesoundTransfers = LinkedHashMap<String, FreesoundTransferSummary>()
 
     private const val MAX_PREFETCH_TRANSFER_ENTRIES = 8
+    private const val MANUAL_NARRATION_REBUILD_MESSAGE = "Đang phân vai chương hiện tại."
 
     fun load(
         sourceId: String,
@@ -206,11 +207,28 @@ object PlaybackQueueStore {
         progress: Float,
         message: String?,
     ) {
+        if (
+            stage == NarrationAutomationStage.CURRENT_PLANNING &&
+            progress <= 0.2f &&
+            message?.trim() == MANUAL_NARRATION_REBUILD_MESSAGE
+        ) {
+            clearCurrentNarrationRuntimeForManualRebuild()
+        }
         mutable.value = mutable.value.copy(
             narrationStage = stage,
             narrationProgress = progress.coerceIn(0f, 1f),
             narrationMessage = message?.take(260),
         )
+    }
+
+    private fun clearCurrentNarrationRuntimeForManualRebuild() {
+        XpkPlaybackRuntime.resetCanonicalPlans()
+        val chapterId = mutable.value.chapterId.trim()
+        if (chapterId.isNotEmpty()) {
+            synchronized(narrationTransferLock) {
+                prefetchedFreesoundTransfers.remove(chapterId)
+            }
+        }
     }
 
     fun publishPrefetchNarrationAutomation(

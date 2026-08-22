@@ -182,6 +182,11 @@ class FreesoundImporterTest {
     }
 
     @Test
+    fun previewDownloadBudgetIsThreeMinutesPerSelectedSound() {
+        assertEquals(180_000L, FreesoundImporter.PREVIEW_IMPORT_BUDGET_MS)
+    }
+
+    @Test
     fun queueSummaryCountsEveryTerminalAndActiveState() {
         val summary = summarizeFreesoundQueue(
             listOf(

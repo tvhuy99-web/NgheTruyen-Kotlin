@@ -13,18 +13,26 @@ class FreesoundPlaybackStatusFormatterTest {
     }
 
     @Test
-    fun zeroCountsRemainExplicit() {
+    fun zeroCountsStaySilent() {
         assertEquals(
-            " • 0 tải mới • 0 bộ nhớ tạm",
+            "",
             FreesoundPlaybackStatusFormatter.format(true, 0, 0, false, true),
         )
     }
 
     @Test
-    fun abnormalStateRemainsVisible() {
+    fun abnormalStateRemainsVisibleWithoutZeroNoise() {
         assertEquals(
-            " • 1 tải mới • 0 bộ nhớ tạm • còn thiếu",
+            " • 1 tải mới • còn thiếu",
             FreesoundPlaybackStatusFormatter.format(true, 1, 0, true, true),
+        )
+    }
+
+    @Test
+    fun missingPlanIsVisibleEvenWithNoTransfers() {
+        assertEquals(
+            " • chưa có kế hoạch âm thanh",
+            FreesoundPlaybackStatusFormatter.format(false, 0, 0, false, true),
         )
     }
 

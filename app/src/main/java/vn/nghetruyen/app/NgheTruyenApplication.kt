@@ -1,7 +1,10 @@
 package vn.nghetruyen.app
 
 import android.app.Application
+import android.util.Log
 import android.webkit.WebView
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import vn.nghetruyen.app.ai.vietphrase.ReferenceVietPhraseRuntime
 import vn.nghetruyen.app.audio.AudioDirectionPreferences
 import vn.nghetruyen.app.playback.AudioDirectionRuntime
@@ -14,6 +17,7 @@ import vn.nghetruyen.app.sourceplatform.DiagnosticScreenRestoreLifecycleCallback
 import vn.nghetruyen.app.sourceplatform.SourceBrowserViewportHost
 import vn.nghetruyen.app.sourceplatform.SourceWebViewCookieReader
 import vn.nghetruyen.app.sourceplatform.replayAwareChromiumDiagnostics
+import vn.nghetruyen.app.startup.StartupFreshnessMaintenance
 import vn.nghetruyen.source.api.SourceErrorCode
 import vn.nghetruyen.source.api.SourcePlatformFailure
 import vn.nghetruyen.source.api.SourcePlatformResult
@@ -30,6 +34,24 @@ class NgheTruyenApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+
+        val freshnessMaintenance = StartupFreshnessMaintenance(
+            context = this,
+            database = container.database,
+            settingsRepository = container.settingsRepository,
+        )
+        runCatching {
+            // Both operations are completed before any playback/audio runtime can hydrate state.
+            // This makes a successful migration a hard boundary: once the UI is available, legacy
+            // Download/content:// audio no longer needs its external source file.
+            runBlocking(Dispatchers.IO) {
+                freshnessMaintenance.clearTransientState()
+                freshnessMaintenance.internalizeLegacyLocalAudio()
+            }
+        }.onFailure { error ->
+            Log.w(STARTUP_TAG, "Bảo trì dữ liệu lúc khởi động chưa hoàn tất.", error)
+        }
+
         registerActivityLifecycleCallbacks(DiagnosticScreenRestoreLifecycleCallbacks())
         SourceBrowserViewportHost.initialize(this)
         VBookActionRuntimeRegistry.install { brokers, diagnostics ->
@@ -83,5 +105,9 @@ class NgheTruyenApplication : Application() {
             preferences = audioPreferences,
             narrationPlanCoordinator = container.narrationPlanCoordinator,
         ).also(AudioDirectionRuntime::start)
+    }
+
+    private companion object {
+        const val STARTUP_TAG = "NgheTruyenStartup"
     }
 }

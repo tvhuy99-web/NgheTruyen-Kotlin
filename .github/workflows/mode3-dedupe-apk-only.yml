@@ -1,9 +1,9 @@
 name: Mode 3 dedupe APK only
 
 on:
-  pull_request:
+  push:
     branches:
-      - main
+      - build/mode3-dedupe-temp
 
 permissions:
   contents: write
@@ -82,5 +82,3 @@ jobs:
             app/src/main/java/vn/nghetruyen/app/ui/components/UnifiedAudioAssetManagerDialog.kt
           git commit -m "Fix Mode 3 arbitration and add duplicate audio scanner [skip ci]"
           git push origin HEAD:build/mode3-dedupe-temp
-
-# trigger after temporary branch was isolated from normal CI

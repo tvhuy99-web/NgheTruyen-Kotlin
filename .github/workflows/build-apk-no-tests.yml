@@ -1,4 +1,4 @@
-name: Patch PR83 and Build APK No Tests
+name: Build Updated PR83 APK No Tests
 
 on:
   pull_request:
@@ -9,103 +9,17 @@ on:
       - build/pr83-apk-no-tests-20260822
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  patch-build-apk-no-tests:
+  build-apk-no-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Checkout PR83 source
+      - name: Checkout updated PR83 source
         uses: actions/checkout@v4
         with:
           ref: fix/freesound-timeout-clean-reassign
-          fetch-depth: 0
-
-      - name: Apply diagnostics fixes
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          def replace(path, old, new, expected=1):
-              p = Path(path)
-              text = p.read_text(encoding='utf-8')
-              count = text.count(old)
-              if count != expected:
-                  raise SystemExit(f'{path}: expected {expected} occurrence(s), found {count}: {old[:100]!r}')
-              p.write_text(text.replace(old, new), encoding='utf-8')
-
-          importer = 'app/src/main/java/vn/nghetruyen/app/freesound/FreesoundImporter.kt'
-          replace(
-              importer,
-              '''            val boundedClient = httpClient.newBuilder()\n                .connectTimeout(minOf(15_000L, callTimeoutMs).coerceAtLeast(500L), TimeUnit.MILLISECONDS)\n                .readTimeout(callTimeoutMs.coerceAtLeast(500L), TimeUnit.MILLISECONDS)\n                .callTimeout(callTimeoutMs.coerceAtLeast(500L), TimeUnit.MILLISECONDS)\n                .build()''',
-              '''            val boundedClient = httpClient.newBuilder()\n                // A healthy slow transfer may continue for the full 180-second call budget, but\n                // 20 seconds without any socket progress is treated as a stalled preview.\n                .connectTimeout(minOf(PREVIEW_STALL_TIMEOUT_MS, callTimeoutMs).coerceAtLeast(500L), TimeUnit.MILLISECONDS)\n                .readTimeout(minOf(PREVIEW_STALL_TIMEOUT_MS, callTimeoutMs).coerceAtLeast(500L), TimeUnit.MILLISECONDS)\n                .callTimeout(callTimeoutMs.coerceAtLeast(500L), TimeUnit.MILLISECONDS)\n                .build()''',
-          )
-          replace(importer, '        internal const val PREVIEW_IMPORT_BUDGET_MS = 60_000L\n        private const val PER_PREVIEW_MAX_CALL_MS = 60_000L', '        internal const val PREVIEW_IMPORT_BUDGET_MS = 180_000L\n        private const val PER_PREVIEW_MAX_CALL_MS = 180_000L\n        private const val PREVIEW_STALL_TIMEOUT_MS = 20_000L')
-          replace(importer, '            listOfNotNull(sound.previewHqMp3, sound.previewHqOgg)', '            listOfNotNull(sound.previewHqOgg, sound.previewHqMp3)')
-          replace(
-              importer,
-              '''        internal fun isRetryableImportFailure(error: Throwable?): Boolean =\n            generateSequence(error) { it.cause }.any { candidate ->\n                val message = candidate.message.orEmpty()\n                candidate is InterruptedIOException ||\n                    message.contains("timeout", ignoreCase = true) ||\n                    Regex("""HTTP\\s+(?:429|5\\d\\d)""", RegexOption.IGNORE_CASE).containsMatchIn(message)\n            }''',
-              '''        internal fun isRetryableImportFailure(error: Throwable?): Boolean =\n            generateSequence(error) { it.cause }.any { candidate ->\n                val message = candidate.message.orEmpty()\n                (candidate is FreesoundImportException && candidate.retryable) ||\n                    (candidate is FreesoundNormalizationException && candidate.retryable) ||\n                    candidate is InterruptedIOException ||\n                    message.contains("timeout", ignoreCase = true) ||\n                    message.contains("quá thời gian", ignoreCase = true) ||\n                    Regex("""HTTP\\s+(?:429|5\\d\\d)""", RegexOption.IGNORE_CASE).containsMatchIn(message)\n            }''',
-          )
-          replace(
-              importer,
-              '''        private fun defaultHttpClient(): OkHttpClient = OkHttpClient.Builder()\n            .connectTimeout(15, TimeUnit.SECONDS)\n            .readTimeout(60, TimeUnit.SECONDS)\n            .callTimeout(60, TimeUnit.SECONDS)\n            .build()''',
-              '''        private fun defaultHttpClient(): OkHttpClient = OkHttpClient.Builder()\n            .connectTimeout(20, TimeUnit.SECONDS)\n            .readTimeout(20, TimeUnit.SECONDS)\n            .callTimeout(180, TimeUnit.SECONDS)\n            .build()''',
-          )
-
-          resolver = 'app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt'
-          replace(
-              resolver,
-              '''                "FREESOUND_RETRY_EXHAUSTED",\n                DiagnosticSeverity.ERROR,''',
-              '''                "FREESOUND_RETRY_EXHAUSTED",\n                if (resolutions.any { !it.trackId.isNullOrBlank() }) DiagnosticSeverity.WARN else DiagnosticSeverity.ERROR,''',
-          )
-
-          queue = 'app/src/main/java/vn/nghetruyen/app/playback/PlaybackQueueStore.kt'
-          replace(
-              queue,
-              '''            stage == NarrationAutomationStage.CURRENT_PLANNING &&\n            message?.trim() == MANUAL_NARRATION_REBUILD_MESSAGE''',
-              '''            stage == NarrationAutomationStage.CURRENT_PLANNING &&\n            progress <= 0.2f &&\n            message?.trim() == MANUAL_NARRATION_REBUILD_MESSAGE''',
-          )
-
-          service = 'app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt'
-          replace(
-              service,
-              '''                "downloadedAssets" to (result?.freesoundDownloadedAssets ?: 0).toString(),\n                "reusedAssets" to (result?.freesoundReusedAssets ?: 0).toString(),''',
-              '''                "downloadedAssets" to (result?.freesoundDownloadedAssets ?: 0).toString(),\n                "reusedAssets" to (result?.freesoundReusedAssets ?: 0).toString(),\n                "transferScope" to "current_call_before_prefetch_merge",''',
-          )
-          replace(
-              service,
-              '''        if (!currentStoryAutoVoiceCastEnabled || snapshot.chapterId.isBlank()) return false\n        if (narrationPreparedChapterId == snapshot.chapterId) return false\n        pendingPlay = true''',
-              '''        if (!currentStoryAutoVoiceCastEnabled || snapshot.chapterId.isBlank()) return false\n        if (narrationPreparedChapterId == snapshot.chapterId) return false\n        // Prefetch persists the voice plan before Freesound imports finish. If the current chapter\n        // already has canonical voice assignments, start TTS immediately instead of holding the\n        // chapter transition behind a slow background preview download. The next speech chunk will\n        // perform the normal fast reuse/apply pass once prefetch finishes.\n        if (xpkVoiceAssignments.isNotEmpty() && narrationPrefetchJob?.isActive == true) {\n            diagnostic(\n                "TTS_NARRATION_VOICE_READY_AUDIO_PENDING",\n                DiagnosticSeverity.INFO,\n                mapOf(\n                    "chapterId" to snapshot.chapterId,\n                    "voiceAssignments" to xpkVoiceAssignments.size.toString(),\n                    "freesoundPrefetchActive" to "true",\n                ),\n            )\n            PlaybackQueueStore.setNarrationAutomation(\n                stage = NarrationAutomationStage.CURRENT_READY,\n                progress = 0.9f,\n                message = "Đã có phân vai; Freesound tiếp tục chuẩn bị trong nền.",\n            )\n            return false\n        }\n        pendingPlay = true''',
-          )
-          replace(
-              service,
-              '''                                    "resolvedAssets" to (planResult?.freesoundResolvedAssets ?: 0).toString(),\n                                    "retryRequired" to (planResult?.freesoundRetryRequired ?: false).toString(),\n                                    "musicApplied" to musicApplied.toString(),\n                                    "audioPlanCreated" to (planResult?.audioPlanCreated ?: false).toString(),\n                                    "issueCount" to issueMessages.size.toString(),''',
-              '''                                    "resolvedAssets" to (planResult?.freesoundResolvedAssets ?: 0).toString(),\n                                    "downloadedAssets" to transferSummary.downloadedAssets.toString(),\n                                    "reusedAssets" to transferSummary.reusedAssets.toString(),\n                                    "transferScope" to "merged_prefetch_and_current",\n                                    "retryRequired" to (planResult?.freesoundRetryRequired ?: false).toString(),\n                                    "musicApplied" to musicApplied.toString(),\n                                    "audioPlanCreatedThisCall" to (planResult?.audioPlanCreated ?: false).toString(),\n                                    "audioPlanAvailable" to ((planResult?.audioPlanCreated == true) || (planResult?.freesoundPlanCreated == true)).toString(),\n                                    "issueCount" to issueMessages.size.toString(),''',
-          )
-
-          test = 'app/src/test/java/vn/nghetruyen/app/freesound/FreesoundImporterTest.kt'
-          replace(test, '    fun previewDownloadBudgetIsOneMinutePerSelectedSound() {\n        assertEquals(60_000L, FreesoundImporter.PREVIEW_IMPORT_BUDGET_MS)\n    }', '    fun previewDownloadBudgetIsThreeMinutesPerSelectedSound() {\n        assertEquals(180_000L, FreesoundImporter.PREVIEW_IMPORT_BUDGET_MS)\n    }')
-          PY
-
-          git diff --check
-          git diff --stat
-
-      - name: Commit fixes to PR83
-        shell: bash
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add \
-            app/src/main/java/vn/nghetruyen/app/freesound/FreesoundImporter.kt \
-            app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt \
-            app/src/main/java/vn/nghetruyen/app/playback/PlaybackQueueStore.kt \
-            app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt \
-            app/src/test/java/vn/nghetruyen/app/freesound/FreesoundImporterTest.kt
-          git commit -m "Fix Freesound stalls, retries and transition blocking"
-          git push origin HEAD:fix/freesound-timeout-clean-reassign
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5

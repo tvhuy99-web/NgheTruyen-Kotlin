@@ -21,6 +21,19 @@ class ChromiumVBookPreludeDomCompatibilityTest {
     }
 
     @Test
+    fun elementSelectFirstAlsoPrefersTheCurrentElementLikeJsoup() {
+        val program = ChromiumVBookPrelude.build(
+            bridgeToken = "test-token",
+            entryPath = "src/test.js",
+            inputJson = "{}",
+        )
+
+        assertTrue(program.contains("var descendant=node.querySelector(selectorText);"))
+        assertTrue(program.contains("if(typeof node.matches==='function'&&node.matches(selectorText)) return out;"))
+        assertTrue(program.contains("return __nativeElement(descendant,baseUrl);"))
+    }
+
+    @Test
     fun documentSelectStillUsesDescendantQuerySemantics() {
         val program = ChromiumVBookPrelude.build(
             bridgeToken = "test-token",

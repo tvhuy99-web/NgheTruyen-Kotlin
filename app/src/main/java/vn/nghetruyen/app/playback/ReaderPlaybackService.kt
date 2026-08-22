@@ -2009,32 +2009,16 @@ class ReaderPlaybackService : Service() {
                 if (planResult?.freesoundRetryExhausted == true) {
                     diagnostic(
                         "FREESOUND_MODE3_RETRY_EXHAUSTED",
-                        DiagnosticSeverity.ERROR,
+                        if (planResult.freesoundResolvedAssets > 0) DiagnosticSeverity.WARN else DiagnosticSeverity.ERROR,
                         mapOf(
                             "attempts" to planResult.freesoundRetryAttempts.toString(),
                             "resolvedAssets" to planResult.freesoundResolvedAssets.toString(),
+                            "partialPlaybackAllowed" to "true",
                         ),
                     )
-                    withContext(Dispatchers.Main) {
-                        if (PlaybackQueueStore.state.value.chapterId != snapshot.chapterId) return@withContext
-                        narrationPlanningChapterId = ""
-                        pendingPlay = false
-                        PlaybackQueueStore.setPlaying(false)
-                        PlaybackQueueStore.setNarrationAutomation(
-                            stage = NarrationAutomationStage.FAILED,
-                            progress = 1f,
-                            message = "Freesound thất bại sau 3 lần. Không có kế hoạch âm thanh hợp lệ để phát.",
-                        )
-                        transitionMessage = "Freesound thất bại sau 3 lần; hãy phân vai lại để tạo lượt mới."
-                        updateMediaState()
-                        updateNotification()
-                    }
-                    return@launch
                 }
 
-                val mode3Incomplete = StoryAudioModeRouter.usesAiFreesound(storyAudioSourceMode) &&
-                    planResult?.freesoundRetryRequired == true
-                if (assignmentCount > 0 && !mode3Incomplete) {
+                if (assignmentCount > 0) {
                     PlaybackQueueStore.setNarrationAutomation(
                         stage = NarrationAutomationStage.CURRENT_APPLYING,
                         progress = 0.85f,

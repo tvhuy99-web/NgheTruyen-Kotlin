@@ -421,7 +421,7 @@ class FreesoundImporter(
         )
 
         internal fun previewCandidatesForImport(sound: FreesoundSound): List<String> =
-            listOfNotNull(sound.previewHqOgg, sound.previewHqMp3)
+            listOfNotNull(sound.previewHqMp3, sound.previewHqOgg)
                 .map(String::trim)
                 .filter { it.startsWith("https://", ignoreCase = true) }
                 .distinct()

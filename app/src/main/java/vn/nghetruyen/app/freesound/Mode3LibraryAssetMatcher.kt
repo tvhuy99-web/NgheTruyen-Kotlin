@@ -15,14 +15,14 @@ import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 /**
  * Scores existing Mode-3 library assets as source-neutral candidates beside Freesound results.
  *
- * The short English Freesound query remains untouched. New AI responses additionally carry a short
- * Vietnamese local hint in each usage, formatted as "Dùng: ...; Tránh: ...". Local matching compares
- * that hint directly with the asset metadata fields Sắc thái / Dùng / Tránh. There is deliberately no
- * English↔Vietnamese dictionary and no attempt to infer a replacement description from story text.
+ * The short Freesound query remains the network-search signal. New AI responses additionally carry
+ * a Vietnamese local hint in each usage, formatted as "Dùng: ...; Tránh: ...". Local matching compares
+ * that hint directly with the asset metadata fields Sắc thái / Dùng / Tránh. Source provenance never
+ * contributes to fit: user-imported assets and earlier Freesound imports are evaluated identically.
  *
  * Performance rule: expensive metadata parsing/tokenization is cached per library fingerprint. Each
- * need then evaluates only tracks sharing at least one relevant English/local token. This keeps local
- * lookup cheaper than rebuilding metadata for the whole library on every 2–3 word query.
+ * need then evaluates only tracks sharing at least one relevant query/local token. This keeps local
+ * lookup cheaper than rebuilding metadata for the whole library on every short query.
  */
 internal object Mode3LibraryAssetMatcher {
     data class Match(
@@ -85,10 +85,11 @@ internal object Mode3LibraryAssetMatcher {
 
     private data class LocalHint(
         val raw: String,
+        val shade: LocalText,
         val use: LocalText,
         val avoid: LocalText,
     ) {
-        val isPresent: Boolean get() = use.tokens.isNotEmpty() || avoid.tokens.isNotEmpty()
+        val isPresent: Boolean get() = shade.tokens.isNotEmpty() || use.tokens.isNotEmpty() || avoid.tokens.isNotEmpty()
     }
 
     private data class NeedProfile(
@@ -100,7 +101,7 @@ internal object Mode3LibraryAssetMatcher {
     ) {
         val hintAware: Boolean get() = hints.isNotEmpty()
         val localCandidateTokens: Set<String>
-            get() = hints.flatMapTo(linkedSetOf()) { it.use.tokens + it.avoid.tokens }
+            get() = hints.flatMapTo(linkedSetOf()) { it.shade.tokens + it.use.tokens + it.avoid.tokens }
     }
 
     private data class IndexedTrack(
@@ -184,6 +185,30 @@ internal object Mode3LibraryAssetMatcher {
         if (!track.enabled || AudioAssetClassifier.classify(track) != need.kind) return null
         val profile = needProfile(need)
         return score(profile, indexTrack(track), track, nowMillis)?.takeIf(Match::accepted)
+    }
+
+    /**
+     * A decisive library fit can safely stop the network path. This is deliberately source-neutral:
+     * an already-downloaded Freesound asset and a user-imported asset use the exact same rule.
+     * Borderline accepted matches still go online and compete against the remote candidate.
+     */
+    fun isDecisive(match: Match?): Boolean {
+        if (match == null || !match.accepted || match.avoidCoverage >= MAX_CONFLICT) return false
+        return when (match.metadataQuality) {
+            "STRUCTURED" -> {
+                val descriptionDecisive = match.contextScore >= DECISIVE_CONTEXT_SCORE
+                val exactWithContext =
+                    match.selectionScore >= LOCAL_NETWORK_SKIP_FIT &&
+                        match.coverage >= EXACT_QUERY_COVERAGE &&
+                        match.coreCoverage >= CORE_PRESENT_COVERAGE &&
+                        match.contextScore >= DECISIVE_EXACT_MIN_CONTEXT_SCORE
+                descriptionDecisive || exactWithContext
+            }
+            else ->
+                match.selectionScore >= LOCAL_NETWORK_SKIP_FIT &&
+                    match.coverage >= EXACT_QUERY_COVERAGE &&
+                    match.coreCoverage >= CORE_PRESENT_COVERAGE
+        }
     }
 
     private fun indexFor(
@@ -326,20 +351,24 @@ internal object Mode3LibraryAssetMatcher {
         val coreCoverage = if (core != null && core in remoteTokens) 1.0 else 0.0
         val eventCoverage = if (event != null && event in remoteTokens) 1.0 else 0.0
         val lexical = lexicalCoverage.coerceIn(0.0, 1.0)
+        val corePresent = coreCoverage >= CORE_PRESENT_COVERAGE
+        val eventPresent = eventCoverage >= CORE_PRESENT_COVERAGE
         val qualified = when (need.kind) {
             AudioAssetKind.SFX -> if (event != null) {
-                coreCoverage >= CORE_PRESENT_COVERAGE &&
-                    eventCoverage >= CORE_PRESENT_COVERAGE &&
-                    lexical >= SFX_REMOTE_MIN_QUERY_COVERAGE
+                lexical >= REMOTE_SFX_STRONG_QUERY_COVERAGE ||
+                    (lexical >= REMOTE_SFX_RELAXED_QUERY_COVERAGE && (corePresent || eventPresent))
             } else {
-                coreCoverage >= CORE_PRESENT_COVERAGE && lexical >= RAW_MIN_QUERY_COVERAGE
+                lexical >= RAW_MIN_QUERY_COVERAGE ||
+                    (corePresent && lexical >= CORE_ONLY_MIN_QUERY_COVERAGE)
             }
             else -> lexical >= LEGACY_MIN_QUERY_COVERAGE
         }
         val fit = if (!qualified) {
             0.0
         } else if (need.kind == AudioAssetKind.SFX && event != null) {
-            (coreCoverage * 0.36 + eventCoverage * 0.36 + lexical * 0.28).coerceIn(0.0, 1.0)
+            // Do not require both exact source and exact event words. A strong combined lexical match
+            // is valid evidence on its own; exact core/event tokens add confidence when present.
+            (coreCoverage * 0.24 + eventCoverage * 0.24 + lexical * 0.52).coerceIn(0.0, 1.0)
         } else {
             (coreCoverage * 0.52 + lexical * 0.48).coerceIn(0.0, 1.0)
         }
@@ -360,38 +389,61 @@ internal object Mode3LibraryAssetMatcher {
         val queryTokens = profile.queryTokens
         val titleQueryCoverage = tokenCoverage(queryTokens, indexed.englishTitleTokens)
         val metadataQueryCoverage = tokenCoverage(queryTokens, indexed.englishMetadataTokens)
-        val queryCoverage = max(titleQueryCoverage, metadataQueryCoverage * 0.92)
+        // Metadata is the semantic source of truth. A very good filename remains useful evidence,
+        // but can no longer outrank a contradictory structured description by itself.
+        val queryCoverage = max(metadataQueryCoverage, titleQueryCoverage * TITLE_QUERY_EVIDENCE_WEIGHT)
         val queryAvoidCoverage = tokenCoverage(queryTokens, indexed.englishAvoidTokens)
         val coreCoverage = profile.coreToken?.let { core ->
             max(
-                if (core in indexed.englishTitleTokens) 1.0 else 0.0,
-                if (core in indexed.englishMetadataTokens) 0.92 else 0.0,
+                if (core in indexed.englishMetadataTokens) 1.0 else 0.0,
+                if (core in indexed.englishTitleTokens) TITLE_CORE_EVIDENCE_WEIGHT else 0.0,
             )
         } ?: 0.0
         val eventCoverage = profile.eventToken?.let { event ->
             max(
-                if (event in indexed.englishTitleTokens) 1.0 else 0.0,
-                if (event in indexed.englishMetadataTokens) 0.92 else 0.0,
+                if (event in indexed.englishMetadataTokens) 1.0 else 0.0,
+                if (event in indexed.englishTitleTokens) TITLE_CORE_EVIDENCE_WEIGHT else 0.0,
             )
         } ?: 0.0
 
         val hintAware = profile.hintAware
         val useScore = if (hintAware) average(profile.hints.map { hint ->
             val direct = localSimilarity(hint.use, indexed.sections.use)
-            val shade = localSimilarity(hint.use, indexed.sections.shade) * 0.82
-            val fallback = localSimilarity(hint.use, indexed.sections.all) * 0.62
-            max(direct, max(shade, fallback))
+            val shadeToUse = localSimilarity(hint.shade, indexed.sections.use) * 0.45
+            val useToShade = localSimilarity(hint.use, indexed.sections.shade) * 0.55
+            val fallback = max(
+                localSimilarity(hint.use, indexed.sections.all),
+                localSimilarity(hint.shade, indexed.sections.all),
+            ) * 0.45
+            max(max(direct, shadeToUse), max(useToShade, fallback))
         }) else 0.0
-        val shadeScore = if (hintAware) average(profile.hints.map { localSimilarity(it.use, indexed.sections.shade) }) else 0.0
-        val allScore = if (hintAware) average(profile.hints.map { localSimilarity(it.use, indexed.sections.all) }) else 0.0
+        val shadeScore = if (hintAware) average(profile.hints.map { hint ->
+            val expectedShade = if (hint.shade.tokens.isNotEmpty()) hint.shade else hint.use
+            max(
+                localSimilarity(expectedShade, indexed.sections.shade),
+                localSimilarity(hint.use, indexed.sections.shade) * 0.70,
+            )
+        }) else 0.0
+        val allScore = if (hintAware) average(profile.hints.map { hint ->
+            max(
+                localSimilarity(hint.use, indexed.sections.all),
+                localSimilarity(hint.shade, indexed.sections.all),
+            )
+        }) else 0.0
         val hintConflict = if (hintAware) profile.hints.maxOf { hint ->
             max(
-                localSimilarity(hint.use, indexed.sections.avoid),
-                localSimilarity(hint.avoid, indexed.sections.use),
+                max(
+                    localSimilarity(hint.use, indexed.sections.avoid),
+                    localSimilarity(hint.shade, indexed.sections.avoid),
+                ),
+                max(
+                    localSimilarity(hint.avoid, indexed.sections.use),
+                    localSimilarity(hint.avoid, indexed.sections.shade),
+                ),
             )
         } else 0.0
         val avoidCoverage = max(queryAvoidCoverage, hintConflict)
-        val contextScore = max(useScore, max(shadeScore * 0.86, allScore * 0.66))
+        val contextScore = max(useScore, max(shadeScore * 0.94, allScore * 0.62))
         val semanticMetadata = indexed.sections.structured &&
             (indexed.sections.use.tokens.isNotEmpty() || indexed.sections.shade.tokens.isNotEmpty())
         val metadataQuality = when {
@@ -404,21 +456,22 @@ internal object Mode3LibraryAssetMatcher {
         if (hintAware && contextScore <= 0.0 && queryCoverage <= 0.0 && coreCoverage <= 0.0) return null
 
         val structuredBonus = if (semanticMetadata) 0.06 else if (indexed.sections.allText.length >= 24) 0.02 else 0.0
-        val titleBonus = titleQueryCoverage * 0.04
+        val titleBonus = titleQueryCoverage * 0.02
         val repetitionPenalty = repetitionPenalty(currentTrack, nowMillis)
         val finalScore = if (hintAware && semanticMetadata) {
-            // Rich Vietnamese Dùng/Sắc thái/Tránh metadata: AI local_hint is the main evidence.
-            useScore * 0.56 +
-                shadeScore * 0.13 +
-                allScore * 0.09 +
-                queryCoverage * 0.12 +
+            // Vietnamese structured metadata is primary; filename/query evidence is deliberately
+            // secondary so renamed files and Freesound imports compete on meaning, not provenance.
+            useScore * 0.52 +
+                shadeScore * 0.22 +
+                allScore * 0.10 +
+                queryCoverage * 0.08 +
                 structuredBonus +
                 titleBonus -
-                avoidCoverage * 0.72 -
+                avoidCoverage * 0.78 -
                 repetitionPenalty
         } else {
             // Weak/raw metadata cannot be judged fairly against Vietnamese local_hint. Fall back to
-            // the unchanged English query/title instead of punishing an otherwise exact asset.
+            // the unchanged query/title instead of punishing an otherwise exact asset.
             queryCoverage * 0.78 +
                 coreCoverage * 0.16 +
                 structuredBonus * 0.30 +
@@ -444,9 +497,14 @@ internal object Mode3LibraryAssetMatcher {
                     titleQueryCoverage * 0.05
                 ).coerceIn(0.0, 1.0)
         }
+        val selectionBase = if (hintAware && semanticMetadata && contextEvidence > 0.0) {
+            contextEvidence * 0.65 + queryEvidence * 0.35
+        } else {
+            queryEvidence
+        }
         val selectionScore = (
-            max(contextEvidence, queryEvidence) -
-                avoidCoverage * 0.45 -
+            selectionBase -
+                avoidCoverage * 0.48 -
                 repetitionPenalty * 0.50
             ).coerceIn(0.0, 1.0)
 
@@ -501,19 +559,18 @@ internal object Mode3LibraryAssetMatcher {
             if (conflict >= MAX_CONFLICT) add("conflict>=$MAX_CONFLICT")
             if (!hintAware) {
                 if (kind == AudioAssetKind.SFX && eventRequired) {
-                    if (
-                        coreCoverage < CORE_PRESENT_COVERAGE ||
-                        eventCoverage < CORE_PRESENT_COVERAGE ||
-                        queryCoverage < SFX_RAW_MIN_QUERY_COVERAGE
-                    ) add("sfxSourceEventMismatch")
+                    val hasStrongQueryEvidence =
+                        queryCoverage >= REMOTE_SFX_STRONG_QUERY_COVERAGE ||
+                            (queryCoverage >= REMOTE_SFX_RELAXED_QUERY_COVERAGE &&
+                                (coreCoverage >= CORE_PRESENT_COVERAGE || eventCoverage >= CORE_PRESENT_COVERAGE))
+                    if (!hasStrongQueryEvidence) add("sfxSourceEventMismatch")
                 } else {
                     if (score < LEGACY_MIN_SCORE) add("score<$LEGACY_MIN_SCORE")
                     if (queryCoverage < LEGACY_MIN_QUERY_COVERAGE) add("queryCoverage<$LEGACY_MIN_QUERY_COVERAGE")
                 }
             } else if (semanticMetadata) {
                 val semanticPass =
-                    (kind == AudioAssetKind.SFX && contextScore >= SFX_CONTEXT_ONLY_SCORE) ||
-                    contextScore >= DECISIVE_CONTEXT_SCORE ||
+                    contextScore >= CONTEXT_ONLY_SCORE ||
                     (
                         contextScore >= BALANCED_CONTEXT_SCORE &&
                             queryCoverage >= BALANCED_QUERY_COVERAGE &&
@@ -522,17 +579,16 @@ internal object Mode3LibraryAssetMatcher {
                     (queryCoverage >= EXACT_QUERY_COVERAGE && coreCoverage >= CORE_PRESENT_COVERAGE)
                 if (!semanticPass) {
                     add(
-                        "semanticEvidence<context=$DECISIVE_CONTEXT_SCORE" +
-                            "|sfxContext=$SFX_CONTEXT_ONLY_SCORE" +
+                        "semanticEvidence<context=$CONTEXT_ONLY_SCORE" +
                             "|balanced=$BALANCED_CONTEXT_SCORE+$BALANCED_QUERY_COVERAGE+$BALANCED_MIN_SCORE" +
                             "|exactQuery=$EXACT_QUERY_COVERAGE",
                     )
                 }
             } else {
                 val queryPass = if (kind == AudioAssetKind.SFX && eventRequired) {
-                    coreCoverage >= CORE_PRESENT_COVERAGE &&
-                        eventCoverage >= CORE_PRESENT_COVERAGE &&
-                        queryCoverage >= SFX_RAW_MIN_QUERY_COVERAGE
+                    queryCoverage >= REMOTE_SFX_STRONG_QUERY_COVERAGE ||
+                        (queryCoverage >= REMOTE_SFX_RELAXED_QUERY_COVERAGE &&
+                            (coreCoverage >= CORE_PRESENT_COVERAGE || eventCoverage >= CORE_PRESENT_COVERAGE))
                 } else {
                     queryCoverage >= RAW_MIN_QUERY_COVERAGE ||
                         (coreCoverage >= CORE_PRESENT_COVERAGE && queryCoverage >= CORE_ONLY_MIN_QUERY_COVERAGE)
@@ -570,7 +626,17 @@ internal object Mode3LibraryAssetMatcher {
 
         val shadeText = slice(shadeAt, markerLengthAt(lower, shadeAt, "sắc thái:", "sac thai:"), listOf(useAt, avoidAt))
         val useText = slice(useAt, markerLengthAt(lower, useAt, "dùng:", "dung:"), listOf(avoidAt))
-        val avoidText = slice(avoidAt, markerLengthAt(lower, avoidAt, "tránh:", "tranh:"), emptyList())
+        val provenanceAt = listOf(
+            lower.indexOf("freesound_id:"),
+            lower.indexOf("freesound_user:"),
+            lower.indexOf("freesound_license:"),
+            lower.indexOf("freesound_url:"),
+        ).filter { it >= 0 }.minOrNull() ?: -1
+        val avoidText = slice(
+            avoidAt,
+            markerLengthAt(lower, avoidAt, "tránh:", "tranh:"),
+            listOf(provenanceAt),
+        )
         val allText = localNormalize(value)
         return Sections(
             allText = allText,
@@ -588,24 +654,41 @@ internal object Mode3LibraryAssetMatcher {
     private fun parseLocalHint(raw: String): LocalHint {
         val value = raw.trim()
         val lower = value.lowercase(Locale.ROOT)
+        val shadeAt = firstMarker(lower, "sắc thái:", "sac thai:")
         val useAt = firstMarker(lower, "dùng:", "dung:")
         val avoidAt = firstMarker(lower, "tránh:", "tranh:")
-        if (useAt < 0 && avoidAt < 0) {
-            return LocalHint(raw = value, use = localText(localNormalize(value)), avoid = EMPTY_LOCAL_TEXT)
+        if (shadeAt < 0 && useAt < 0 && avoidAt < 0) {
+            return LocalHint(
+                raw = value,
+                shade = EMPTY_LOCAL_TEXT,
+                use = localText(localNormalize(value)),
+                avoid = EMPTY_LOCAL_TEXT,
+            )
         }
 
-        val useMarkerLength = markerLengthAt(lower, useAt, "dùng:", "dung:")
-        val avoidMarkerLength = markerLengthAt(lower, avoidAt, "tránh:", "tranh:")
-        val use = if (useAt >= 0) {
-            val start = (useAt + useMarkerLength).coerceAtMost(value.length)
-            val end = avoidAt.takeIf { it > start } ?: value.length
-            localNormalize(value.substring(start, end))
-        } else ""
-        val avoid = if (avoidAt >= 0) {
-            val start = (avoidAt + avoidMarkerLength).coerceAtMost(value.length)
-            localNormalize(value.substring(start))
-        } else ""
-        return LocalHint(raw = value, use = localText(use), avoid = localText(avoid))
+        fun slice(start: Int, markerLength: Int, endCandidates: List<Int>): String {
+            if (start < 0) return ""
+            val contentStart = (start + markerLength).coerceAtMost(value.length)
+            val end = endCandidates.filter { it > contentStart }.minOrNull() ?: value.length
+            return localNormalize(value.substring(contentStart, end))
+        }
+
+        val shade = slice(
+            shadeAt,
+            markerLengthAt(lower, shadeAt, "sắc thái:", "sac thai:"),
+            listOf(useAt, avoidAt),
+        )
+        val use = slice(
+            useAt,
+            markerLengthAt(lower, useAt, "dùng:", "dung:"),
+            listOf(avoidAt),
+        )
+        val avoid = slice(
+            avoidAt,
+            markerLengthAt(lower, avoidAt, "tránh:", "tranh:"),
+            emptyList(),
+        )
+        return LocalHint(raw = value, shade = localText(shade), use = localText(use), avoid = localText(avoid))
     }
 
     private fun firstMarker(lower: String, vararg markers: String): Int = markers
@@ -726,14 +809,17 @@ internal object Mode3LibraryAssetMatcher {
                 "acceptedCoreCoverage" to format(evaluation.accepted?.coreCoverage ?: 0.0),
                 "acceptedEventCoverage" to format(evaluation.accepted?.eventCoverage ?: 0.0),
                 "acceptedMetadataQuality" to evaluation.accepted?.metadataQuality.orEmpty(),
+                "acceptedDecisive" to isDecisive(evaluation.accepted).toString(),
                 "bestTrackId" to best?.track?.id.orEmpty(),
                 "bestScore" to format(best?.score ?: 0.0),
                 "bestFit" to format(best?.selectionScore ?: 0.0),
                 "bestCoreCoverage" to format(best?.coreCoverage ?: 0.0),
                 "bestEventCoverage" to format(best?.eventCoverage ?: 0.0),
-          "bestMetadataQuality" to best?.metadataQuality.orEmpty(),
+                "bestMetadataQuality" to best?.metadataQuality.orEmpty(),
                 "bestRejectReason" to (best?.rejectReason ?: if (evaluation.candidateTracks == 0) "NO_LEXICAL_CANDIDATES" else "NO_SCORED_CANDIDATE"),
                 "decisiveContextThreshold" to DECISIVE_CONTEXT_SCORE.toString(),
+                "contextOnlyThreshold" to CONTEXT_ONLY_SCORE.toString(),
+                "localNetworkSkipFit" to LOCAL_NETWORK_SKIP_FIT.toString(),
                 "balancedContextThreshold" to BALANCED_CONTEXT_SCORE.toString(),
                 "rawQueryThreshold" to RAW_MIN_QUERY_COVERAGE.toString(),
                 "coreOnlyMinQueryCoverage" to CORE_ONLY_MIN_QUERY_COVERAGE.toString(),
@@ -754,6 +840,7 @@ internal object Mode3LibraryAssetMatcher {
                     "trackId" to candidate.track.id,
                     "title" to candidate.track.title.take(180),
                     "accepted" to candidate.accepted.toString(),
+                    "decisive" to isDecisive(candidate).toString(),
                     "rejectReason" to candidate.rejectReason,
                     "score" to format(candidate.score),
                     "selectionFit" to format(candidate.selectionScore),
@@ -784,6 +871,7 @@ internal object Mode3LibraryAssetMatcher {
                 "acceptedTitle" to evaluation.accepted?.track?.title.orEmpty().take(180),
                 "acceptedScore" to format(evaluation.accepted?.score ?: 0.0),
                 "acceptedFit" to format(evaluation.accepted?.selectionScore ?: 0.0),
+                "acceptedDecisive" to isDecisive(evaluation.accepted).toString(),
                 "candidateTracks" to evaluation.candidateTracks.toString(),
                 "indexedTracks" to evaluation.indexedTracks.toString(),
                 "elapsedMs" to evaluation.elapsedMs.toString(),
@@ -812,15 +900,19 @@ internal object Mode3LibraryAssetMatcher {
 
     private fun format(value: Double): String = "%.3f".format(Locale.US, value)
 
-    private const val DECISIVE_CONTEXT_SCORE = 0.56
+    private const val DECISIVE_CONTEXT_SCORE = 0.72
+    private const val DECISIVE_EXACT_MIN_CONTEXT_SCORE = 0.30
+    private const val CONTEXT_ONLY_SCORE = 0.46
+    private const val LOCAL_NETWORK_SKIP_FIT = 0.77
+    private const val TITLE_QUERY_EVIDENCE_WEIGHT = 0.88
+    private const val TITLE_CORE_EVIDENCE_WEIGHT = 0.92
     private const val BALANCED_CONTEXT_SCORE = 0.38
     private const val BALANCED_QUERY_COVERAGE = 0.33
     private const val BALANCED_MIN_SCORE = 0.40
     private const val EXACT_QUERY_COVERAGE = 0.85
     private const val RAW_MIN_QUERY_COVERAGE = 0.78
-    private const val SFX_RAW_MIN_QUERY_COVERAGE = 0.60
-    private const val SFX_REMOTE_MIN_QUERY_COVERAGE = 0.66
-    private const val SFX_CONTEXT_ONLY_SCORE = 0.40
+    private const val REMOTE_SFX_STRONG_QUERY_COVERAGE = 0.78
+    private const val REMOTE_SFX_RELAXED_QUERY_COVERAGE = 0.60
     private const val CORE_PRESENT_COVERAGE = 0.92
     private const val CORE_ONLY_MIN_QUERY_COVERAGE = 0.32
     private const val LEGACY_MIN_SCORE = 0.56
@@ -851,6 +943,8 @@ internal object Mode3LibraryAssetMatcher {
     private val LOCAL_STOPWORDS = setOf(
         "và", "hoặc", "nhưng", "của", "cho", "trong", "ngoài", "khi", "sau", "trước", "với", "đến",
         "đang", "được", "không", "một", "những", "các", "này", "đó", "thì", "mà", "theo", "rất", "hơi",
+        "cảnh", "tiếng", "âm", "thanh", "hiệu", "ứng", "sắc", "thái", "dùng", "tránh", "phù", "hợp",
+        "tạo", "có", "là", "nền", "nghe", "được", "kéo", "dài", "ngắn", "liên", "tục",
         "and", "or", "the", "a", "an", "with", "for", "from", "into", "this", "that",
     )
 }

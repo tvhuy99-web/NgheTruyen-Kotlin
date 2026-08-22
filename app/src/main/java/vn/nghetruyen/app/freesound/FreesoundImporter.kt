@@ -66,6 +66,7 @@ class FreesoundImporter(
         sound: FreesoundSound,
         kind: AudioAssetKind,
         normalizationTargetLufs: Float,
+        semanticDescription: String = "",
     ): Result<FreesoundImportResult> = withContext(Dispatchers.IO) {
         soundImportLock(sound.id).withLock {
             cleanupStalePartFiles(appContext)
@@ -117,7 +118,7 @@ class FreesoundImporter(
                 deleteManagedFile(appContext, stale.uri)
             }
 
-            importPreviewLocked(sound, kind, normalizationTargetLufs)
+            importPreviewLocked(sound, kind, normalizationTargetLufs, semanticDescription)
         }
     }
 
@@ -178,6 +179,7 @@ class FreesoundImporter(
         sound: FreesoundSound,
         kind: AudioAssetKind,
         normalizationTargetLufs: Float,
+        semanticDescription: String,
     ): Result<FreesoundImportResult> {
         val candidates = previewCandidatesForImport(sound)
         if (candidates.isEmpty()) {
@@ -206,6 +208,7 @@ class FreesoundImporter(
                 sound = sound,
                 kind = kind,
                 normalizationTargetLufs = normalizationTargetLufs,
+                semanticDescription = semanticDescription,
                 previewUrl = previewUrl,
                 directory = directory,
                 callTimeoutMs = remainingMs.coerceAtMost(PER_PREVIEW_MAX_CALL_MS),
@@ -239,6 +242,7 @@ class FreesoundImporter(
         sound: FreesoundSound,
         kind: AudioAssetKind,
         normalizationTargetLufs: Float,
+        semanticDescription: String,
         previewUrl: String,
         directory: File,
         callTimeoutMs: Long,
@@ -315,7 +319,7 @@ class FreesoundImporter(
             val title = titleForImport(sound.name, "Âm thanh Freesound ${sound.id}")
             val tagsCsv = tagsForImport(
                 kind = kind,
-                description = sound.description,
+                description = semanticDescription.trim().ifBlank { sound.description },
                 soundId = sound.id,
                 username = sound.username,
                 license = sound.license,

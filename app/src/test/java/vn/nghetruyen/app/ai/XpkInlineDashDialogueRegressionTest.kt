@@ -87,4 +87,68 @@ class XpkInlineDashDialogueRegressionTest {
         assertEquals(1, units.size)
         assertTrue(units.single().isDialogue)
     }
+
+    @Test
+    fun malformedRepeatedOpeningCurlyQuoteIsRecoveredWithoutEatingNarration() {
+        val units = XpkVoiceCastSplitter.buildUnits(
+            "",
+            "Vy tủm tỉm cười trêu “ hai vợ chồng cùng dính nợ “, thằng K quệt mồ hôi hú thằng L lên phụ.",
+        )
+
+        assertEquals(3, units.size)
+        assertFalse(units[0].isDialogue)
+        assertEquals("Vy tủm tỉm cười trêu", units[0].text)
+        assertTrue(units[1].isDialogue)
+        assertEquals("“ hai vợ chồng cùng dính nợ “", units[1].text)
+        assertFalse(units[2].isDialogue)
+        assertEquals(", thằng K quệt mồ hôi hú thằng L lên phụ.", units[2].text)
+    }
+
+    @Test
+    fun dashPrefixedThirdPersonNarrationIsNotForcedIntoCharacterVoice() {
+        val units = XpkVoiceCastSplitter.buildUnits(
+            "",
+            "- Và nàng bỏ ra ngoài trước ánh mắt ngạc nhiên của mọi người.",
+        )
+
+        assertEquals(1, units.size)
+        assertFalse(units.single().isDialogue)
+        assertEquals(XpkVoiceCastSplitter.NARRATOR_ID, units.single().fixedVoice)
+        assertEquals("narration", units.single().unitKind)
+    }
+
+    @Test
+    fun realQuestionAboutThirdPersonSubjectRemainsDialogue() {
+        val units = XpkVoiceCastSplitter.buildUnits("", "- Nàng đi đâu rồi?")
+
+        assertEquals(1, units.size)
+        assertTrue(units.single().isDialogue)
+    }
+
+    @Test
+    fun shortQuotedTermInsideNarrationStaysWithNarrator() {
+        val units = XpkVoiceCastSplitter.buildUnits(
+            "",
+            "Nghe đến \"Cổ Thần cấp năm\", Tô Tông sững người lại.",
+        )
+
+        assertEquals(1, units.size)
+        assertFalse(units.single().isDialogue)
+        assertEquals(XpkVoiceCastSplitter.NARRATOR_ID, units.single().fixedVoice)
+        assertEquals("Nghe đến \"Cổ Thần cấp năm\", Tô Tông sững người lại.", units.single().text)
+    }
+
+    @Test
+    fun shortQuotedSpeechWithSpeechCueRemainsDialogue() {
+        val units = XpkVoiceCastSplitter.buildUnits(
+            "",
+            "Tô Tông khẽ nói \"Được\", rồi quay đi.",
+        )
+
+        assertEquals(3, units.size)
+        assertFalse(units[0].isDialogue)
+        assertTrue(units[1].isDialogue)
+        assertEquals("\"Được\"", units[1].text)
+        assertFalse(units[2].isDialogue)
+    }
 }

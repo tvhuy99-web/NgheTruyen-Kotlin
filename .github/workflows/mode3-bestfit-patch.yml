@@ -1,0 +1,36 @@
+name: Apply Mode 3 best-fit patch
+
+on:
+  push:
+    branches:
+      - agent/unified-audio-library-modes
+    paths:
+      - ".github/workflows/mode3-bestfit-patch.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/unified-audio-library-modes
+          fetch-depth: 0
+
+      - name: Apply Mode 3 fixes
+        run: python3 scripts/mode3_bestfit_patch.py
+
+      - name: Commit patched source
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/vn/nghetruyen/app/freesound/Mode3LibraryAssetMatcher.kt \
+                  app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt \
+                  app/src/main/java/vn/nghetruyen/app/ai/XpkUnifiedNarrationPrompt.kt
+          git commit -m "Make Mode 3 source-neutral and improve local matching [skip ci]"
+          git push origin HEAD:agent/unified-audio-library-modes

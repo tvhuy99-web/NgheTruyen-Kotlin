@@ -45,15 +45,15 @@ import vn.nghetruyen.app.audio.AudioDirectionPreferences
 import vn.nghetruyen.app.audio.PcmLoudnessEstimator
 import vn.nghetruyen.app.audio.SceneMusicAnalysisWorker
 import vn.nghetruyen.app.audio.StoryAudioSourceMode
-import vn.nghetruyen.app.freesound.FreesoundImporter
 import vn.nghetruyen.app.playback.PlaybackQueueStore
 import vn.nghetruyen.app.playback.ReaderPlaybackService
 
 private val audioSettingsPersistenceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
 /**
- * Reader audio-layer controls. The selected source mode owns its visible options: manual playback,
- * AI-local planning and AI-Freesound planning are deliberately not rendered together.
+ * Reader audio-layer controls. Source mode changes only the playback/planning mechanism. The
+ * physical MUSIC/AMBIENCE/SFX library is always shared: user-added assets and Freesound imports are
+ * managed, normalized and displayed together in every mode.
  *
  * [onManageMusic] is retained only for source compatibility with the existing ReaderScreen call.
  * MUSIC uses [UnifiedAudioAssetManagerDialog] just like AMBIENCE and SFX.
@@ -147,10 +147,7 @@ fun AudioDirectionLayerSwitches(
         val sfxTarget = normalizationSfxDraft
             .coerceIn(PcmLoudnessEstimator.MIN_TARGET_LUFS, PcmLoudnessEstimator.MAX_TARGET_LUFS)
         val runKinds = normalizationKinds
-    val eligibleTracks = if (sourceMode == StoryAudioSourceMode.AI_FREESOUND) {
-        tracks.filter { FreesoundImporter.soundIdFromManagedUri(it.uri) != null }
-    } else tracks
-    val runTracks = eligibleTracks.filter { AudioAssetClassifier.classify(it) in runKinds }
+        val runTracks = tracks.filter { AudioAssetClassifier.classify(it) in runKinds }
 
         normalizationSaving = true
         normalizationPersistenceError = null
@@ -241,6 +238,26 @@ fun AudioDirectionLayerSwitches(
         dynamicsSettingsDirty = false
     }
 
+    val musicCount = tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }
+    val ambienceCount = tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.AMBIENCE }
+    val sfxCount = tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.SFX }
+
+    @Composable
+    fun SharedLibraryManagementButtons() {
+        AudioManagerButton(
+            label = "QUẢN LÝ NHẠC ($musicCount)",
+            onClick = { managerKind = AudioAssetKind.MUSIC },
+        )
+        AudioManagerButton(
+            label = "QUẢN LÝ MÔI TRƯỜNG ($ambienceCount)",
+            onClick = { managerKind = AudioAssetKind.AMBIENCE },
+        )
+        AudioManagerButton(
+            label = "QUẢN LÝ SFX ($sfxCount)",
+            onClick = { managerKind = AudioAssetKind.SFX },
+        )
+    }
+
     Column(modifier = modifier.fillMaxWidth()) {
         StoryAudioSourceModeSelector(
             onModeChanged = { mode ->
@@ -254,24 +271,21 @@ fun AudioDirectionLayerSwitches(
 
         when (sourceMode) {
             StoryAudioSourceMode.LOCAL_MANUAL -> {
-                Text("MODE 1 · PHÁT THỦ CÔNG TỪ THƯ VIỆN LOCAL")
-                Text("Mode này không dùng AI chọn MUSIC, AMBIENCE hoặc SFX.")
+                Text("MODE 1 · PHÁT THỦ CÔNG TỪ THƯ VIỆN")
+                Text("Mode này thay đổi cơ chế phát, không thay đổi thư viện. MUSIC, AMBIENCE và SFX vẫn dùng chung toàn bộ asset đã có.")
+                SharedLibraryManagementButtons()
                 AudioManagerButton(
-                    label = "QUẢN LÝ NHẠC ($musicTrackCount)",
-                    onClick = { managerKind = AudioAssetKind.MUSIC },
-                )
-                AudioManagerButton(
-                    label = "CHUẨN HÓA KHO NHẠC",
-                    enabled = tracks.any { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC },
-                    onClick = { openNormalization(setOf(AudioAssetKind.MUSIC)) },
+                    label = "CHUẨN HÓA TOÀN BỘ THƯ VIỆN",
+                    enabled = tracks.isNotEmpty(),
+                    onClick = { openNormalization(AudioAssetKind.entries.toSet()) },
                 )
             }
 
             StoryAudioSourceMode.AI_LOCAL -> {
-                Text("MODE 2 · AI CHỌN TỪ THƯ VIỆN LOCAL")
-                Text("Chỉ Mode 2 gửi danh sách asset local đang bật cho AI để chọn track_id.")
+                Text("MODE 2 · AI CHỌN TỪ THƯ VIỆN")
+                Text("AI chọn từ toàn bộ asset đang bật, gồm file tự thêm và file Freesound đã tải trước đó. Mode chỉ thay cơ chế chọn; thư viện không bị tách theo nguồn.")
                 AudioLayerSwitchRow(
-                    title = "AI chọn nhạc cảnh local",
+                    title = "AI chọn nhạc cảnh từ thư viện",
                     checked = musicEnabled,
                     onCheckedChange = { enabled ->
                         musicEnabled = enabled
@@ -279,19 +293,19 @@ fun AudioDirectionLayerSwitches(
                     },
                 )
                 AudioLayerSwitchRow(
-                    title = "AI chọn âm thanh môi trường local",
+                    title = "AI chọn âm thanh môi trường từ thư viện",
                     checked = snapshot.ambienceEnabled,
                     onCheckedChange = preferences::setAmbienceEnabled,
                 )
                 AudioLayerSwitchRow(
-                    title = "AI chọn hiệu ứng âm thanh local",
+                    title = "AI chọn hiệu ứng âm thanh từ thư viện",
                     checked = snapshot.soundEffectsEnabled,
                     onCheckedChange = preferences::setSoundEffectsEnabled,
                 )
                 if (musicEnabled) {
                     HorizontalDivider(Modifier.padding(vertical = 6.dp))
                     AudioIntSlider(
-                        title = "Attack nhạc AI local",
+                        title = "Attack nhạc AI",
                         value = attackMillis,
                         maximum = 2_000,
                         onValueChange = { value ->
@@ -300,7 +314,7 @@ fun AudioDirectionLayerSwitches(
                         },
                     )
                     AudioIntSlider(
-                        title = "Release nhạc AI local",
+                        title = "Release nhạc AI",
                         value = releaseMillis,
                         maximum = 5_000,
                         onValueChange = { value ->
@@ -311,29 +325,18 @@ fun AudioDirectionLayerSwitches(
                 }
                 HorizontalDivider(Modifier.padding(vertical = 6.dp))
                 AudioManagerButton(
-                    label = "CHUẨN HÓA THƯ VIỆN AI LOCAL",
+                    label = "CHUẨN HÓA TOÀN BỘ THƯ VIỆN",
                     enabled = tracks.isNotEmpty(),
                     onClick = { openNormalization(AudioAssetKind.entries.toSet()) },
                 )
-                AudioManagerButton(
-                    label = "QUẢN LÝ NHẠC LOCAL ($musicTrackCount)",
-                    onClick = { managerKind = AudioAssetKind.MUSIC },
-                )
-                AudioManagerButton(
-                    label = "QUẢN LÝ MÔI TRƯỜNG LOCAL (${tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.AMBIENCE }})",
-                    onClick = { managerKind = AudioAssetKind.AMBIENCE },
-                )
-                AudioManagerButton(
-                    label = "QUẢN LÝ SFX LOCAL (${tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.SFX }})",
-                    onClick = { managerKind = AudioAssetKind.SFX },
-                )
+                SharedLibraryManagementButtons()
             }
 
             StoryAudioSourceMode.AI_FREESOUND -> {
-                Text("MODE 3 · AI TỰ TÌM TRÊN FREESOUND")
-                Text("Mode 3 dùng cùng quy tắc đạo diễn MUSIC / AMBIENCE / SFX của Mode 2, nhưng KHÔNG gửi catalog local. AI chỉ mô tả nhu cầu theo timeline; ứng dụng tự tìm và tải asset Freesound phù hợp.")
+                Text("MODE 3 · AI TỰ ĐỘNG — THƯ VIỆN + FREESOUND")
+                Text("AI mô tả nhu cầu theo timeline. Resolver đánh giá toàn bộ thư viện chung trước; chỉ khi chưa có asset đủ phù hợp mới tìm và tải thêm từ Freesound.")
                 AudioLayerSwitchRow(
-                    title = "Tự tìm nhạc nền trên Freesound",
+                    title = "Tự chọn / tìm nhạc nền",
                     checked = musicEnabled,
                     onCheckedChange = { enabled ->
                         musicEnabled = enabled
@@ -341,12 +344,12 @@ fun AudioDirectionLayerSwitches(
                     },
                 )
                 AudioLayerSwitchRow(
-                    title = "Tự tìm môi trường trên Freesound",
+                    title = "Tự chọn / tìm môi trường",
                     checked = snapshot.ambienceEnabled,
                     onCheckedChange = preferences::setAmbienceEnabled,
                 )
                 AudioLayerSwitchRow(
-                    title = "Tự tìm SFX trên Freesound",
+                    title = "Tự chọn / tìm SFX",
                     checked = snapshot.soundEffectsEnabled,
                     onCheckedChange = preferences::setSoundEffectsEnabled,
                 )
@@ -372,37 +375,22 @@ fun AudioDirectionLayerSwitches(
                     )
                 }
                 HorizontalDivider(Modifier.padding(vertical = 6.dp))
-                val mode3Tracks = tracks.filter { FreesoundImporter.soundIdFromManagedUri(it.uri) != null }
                 AudioManagerButton(
-                    label = "CHUẨN HÓA / BẢO TRÌ FILE ÂM THANH MODE 3",
-                    enabled = mode3Tracks.isNotEmpty(),
+                    label = "CHUẨN HÓA TOÀN BỘ THƯ VIỆN",
+                    enabled = tracks.isNotEmpty(),
                     onClick = { openNormalization(AudioAssetKind.entries.toSet()) },
                 )
-                AudioManagerButton(
-                    label = "QUẢN LÝ NHẠC ĐÃ TẢI (${mode3Tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }})",
-                    onClick = { managerKind = AudioAssetKind.MUSIC },
-                )
-                AudioManagerButton(
-                    label = "QUẢN LÝ MÔI TRƯỜNG ĐÃ TẢI (${mode3Tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.AMBIENCE }})",
-                    onClick = { managerKind = AudioAssetKind.AMBIENCE },
-                )
-                AudioManagerButton(
-                    label = "QUẢN LÝ SFX ĐÃ TẢI (${mode3Tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.SFX }})",
-                    onClick = { managerKind = AudioAssetKind.SFX },
-                )
-                Text("Ba mục trên chỉ hiển thị file Freesound đã tải về. Asset local của Mode 1/2 không xuất hiện và không bị sửa/xóa khi lưu Mode 3.")
-                Text("Mode 3 chỉ phát các file Freesound đã resolve cho kế hoạch hiện tại. Nếu một nhu cầu không resolve được, lớp tương ứng giữ im lặng; không dùng kho local làm fallback.")
+                SharedLibraryManagementButtons()
+                Text("Thư viện ở Mode 3 giống Mode 1/2: file tự thêm và file Freesound đã tải đều hiển thị, chỉnh sửa, chuẩn hóa và được xét như nhau. Nguồn file chỉ phục vụ quản lý/chẩn đoán, không quyết định độ ưu tiên.")
             }
         }
     }
 
     if (showNormalizationDialog) {
-        val normalizationTracks = if (sourceMode == StoryAudioSourceMode.AI_FREESOUND) {
-            tracks.filter { FreesoundImporter.soundIdFromManagedUri(it.uri) != null }
-        } else tracks
-        val musicCount = normalizationTracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }
-        val ambienceCount = normalizationTracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.AMBIENCE }
-        val sfxCount = normalizationTracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.SFX }
+        val normalizationTracks = tracks
+        val normalizationMusicCount = normalizationTracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }
+        val normalizationAmbienceCount = normalizationTracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.AMBIENCE }
+        val normalizationSfxCount = normalizationTracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.SFX }
         AlertDialog(
             onDismissRequest = {
                 if (!normalizationSaving) showNormalizationDialog = false
@@ -410,11 +398,11 @@ fun AudioDirectionLayerSwitches(
             title = { Text(if (normalizationKinds == setOf(AudioAssetKind.MUSIC)) "CHUẨN HÓA KHO NHẠC" else "CHUẨN HÓA KHO ÂM THANH") },
             text = {
                 Column {
-                    Text("Chỉ các loại âm thanh thuộc mode hiện tại mới xuất hiện trong hộp thoại này.")
+                    Text("Thư viện chuẩn hóa là thư viện chung, không thay đổi theo Mode 1/2/3 hay nguồn file.")
                     Text("CHUẨN HÓA dùng lại phép đo loudness/peak hợp lệ và chỉ tính gain mới. ĐO LẠI TỪ ĐẦU bỏ kết quả chuẩn hóa cũ, giải mã và đo lại tệp được chọn.")
                     if (AudioAssetKind.MUSIC in normalizationKinds) {
                         AudioFloatSlider(
-                            title = "Nhạc nền ($musicCount tệp)",
+                            title = "Nhạc nền ($normalizationMusicCount tệp)",
                             value = normalizationMusicDraft,
                             range = PcmLoudnessEstimator.MIN_TARGET_LUFS..PcmLoudnessEstimator.MAX_MUSIC_TARGET_LUFS,
                             shown = { "%.0f LUFS".format(it) },
@@ -423,7 +411,7 @@ fun AudioDirectionLayerSwitches(
                     }
                     if (AudioAssetKind.AMBIENCE in normalizationKinds) {
                         AudioFloatSlider(
-                            title = "Âm thanh môi trường ($ambienceCount tệp)",
+                            title = "Âm thanh môi trường ($normalizationAmbienceCount tệp)",
                             value = normalizationAmbienceDraft,
                             range = PcmLoudnessEstimator.MIN_TARGET_LUFS..PcmLoudnessEstimator.MAX_TARGET_LUFS,
                             shown = { "%.0f LUFS".format(it) },
@@ -432,7 +420,7 @@ fun AudioDirectionLayerSwitches(
                     }
                     if (AudioAssetKind.SFX in normalizationKinds) {
                         AudioFloatSlider(
-                            title = "Hiệu ứng âm thanh ($sfxCount tệp)",
+                            title = "Hiệu ứng âm thanh ($normalizationSfxCount tệp)",
                             value = normalizationSfxDraft,
                             range = PcmLoudnessEstimator.MIN_TARGET_LUFS..PcmLoudnessEstimator.MAX_TARGET_LUFS,
                             shown = { "%.0f LUFS".format(it) },
@@ -540,15 +528,11 @@ fun AudioDirectionLayerSwitches(
             AudioAssetKind.AMBIENCE -> snapshot.ambienceNormalizationTargetLufs
             AudioAssetKind.SFX -> snapshot.soundEffectsNormalizationTargetLufs
         }
-        val managedFreesoundOnly = sourceMode == StoryAudioSourceMode.AI_FREESOUND
         UnifiedAudioAssetManagerDialog(
             kind = kind,
-            tracks = tracks.filter { track ->
-                AudioAssetClassifier.classify(track) == kind &&
-                    (!managedFreesoundOnly || FreesoundImporter.soundIdFromManagedUri(track.uri) != null)
-            },
+            tracks = tracks.filter { track -> AudioAssetClassifier.classify(track) == kind },
             normalizationTargetLufs = target,
-            managedFreesoundOnly = managedFreesoundOnly,
+            managedFreesoundOnly = false,
             onDismiss = { managerKind = null },
         )
     }

@@ -61,6 +61,7 @@ jobs:
           ./gradlew --no-daemon --stacktrace \
             :app:testDebugUnitTest \
             --tests vn.nghetruyen.app.sourceplatform.VBookLegacyLargeGenreTest \
+            --tests vn.nghetruyen.app.sourceplatform.ChromiumVBookPreludeDomCompatibilityTest \
             --tests vn.nghetruyen.app.sources.DefaultLuaSourceAliasTest \
             --tests vn.nghetruyen.app.sources.DiagnosticStorySourceGenreContractTest \
             --tests vn.nghetruyen.app.sources.ExploreDiagnosticScreenContextTest

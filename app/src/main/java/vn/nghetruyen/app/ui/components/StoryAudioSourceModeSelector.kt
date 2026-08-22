@@ -28,7 +28,7 @@ import vn.nghetruyen.app.audio.AudioDirectionPreferences
 import vn.nghetruyen.app.audio.StoryAudioSourceMode
 import vn.nghetruyen.app.playback.ReaderPlaybackService
 
-/** One selector owns the mutually-exclusive story-audio source mode; three switches cannot conflict. */
+/** One selector owns the processing mode; the physical MUSIC/AMBIENCE/SFX library stays shared. */
 @Composable
 fun StoryAudioSourceModeSelector(
     modifier: Modifier = Modifier,
@@ -60,11 +60,8 @@ fun StoryAudioSourceModeSelector(
                     settingsRepository.setBackgroundMusicEnabled(true)
                 }
                 if (mode == StoryAudioSourceMode.AI_FREESOUND) {
-                    // Mode 3 previously allowed all three story-audio layers to remain OFF. In that
-                    // state the unified AI request legitimately contained voice-cast only, which looked
-                    // exactly like a broken Freesound runtime: voices were assigned but no search ran.
-                    // Activate the intended Mode-3 defaults only when the user has no active audio layer;
-                    // an explicit partial selection (for example SFX-only) is preserved.
+                    // Activate intended Mode-3 defaults only when no audio layer is currently active;
+                    // an explicit partial selection such as SFX-only remains untouched.
                     val appSettings = settingsRepository.snapshot()
                     val audioSettings = audioPreferences.snapshot()
                     if (!appSettings.autoSceneMusicEnabled &&
@@ -78,7 +75,7 @@ fun StoryAudioSourceModeSelector(
                 }
                 // Standard runtime transforms are source-mode specific. Remove only AUDIO transforms;
                 // voice-cast transforms remain untouched. The Mode-3 requirement marker is retained so
-                // switching back can reuse its query/cache without another AI call when still current.
+                // switching back can reuse its semantic requirements/cache when still current.
                 val dao = application.container.database.chapterTransformDao()
                 dao.listAll()
                     .filter {
@@ -122,9 +119,13 @@ fun StoryAudioSourceModeSelector(
             }
         }
         Text(current.description, style = MaterialTheme.typography.bodySmall)
+        Text(
+            "Thư viện MUSIC / AMBIENCE / SFX là một kho chung cho cả ba chế độ. File tự thêm và file tải từ Freesound luôn cùng xuất hiện; đổi chế độ chỉ đổi cách chọn/phát, không đổi danh sách thư viện.",
+            style = MaterialTheme.typography.bodySmall,
+        )
         if (current == StoryAudioSourceMode.AI_FREESOUND) {
             Text(
-                "Freesound chỉ dùng để tìm và tải trước. Khi đọc truyện, Mode 3 chỉ phát các file Freesound đã resolve cho kế hoạch AI hiện tại; không dùng playlist tuần tự/ngẫu nhiên của Mode 1. Nếu trước khi vào Mode 3 cả ba lớp âm thanh đều đang tắt, ứng dụng sẽ tự bật MUSIC + AMBIENCE + SFX để tránh trạng thái chỉ phân vai giọng nhưng không hề yêu cầu âm thanh.",
+                "Mode 3 đánh giá kho chung trước. Asset đã có đủ phù hợp sẽ được dùng ngay; chỉ nhu cầu chưa đủ phù hợp mới được tìm trên Freesound. Khi đọc truyện, chỉ asset đã được resolve cho kế hoạch AI hiện tại được phát; không dùng playlist tuần tự/ngẫu nhiên của Mode 1.",
                 style = MaterialTheme.typography.bodySmall,
             )
         }

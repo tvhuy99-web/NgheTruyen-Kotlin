@@ -53,6 +53,9 @@ jobs:
         shell: bash
         run: |
           ./gradlew --no-daemon --stacktrace \
+            :source-network:test \
+            --tests vn.nghetruyen.source.network.PartitionedSourceCookieJarTest
+          ./gradlew --no-daemon --stacktrace \
             :source-vbook:test \
             --tests vn.nghetruyen.source.vbook.PrimaryFallbackVBookActionRuntimeTest
           ./gradlew --no-daemon --stacktrace \

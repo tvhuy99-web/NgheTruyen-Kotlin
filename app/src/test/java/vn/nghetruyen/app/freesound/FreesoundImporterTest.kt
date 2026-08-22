@@ -182,8 +182,8 @@ class FreesoundImporterTest {
     }
 
     @Test
-    fun previewDownloadBudgetIsOneMinutePerSelectedSound() {
-        assertEquals(60_000L, FreesoundImporter.PREVIEW_IMPORT_BUDGET_MS)
+    fun previewDownloadBudgetIsThreeMinutesPerSelectedSound() {
+        assertEquals(180_000L, FreesoundImporter.PREVIEW_IMPORT_BUDGET_MS)
     }
 
     @Test

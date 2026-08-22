@@ -241,8 +241,10 @@ class FreesoundImporter(
                 .build()
 
             val boundedClient = httpClient.newBuilder()
-                .connectTimeout(minOf(15_000L, callTimeoutMs).coerceAtLeast(500L), TimeUnit.MILLISECONDS)
-                .readTimeout(callTimeoutMs.coerceAtLeast(500L), TimeUnit.MILLISECONDS)
+                // A healthy slow transfer may continue for the full 180-second call budget, but
+                // 20 seconds without any socket progress is treated as a stalled preview.
+                .connectTimeout(minOf(PREVIEW_STALL_TIMEOUT_MS, callTimeoutMs).coerceAtLeast(500L), TimeUnit.MILLISECONDS)
+                .readTimeout(minOf(PREVIEW_STALL_TIMEOUT_MS, callTimeoutMs).coerceAtLeast(500L), TimeUnit.MILLISECONDS)
                 .callTimeout(callTimeoutMs.coerceAtLeast(500L), TimeUnit.MILLISECONDS)
                 .build()
             boundedClient.newCall(request).execute().use { response ->
@@ -409,8 +411,9 @@ class FreesoundImporter(
         private const val UNKNOWN_LENGTH_REQUIRED_BYTES = 12L * 1024L * 1024L
         private const val NORMALIZATION_POLL_MS = 120L
         private const val DOWNLOAD_BUFFER_BYTES = 64 * 1024
-        internal const val PREVIEW_IMPORT_BUDGET_MS = 60_000L
-        private const val PER_PREVIEW_MAX_CALL_MS = 60_000L
+        internal const val PREVIEW_IMPORT_BUDGET_MS = 180_000L
+        private const val PER_PREVIEW_MAX_CALL_MS = 180_000L
+        private const val PREVIEW_STALL_TIMEOUT_MS = 20_000L
         private const val MIN_PREVIEW_ATTEMPT_MS = 800L
         private const val NORMALIZATION_TIMEOUT_MS = 10L * 60L * 1_000L
         private const val STALE_PART_AGE_MS = 15L * 60L * 1_000L
@@ -421,7 +424,7 @@ class FreesoundImporter(
         )
 
         internal fun previewCandidatesForImport(sound: FreesoundSound): List<String> =
-            listOfNotNull(sound.previewHqMp3, sound.previewHqOgg)
+            listOfNotNull(sound.previewHqOgg, sound.previewHqMp3)
                 .map(String::trim)
                 .filter { it.startsWith("https://", ignoreCase = true) }
                 .distinct()
@@ -439,8 +442,11 @@ class FreesoundImporter(
         internal fun isRetryableImportFailure(error: Throwable?): Boolean =
             generateSequence(error) { it.cause }.any { candidate ->
                 val message = candidate.message.orEmpty()
-                candidate is InterruptedIOException ||
+                (candidate is FreesoundImportException && candidate.retryable) ||
+                    (candidate is FreesoundNormalizationException && candidate.retryable) ||
+                    candidate is InterruptedIOException ||
                     message.contains("timeout", ignoreCase = true) ||
+                    message.contains("quá thời gian", ignoreCase = true) ||
                     Regex("""HTTP\s+(?:429|5\d\d)""", RegexOption.IGNORE_CASE).containsMatchIn(message)
             }
 
@@ -583,9 +589,9 @@ class FreesoundImporter(
         }
 
         private fun defaultHttpClient(): OkHttpClient = OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(60, TimeUnit.SECONDS)
-            .callTimeout(60, TimeUnit.SECONDS)
+            .connectTimeout(20, TimeUnit.SECONDS)
+            .readTimeout(20, TimeUnit.SECONDS)
+            .callTimeout(180, TimeUnit.SECONDS)
             .build()
     }
 }

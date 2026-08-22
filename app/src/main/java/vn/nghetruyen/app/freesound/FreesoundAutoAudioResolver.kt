@@ -692,7 +692,7 @@ class FreesoundAutoAudioResolver(
             liveDiagnostic(
                 traceId,
                 "FREESOUND_RETRY_EXHAUSTED",
-                DiagnosticSeverity.ERROR,
+                if (resolutions.any { !it.trackId.isNullOrBlank() }) DiagnosticSeverity.WARN else DiagnosticSeverity.ERROR,
                 baseAttributes + mapOf(
                     "resolved" to resolutions.count { !it.trackId.isNullOrBlank() }.toString(),
                     "unresolved" to resolutions.count { it.trackId.isNullOrBlank() }.toString(),

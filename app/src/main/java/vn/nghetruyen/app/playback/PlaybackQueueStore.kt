@@ -209,6 +209,7 @@ object PlaybackQueueStore {
     ) {
         if (
             stage == NarrationAutomationStage.CURRENT_PLANNING &&
+            progress <= 0.2f &&
             message?.trim() == MANUAL_NARRATION_REBUILD_MESSAGE
         ) {
             clearCurrentNarrationRuntimeForManualRebuild()

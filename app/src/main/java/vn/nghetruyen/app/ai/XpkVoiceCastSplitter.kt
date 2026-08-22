@@ -11,7 +11,7 @@ import java.nio.charset.StandardCharsets
  */
 object XpkVoiceCastSplitter {
     const val NARRATOR_ID: String = "voice_narrator"
-    const val ENGINE_VERSION: Int = 8
+    const val ENGINE_VERSION: Int = 10
 
     data class Unit(
         val id: String,
@@ -56,6 +56,7 @@ object XpkVoiceCastSplitter {
         val colonEndExclusive: Int,
         val prefix: String,
     )
+    private data class DashChunk(val text: String, val dialogue: Boolean)
 
     private val quotes = listOf(
         QuotePair("“", "”"),
@@ -72,6 +73,7 @@ object XpkVoiceCastSplitter {
         "lên tiếng", "cất tiếng", "thốt lên", "gọi", "kêu", "hô", "mắng", "rít",
         "gầm", "ra lệnh", "tiếp lời", "nói tiếp", "nhắc", "truyền âm",
         "cất giọng", "mở miệng", "buông lời", "thốt lời", "một tiếng",
+        "trêu", "chọc", "đùa", "cười nói", "nói vọng",
     )
     private val thoughtCueWords = listOf(
         "nghĩ", "thầm nghĩ", "nghĩ thầm", "tự nhủ", "nhủ thầm", "trong lòng",
@@ -135,6 +137,23 @@ object XpkVoiceCastSplitter {
         if (value.isEmpty()) return initialCounter
         var unitCounter = initialCounter
         if (metadata.forceDialogue) {
+            if (quoteContent(value).isEmpty()) return unitCounter
+            if (looksLikeDashNarration(value, metadata)) {
+                return appendSized(
+                    out, value, paragraphIndex, unitCounter, 1200,
+                    narrationMetadata(metadata, "narration").copy(
+                        parsingNote = "Dòng có gạch đầu dòng nhưng mang cấu trúc tường thuật ngôi ba; giữ bằng giọng Người kể chuyện.",
+                    ),
+                )
+            }
+            if (looksLikeDashQuotedThought(value, metadata)) {
+                return appendSized(
+                    out, value, paragraphIndex, unitCounter, 1200,
+                    narrationMetadata(metadata, "inner_thought").copy(
+                        parsingNote = "Dòng gạch đầu dòng được bọc bằng cặp ngoặc kép mở kiểu truyện web; giữ là nội tâm thay vì gán giọng nhân vật.",
+                    ),
+                )
+            }
             val narrationReason = quoteNarrationReason(value, metadata.contextBefore, metadata.contextAfter)
             if (narrationReason != null) {
                 return appendSized(
@@ -183,7 +202,7 @@ object XpkVoiceCastSplitter {
                 )
             }
 
-            val closeStart = value.indexOf(bestPair.close, bestStart + bestPair.open.length)
+            val closeStart = findRecoveredQuoteCloseStart(value, bestPair, bestStart)
             if (closeStart < 0) {
                 val fallbackEndExclusive = findUnclosedQuoteEndExclusive(value, bestStart, bestPair.open)
                 val quoteText = value.substring(bestStart, fallbackEndExclusive)
@@ -244,47 +263,110 @@ object XpkVoiceCastSplitter {
     }
 
     private fun splitDashDialogue(out: MutableList<Unit>, paragraph: String, paragraphIndex: Int): Boolean {
-        if (!Regex("^\\s*[—–-]\\s+").containsMatchIn(paragraph)) return false
-        val delimiters = listOf(" — ", " – ", " - ")
-        val parts = mutableListOf<String>()
-        var start = 0
-        while (true) {
-            var bestStart = -1
-            var bestEnd = -1
-            for (delimiter in delimiters) {
-                val found = paragraph.indexOf(delimiter, start)
-                if (found >= 0 && (bestStart < 0 || found < bestStart)) {
-                    bestStart = found
-                    bestEnd = found + delimiter.length
-                }
-            }
-            if (bestStart < 0) {
-                parts += paragraph.substring(start)
-                break
-            }
-            parts += paragraph.substring(start, bestStart)
-            start = bestEnd
+        val leadingDash = Regex("^\\s*[—–-]\\s+").find(paragraph) ?: return false
+        val chunks = mutableListOf<DashChunk>()
+        var currentDialogue = true
+        var chunkStart = 0
+        var index = leadingDash.range.last + 1
+
+        fun appendChunk(endExclusive: Int) {
+            val text = paragraph.substring(chunkStart, endExclusive).trim()
+            if (text.isNotEmpty()) chunks += DashChunk(text, currentDialogue)
         }
+
+        while (index < paragraph.length) {
+            when {
+                isCompactDashDialogueRestart(paragraph, index) -> {
+                    appendChunk(index)
+                    currentDialogue = true
+                    chunkStart = index
+                    index += 1
+                }
+                isSpacedDashDelimiter(paragraph, index) -> {
+                    appendChunk(index)
+                    currentDialogue = !currentDialogue
+                    index += 1
+                    while (index < paragraph.length && paragraph[index].isWhitespace()) index += 1
+                    chunkStart = index
+                }
+                else -> index += 1
+            }
+        }
+        appendChunk(paragraph.length)
+
         var counter = 0
-        parts.forEachIndexed { index, part ->
-            counter = if (index % 2 == 0) {
+        chunks.forEachIndexed { chunkIndex, chunk ->
+            counter = if (chunk.dialogue) {
                 splitQuoteAware(
-                    out, part, paragraphIndex, counter,
+                    out, chunk.text, paragraphIndex, counter,
                     Metadata(
                         forceDialogue = true,
-                        contextBefore = parts.getOrNull(index - 1),
-                        contextAfter = parts.getOrNull(index + 1),
+                        contextBefore = chunks.getOrNull(chunkIndex - 1)?.text,
+                        contextAfter = chunks.getOrNull(chunkIndex + 1)?.text,
                         dashDialogue = true,
                     ),
                 )
             } else {
                 splitQuoteAware(
-                    out, part, paragraphIndex, counter,
+                    out, chunk.text, paragraphIndex, counter,
                     Metadata(forceNarration = true, unitKind = "narration"),
                 )
             }
         }
         return true
+    }
+
+    private fun isCompactDashDialogueRestart(value: String, index: Int): Boolean {
+        if (index <= 0 || index >= value.length || value[index] != '-') return false
+        if (value[index - 1].isWhitespace()) return false
+        var cursor = index - 1
+        while (cursor >= 0 && value[cursor] in listOf('”', '\"', '’', '」', '』', ')', ']', '}')) cursor -= 1
+        val previous = value.getOrNull(cursor) ?: return false
+        return previous in listOf('.', '!', '?', '…', '。', '！', '？')
+    }
+
+    private fun isSpacedDashDelimiter(value: String, index: Int): Boolean {
+        if (index <= 0 || index + 1 >= value.length) return false
+        if (value[index] !in listOf('—', '–', '-')) return false
+        return value[index - 1].isWhitespace() && value[index + 1].isWhitespace()
+    }
+
+    private fun looksLikeDashNarration(value: String, metadata: Metadata): Boolean {
+        if (!metadata.dashDialogue) return false
+        var trimmed = value.trim()
+        if (trimmed.firstOrNull() in listOf('-', '—', '–')) trimmed = trimmed.drop(1).trim()
+        if (trimmed.isEmpty() || !trimmed.endsWith('.')) return false
+        if (trimmed.any { it in listOf('?', '!', '？', '！') }) return false
+
+        val lower = normalizeSpaces(trimmed.lowercase())
+        val subjectPrefixes = listOf(
+            "và nàng ", "và hắn ", "và cô ấy ", "và anh ấy ", "và anh ta ",
+            "và ông ấy ", "và bà ấy ", "và họ ", "rồi nàng ", "rồi hắn ",
+            "rồi cô ấy ", "rồi anh ấy ", "rồi anh ta ", "sau đó nàng ", "sau đó hắn ",
+            "sau đó cô ấy ", "sau đó anh ấy ", "sau đó anh ta ",
+        )
+        val prefix = subjectPrefixes.firstOrNull(lower::startsWith) ?: return false
+        val remainder = lower.removePrefix(prefix)
+        val narrativeVerbs = listOf(
+            "bỏ", "bước", "đi", "chạy", "rời", "quay", "nhìn", "đứng", "ngồi",
+            "cúi", "ngẩng", "thu dọn", "ôm", "cầm", "đặt", "kéo", "đẩy",
+        )
+        return narrativeVerbs.any { remainder == it || remainder.startsWith("$it ") }
+    }
+
+    private fun looksLikeDashQuotedThought(value: String, metadata: Metadata): Boolean {
+        if (!metadata.dashDialogue) return false
+        var trimmed = value.trim()
+        if (trimmed.firstOrNull() in listOf('-', '—', '–')) trimmed = trimmed.drop(1).trim()
+        if (trimmed.length < 2) return false
+        val malformedCurlyThought = trimmed.startsWith("“") && trimmed.endsWith("“")
+        if (malformedCurlyThought) return true
+        val thoughtContext = containsThoughtCue(metadata.contextBefore.orEmpty()) ||
+            containsThoughtCue(metadata.contextAfter.orEmpty())
+        if (!thoughtContext) return false
+        return (trimmed.startsWith("“") && trimmed.endsWith("”")) ||
+            (trimmed.startsWith("\"") && trimmed.endsWith("\"")) ||
+            (trimmed.startsWith("‘") && trimmed.endsWith("’"))
     }
 
     private fun splitColonDialogue(out: MutableList<Unit>, paragraph: String, paragraphIndex: Int): Boolean {
@@ -470,7 +552,10 @@ object XpkVoiceCastSplitter {
             } else {
                 val lastOpen = value.lastIndexOf(pair.open, position - 1)
                 val lastClose = value.lastIndexOf(pair.close, position - 1)
-                if (lastOpen >= 0 && (lastClose < 0 || lastOpen > lastClose)) return true
+                if (lastOpen >= 0 && (lastClose < 0 || lastOpen > lastClose)) {
+                    val repeatedOpen = value.indexOf(pair.open, lastOpen + pair.open.length)
+                    if (repeatedOpen < 0 || repeatedOpen >= position) return true
+                }
             }
         }
         return false
@@ -502,6 +587,9 @@ object XpkVoiceCastSplitter {
         if (containsQuotedNarrationCue(beforeText.orEmpty(), afterText.orEmpty())) {
             return "Đoạn trong ngoặc có dấu hiệu là âm thanh, thuật ngữ hoặc lời được trích dẫn nên dùng giọng Người kể chuyện."
         }
+        if (looksLikeInlineQuotedTerm(value, beforeText.orEmpty(), afterText.orEmpty())) {
+            return "Cụm ngắn trong ngoặc nằm giữa một câu tường thuật và không có tín hiệu dẫn thoại; giữ bằng giọng Người kể chuyện."
+        }
         return null
     }
 
@@ -514,9 +602,30 @@ object XpkVoiceCastSplitter {
             val supersededBySpeech = speech != null && speech.first > narration.second
             if (closeEnough && !supersededBySpeech) return true
         }
-        // XPK currently keeps QUOTED_NARRATION_AFTER_CUES empty, so afterText is reserved for parity.
         @Suppress("UNUSED_VARIABLE") val reservedAfterText = afterText
         return false
+    }
+
+    private fun looksLikeInlineQuotedTerm(value: String, beforeText: String, afterText: String): Boolean {
+        val before = beforeText.trimEnd()
+        val after = afterText.trimStart()
+        if (before.isEmpty() || after.isEmpty()) return false
+
+        val beforeLower = normalizeSpaces(before.lowercase())
+        if (containsCueWord(beforeLower)) return false
+        if (value.any { it in listOf('.', '!', '?', '。', '！', '？') }) return false
+
+        val content = quoteContent(value)
+        if (content.isEmpty() || utf8Bytes(content) > 120) return false
+        val wordCount = content.split(Regex("\\s+")).count { it.isNotEmpty() }
+        if (wordCount !in 1..10) return false
+
+        val beforeLast = before.lastOrNull() ?: return false
+        val beforeContinues = beforeLast.isLetterOrDigit() || beforeLast in listOf(')', ']', '}')
+        if (!beforeContinues) return false
+
+        val afterFirst = after.firstOrNull() ?: return false
+        return afterFirst in listOf(',', ';', ':', '，', '；', '：') || afterFirst.isLowerCase()
     }
 
     private fun quoteContent(value: String): String {
@@ -638,6 +747,18 @@ object XpkVoiceCastSplitter {
         }
         val sentenceEnd = findSentenceBoundaryExclusive(value, contentStart, hardEndExclusive)
         return sentenceEnd ?: hardEndExclusive
+    }
+
+    private fun findRecoveredQuoteCloseStart(value: String, pair: QuotePair, openStart: Int): Int {
+        val contentStart = openStart + pair.open.length
+        val properClose = value.indexOf(pair.close, contentStart)
+        if (pair.open == pair.close) return properClose
+
+        val repeatedOpen = value.indexOf(pair.open, contentStart)
+        return when {
+            repeatedOpen >= 0 && (properClose < 0 || repeatedOpen < properClose) -> repeatedOpen
+            else -> properClose
+        }
     }
 
     private fun findSentenceBoundaryExclusive(value: String, from: Int, toExclusive: Int): Int? {

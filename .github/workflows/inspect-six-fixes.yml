@@ -29,7 +29,15 @@ jobs:
           cache: gradle
 
       - name: Apply all six fixes
-        run: python3 scripts/apply_six_log_fixes.py
+        run: |
+          python3 scripts/apply_six_log_fixes.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('app/src/main/java/vn/nghetruyen/app/sourceplatform/SourceDiagnosticRuntime.kt')
+          text = p.read_text(encoding='utf-8')
+          text = text.replace('event.name.uppercase(Locale.ROOT)', 'event.name.uppercase()')
+          p.write_text(text, encoding='utf-8')
+          PY
 
       - name: Verify patched TruyenFull source
         run: |

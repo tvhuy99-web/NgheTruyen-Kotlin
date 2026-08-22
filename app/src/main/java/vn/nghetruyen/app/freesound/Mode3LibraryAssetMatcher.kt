@@ -228,7 +228,7 @@ internal object Mode3LibraryAssetMatcher {
     }
 
     private fun firstMarker(lower: String, vararg markers: String): Int = markers
-        .map(lower::indexOf)
+        .map { marker -> lower.indexOf(marker) }
         .filter { it >= 0 }
         .minOrNull()
         ?: -1

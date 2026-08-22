@@ -2047,6 +2047,17 @@ class ReaderPlaybackService : Service() {
                         message = "Đã phân vai $assignmentCount mục. Đang áp dụng giọng${if (shouldPlanAutoStoryAudio()) " và âm thanh truyện" else ""}."
                     )
                     val configured = applyConfiguredVoice(useStoryProfile = true)
+                    val audioDirectionSettings = AudioDirectionPreferences.currentSnapshot()
+                    val audioPlanAvailable = if (
+                        content != null &&
+                        (audioDirectionSettings.ambienceEnabled || audioDirectionSettings.soundEffectsEnabled)
+                    ) {
+                        runCatching {
+                            container.narrationPlanCoordinator.loadAudioDirectionPlan(content) != null
+                        }.getOrDefault(false)
+                    } else {
+                        false
+                    }
                     withContext(Dispatchers.Main) {
                         if (PlaybackQueueStore.state.value.chapterId != snapshot.chapterId) return@withContext
                         narrationPreparedChapterId = snapshot.chapterId
@@ -2087,7 +2098,7 @@ class ReaderPlaybackService : Service() {
                                     "retryRequired" to (planResult?.freesoundRetryRequired ?: false).toString(),
                                     "musicApplied" to musicApplied.toString(),
                                     "audioPlanCreatedThisCall" to (planResult?.audioPlanCreated ?: false).toString(),
-                                    "audioPlanAvailable" to ((planResult?.audioPlanCreated == true) || (planResult?.freesoundPlanCreated == true)).toString(),
+                                    "audioPlanAvailable" to audioPlanAvailable.toString(),
                                     "issueCount" to issueMessages.size.toString(),
                                     "warning" to firstIssue.orEmpty().take(180),
                                 ),

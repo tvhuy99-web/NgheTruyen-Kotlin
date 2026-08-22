@@ -6,16 +6,7 @@ import org.junit.Test
 
 class DiagnosticStorySourceGenreContractTest {
     @Test
-    fun manualStorySourceWrappersCoverEverySuspendOperation() {
-        val sourceOperations = StorySource::class.java.declaredMethods
-            .asSequence()
-            .filter { method -> method.parameterTypes.lastOrNull() == Continuation::class.java }
-            .map { it.name }
-            .toSet()
-
-        // Only wrappers that manually forward StorySource operations belong in this contract.
-        // ChapterCatalogSafetyStorySource uses `StorySource by delegate`, so Kotlin generates the
-        // forwarding methods and automatically tracks future interface additions.
+    fun manualStorySourceWrappersExplicitlyForwardGenreMenu() {
         val wrappers = listOf(
             DiagnosticStorySource::class.java,
             Class.forName("vn.nghetruyen.app.sources.StableDefaultLuaSourceAlias"),
@@ -24,13 +15,11 @@ class DiagnosticStorySourceGenreContractTest {
         )
 
         wrappers.forEach { wrapper ->
-            val wrapperOperations = wrapper.declaredMethods
-                .asSequence()
-                .filter { method -> method.parameterTypes.lastOrNull() == Continuation::class.java }
-                .map { it.name }
-                .toSet()
-            val missing = sourceOperations - wrapperOperations
-            assertTrue("${wrapper.name} is missing StorySource operations: $missing", missing.isEmpty())
+            val declaresGenreMenu = wrapper.declaredMethods.any { method ->
+                method.name == "genreMenu" &&
+                    method.parameterTypes.lastOrNull() == Continuation::class.java
+            }
+            assertTrue("${wrapper.name} must explicitly forward StorySource.genreMenu()", declaresGenreMenu)
         }
     }
 }

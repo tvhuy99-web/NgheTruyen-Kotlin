@@ -91,9 +91,9 @@ object XpkUnifiedNarrationPrompt {
                 add("MUSIC, AMBIENCE và SFX phải phối hợp nhưng không khóa lẫn nhau: MUSIC im lặng không buộc các lớp âm thanh vật lý im, và một cue âm thanh vật lý không tự động tạo ranh giới MUSIC.")
             }
             if (includeFreesoundAudioRequirements) {
-                add("Mode 3 dùng cùng logic đạo diễn MUSIC/AMBIENCE/SFX của Mode 2; khác biệt duy nhất là không gửi catalog local (asset trên máy) và không yêu cầu AI chọn track_id. AI chỉ mô tả nhu cầu tìm kiếm, ứng dụng tự tìm/tải/chuẩn hóa sau phản hồi.")
-                add("FREESOUND_REQUIREMENTS chỉ mô tả âm thanh cần tìm; không chọn ID, tên file hoặc URL. Không tạo một nhu cầu mới cho mỗi lần lặp cùng loại âm thanh; cùng âm thanh phải dùng cùng query để tái sử dụng asset.")
-                add("Khi có nhiều cách mô tả đều hợp, ưu tiên query mô tả đúng nguồn âm/sắc thái cụ thể nhất và dễ tìm nhất; không chọn từ quá chung chỉ vì phổ biến. Nếu không có lựa chọn đủ sát nội dung, im lặng tốt hơn một âm sai cảnh.")
+                add("Mode 3 dùng cùng logic đạo diễn MUSIC/AMBIENCE/SFX của Mode 2; khác biệt duy nhất là không gửi catalog local và không yêu cầu AI chọn track_id. Sau khi AI quyết định hoàn toàn cách dùng âm thanh, mỗi nhu cầu trả hai mô tả độc lập: query tiếng Anh ngắn cho Freesound và local_hint tiếng Việt ngắn để ứng dụng đối chiếu metadata trong máy.")
+                add("FREESOUND_REQUIREMENTS không chọn ID, tên file hoặc URL. query chỉ phục vụ pipeline tìm mạng hiện tại; local_hint chỉ phục vụ chọn file trong thư viện. Không được dùng local_hint để thay đổi query, ranh giới timeline, số lớp, repeat_count, cadence, looping hoặc bất kỳ quyết định đạo diễn nào.")
+                add("local_hint phải do chính AI viết từ hiểu biết về cảnh, không phải bản dịch máy móc của query. Viết ngắn nhưng PHẢI có tín hiệu phân biệt tình tiết/nguồn âm cụ thể của cảnh và các near-miss dễ chọn nhầm; không chỉ liệt kê mood chung như buồn, bí ẩn, căng thẳng.")
             }
             if (includeSceneMusic || includeAmbience || includeSoundEffects) {
                 add("Mã số catalog của mọi module local đang bật chỉ là định danh tạm. Số nhỏ/lớn, vị trí đầu/cuối và các số liền nhau không biểu thị ưu tiên, độ phù hợp, cường độ hay sự tương đồng.")
@@ -260,7 +260,9 @@ object XpkUnifiedNarrationPrompt {
             9. Nếu 2 từ đã mô tả đúng nguồn âm thì KHÔNG thêm từ thứ ba. Khi phân vân giữa từ mô tả cảm xúc/cốt truyện và từ mô tả âm nghe được, luôn chọn từ mô tả âm nghe được.
             10. importance chỉ là REQUIRED hoặc OPTIONAL. REQUIRED chỉ dành cho âm thanh có vai trò nghe rõ ràng đối với cảnh; không lạm dụng REQUIRED.
             11. Không có quota số query. Một chương ít âm thanh có thể trả mảng rỗng; một chương dày đặc âm thanh có thể trả nhiều mục. Chất lượng và đúng ngữ cảnh là tiêu chí duy nhất.
-            12. Với MUSIC/AMBIENCE, object chỉ có kind, query, importance, start_id, end_id. Với SFX, object bắt buộc có kind, query, importance, unit_id và chỉ thêm stop_unit_id, repeat_count, cadence, loop_until_stop khi cần.
+            12. Mỗi requirement BẮT BUỘC thêm local_hint bằng tiếng Việt, tối đa 240 ký tự, đúng dạng "Dùng: ...; Tránh: ...". Phần Dùng dùng 3–6 cụm ngắn; ít nhất 2 cụm phải phân biệt đúng tình tiết/không gian/vật liệu/cách phát âm của cảnh, không chỉ là mood chung. Phần Tránh dùng 2–4 near-miss dễ bị chọn nhầm nhưng nghe/cảm xúc khác cảnh. Không kể lại cốt truyện, không tên nhân vật, không ID, không tên file. Ví dụ MUSIC: "Dùng: đối đầu căng thẳng trước giao chiến, nguy hiểm cận kề, thế lực áp đảo; Tránh: phiêu lưu vui, chiến thắng, lãng mạn". Ví dụ AMBIENCE: "Dùng: hang băng, gió lạnh luồn hang, không gian đá kín; Tránh: gió đồng trống, thành phố, phòng trong nhà". Ví dụ SFX: "Dùng: xích sắt đứt, kim loại gãy vỡ, mắt xích bật mạnh; Tránh: kính vỡ, gỗ gãy, kim loại va nhẹ".
+            13. local_hint chỉ mô tả asset phù hợp với nhu cầu AI vừa quyết định; nó KHÔNG được thay đổi query, start_id/end_id, unit_id, stop_unit_id, repeat_count, cadence, loop_until_stop, số lớp hay độ phủ. Nếu cùng query được tái sử dụng cho cùng một loại âm, local_hint phải giữ ý nghĩa tương thích để một asset có thể dùng lại.
+            14. Với MUSIC/AMBIENCE, object chỉ có kind, query, local_hint, importance, start_id, end_id. Với SFX, object bắt buộc có kind, query, local_hint, importance, unit_id và chỉ thêm stop_unit_id, repeat_count, cadence, loop_until_stop khi cần.
         """.trimIndent()
     }
 
@@ -344,7 +346,7 @@ object XpkUnifiedNarrationPrompt {
             if (includeSceneMusic) add("- \"music_scenes\": mỗi phần tử đúng start_id, end_id, track_id; track_id là mã số từ TRACK_CATALOG; mảng phải phủ kín timeline và không được rỗng khi timeline có UNIT.")
             if (includeAmbience) add("- \"ambience_scenes\": mỗi phần tử đúng start_id, end_id, ambience_id; ambience_id là mã số từ AMBIENCE_CATALOG; mảng [] hợp lệ khi không cần ambience.")
             if (includeSoundEffects) add("- \"sfx_cues\": mỗi phần tử bắt buộc có unit_id, effect_id và chỉ được thêm stop_unit_id, repeat_count, cadence, loop_until_stop; effect_id là mã số từ SFX_CATALOG; mảng [] hợp lệ khi không có sự kiện đáng phát.")
-            if (includeFreesoundAudioRequirements) add("- \"freesound_requirements\": mảng nhu cầu theo MODULE FREESOUND AUTO; [] hợp lệ khi chương không cần âm thanh ở các lớp được phép.")
+            if (includeFreesoundAudioRequirements) add("- \"freesound_requirements\": mảng nhu cầu theo MODULE FREESOUND AUTO; mỗi phần tử có query tiếng Anh ngắn và local_hint tiếng Việt dạng Dùng/Tránh; [] hợp lệ khi chương không cần âm thanh ở các lớp được phép.")
         }
         val quotedKeys = keys.joinToString(", ") { "\"$it\"" }
         val silenceRules = buildList {
@@ -361,7 +363,7 @@ object XpkUnifiedNarrationPrompt {
             - Không thêm khóa của module đang tắt và không thêm trường phụ trong từng phần tử.
             ${schema.joinToString("\n")}
             ${silenceRules.joinToString("\n")}
-            - Mọi UNIT ID phải lấy chính xác từ timeline chương hiện tại. Các module local chỉ dùng mã số asset từ catalog; Freesound chỉ trả query, không trả ID/URL.
+            - Mọi UNIT ID phải lấy chính xác từ timeline chương hiện tại. Các module local chỉ dùng mã số asset từ catalog; Mode 3 chỉ trả query + local_hint, không trả ID/URL.
         """.trimIndent()
     }
 

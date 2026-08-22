@@ -5,6 +5,10 @@ import android.content.Context
 /**
  * Mutually exclusive story-audio source modes. The default deliberately matches the pre-existing
  * AI/local-library behaviour so installing an update never opts a user into Freesound automation.
+ *
+ * The physical asset library is shared by Mode 2 and Mode 3 for MUSIC, AMBIENCE and SFX. Source
+ * provenance (user-added vs Freesound-downloaded) is still preserved for management/diagnostics,
+ * but it does not make an otherwise suitable enabled asset ineligible for AI selection.
  */
 enum class StoryAudioSourceMode(
     val label: String,
@@ -12,15 +16,15 @@ enum class StoryAudioSourceMode(
 ) {
     LOCAL_MANUAL(
         label = "1. Thư viện trong máy (thủ công)",
-        description = "Chỉ dùng âm thanh trong máy; không để AI tự chọn nhạc, môi trường hoặc SFX.",
+        description = "Chỉ dùng âm thanh trong máy theo cách thủ công; AI không tự chọn MUSIC, AMBIENCE hoặc SFX và không tải Freesound.",
     ),
     AI_LOCAL(
-        label = "2. AI chọn từ thư viện trong máy",
-        description = "Giữ nguyên cơ chế hiện tại: AI chọn MUSIC, AMBIENCE và SFX từ thư viện local đang bật.",
+        label = "2. AI chọn từ toàn bộ thư viện trong máy",
+        description = "AI chọn MUSIC, AMBIENCE và SFX từ mọi asset đang bật, gồm file tự thêm và file Freesound đã tải trước đó; không tìm hoặc tải mới từ mạng.",
     ),
     AI_FREESOUND(
-        label = "3. AI tự động tìm trên Freesound",
-        description = "Cùng lượt AI phân vai xác định âm thanh cần dùng; ứng dụng tự tìm Freesound, tải, chuẩn hóa rồi phát từ file local.",
+        label = "3. AI tự động — thư viện + Freesound",
+        description = "AI ưu tiên MUSIC, AMBIENCE và SFX phù hợp đã có trong toàn bộ thư viện; chỉ tìm, tải và chuẩn hóa Freesound khi thư viện chưa có asset đủ phù hợp.",
     ),
 }
 
@@ -52,12 +56,19 @@ object StoryAudioModeRouter {
     /** Legacy sequential/shuffle/plain-background playback belongs exclusively to Mode 1. */
     fun allowsManualPlaylist(mode: StoryAudioSourceMode): Boolean = usesManualLocal(mode)
 
-    /** Voice-cast AI is independent from the story-audio source mode. */
+    /**
+     * Only Mode 2 sends the full local catalog to the AI prompt. Mode 3 intentionally keeps its
+     * compact semantic-requirement contract and lets the resolver satisfy those requirements from
+     * the shared library before it is allowed to use Freesound network search.
+     */
     fun shouldUseLocalAudioCatalogs(mode: StoryAudioSourceMode): Boolean = usesAiLocal(mode)
 
     fun shouldRequestFreesoundRequirements(mode: StoryAudioSourceMode): Boolean = usesAiFreesound(mode)
 
-    /** Mode 2 and Mode 3 are deliberately different AI contracts and may never be mixed. */
+    /**
+     * These are AI-request contracts, not physical-library isolation rules. Mode 2 receives the
+     * catalog directly; Mode 3 requests semantic needs only and resolves them library-first.
+     */
     fun isValidAiAudioContract(
         mode: StoryAudioSourceMode,
         hasLocalAudioCatalog: Boolean,

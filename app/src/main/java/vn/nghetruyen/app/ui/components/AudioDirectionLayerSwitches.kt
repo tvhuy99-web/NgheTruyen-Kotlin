@@ -271,7 +271,7 @@ fun AudioDirectionLayerSwitches(
 
         when (sourceMode) {
             StoryAudioSourceMode.LOCAL_MANUAL -> {
-                Text("MODE 1 · PHÁT THỦ CÔNG TỪ THƯ VIỆN")
+                Text("MODE 1 · PHÁT THỦ CÔNG TỪ THƯ VIỆN LOCAL")
                 Text("Mode này thay đổi cơ chế phát, không thay đổi thư viện. MUSIC, AMBIENCE và SFX vẫn dùng chung toàn bộ asset đã có.")
                 SharedLibraryManagementButtons()
                 AudioManagerButton(

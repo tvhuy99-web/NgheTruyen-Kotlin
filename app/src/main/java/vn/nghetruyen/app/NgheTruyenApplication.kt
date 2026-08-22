@@ -15,8 +15,8 @@ import vn.nghetruyen.app.sourceplatform.ChromiumVBookBrowserReplayRuntime
 import vn.nghetruyen.app.sourceplatform.ChromiumVBookDispatcherParityRuntime
 import vn.nghetruyen.app.sourceplatform.ChromiumVBookReplayCoordinator
 import vn.nghetruyen.app.sourceplatform.DiagnosticScreenRestoreLifecycleCallbacks
+import vn.nghetruyen.app.sourceplatform.PromptSafeSourceBrowserBridge
 import vn.nghetruyen.app.sourceplatform.SourceBrowserViewportHost
-import vn.nghetruyen.app.sourceplatform.SourceWebViewCookieReader
 import vn.nghetruyen.app.sourceplatform.replayAwareChromiumDiagnostics
 import vn.nghetruyen.app.startup.StartupFreshnessMaintenance
 import vn.nghetruyen.source.api.SourceErrorCode
@@ -77,8 +77,9 @@ class NgheTruyenApplication : Application() {
                             cookiePartition = brokers.cookies,
                         ),
                     )
+                    val promptSafeBrowser = PromptSafeSourceBrowserBridge(brokers.browser)
                     val replay = ChromiumVBookReplayCoordinator(
-                        browserDelegate = brokers.browser,
+                        browserDelegate = promptSafeBrowser,
                         networkDelegate = brokers.network,
                         browserNetworkDelegate = browserSessionNetwork,
                     )
@@ -89,7 +90,7 @@ class NgheTruyenApplication : Application() {
                             network = replay.networkBroker,
                         ),
                         diagnostics = replayAwareChromiumDiagnostics(diagnostics),
-                        webViewCookieReader = brokers.browser as? SourceWebViewCookieReader,
+                        webViewCookieReader = promptSafeBrowser,
                     )
                     ChromiumVBookDispatcherParityRuntime(
                         ChromiumVBookBrowserReplayRuntime(

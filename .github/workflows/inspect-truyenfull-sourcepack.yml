@@ -17,21 +17,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: fix/freesound-latency-status-cloudflare
-      - name: Inspect sourcepack
+      - name: Locate native-v2 generator
         run: |
           set -euxo pipefail
-          rm -rf /tmp/truyenfull-pack
-          mkdir -p /tmp/truyenfull-pack
-          unzip -q app/src/main/assets/sourcepacks/truyenfull.ntsource -d /tmp/truyenfull-pack
-          echo '=== FILES ==='
-          find /tmp/truyenfull-pack -maxdepth 3 -type f -printf '%P\n' | sort
-          echo '=== SOURCE JSON ==='
-          cat /tmp/truyenfull-pack/source.json
-          echo '=== CHAPTER ACTION ==='
-          cat /tmp/truyenfull-pack/actions/chapter.json
-          echo '=== CHAPTER FIXTURE HTTP ==='
-          cat /tmp/truyenfull-pack/fixtures/chapter.http.json
-          echo '=== CHAPTER FIXTURE EXPECTED ==='
-          cat /tmp/truyenfull-pack/fixtures/chapter.expected.json
-          echo '=== ALL CHAPTER-RELATED ACTION MATCHES ==='
-          grep -R -n -E 'content|paragraph|chapter|selector|remove|hidden|display' /tmp/truyenfull-pack/actions /tmp/truyenfull-pack/source.json | head -n 400 || true
+          echo '=== htmlParagraphs references ==='
+          grep -R -n --exclude-dir=.git --exclude='*.ntsource' 'htmlParagraphs' . | head -n 300 || true
+          echo '=== native_v2_core references ==='
+          grep -R -n --exclude-dir=.git --exclude='*.ntsource' 'native_v2_core' . | head -n 300 || true
+          echo '=== chapter parser/generator references ==='
+          grep -R -n --exclude-dir=.git --exclude='*.ntsource' -E 'NATIVE_V2|selectHtmlObject|selectHtmlArray|wholeText\(\)|chapter-c' source-* app/src/main/java | head -n 500 || true

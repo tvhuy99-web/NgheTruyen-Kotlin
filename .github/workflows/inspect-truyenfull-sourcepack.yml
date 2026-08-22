@@ -25,12 +25,13 @@ jobs:
           unzip -q app/src/main/assets/sourcepacks/truyenfull.ntsource -d /tmp/truyenfull-pack
           echo '=== FILES ==='
           find /tmp/truyenfull-pack -maxdepth 3 -type f -printf '%P\n' | sort
+          echo '=== SOURCE JSON ==='
+          cat /tmp/truyenfull-pack/source.json
           echo '=== CHAPTER ACTION ==='
-          cat /tmp/truyenfull-pack/src/native_v2_chap.js || true
-          echo '=== CORE MATCHES ==='
-          grep -n -E 'paragraph|content|chapter|truyenfull|display:none|hidden|select\(' /tmp/truyenfull-pack/src/native_v2_core.js | head -n 240 || true
-          echo '=== CORE REGION 1 ==='
-          sed -n '1,260p' /tmp/truyenfull-pack/src/native_v2_core.js
-          echo '=== MANIFEST/PACKAGE ==='
-          cat /tmp/truyenfull-pack/plugin.json 2>/dev/null || true
-          cat /tmp/truyenfull-pack/manifest.json 2>/dev/null || true
+          cat /tmp/truyenfull-pack/actions/chapter.json
+          echo '=== CHAPTER FIXTURE HTTP ==='
+          cat /tmp/truyenfull-pack/fixtures/chapter.http.json
+          echo '=== CHAPTER FIXTURE EXPECTED ==='
+          cat /tmp/truyenfull-pack/fixtures/chapter.expected.json
+          echo '=== ALL CHAPTER-RELATED ACTION MATCHES ==='
+          grep -R -n -E 'content|paragraph|chapter|selector|remove|hidden|display' /tmp/truyenfull-pack/actions /tmp/truyenfull-pack/source.json | head -n 400 || true

@@ -1,0 +1,36 @@
+name: Inspect TruyenFull Sourcepack
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/inspect-truyenfull-sourcepack.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/freesound-latency-status-cloudflare
+      - name: Inspect sourcepack
+        run: |
+          set -euxo pipefail
+          rm -rf /tmp/truyenfull-pack
+          mkdir -p /tmp/truyenfull-pack
+          unzip -q app/src/main/assets/sourcepacks/truyenfull.ntsource -d /tmp/truyenfull-pack
+          echo '=== FILES ==='
+          find /tmp/truyenfull-pack -maxdepth 3 -type f -printf '%P\n' | sort
+          echo '=== CHAPTER ACTION ==='
+          cat /tmp/truyenfull-pack/src/native_v2_chap.js || true
+          echo '=== CORE MATCHES ==='
+          grep -n -E 'paragraph|content|chapter|truyenfull|display:none|hidden|select\(' /tmp/truyenfull-pack/src/native_v2_core.js | head -n 240 || true
+          echo '=== CORE REGION 1 ==='
+          sed -n '1,260p' /tmp/truyenfull-pack/src/native_v2_core.js
+          echo '=== MANIFEST/PACKAGE ==='
+          cat /tmp/truyenfull-pack/plugin.json 2>/dev/null || true
+          cat /tmp/truyenfull-pack/manifest.json 2>/dev/null || true

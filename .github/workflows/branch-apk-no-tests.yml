@@ -67,3 +67,5 @@ jobs:
           path: |
             dist/NgheTruyen-mode3-localdiag.apk
             dist/NgheTruyen-mode3-localdiag.apk.sha256
+
+# build trigger 2026-08-22

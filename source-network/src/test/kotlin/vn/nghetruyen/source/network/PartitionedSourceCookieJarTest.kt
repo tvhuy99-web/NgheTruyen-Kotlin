@@ -67,7 +67,7 @@ class PartitionedSourceCookieJarTest {
         val id = "vn.nghetruyen.sources.test"
         listOf("ftp://example.org/file", "about:blank", "/relative/path").forEach { url ->
             val failure = runCatching { jar.readCookieHeader(id, url) }.exceptionOrNull()
-            assertTrue("Expected SOURCE_COOKIE_URL_INVALID for $url", failure is IllegalArgumentException)
+            assertTrue(failure is IllegalArgumentException)
             assertEquals("SOURCE_COOKIE_URL_INVALID", failure?.message)
         }
     }

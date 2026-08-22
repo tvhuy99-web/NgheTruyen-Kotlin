@@ -144,6 +144,7 @@ class PartitionedSourceCookieJar(
             val attrValue = if (index < 0) null else text.substring(index + 1).trim()
             attributes[key] = attrValue
         }
+        if (responseUri.scheme.equals("http", true) && "secure" in attributes) return null
         val responseHost = responseUri.host.lowercase(Locale.ROOT).trimEnd('.')
         val domainAttribute = attributes["domain"]?.trim()?.trimStart('.')?.lowercase(Locale.ROOT)?.trimEnd('.')
         val hostOnly = domainAttribute.isNullOrBlank()

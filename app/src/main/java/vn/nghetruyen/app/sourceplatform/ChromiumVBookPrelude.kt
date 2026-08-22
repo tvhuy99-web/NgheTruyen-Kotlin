@@ -153,8 +153,18 @@ internal object ChromiumVBookPrelude {
               function __nativeElement(node,baseUrl){
                 if(!node) return undefined;
                 var out={__node:node};
-                out.select=function(selector){return __nativeElements(node.querySelectorAll(String(selector||'')),baseUrl);};
-                out.selectFirst=function(selector){return __nativeElement(node.querySelector(String(selector||'')),baseUrl);};
+                out.select=function(selector){
+                  var selectorText=String(selector||'');
+                  var selected=Array.from(node.querySelectorAll(selectorText));
+                  if(typeof node.matches==='function'&&node.matches(selectorText)) selected.unshift(node);
+                  return __nativeElements(selected,baseUrl);
+                };
+                out.selectFirst=function(selector){
+                  var selectorText=String(selector||'');
+                  var descendant=node.querySelector(selectorText);
+                  if(typeof node.matches==='function'&&node.matches(selectorText)) return out;
+                  return __nativeElement(descendant,baseUrl);
+                };
                 out.text=function(){return String(node.textContent||'').replace(/\s+/g,' ').trim();};
                 out.ownText=function(){
                   var text=''; for(var i=0;i<node.childNodes.length;i++) if(node.childNodes[i].nodeType===3) text+=node.childNodes[i].nodeValue||'';

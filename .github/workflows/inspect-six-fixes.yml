@@ -1,48 +1,78 @@
-name: Inspect Six Fixes
+name: Build Six Diagnostics Fixes
 
 on:
   pull_request:
     branches: [main]
     paths:
       - .github/workflows/inspect-six-fixes.yml
+      - scripts/apply_six_log_fixes.py
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  inspect:
+  patch-build-publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout branch
+        uses: actions/checkout@v4
         with:
           ref: fix/freesound-latency-status-cloudflare
-      - name: Inspect exact targets
+          fetch-depth: 0
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Apply all six fixes
+        run: python3 scripts/apply_six_log_fixes.py
+
+      - name: Verify patched TruyenFull source
         run: |
           set -euxo pipefail
-          echo '=== LibraryRepository loadCachedChapter ==='
-          f=app/src/main/java/vn/nghetruyen/app/data/repository/LibraryRepository.kt
-          grep -n 'loadCachedChapter' "$f" || true
-          line=$(grep -n 'loadCachedChapter' "$f" | head -1 | cut -d: -f1 || true); if [ -n "$line" ]; then sed -n "$((line-35)),$((line+65))p" "$f"; fi
-          echo '=== AppViewModel open chapter ==='
-          sed -n '2600,2735p' app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt
-          echo '=== SourceDiagnosticRuntime critical store/policy/export ==='
-          sed -n '1,180p' app/src/main/java/vn/nghetruyen/app/sourceplatform/SourceDiagnosticRuntime.kt
-          sed -n '280,410p' app/src/main/java/vn/nghetruyen/app/sourceplatform/SourceDiagnosticRuntime.kt
-          sed -n '455,510p' app/src/main/java/vn/nghetruyen/app/sourceplatform/SourceDiagnosticRuntime.kt
-          echo '=== PersistentCriticalDiagnosticPolicy ==='
-          grep -R -n -A120 -B20 'object PersistentCriticalDiagnosticPolicy\|class PersistentCriticalDiagnosticPolicy' app/src/main/java app/src/test || true
-          echo '=== DiagnosticDeepBlackBox data loss ==='
-          sed -n '220,285p' app/src/main/java/vn/nghetruyen/app/sourceplatform/DiagnosticDeepBlackBox.kt
-          echo '=== SourcePackStorySource paging ==='
-          sed -n '315,375p' app/src/main/java/vn/nghetruyen/app/sourceplatform/SourcePackStorySource.kt
-          sed -n '480,535p' app/src/main/java/vn/nghetruyen/app/sourceplatform/SourcePackStorySource.kt
-          sed -n '560,600p' app/src/main/java/vn/nghetruyen/app/sourceplatform/SourcePackStorySource.kt
-          echo '=== VBookJsRuntime TOC storyId ==='
-          sed -n '980,1020p' source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt
-          sed -n '1105,1148p' source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt
-          echo '=== Native source relevant ==='
-          gzip -dc app/src/main/assets/source-lua/nguon_truyenfull_native.lua.gz.gz > /tmp/a.gz
-          gzip -dc /tmp/a.gz > /tmp/source.lua
-          sed -n '45,65p' /tmp/source.lua
-          sed -n '345,420p' /tmp/source.lua
-          sed -n '390,425p' /tmp/source.lua
+          gzip -dc app/src/main/assets/source-lua/nguon_truyenfull_native.lua.gz.gz > /tmp/truyenfull.gz
+          gzip -dc /tmp/truyenfull.gz > /tmp/truyenfull.lua
+          grep -n 'version = 14' /tmp/truyenfull.lua
+          grep -n "href.*/chuong-" /tmp/truyenfull.lua | head
+          grep -n 'Truyenfull' /tmp/truyenfull.lua | head
+
+      - name: Build debug APK
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :app:assembleDebug --stacktrace
+
+      - name: Generate checksum
+        run: sha256sum app/build/outputs/apk/debug/*.apk > app/build/outputs/apk/debug/NgheTruyen-six-log-fixes.sha256
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NgheTruyen-six-log-fixes-apk
+          path: |
+            app/build/outputs/apk/debug/*.apk
+            app/build/outputs/apk/debug/NgheTruyen-six-log-fixes.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Commit product changes
+        run: |
+          rm -f scripts/apply_six_log_fixes.py
+          rm -f .github/workflows/inspect-six-fixes.yml
+          git restore --worktree -- gradlew || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- \
+            app/src/main/java/vn/nghetruyen/app/data/repository/LibraryRepository.kt \
+            app/src/main/java/vn/nghetruyen/app/sourceplatform/SourcePackStorySource.kt \
+            app/src/main/java/vn/nghetruyen/app/sourceplatform/SourceDiagnosticRuntime.kt \
+            app/src/main/java/vn/nghetruyen/app/sourceplatform/DiagnosticDeepBlackBox.kt \
+            source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt \
+            app/src/main/assets/source-lua/nguon_truyenfull_native.lua.gz.gz \
+            scripts/apply_six_log_fixes.py \
+            .github/workflows/inspect-six-fixes.yml
+          git commit -m "fix: repair stale cache toc ids and diagnostics [skip ci]"
+          git push origin HEAD:fix/freesound-latency-status-cloudflare

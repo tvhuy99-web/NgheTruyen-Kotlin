@@ -41,6 +41,8 @@ private class StableDefaultLuaSourceAlias(
     override suspend fun home(page: Int): AppResult<List<StorySummary>> =
         delegate.home(page).rewriteStories()
 
+    override suspend fun genreMenu(): AppResult<List<SourceBrowseEntry>> = delegate.genreMenu()
+
     override suspend fun story(url: String): AppResult<StoryDetail> = when (val result = delegate.story(url)) {
         is AppResult.Success -> AppResult.Success(
             result.value.copy(story = result.value.story.copy(sourceId = stableId)),

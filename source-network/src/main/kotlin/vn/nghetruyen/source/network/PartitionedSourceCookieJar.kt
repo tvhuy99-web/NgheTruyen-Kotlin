@@ -59,7 +59,7 @@ class PartitionedSourceCookieJar(
     }
 
     override fun readCookieHeader(sourceId: String, requestUrl: String): String? = lock.withLock {
-        val uri = requireHttpsUrl(requestUrl)
+        val uri = requireHttpUrl(requestUrl)
         prune(sourceId)
         bucket(sourceId).values.asSequence()
             .filter { cookie -> matches(cookie, uri) }
@@ -72,7 +72,7 @@ class PartitionedSourceCookieJar(
         mergeSetCookieHeaders(sourceId, "https://invalid.local/", setCookieHeaders)
 
     override fun mergeSetCookieHeaders(sourceId: String, responseUrl: String, setCookieHeaders: List<String>) = lock.withLock {
-        val uri = requireHttpsUrl(responseUrl)
+        val uri = requireHttpUrl(responseUrl)
         val bucket = bucket(sourceId)
         setCookieHeaders.take(64).forEach { raw ->
             parse(raw, uri)?.let { parsed ->
@@ -89,7 +89,7 @@ class PartitionedSourceCookieJar(
     }
 
     override fun exportSetCookieHeaders(sourceId: String, requestUrl: String): List<String> = lock.withLock {
-        val uri = requireHttpsUrl(requestUrl)
+        val uri = requireHttpUrl(requestUrl)
         prune(sourceId)
         bucket(sourceId).values.filter { matches(it, uri) }.map { cookie ->
             buildString {
@@ -193,9 +193,12 @@ class PartitionedSourceCookieJar(
 
     private fun persist(sourceId: String) = persistence.save(sourceId, bucket(sourceId).values.toList())
 
-    private fun requireHttpsUrl(raw: String): URI {
+    private fun requireHttpUrl(raw: String): URI {
         val uri = runCatching { URI(raw) }.getOrNull() ?: error("SOURCE_COOKIE_URL_INVALID")
-        require(uri.scheme.equals("https", true) && !uri.host.isNullOrBlank()) { "SOURCE_COOKIE_URL_INVALID" }
+        val scheme = uri.scheme?.lowercase(Locale.ROOT)
+        require(scheme == "http" || scheme == "https") { "SOURCE_COOKIE_URL_INVALID" }
+        require(!uri.host.isNullOrBlank() && uri.userInfo == null) { "SOURCE_COOKIE_URL_INVALID" }
+        require(uri.port == -1 || uri.port in 1..65535) { "SOURCE_COOKIE_URL_INVALID" }
         return uri
     }
 

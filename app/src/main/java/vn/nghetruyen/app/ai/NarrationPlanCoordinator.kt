@@ -28,7 +28,6 @@ import vn.nghetruyen.app.freesound.FreesoundAutoRequirement
 import vn.nghetruyen.app.freesound.FreesoundAutoResolvedNeed
 import vn.nghetruyen.app.freesound.FreesoundAutoSearchNeed
 import vn.nghetruyen.app.freesound.FreesoundAutoRequirementCodec
-import vn.nghetruyen.app.freesound.FreesoundImporter
 import vn.nghetruyen.app.freesound.FreesoundRequirementImportance
 import vn.nghetruyen.app.playback.PlaybackQueueStore
 import vn.nghetruyen.app.playback.XpkPlaybackRuntime
@@ -36,7 +35,8 @@ import java.util.UUID
 
 /**
  * Creates and caches one coordinated XPK chapter plan. Voice casting stays independent, while
- * MUSIC/AMBIENCE/SFX are routed through one of three mutually exclusive source modes.
+ * MUSIC/AMBIENCE/SFX are routed through one of three mutually exclusive source modes. Modes 2 and 3
+ * share the same enabled physical asset library; only Mode 3 may extend it from Freesound.
  */
 class NarrationPlanCoordinator(
     private val library: LibraryRepository,
@@ -189,7 +189,7 @@ class NarrationPlanCoordinator(
                 musicCreated = false,
                 audioCreated = false,
                 resolvedAssets = 0,
-                warnings = listOf("AI chưa trả yêu cầu Freesound; sẽ yêu cầu AI lập lại sau thời gian chờ."),
+                warnings = listOf("AI chưa trả yêu cầu âm thanh tự động; sẽ yêu cầu AI lập lại sau thời gian chờ."),
                 retryableFailure = true,
                 diagnostics = listOf("AI_REQUIREMENTS_EMPTY_CACHE retryDue=false"),
             )
@@ -203,8 +203,8 @@ class NarrationPlanCoordinator(
                 audioCreated = false,
                 resolvedAssets = reusable.size,
                 warnings = listOf(
-                    if (reusable.isEmpty()) "Freesound còn thiếu sau 3 lần; phần TTS vẫn được phát và có thể phân vai lại để thử âm thanh mới."
-                    else "Một số âm thanh Freesound còn thiếu sau 3 lần; vẫn phát ${reusable.size} asset đã chuẩn bị hợp lệ.",
+                    if (reusable.isEmpty()) "Âm thanh Mode 3 còn thiếu sau 3 lần; phần TTS vẫn được phát và có thể phân vai lại để thử âm thanh mới."
+                    else "Một số âm thanh Mode 3 còn thiếu sau 3 lần; vẫn phát ${reusable.size} asset đã chuẩn bị hợp lệ.",
                 ),
                 reusedTrackIds = reusable,
                 retryableFailure = false,
@@ -232,7 +232,7 @@ class NarrationPlanCoordinator(
                     retryAttempts = restoredFreesound.attempts,
                     retryExhausted = restoredFreesound.retryExhausted,
                 )
-            }.onFailure { warnings += it.message ?: "Không cập nhật được trạng thái retry Freesound." }
+            }.onFailure { warnings += it.message ?: "Không cập nhật được trạng thái retry Mode 3." }
         }
 
         if (
@@ -285,7 +285,7 @@ class NarrationPlanCoordinator(
                 freesoundRetryRequired = restoredFreesound.retryableFailure,
                 freesoundRetryAttempts = restoredFreesound.attempts,
                 freesoundRetryExhausted = restoredFreesound.retryExhausted,
-                freesoundDiagnostics = (freesoundDiagnostics + restoredFreesound.diagnostics + "COORDINATOR_REUSE no new AI/Freesound work required").distinct(),
+                freesoundDiagnostics = (freesoundDiagnostics + restoredFreesound.diagnostics + "COORDINATOR_REUSE no new AI/Mode3 work required").distinct(),
             )
         }
 
@@ -383,7 +383,7 @@ class NarrationPlanCoordinator(
                 var markerCreated = false
                 if (freesoundNeeded && outcome.value.freesoundRequirementError.isBlank()) {
                     if (outcome.value.freesoundRequirements.isEmpty()) {
-                        warnings += "AI không trả yêu cầu MUSIC/AMBIENCE/SFX Freesound; sẽ tự yêu cầu AI lập lại sau thời gian chờ."
+                        warnings += "AI không trả yêu cầu MUSIC/AMBIENCE/SFX Mode 3; sẽ tự yêu cầu AI lập lại sau thời gian chờ."
                         autoApplied = FreesoundApplyResult(
                             musicCreated = false,
                             audioCreated = false,
@@ -407,7 +407,7 @@ class NarrationPlanCoordinator(
                             retryExhausted = autoApplied.retryExhausted,
                         )
                     }.onSuccess { markerCreated = true }
-                        .onFailure { warnings += it.message ?: "Không lưu được cache kế hoạch Freesound tự động." }
+                        .onFailure { warnings += it.message ?: "Không lưu được cache kế hoạch Mode 3 tự động." }
                 }
 
                 Result(
@@ -437,8 +437,8 @@ class NarrationPlanCoordinator(
         if (!audioSettings.ambienceEnabled && !audioSettings.soundEffectsEnabled) return AmbienceSfxPlan()
         val enabledAssets = library.listEnabledSceneMusicTracks()
         val sourceAssets = if (StoryAudioModeRouter.usesAiFreesound(sourceMode)) {
-            val usableIds = freesoundResolver.usableManagedTrackIds(setOf(AudioAssetKind.AMBIENCE, AudioAssetKind.SFX))
-            enabledAssets.filter { it.id in usableIds && FreesoundImporter.soundIdFromManagedUri(it.uri) != null }
+            val usableIds = freesoundResolver.usableLibraryTrackIds(setOf(AudioAssetKind.AMBIENCE, AudioAssetKind.SFX))
+            enabledAssets.filter { it.id in usableIds }
         } else enabledAssets
         val ambienceTracks = if (audioSettings.ambienceEnabled) {
             sourceAssets.filter { AudioAssetClassifier.classify(it) == AudioAssetKind.AMBIENCE }
@@ -586,7 +586,7 @@ class NarrationPlanCoordinator(
         val result = linkedSetOf<String>()
         requirements.forEach { requirement ->
             if (requirement.kind in kinds) {
-                freesoundResolver.cachedManagedTrackId(requirement.kind, requirement.query)?.let(result::add)
+                freesoundResolver.cachedLibraryTrackId(requirement.kind, requirement.query)?.let(result::add)
             }
         }
         return result
@@ -598,9 +598,9 @@ class NarrationPlanCoordinator(
         requirements: List<FreesoundAutoRequirement>,
     ): Boolean {
         if (requirements.isEmpty()) return false
-        val usableIds = freesoundResolver.usableManagedTrackIds(kinds)
+        val usableIds = freesoundResolver.usableLibraryTrackIds(kinds)
         val enabled = library.listEnabledSceneMusicTracks()
-            .filter { it.id in usableIds && FreesoundImporter.soundIdFromManagedUri(it.uri) != null }
+            .filter { it.id in usableIds }
         val unitIds = XpkVoiceCastSplitter.buildUnits(content.chapter.title, chapterBody(content)).map { it.id }
         var musicCues = emptyList<SceneMusicCue>()
         var audioPlan = AmbienceSfxPlan()
@@ -655,7 +655,7 @@ class NarrationPlanCoordinator(
         if (required.isEmpty()) return true
         val resolvedRequired = mutableListOf<FreesoundAutoResolvedNeed>()
         required.forEach { usage ->
-            val trackId = freesoundResolver.cachedManagedTrackId(usage.kind, usage.query) ?: return false
+            val trackId = freesoundResolver.cachedLibraryTrackId(usage.kind, usage.query) ?: return false
             val track = enabled.firstOrNull { it.id == trackId && AudioAssetClassifier.classify(it) == usage.kind } ?: return false
             resolvedRequired += FreesoundAutoResolvedNeed(
                 need = FreesoundAutoSearchNeed(
@@ -687,7 +687,7 @@ class NarrationPlanCoordinator(
                 musicCreated = false,
                 audioCreated = false,
                 resolvedAssets = 0,
-                warnings = listOf("AI chưa trả yêu cầu Freesound; chưa có truy vấn để retry runtime."),
+                warnings = listOf("AI chưa trả yêu cầu âm thanh Mode 3; chưa có truy vấn để retry runtime."),
                 retryableFailure = true,
                 diagnostics = listOf("RUNTIME_RETRY_SKIPPED reason=AI_REQUIREMENTS_EMPTY"),
                 attempts = 0,
@@ -699,7 +699,7 @@ class NarrationPlanCoordinator(
                 musicCreated = false,
                 audioCreated = false,
                 resolvedAssets = 0,
-                warnings = listOf("Freesound đã thất bại sau 3 lần; cần bắt đầu một lượt phân vai mới."),
+                warnings = listOf("Mode 3 đã thất bại sau 3 lần; cần bắt đầu một lượt phân vai mới."),
                 retryableFailure = true,
                 diagnostics = listOf("RUNTIME_RETRY_BLOCKED attempts=$MAX_FREESOUND_RUNTIME_ATTEMPTS"),
                 attempts = MAX_FREESOUND_RUNTIME_ATTEMPTS,
@@ -741,9 +741,9 @@ class NarrationPlanCoordinator(
         val partialResolved = latest.resolvedAssets > 0
         return latest.copy(
             warnings = (warnings + if (partialResolved) {
-                "Một số âm thanh Freesound còn thiếu sau 3 lần; ứng dụng sẽ phát phần đã tải hợp lệ thay vì làm câm cả chương."
+                "Một số âm thanh Mode 3 còn thiếu sau 3 lần; ứng dụng sẽ phát phần đã resolve hợp lệ thay vì làm câm cả chương."
             } else {
-                "Freesound chưa tải được asset nào sau 3 lần; TTS vẫn được phép phát."
+                "Mode 3 chưa resolve được asset nào sau 3 lần; TTS vẫn được phép phát."
             }).distinct(),
             downloadedTrackIds = downloadedTrackIds,
             reusedTrackIds = reusedTrackIds - downloadedTrackIds,
@@ -769,10 +769,10 @@ class NarrationPlanCoordinator(
         val diagnostics = resolved.diagnostics.toMutableList()
         val units = XpkVoiceCastSplitter.buildUnits(content.chapter.title, chapterBody(content))
         val unitIds = units.map { it.id }
-        val usableIds = freesoundResolver.usableManagedTrackIds(kinds)
+        val usableIds = freesoundResolver.usableLibraryTrackIds(kinds)
         val enabled = library.listEnabledSceneMusicTracks()
-            .filter { it.id in usableIds && FreesoundImporter.soundIdFromManagedUri(it.uri) != null }
-        diagnostics += "PLAN_BUILD_START requirements=${requirements.size} units=${unitIds.size} managedTracks=${enabled.size} kinds=${kinds.map(AudioAssetKind::name).sorted().joinToString(",")}"
+            .filter { it.id in usableIds }
+        diagnostics += "PLAN_BUILD_START requirements=${requirements.size} units=${unitIds.size} libraryTracks=${enabled.size} kinds=${kinds.map(AudioAssetKind::name).sorted().joinToString(",")}"
         var musicCreated = false
         var audioCreated = false
         val requiredKinds = requirements
@@ -794,7 +794,7 @@ class NarrationPlanCoordinator(
                     musicTracks.map(SceneMusicTrackEntity::id),
                 )
             }.getOrElse { firstError ->
-                warnings += "Kế hoạch MUSIC Freesound có vùng chưa hợp lệ; chỉ vùng lỗi được đưa về im lặng/ghép ổn định thay vì làm im lặng cả chương: ${firstError.message.orEmpty()}"
+                warnings += "Kế hoạch MUSIC Mode 3 có vùng chưa hợp lệ; chỉ vùng lỗi được đưa về im lặng/ghép ổn định thay vì làm im lặng cả chương: ${firstError.message.orEmpty()}"
                 val salvaged = FreesoundAutoPlanBuilder.salvageMusicCues(rawCues, unitIds, musicIds)
                 runCatching {
                     XpkSceneMusicParity.validateScenes(
@@ -812,7 +812,7 @@ class NarrationPlanCoordinator(
                 musicCues = validated,
             )
             requiredMusicMissing = musicCoverage.missingMusicUsages > 0
-            diagnostics += "PLAN_MUSIC rawCues=${rawCues.size} validatedCues=${validated.size} managedMusicTracks=${musicTracks.size} requiredMissing=$requiredMusicMissing"
+            diagnostics += "PLAN_MUSIC rawCues=${rawCues.size} validatedCues=${validated.size} libraryMusicTracks=${musicTracks.size} requiredMissing=$requiredMusicMissing"
             runCatching {
                 persistMusicPlan(
                     content,
@@ -825,7 +825,7 @@ class NarrationPlanCoordinator(
                 musicCreated = true
                 diagnostics += "PLAN_MUSIC_PERSIST success=true"
             }.onFailure {
-                warnings += it.message ?: "Không lưu được MUSIC Freesound tự động."
+                warnings += it.message ?: "Không lưu được MUSIC Mode 3."
                 diagnostics += "PLAN_MUSIC_PERSIST success=false error=${(it.message ?: it::class.java.simpleName).take(220)}"
             }
         }
@@ -838,7 +838,7 @@ class NarrationPlanCoordinator(
                 enabled.filter { AudioAssetClassifier.classify(it) == AudioAssetKind.SFX }
             } else emptyList()
 
-            var ambienceCandidate = if (AudioAssetKind.AMBIENCE in kinds) {
+            val ambienceCandidate = if (AudioAssetKind.AMBIENCE in kinds) {
                 FreesoundAutoPlanBuilder.ambienceScenes(resolved.resolved, unitIds)
             } else emptyList()
             val originalAmbienceCount = ambienceCandidate.size
@@ -856,7 +856,7 @@ class NarrationPlanCoordinator(
                 AmbienceSfxPlan()
             }
 
-            var sfxCandidate = if (AudioAssetKind.SFX in kinds) {
+            val sfxCandidate = if (AudioAssetKind.SFX in kinds) {
                 FreesoundAutoPlanBuilder.soundEffectCues(resolved.resolved, unitIds)
             } else emptyList()
             val originalSfxCount = sfxCandidate.size
@@ -903,7 +903,7 @@ class NarrationPlanCoordinator(
                 audioCreated = true
                 diagnostics += "PLAN_AUDIO_PERSIST success=true"
             }.onFailure {
-                warnings += it.message ?: "Không lưu được AMBIENCE/SFX Freesound tự động."
+                warnings += it.message ?: "Không lưu được AMBIENCE/SFX Mode 3."
                 diagnostics += "PLAN_AUDIO_PERSIST success=false error=${(it.message ?: it::class.java.simpleName).take(220)}"
             }
         }
@@ -912,9 +912,9 @@ class NarrationPlanCoordinator(
         val retryRecommended = resolved.shouldRetryIncomplete || requiredPlanMissing
         if (retryRecommended && requirements.isNotEmpty()) {
             warnings += if (requiredPlanMissing) {
-                "Freesound đã có asset nhưng chưa tạo được cue bắt buộc hợp lệ; ứng dụng sẽ tự thử lại tối đa 3 lần."
+                "Mode 3 đã resolve asset nhưng chưa tạo được cue bắt buộc hợp lệ; ứng dụng sẽ tự thử lại tối đa 3 lần."
             } else {
-                "Freesound chưa resolve đủ âm thanh quan trọng; ứng dụng sẽ tự thử lại mà không cần phân vai lại."
+                "Mode 3 chưa resolve đủ âm thanh quan trọng; ứng dụng sẽ tự thử lại mà không cần phân vai lại."
             }
         }
         diagnostics += "PLAN_REQUIRED_COVERAGE musicMissing=$requiredMusicMissing ambienceMissing=$requiredAmbienceMissing sfxMissing=$requiredSfxMissing"

@@ -1,0 +1,36 @@
+name: Inspect Six Fixes
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/inspect-six-fixes.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/freesound-latency-status-cloudflare
+      - name: Inspect targets
+        run: |
+          set -euxo pipefail
+          echo '=== CACHE / READER ==='
+          grep -R -n --exclude-dir=.git -E 'READER_SCREEN_READY|fromCache|paragraphCount|chapterCache|ChapterCache|cached.*chapter|chapter.*cache' app/src/main/java | head -n 500 || true
+          echo '=== PERSISTENT / CRITICAL ==='
+          grep -R -n --exclude-dir=.git -E 'persistentInstallFailure|persistent.*critical|Persistent.*Failure|FREESOUND_IMPORT_FAILED|alwaysMirror|shouldRetainWhenDiagnosticsOff' app source-* | head -n 700 || true
+          echo '=== DATA LOSS ==='
+          grep -R -n --exclude-dir=.git -E 'eventsReportingDroppedData|logArgumentsDropped|data_loss|droppedData|DroppedData' app source-* | head -n 700 || true
+          echo '=== STORY ID / TOC NORMALIZATION ==='
+          grep -R -n --exclude-dir=.git -E 'stableId\(storyUrl|storyId|normalizeChapter\(|TOC_PAGES|chapters\(' source-vbook app/src/main/java/vn/nghetruyen/app/sourceplatform | head -n 700 || true
+          echo '=== TRUYENFULL NATIVE LUA RELEVANT ==='
+          cp app/src/main/assets/source-lua/nguon_truyenfull_native.lua.gz.gz /tmp/source.gz.gz
+          gzip -dc /tmp/source.gz.gz > /tmp/source.gz
+          gzip -dc /tmp/source.gz > /tmp/source.lua
+          sed -n '40,90p' /tmp/source.lua
+          sed -n '270,430p' /tmp/source.lua
+          sed -n '415,510p' /tmp/source.lua

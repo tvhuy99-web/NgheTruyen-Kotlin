@@ -22,9 +22,10 @@ data class FreesoundAutoRequirement(
     val cadence: SfxCadence = SfxCadence.NORMAL,
     val loopUntilStop: Boolean = false,
     /**
-     * Story text attached locally after AI has already chosen every timeline/playback instruction.
-     * It is persisted only so cached Mode-3 requirements can keep the same local-file matching
-     * quality after reload. Freesound search code reads [query] only and never sends this context.
+     * Short Vietnamese description returned by the SAME narration AI for local-library matching.
+     * Expected form: "Dùng: ...; Tránh: ...". The name is kept source-compatible with the previous
+     * experimental field, but its content is no longer copied from story text by the app.
+     * Freesound search code reads [query] only and never sends this value to the search endpoint.
      */
     val localContext: String = "",
 )
@@ -40,7 +41,7 @@ data class FreesoundAutoSearchNeed(
 object FreesoundAutoRequirementCodec {
     const val JSON_KEY = "freesound_requirements"
     private const val MAX_QUERY_CHARS = 160
-    private const val MAX_LOCAL_CONTEXT_CHARS = 6_000
+    private const val MAX_LOCAL_HINT_CHARS = 240
 
     fun parse(
         root: JSONObject,
@@ -68,7 +69,9 @@ object FreesoundAutoRequirementCodec {
                             .trim().uppercase(Locale.ROOT),
                     )
                 }.getOrDefault(FreesoundRequirementImportance.OPTIONAL)
-                val localContext = oneLine(row.optString("local_context")).take(MAX_LOCAL_CONTEXT_CHARS)
+                // Missing local_hint must never break the network path. New prompts require it, but
+                // old cached responses remain valid and simply fall back to query-only local reuse.
+                val localContext = oneLine(row.optString("local_hint")).take(MAX_LOCAL_HINT_CHARS)
 
                 when (kind) {
                     AudioAssetKind.MUSIC, AudioAssetKind.AMBIENCE -> {
@@ -140,7 +143,7 @@ object FreesoundAutoRequirementCodec {
                     .put("importance", requirement.importance.name)
                     .also { row ->
                         requirement.localContext.trim().takeIf(String::isNotBlank)?.let {
-                            row.put("local_context", oneLine(it).take(MAX_LOCAL_CONTEXT_CHARS))
+                            row.put("local_hint", oneLine(it).take(MAX_LOCAL_HINT_CHARS))
                         }
                         when (requirement.kind) {
                             AudioAssetKind.MUSIC, AudioAssetKind.AMBIENCE -> {

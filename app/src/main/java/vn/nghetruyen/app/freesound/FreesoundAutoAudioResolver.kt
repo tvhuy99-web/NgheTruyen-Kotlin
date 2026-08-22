@@ -258,7 +258,6 @@ class FreesoundAutoAudioResolver(
         if (!isUsableLibraryTrack(track, need.kind)) return null
         val hasLocalContext = need.usages.any { it.localContext.isNotBlank() }
         if (!hasLocalContext) {
-            if (isManagedFreesoundTrack(track)) return track
             return Mode3LibraryAssetMatcher.strongMatch(need, track)?.track
         }
 
@@ -270,7 +269,7 @@ class FreesoundAutoAudioResolver(
             return track.takeIf { it.id == contextualBest.track.id }
         }
 
-        return track.takeIf(::isManagedFreesoundTrack)
+        return null
     }
 
     suspend fun usableLibraryTrackIds(kinds: Set<AudioAssetKind>): Set<String> {
@@ -665,6 +664,7 @@ class FreesoundAutoAudioResolver(
                 sound = remote,
                 kind = seed.need.kind,
                 normalizationTargetLufs = normalizationTarget(seed.need.kind),
+                semanticDescription = semanticDescriptionForImport(seed.need),
             )
             FreesoundAutoImportOutcome(
                 index = seed.index,
@@ -1053,6 +1053,16 @@ class FreesoundAutoAudioResolver(
             }
         }
     }
+
+    private fun semanticDescriptionForImport(need: FreesoundAutoSearchNeed): String =
+        need.usages.asSequence()
+            .map(FreesoundAutoRequirement::localContext)
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .distinct()
+            .maxByOrNull(String::length)
+            ?.take(300)
+            .orEmpty()
 
     private suspend fun normalizationTarget(kind: AudioAssetKind): Float = when (kind) {
         AudioAssetKind.MUSIC -> settingsRepository.snapshot().sceneMusicTargetLufs

@@ -23,7 +23,7 @@ data class FreesoundAutoRequirement(
     val loopUntilStop: Boolean = false,
     /**
      * Short Vietnamese description returned by the SAME narration AI for local-library matching.
-     * Expected form: "Dùng: ...; Tránh: ...". The name is kept source-compatible with the previous
+     * Expected form: "Sắc thái: ...; Dùng: ...; Tránh: ...". The name is kept source-compatible with the previous
      * experimental field, but its content is no longer copied from story text by the app.
      * Freesound search code reads [query] only and never sends this value to the search endpoint.
      */
@@ -41,7 +41,7 @@ data class FreesoundAutoSearchNeed(
 object FreesoundAutoRequirementCodec {
     const val JSON_KEY = "freesound_requirements"
     private const val MAX_QUERY_CHARS = 160
-    private const val MAX_LOCAL_HINT_CHARS = 240
+    private const val MAX_LOCAL_HINT_CHARS = 300
 
     fun parse(
         root: JSONObject,

@@ -21,6 +21,13 @@ data class FreesoundAutoRequirement(
     val repeatCount: Int = 1,
     val cadence: SfxCadence = SfxCadence.NORMAL,
     val loopUntilStop: Boolean = false,
+    /**
+     * Short Vietnamese description returned by the SAME narration AI for local-library matching.
+     * Expected form: "Dùng: ...; Tránh: ...". The name is kept source-compatible with the previous
+     * experimental field, but its content is no longer copied from story text by the app.
+     * Freesound search code reads [query] only and never sends this value to the search endpoint.
+     */
+    val localContext: String = "",
 )
 
 data class FreesoundAutoSearchNeed(
@@ -34,6 +41,7 @@ data class FreesoundAutoSearchNeed(
 object FreesoundAutoRequirementCodec {
     const val JSON_KEY = "freesound_requirements"
     private const val MAX_QUERY_CHARS = 160
+    private const val MAX_LOCAL_HINT_CHARS = 240
 
     fun parse(
         root: JSONObject,
@@ -61,6 +69,9 @@ object FreesoundAutoRequirementCodec {
                             .trim().uppercase(Locale.ROOT),
                     )
                 }.getOrDefault(FreesoundRequirementImportance.OPTIONAL)
+                // Missing local_hint must never break the network path. New prompts require it, but
+                // old cached responses remain valid and simply fall back to query-only local reuse.
+                val localContext = oneLine(row.optString("local_hint")).take(MAX_LOCAL_HINT_CHARS)
 
                 when (kind) {
                     AudioAssetKind.MUSIC, AudioAssetKind.AMBIENCE -> {
@@ -85,6 +96,7 @@ object FreesoundAutoRequirementCodec {
                                 importance = importance,
                                 startUnitId = validUnitIds[safeStartIndex],
                                 endUnitId = validUnitIds[safeEndIndex],
+                                localContext = localContext,
                             ),
                         )
                     }
@@ -112,6 +124,7 @@ object FreesoundAutoRequirementCodec {
                                 repeatCount = repeat,
                                 cadence = cadence,
                                 loopUntilStop = loop,
+                                localContext = localContext,
                             ),
                         )
                     }
@@ -129,6 +142,9 @@ object FreesoundAutoRequirementCodec {
                     .put("query", requirement.query)
                     .put("importance", requirement.importance.name)
                     .also { row ->
+                        requirement.localContext.trim().takeIf(String::isNotBlank)?.let {
+                            row.put("local_hint", oneLine(it).take(MAX_LOCAL_HINT_CHARS))
+                        }
                         when (requirement.kind) {
                             AudioAssetKind.MUSIC, AudioAssetKind.AMBIENCE -> {
                                 row.put("start_id", requirement.startUnitId)

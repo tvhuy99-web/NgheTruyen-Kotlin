@@ -94,6 +94,9 @@ fun UnifiedAudioAssetManagerDialog(
     var editingTrack by remember(kind) { mutableStateOf<SceneMusicTrackEntity?>(null) }
     var deleteTrack by remember(kind) { mutableStateOf<SceneMusicTrackEntity?>(null) }
     var showBulkDialog by remember(kind) { mutableStateOf(false) }
+    var showDuplicateDialog by remember(kind) { mutableStateOf(false) }
+    var duplicateCandidates by remember(kind) { mutableStateOf<List<AudioDuplicateCandidate>>(emptyList()) }
+    var exactDuplicateCleanupDone by remember(kind) { mutableStateOf(false) }
     var bulkText by remember(kind) { mutableStateOf("") }
     var showBulkResult by remember(kind) { mutableStateOf(false) }
     var bulkUpdates by remember(kind) { mutableStateOf<Map<String, String>>(emptyMap()) }
@@ -106,6 +109,33 @@ fun UnifiedAudioAssetManagerDialog(
 
     fun notify(message: String) {
         Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+    }
+
+    fun removeDuplicateRowsNow(rows: List<SceneMusicTrackEntity>) {
+        if (rows.isEmpty()) return
+        val ids = rows.mapTo(linkedSetOf()) { it.id }
+        draft = draft.filterNot { it.id in ids }.mapIndexed { index, row -> row.copy(orderIndex = index) }
+        transientAddedIds = transientAddedIds - ids
+        selectedTrackId = selectedTrackId?.takeUnless(ids::contains)
+        duplicateCandidates = duplicateCandidates.filterNot { it.first.id in ids || it.second.id in ids }
+        scope.launch(Dispatchers.IO) {
+            val dao = application.container.database.sceneMusicTrackDao()
+            rows.forEach { row ->
+                FreesoundImporter.deleteManagedFile(context, row.uri)
+                dao.delete(row.id)
+            }
+        }
+    }
+
+    fun scanDuplicatesForReview() {
+        val plan = exactDuplicatePlan(draft)
+        if (plan.removed.isNotEmpty()) {
+            removeDuplicateRowsNow(plan.removed)
+            notify("Đã tự xóa ${plan.removed.size} tệp trùng tên hoàn toàn.")
+        }
+        val kept = if (plan.removed.isEmpty()) draft else plan.kept
+        duplicateCandidates = nearDuplicateCandidates(kept)
+        showDuplicateDialog = true
     }
 
     fun stopPreview() {
@@ -151,6 +181,14 @@ fun UnifiedAudioAssetManagerDialog(
     }
 
     LaunchedEffect(kind) {
+        if (!exactDuplicateCleanupDone) {
+            val plan = exactDuplicatePlan(draft)
+            exactDuplicateCleanupDone = true
+            if (plan.removed.isNotEmpty()) {
+                removeDuplicateRowsNow(plan.removed)
+                notify("Đã tự xóa ${plan.removed.size} tệp trùng tên hoàn toàn trong ${kindShortName(kind)}.")
+            }
+        }
         val recovered = managerJournal.load(kind)
         if (recovered.isNotEmpty()) {
             transientAddedIds = transientAddedIds + recovered
@@ -176,7 +214,25 @@ fun UnifiedAudioAssetManagerDialog(
             },
         )
         if (added.isNotEmpty()) {
-            draft = (draft + added).take(500).mapIndexed { index, row -> row.copy(orderIndex = index) }
+            val existingKeys = draft.mapTo(linkedSetOf()) { duplicateNameKey(it.title) }
+            val accepted = mutableListOf<SceneMusicTrackEntity>()
+            val duplicateRows = mutableListOf<SceneMusicTrackEntity>()
+            added.forEach { row ->
+                val key = duplicateNameKey(row.title)
+                if (key.isNotBlank() && (key in existingKeys || accepted.any { duplicateNameKey(it.title) == key })) {
+                    duplicateRows += row
+                } else {
+                    accepted += row
+                    if (key.isNotBlank()) existingKeys += key
+                }
+            }
+            if (duplicateRows.isNotEmpty()) {
+                removeDuplicateRowsNow(duplicateRows)
+                notify("Đã bỏ ${duplicateRows.size} tệp mới trùng tên với thư viện.")
+            }
+            if (accepted.isNotEmpty()) {
+                draft = (draft + accepted).take(500).mapIndexed { index, row -> row.copy(orderIndex = index) }
+            }
         }
     }
 
@@ -269,10 +325,17 @@ fun UnifiedAudioAssetManagerDialog(
                     },
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("CÔNG CỤ FREESOUND NÂNG CAO") }
-                Button(
-                    onClick = { bulkText = ""; showBulkDialog = true },
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("DÁN MÔ TẢ") }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Button(
+                        onClick = { bulkText = ""; showBulkDialog = true },
+                        modifier = Modifier.weight(1f),
+                    ) { Text("DÁN MÔ TẢ") }
+                    Button(
+                        onClick = ::scanDuplicatesForReview,
+                        enabled = draft.size >= 2,
+                        modifier = Modifier.weight(1f),
+                    ) { Text("QUÉT TỆP TRÙNG") }
+                }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Button(
                         onClick = {
@@ -689,6 +752,54 @@ fun UnifiedAudioAssetManagerDialog(
         )
     }
 
+    if (showDuplicateDialog) {
+        AlertDialog(
+            onDismissRequest = { showDuplicateDialog = false },
+            title = { Text("TỆP CÓ TÊN GẦN GIỐNG") },
+            text = {
+                Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
+                    if (duplicateCandidates.isEmpty()) {
+                        Text("Không còn tệp tên gần giống cần xem xét. Tệp trùng tên hoàn toàn đã được tự động loại bỏ.")
+                    } else {
+                        Text(
+                            "Chỉ các tên gần giống mới hiện ở đây. Chọn xóa một bên nếu đúng là cùng nội dung; nếu khác âm thanh thì giữ cả hai.",
+                            modifier = Modifier.padding(bottom = 8.dp),
+                        )
+                        duplicateCandidates.forEachIndexed { index, candidate ->
+                            Text(
+                                "${index + 1}. Giống ${"%.0f".format(candidate.similarity * 100)}%",
+                                modifier = Modifier.padding(top = 8.dp),
+                            )
+                            Text("A: ${candidate.first.title}")
+                            Text("B: ${candidate.second.title}")
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                TextButton(
+                                    onClick = {
+                                        val id = candidate.first.id
+                                        draft = draft.filterNot { it.id == id }.mapIndexed { rowIndex, row -> row.copy(orderIndex = rowIndex) }
+                                        duplicateCandidates = duplicateCandidates.filterNot { it.first.id == id || it.second.id == id }
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                ) { Text("XÓA A") }
+                                TextButton(
+                                    onClick = {
+                                        val id = candidate.second.id
+                                        draft = draft.filterNot { it.id == id }.mapIndexed { rowIndex, row -> row.copy(orderIndex = rowIndex) }
+                                        duplicateCandidates = duplicateCandidates.filterNot { it.first.id == id || it.second.id == id }
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                ) { Text("XÓA B") }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showDuplicateDialog = false }) { Text("XONG") }
+            },
+        )
+    }
+
     if (showClearAllConfirm) {
         AlertDialog(
             onDismissRequest = { showClearAllConfirm = false },
@@ -715,6 +826,103 @@ private fun UnifiedAssetActionButton(text: String, onClick: () -> Unit) {
         minHeight = 52.dp,
         modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
     )
+}
+
+
+private data class AudioDuplicateCandidate(
+    val first: SceneMusicTrackEntity,
+    val second: SceneMusicTrackEntity,
+    val similarity: Double,
+)
+
+private data class ExactDuplicatePlan(
+    val kept: List<SceneMusicTrackEntity>,
+    val removed: List<SceneMusicTrackEntity>,
+)
+
+private fun duplicateNameKey(value: String): String = java.text.Normalizer
+    .normalize(
+        value.substringBeforeLast('.', value)
+            .lowercase(java.util.Locale.ROOT)
+            .replace('đ', 'd'),
+        java.text.Normalizer.Form.NFD,
+    )
+    .replace(Regex("\\p{Mn}+"), "")
+    .replace(Regex("[^a-z0-9\\p{IsHan}]+"), " ")
+    .trim()
+    .replace(Regex("\\s+"), " ")
+
+private fun exactDuplicatePlan(rows: List<SceneMusicTrackEntity>): ExactDuplicatePlan {
+    if (rows.size < 2) return ExactDuplicatePlan(rows, emptyList())
+    val kept = mutableListOf<SceneMusicTrackEntity>()
+    val removed = mutableListOf<SceneMusicTrackEntity>()
+    rows.groupBy { duplicateNameKey(it.title) }.values.forEach { group ->
+        if (group.size == 1 || duplicateNameKey(group.first().title).isBlank()) {
+            kept += group
+        } else {
+            val keeper = group.minWithOrNull(
+                compareBy<SceneMusicTrackEntity> {
+                    if (FreesoundImporter.soundIdFromManagedUri(it.uri) == null) 0 else 1
+                }.thenBy { it.orderIndex }.thenBy { it.updatedAt },
+            ) ?: group.first()
+            kept += keeper
+            removed += group.filterNot { it.id == keeper.id }
+        }
+    }
+    val order = rows.withIndex().associate { it.value.id to it.index }
+    return ExactDuplicatePlan(
+        kept = kept.sortedBy { order[it.id] ?: Int.MAX_VALUE },
+        removed = removed,
+    )
+}
+
+private fun nearDuplicateCandidates(rows: List<SceneMusicTrackEntity>): List<AudioDuplicateCandidate> {
+    if (rows.size < 2) return emptyList()
+    val normalized = rows.map { it to duplicateNameKey(it.title) }.filter { it.second.length >= 4 }
+    val out = mutableListOf<AudioDuplicateCandidate>()
+    for (leftIndex in 0 until normalized.lastIndex) {
+        val (left, leftName) = normalized[leftIndex]
+        for (rightIndex in leftIndex + 1 until normalized.size) {
+            val (right, rightName) = normalized[rightIndex]
+            if (leftName == rightName) continue
+            val similarity = duplicateNameSimilarity(leftName, rightName)
+            if (similarity >= 0.82) out += AudioDuplicateCandidate(left, right, similarity)
+        }
+    }
+    return out.sortedByDescending(AudioDuplicateCandidate::similarity).take(60)
+}
+
+private fun duplicateNameSimilarity(left: String, right: String): Double {
+    if (left.isBlank() || right.isBlank()) return 0.0
+    val maxLength = maxOf(left.length, right.length).coerceAtLeast(1)
+    val editSimilarity = 1.0 - duplicateEditDistance(left, right).toDouble() / maxLength.toDouble()
+    val leftTokens = left.split(' ').filter(String::isNotBlank).toSet()
+    val rightTokens = right.split(' ').filter(String::isNotBlank).toSet()
+    val union = leftTokens union rightTokens
+    val tokenSimilarity = if (union.isEmpty()) 0.0 else (leftTokens intersect rightTokens).size.toDouble() / union.size.toDouble()
+    val containment = when {
+        left.length >= 6 && right.contains(left) -> left.length.toDouble() / right.length.toDouble()
+        right.length >= 6 && left.contains(right) -> right.length.toDouble() / left.length.toDouble()
+        else -> 0.0
+    }
+    return maxOf(editSimilarity, tokenSimilarity * 0.96, containment)
+}
+
+private fun duplicateEditDistance(left: String, right: String): Int {
+    var previous = IntArray(right.length + 1) { it }
+    left.forEachIndexed { leftIndex, leftChar ->
+        val current = IntArray(right.length + 1)
+        current[0] = leftIndex + 1
+        right.forEachIndexed { rightIndex, rightChar ->
+            current[rightIndex + 1] = minOf(
+                current[rightIndex] + 1,
+                previous[rightIndex + 1] + 1,
+                previous[rightIndex] + if (leftChar == rightChar) 0 else 1,
+            )
+        }
+        previous = current
+    }
+    return previous[right.length]
 }
 
 private fun libraryTitle(kind: AudioAssetKind): String = when (kind) {

@@ -69,7 +69,7 @@ var PIPELINES=__NATIVE_V2_PIPELINES__;
 var BASE=__NATIVE_V2_BASE__;
 var PERMISSIONS=__NATIVE_V2_PERMISSIONS__;
 var RUNTIME_VERSION=__NATIVE_V2_RUNTIME_VERSION__;
-// NGHETRUYEN_NATIVE_V2_HOST_RUNTIME:2026-08-15.1
+// NGHETRUYEN_NATIVE_V2_HOST_RUNTIME:2026-08-15.2
 var MAX_HOOK_INPUT_BYTES=__NATIVE_V2_MAX_HOOK_INPUT_BYTES__;
 function own(o,k){return Object.prototype.hasOwnProperty.call(o||{},k)}
 function isObj(v){return !!v&&typeof v==="object"&&!Array.isArray(v)}
@@ -523,7 +523,7 @@ function doBrowser(rawSpec,ctx,stage){
   }
   if(spec.wait_url){var foundUrl=browser.waitUrl(asArray(spec.wait_url),Number(spec.wait_timeout||spec.timeout||15000));if(foundUrl){ctx.current_url=String(foundUrl);ctx.vars.current_url=ctx.current_url}}
   if(spec.wait_selector){var foundSelector=browser.waitSelector(asArray(spec.wait_selector),Number(spec.wait_timeout||spec.timeout||15000));if(!foundSelector&&!spec.allow_wait_timeout)fail(stage,"Browser không tìm thấy selector",String(spec.wait_selector));if(foundSelector)ctx.vars.browser_wait=foundSelector}
-  if(spec.wait_request){if(!PERMISSIONS||PERMISSIONS.network_capture!==true)fail(stage,"Nguồn chưa được cấp permissions.network_capture");var foundRequest=browser.waitRequest(asArray(spec.wait_request),Number(spec.wait_timeout||spec.timeout||15000),{method:String(spec.method||spec.wait_method||""),mainFrame:spec.main_frame===true});if(!foundRequest&&!spec.allow_wait_timeout)fail(stage,"Browser không bắt được request",String(spec.wait_request));if(foundRequest){ctx.vars.browser_request=foundRequest;if(spec.use_captured_url===true){ctx.current_url=String(foundRequest.url||ctx.current_url);ctx.vars.current_url=ctx.current_url}}}
+  if(spec.wait_request){if(!PERMISSIONS||PERMISSIONS.network_capture!==true)fail(stage,"Nguồn chưa được cấp permissions.network_capture");var foundRequest=browser.waitRequest(asArray(spec.wait_request),Number(spec.wait_timeout||spec.timeout||15000),{method:String(spec.method||spec.wait_method||""),mainFrame:spec.main_frame===true});if(!foundRequest&&!spec.allow_wait_timeout)fail(stage,"Browser không bắt được request mạng",String(spec.wait_request));if(foundRequest){ctx.vars.browser_request=foundRequest;if(spec.use_captured_url===true){ctx.current_url=String(foundRequest.url||ctx.current_url);ctx.vars.current_url=ctx.current_url}}}
   if(spec.snapshot===true||spec.wait_ms)value=browser.html(Number(spec.wait_ms||0));
  }else if(op==="wait_selector"){
   var selectors=spec.selectors||spec.selector||spec.wait_selector;if(!selectors)fail(stage,"wait_selector cần selectors");value=browser.waitSelector(asArray(selectors),Number(spec.timeout||spec.wait_timeout||15000));if(!value&&!spec.allow_timeout&&!spec.allow_wait_timeout)fail(stage,"Hết thời gian chờ selector",String(selectors));
@@ -538,7 +538,6 @@ function doBrowser(rawSpec,ctx,stage){
    var capture=value;if(Array.isArray(capture))capture=capture.length?capture[capture.length-1]:null;if(!capture||!capture.url)fail(stage,"Không có request đã capture để HTTP handoff");
    var fetchSpec=isObj(spec.fetch)?spec.fetch:{},capturedMethod=String(capture.method||"GET").toUpperCase(),method=String(fetchSpec.method||((capturedMethod==="GET"||capturedMethod==="HEAD")?capturedMethod:"GET")).toUpperCase();
    if(capturedMethod!=="GET"&&capturedMethod!=="HEAD"&&!fetchSpec.method)fail(stage,"Không thể tự replay request "+capturedMethod+" vì WebView không cung cấp request body; hãy khai báo fetch.method/body thủ công");
-   // Ép CookieManager flush/read trước khi chuyển về HTTP; HTTP host dùng cùng cookie jar này.
    try{browser.cookie(String(capture.url))}catch(ignoreCookieHandoff){}
    var headers=capturedHeaders(capture);Object.keys(fetchSpec.headers||{}).forEach(function(k){headers[k]=fetchSpec.headers[k]});
    value=doRequest({id:fetchSpec.id||("browser_capture_"+ctx.operation_count),url:String(capture.url),method:method,headers:headers,body:fetchSpec.body,response:fetchSpec.response||fetchSpec.type||"auto",charset:fetchSpec.charset,timeout:fetchSpec.timeout||30000,retries:fetchSpec.retries||0,allow_http_error:fetchSpec.allow_http_error===true,cookie_mode:fetchSpec.cookie_mode||"shared",replay:spec.replay,replay_key:spec.replay_key},ctx,ctx.operation_count);
@@ -579,7 +578,6 @@ function doBrowser(rawSpec,ctx,stage){
   if(!PERMISSIONS||PERMISSIONS.network_capture!==true)fail(stage,"Nguồn chưa được cấp permissions.network_capture");value=browser.requests({patterns:[],limit:Number(spec.limit||100)}).map(function(x){return x.url});
  }else if(op==="cookies"||op==="cookie"||op==="handoff"){
   var cookieUrl=normalizeUrl(spec.url||ctx.current_url||BASE,ctx.current_url||BASE);value=browser.cookie(cookieUrl);ctx.vars.browser_cookie=value;
-  // HTTP host dùng cùng Android CookieManager, nên request HTTP tiếp theo tự nhận cookie này.
  }else if(op==="block"){
   browser.block(asArray(spec.urls||spec.patterns||spec.block||[]));value=true;
  }else if(op==="close"){
@@ -799,6 +797,7 @@ function Adapter.build(sourceInput, metadata, options)
     [[    var r = NativeV2.run("categories", {input:"", query:"", page:"", url:""});]],
     [[    var list = Array.isArray(r.data) ? r.data : [];]],
     [[    var wanted = String(input || "").trim(), target = wanted;]],
+    [[    if (!wanted) return Response.success(list);]],
     [[    for (var i=0;i<list.length;i++) {]],
     [[      var x=list[i]||{}, title=String(x.title||x.name||"").trim();]],
     [[      var route=String(x.url||x.link||x.input||"").trim();]],
@@ -809,8 +808,6 @@ function Adapter.build(sourceInput, metadata, options)
     "}",
   }, "\n")
 
-  -- SourcePack HOME is a story feed, unlike vBook's home.js menu of shortcut descriptors. Route it
-  -- to the Lua source's real feed action so valid Native results are not normalized to an empty list.
   local homeAction = actions.latest and "latest" or (actions.stories and "stories" or (actions.search and "search" or nil))
   if homeAction then
     files["native_v2_home.js"] = wrapper(homeAction, "input, page", [[{input: input || "", query: input || "", page: page || "", url: input || ""}]])

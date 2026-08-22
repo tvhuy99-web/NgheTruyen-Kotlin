@@ -13,14 +13,17 @@ class FreesoundPlaybackStatusFormatterTest {
     }
 
     @Test
-    fun normalZeroCountsStaySilent() {
-        assertEquals("", FreesoundPlaybackStatusFormatter.format(true, 0, 0, false, true))
+    fun zeroCountsRemainExplicit() {
+        assertEquals(
+            " • 0 tải mới • 0 bộ nhớ tạm",
+            FreesoundPlaybackStatusFormatter.format(true, 0, 0, false, true),
+        )
     }
 
     @Test
     fun abnormalStateRemainsVisible() {
         assertEquals(
-            " • 1 tải mới • còn thiếu",
+            " • 1 tải mới • 0 bộ nhớ tạm • còn thiếu",
             FreesoundPlaybackStatusFormatter.format(true, 1, 0, true, true),
         )
     }

@@ -2032,7 +2032,8 @@ class ReaderPlaybackService : Service() {
                         voiceSettingsReady = configured
                         val musicApplied = hasSceneMusicPlan()
                         val mode3 = StoryAudioModeRouter.usesAiFreesound(storyAudioSourceMode)
-                        val warning = warnings.firstOrNull()?.takeIf(String::isNotBlank)
+                        val issueMessages = NarrationAutomationStatusFormatter.normalizeIssues(warnings)
+                        val firstIssue = issueMessages.firstOrNull()
                         val transferSummary = PlaybackQueueStore.consumeFreesoundTransferSummary(
                             chapterId = snapshot.chapterId,
                             currentDownloadedAssets = planResult?.freesoundDownloadedAssets ?: 0,
@@ -2049,23 +2050,24 @@ class ReaderPlaybackService : Service() {
                                 retryRequired = planResult?.freesoundRetryRequired ?: false,
                                 audioLayersEnabled = mode3 && shouldPlanAutoStoryAudio(),
                                 beginPlayback = true,
-                                warning = warning,
+                                issues = issueMessages,
                             ),
                         )
                         if (mode3) {
                             diagnostic(
                                 "FREESOUND_AUTO_PLAN_APPLIED",
-                                if (planResult?.freesoundRetryRequired == true || warning != null) DiagnosticSeverity.WARN else DiagnosticSeverity.INFO,
+                                if (planResult?.freesoundRetryRequired == true || issueMessages.isNotEmpty()) DiagnosticSeverity.WARN else DiagnosticSeverity.INFO,
                                 mapOf(
                                     "resolvedAssets" to (planResult?.freesoundResolvedAssets ?: 0).toString(),
                                     "retryRequired" to (planResult?.freesoundRetryRequired ?: false).toString(),
                                     "musicApplied" to musicApplied.toString(),
                                     "audioPlanCreated" to (planResult?.audioPlanCreated ?: false).toString(),
-                                    "warning" to warning.orEmpty().take(180),
+                                    "issueCount" to issueMessages.size.toString(),
+                                    "warning" to firstIssue.orEmpty().take(180),
                                 ),
                             )
                         }
-                        transitionMessage = warning?.take(180)
+                        transitionMessage = firstIssue?.take(180)
                         if (configured && pendingPlay) {
                             pendingPlay = false
                             play()
@@ -2097,9 +2099,7 @@ class ReaderPlaybackService : Service() {
                     return@launch
                 }
 
-                val warningSuffix = warnings.firstOrNull()?.takeIf(String::isNotBlank)
-                    ?.let { " ${it.take(120)}" }
-                    .orEmpty()
+                val errorSuffix = NarrationAutomationStatusFormatter.errorReport(warnings)
                 withContext(Dispatchers.Main) {
                     if (PlaybackQueueStore.state.value.chapterId != snapshot.chapterId) return@withContext
                     PlaybackQueueStore.setPlaying(false)
@@ -2107,9 +2107,9 @@ class ReaderPlaybackService : Service() {
                         stage = NarrationAutomationStage.FAILED,
                         progress = 1f,
                         message = if (attempt >= MAX_NARRATION_ATTEMPTS) {
-                            "Phân vai/Mode 3 thất bại sau $MAX_NARRATION_ATTEMPTS lần.$warningSuffix"
+                            "Phân vai/Mode 3 thất bại sau $MAX_NARRATION_ATTEMPTS lần$errorSuffix"
                         } else {
-                            "Chưa chuẩn bị xong. Sẽ thử lại sau 5 giây (lần ${attempt + 1}/$MAX_NARRATION_ATTEMPTS).$warningSuffix"
+                            "Chưa chuẩn bị xong. Sẽ thử lại sau 5 giây (lần ${attempt + 1}/$MAX_NARRATION_ATTEMPTS)$errorSuffix"
                         },
                     )
                     transitionMessage = if (attempt >= MAX_NARRATION_ATTEMPTS) {
@@ -2185,18 +2185,16 @@ class ReaderPlaybackService : Service() {
                     val failed = result == null ||
                         (planVoice && assignmentCount <= 0) ||
                         (StoryAudioModeRouter.usesAiFreesound(storyAudioSourceMode) && result.freesoundRetryRequired)
-                    val warning = result?.warnings?.firstOrNull()?.takeIf(String::isNotBlank)
-                        ?: attempt.exceptionOrNull()?.message
+                    val issueMessages = NarrationAutomationStatusFormatter.normalizeIssues(
+                        result?.warnings.orEmpty() + listOfNotNull(attempt.exceptionOrNull()?.message),
+                    )
                     val mode3 = StoryAudioModeRouter.usesAiFreesound(storyAudioSourceMode)
+                    val issueReport = NarrationAutomationStatusFormatter.errorReport(issueMessages)
                     val baseMessage = when {
-                        result == null -> "Không chuẩn bị AI trước được chương tiếp theo: ${chapter.chapter.title}." +
-                            warning?.let { " • ${it.take(120)}" }.orEmpty()
-                        !planVoice -> "Đã tải xong chương tiếp theo: ${chapter.chapter.title}. Đã chuẩn bị âm thanh AI." +
-                            warning?.let { " • ${it.take(120)}" }.orEmpty()
-                        assignmentCount <= 0 -> "Phân vai trước chưa tạo được mục giọng hợp lệ: ${chapter.chapter.title}." +
-                            warning?.let { " • ${it.take(120)}" }.orEmpty()
-                        failed -> "Phân vai trước chương tiếp theo chưa thành công: ${chapter.chapter.title}." +
-                            warning?.let { " • ${it.take(120)}" }.orEmpty()
+                        result == null -> "Không chuẩn bị AI trước được chương tiếp theo: ${chapter.chapter.title}$issueReport."
+                        !planVoice -> "Đã tải xong chương tiếp theo: ${chapter.chapter.title}. Đã chuẩn bị âm thanh AI$issueReport."
+                        assignmentCount <= 0 -> "Phân vai trước chưa tạo được mục giọng hợp lệ: ${chapter.chapter.title}$issueReport."
+                        failed -> "Phân vai trước chương tiếp theo chưa thành công: ${chapter.chapter.title}$issueReport."
                         else -> NarrationAutomationStatusFormatter.ready(
                             assignmentCount = assignmentCount,
                             resultPresent = true,
@@ -2206,7 +2204,7 @@ class ReaderPlaybackService : Service() {
                             audioLayersEnabled = mode3 && planAudio,
                             prefix = "Đã tải xong chương tiếp theo: ${chapter.chapter.title}",
                             beginPlayback = false,
-                            warning = warning,
+                            issues = issueMessages,
                         )
                     }
                     val downloadedAssets = transferSummary.downloadedAssets
@@ -2220,7 +2218,7 @@ class ReaderPlaybackService : Service() {
                             retryRequired = result.freesoundRetryRequired,
                             audioLayersEnabled = mode3 && planAudio,
                             beginPlayback = false,
-                            warning = warning,
+                            issues = issueMessages,
                         )
                     } else {
                         baseMessage

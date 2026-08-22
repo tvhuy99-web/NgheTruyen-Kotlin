@@ -19,7 +19,7 @@ jobs:
           ref: agent/unified-audio-library-modes
           fetch-depth: 0
 
-      - name: Fix temporary patch marker
+      - name: Fix temporary patch script markers
         shell: bash
         run: |
           python3 - <<'PY'
@@ -28,9 +28,16 @@ jobs:
           t = p.read_text(encoding='utf-8')
           old = 'text = replace_between(text, "    private fun rejectReason(\\n", "    private fun sections(\\n", new_reject, "matcher reject")'
           new = 'text = replace_between(text, "    private fun rejectReason(\\n", "    private fun sections(raw: String): Sections {\\n", new_reject, "matcher reject")'
-          if old not in t:
-              raise SystemExit('temporary matcher marker pattern not found')
-          p.write_text(t.replace(old, new, 1), encoding='utf-8')
+          if old in t:
+              t = t.replace(old, new, 1)
+          start_marker = '# Make remote resolution diagnostic explicitly carry the winning fit.'
+          end_marker = 'resolver = replace_once(\n    resolver,\n    "        private const val REMOTE_MIN_LEXICAL_COVERAGE = 0.50\\n",'
+          start = t.find(start_marker)
+          end = t.find(end_marker, start if start >= 0 else 0)
+          if start < 0 or end < 0:
+              raise SystemExit('temporary remote diagnostic patch block not found')
+          t = t[:start] + t[end:]
+          p.write_text(t, encoding='utf-8')
           PY
 
       - name: Apply Mode 3 fixes

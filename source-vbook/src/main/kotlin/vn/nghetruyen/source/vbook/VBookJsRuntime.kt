@@ -59,6 +59,30 @@ import java.util.Base64
 import java.util.Locale
 import kotlin.math.max
 
+internal fun normalizeVBookChapterParagraphs(html: String): List<String> {
+    if (html.isBlank()) return emptyList()
+    val body = Jsoup.parseBodyFragment(html).body()
+    body.select("script,style,noscript,iframe,template,[hidden],[aria-hidden=true]").remove()
+    body.select("[style]").forEach { element ->
+        val style = element.attr("style").lowercase(Locale.ROOT).replace(Regex("\\s+"), "")
+        val zeroFontSize = Regex("(?:^|;)font-size:0(?:px)?(?:;|$)").containsMatchIn(style)
+        if ("display:none" in style || "visibility:hidden" in style || zeroFontSize) {
+            element.remove()
+        }
+    }
+    body.select("br").forEach { it.after("\n") }
+    body.select("p,div,section,article,blockquote,li,h1,h2,h3,h4,h5,h6").forEach { element ->
+        element.before("\n")
+        element.after("\n")
+    }
+    return body.wholeText()
+        .replace('\r', '\n')
+        .split(Regex("\\n+"))
+        .map { line -> line.replace(Regex("[ \\t]+"), " ").trim() }
+        .filter(String::isNotBlank)
+        .take(20_000)
+}
+
 class VBookJsRuntime(
     private val brokers: SourceCapabilityBrokers = SourceCapabilityBrokers(),
     private val diagnostics: DiagnosticSink = DiagnosticSink.NONE,
@@ -1098,17 +1122,26 @@ class VBookJsRuntime(
 
     private fun normalizeChapterContent(value: JsonValue, url: String): JsonValue {
         val obj = value as? JsonValue.Obj
-        val html = when (value) { is JsonValue.Str -> value.value; is JsonValue.Obj -> value.string("content") ?: value.string("html").orEmpty(); else -> "" }
-        val paragraphs = Jsoup.parseBodyFragment(html).select("p,div,br").mapNotNull { it.text().trim().takeIf(String::isNotBlank) }.ifEmpty {
-            Jsoup.parseBodyFragment(html).text().split(Regex("\\n+|(?<=[.!?])\\s+(?=[A-ZÀ-Ỹ])")).map(String::trim).filter(String::isNotBlank)
-        }.distinct()
+        val explicitParagraphs = obj?.array("paragraphs")?.values.orEmpty().mapNotNull { item ->
+            (item as? JsonValue.Str)?.value?.trim()?.takeIf(String::isNotBlank)
+        }
+        val html = when (value) {
+            is JsonValue.Str -> value.value
+            is JsonValue.Obj -> value.string("content") ?: value.string("html").orEmpty()
+            else -> ""
+        }
+        val paragraphs = explicitParagraphs.ifEmpty { normalizeVBookChapterParagraphs(html) }
         val title = obj?.string("title") ?: obj?.string("name") ?: "Chương"
+        val previousChapterUrl = (obj?.string("previousChapterUrl") ?: obj?.string("prev") ?: obj?.string("previous"))
+            ?.trim()?.takeIf { it.isNotBlank() && !it.equals("NO_PREV", ignoreCase = true) }
+        val nextChapterUrl = (obj?.string("nextChapterUrl") ?: obj?.string("next"))
+            ?.trim()?.takeIf { it.isNotBlank() && !it.equals("NO_NEXT", ignoreCase = true) }
         return JsonValue.Obj(linkedMapOf(
             "id" to JsonValue.Str(stableId(url)), "storyId" to JsonValue.Str(""),
             "index" to JsonValue.Num(0.0, "0"), "title" to JsonValue.Str(title), "url" to JsonValue.Str(url),
             "paragraphs" to JsonValue.Arr(paragraphs.map(JsonValue::Str)),
-            "previousChapterUrl" to (obj?.string("previousChapterUrl")?.let(JsonValue::Str) ?: JsonValue.Null),
-            "nextChapterUrl" to (obj?.string("nextChapterUrl")?.let(JsonValue::Str) ?: JsonValue.Null),
+            "previousChapterUrl" to previousChapterUrl?.let(JsonValue::Str).orNull(),
+            "nextChapterUrl" to nextChapterUrl?.let(JsonValue::Str).orNull(),
         ))
     }
 

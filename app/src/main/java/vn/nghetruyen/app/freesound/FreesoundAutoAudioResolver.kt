@@ -232,11 +232,30 @@ class FreesoundAutoAudioResolver(
     ): SceneMusicTrackEntity? {
         val track = tracks.firstOrNull { it.id == cachedId } ?: return null
         if (!isUsableLibraryTrack(track, need.kind)) return null
-        // Existing managed-Freesound query mappings were already semantically verified by the
-        // remote selector. Preserve them across this upgrade. Local-library mappings are re-scored
-        // so a later description edit can invalidate a stale association automatically.
-        if (isManagedFreesoundTrack(track)) return track
-        return Mode3LibraryAssetMatcher.strongMatch(need, track)?.track
+        val hasLocalContext = need.usages.any { it.localContext.isNotBlank() }
+        if (!hasLocalContext) {
+            // Preserve the pre-context behavior for old cached plans and source-compatible callers.
+            // Existing managed-Freesound mappings were already verified by the unchanged remote
+            // selector; ordinary local mappings still have to satisfy the legacy local matcher.
+            if (isManagedFreesoundTrack(track)) return track
+            return Mode3LibraryAssetMatcher.strongMatch(need, track)?.track
+        }
+
+        val contextualBest = Mode3LibraryAssetMatcher.bestMatch(
+            need = need,
+            tracks = tracks.filter { isUsableLibraryTrack(it, need.kind) },
+        )
+        if (contextualBest != null) {
+            // A 2–3 word query can legitimately appear in different story scenes. The durable
+            // query cache is therefore only a shortcut when its track is still the best contextual
+            // library match for this exact AI-selected usage; otherwise the normal library pass
+            // below replaces the stale mapping without changing the query itself.
+            return track.takeIf { it.id == contextualBest.track.id }
+        }
+
+        // If no local asset is strong enough for the story context, keep reusing an already-downloaded
+        // Freesound result for this unchanged network query. Do not force another network request.
+        return track.takeIf(::isManagedFreesoundTrack)
     }
 
     suspend fun usableLibraryTrackIds(kinds: Set<AudioAssetKind>): Set<String> {

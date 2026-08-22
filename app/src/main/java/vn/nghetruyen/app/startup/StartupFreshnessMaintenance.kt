@@ -67,7 +67,8 @@ class StartupFreshnessMaintenance(
                 ),
             )
 
-            // Keep the listening position/queue, but never restore a scene assignment from an old plan.
+            // Keep reading/checkpoint position, but discard the old playback queue and scene binding.
+            sql.execSQL("DELETE FROM playback_queue_chapters")
             sql.execSQL("UPDATE playback_checkpoint SET activeSceneTrackId = NULL")
         }
 
@@ -225,7 +226,7 @@ internal class LocalAudioAssetStore(context: Context) {
             } else {
                 Result.Imported(Uri.fromFile(target).toString())
             }
-        } catch (_: Throwable) {
+        } catch (_: Exception) {
             temp.delete()
             Result.ExternalImportFailed
         }
@@ -247,7 +248,7 @@ internal class LocalAudioAssetStore(context: Context) {
             ?.takeIf { it.matches(Regex("[a-z0-9]{1,8}")) }
         if (!nameExtension.isNullOrBlank()) return nameExtension
         return mimeType
-            ?.let(MimeTypeMap.getSingleton()::getExtensionFromMimeType)
+            ?.let { type -> MimeTypeMap.getSingleton().getExtensionFromMimeType(type) }
             ?.trim()
             ?.lowercase()
             ?.takeIf { it.matches(Regex("[a-z0-9]{1,8}")) }

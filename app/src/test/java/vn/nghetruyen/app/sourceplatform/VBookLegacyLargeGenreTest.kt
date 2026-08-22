@@ -14,7 +14,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import vn.nghetruyen.app.core.common.AppResult
+import vn.nghetruyen.source.api.JsonValue
+import vn.nghetruyen.source.api.SourceActionResponse
 import vn.nghetruyen.source.api.SourceCapabilityBrokers
+import vn.nghetruyen.source.api.SourcePlatformResult
+import vn.nghetruyen.source.vbook.VBookActionRuntime
 import vn.nghetruyen.source.vbook.VBookActionRuntimeRegistry
 import java.io.ByteArrayOutputStream
 import java.util.zip.ZipEntry
@@ -22,7 +26,7 @@ import java.util.zip.ZipOutputStream
 
 class VBookLegacyLargeGenreTest {
     @Before
-    fun usePortableVBookRuntime() {
+    fun clearPlatformVBookRuntime() {
         VBookActionRuntimeRegistry.clear()
     }
 
@@ -33,6 +37,42 @@ class VBookLegacyLargeGenreTest {
 
     @Test
     fun legacyChineseNovelGenreWithHundredsOfDynamicActionsIsVisible() = runTest {
+        assertLargeGenreMenu(source())
+    }
+
+    @Test
+    fun legacyGenreBypassesInstalledPlatformRuntimeBeforeExecution() = runTest {
+        var platformCalls = 0
+        VBookActionRuntimeRegistry.install { _, _ ->
+            VBookActionRuntime { _, _, request ->
+                platformCalls += 1
+                SourcePlatformResult.Success(
+                    SourceActionResponse(
+                        value = JsonValue.Obj(linkedMapOf(
+                            "__ngheVBookRawResult" to JsonValue.Str("{\"code\":200,\"data\":[]}"),
+                        )),
+                        traceId = request.traceId,
+                        instructionCount = 0,
+                    ),
+                )
+            }
+        }
+
+        assertLargeGenreMenu(source())
+        assertEquals(0, platformCalls)
+    }
+
+    private fun assertLargeGenreMenu(source: VBookStorySource) {
+        assertTrue(source.descriptor.supportsGenre)
+        val menu = source.genreMenu().requireSuccess("genre menu")
+        assertEquals(360, menu.value.size)
+        assertEquals("Fanqie Tuần", menu.value.first().label)
+        assertTrue(menu.value.first().selectable)
+        assertEquals("————", menu.value.last().label)
+        assertFalse(menu.value.last().selectable)
+    }
+
+    private fun source(): VBookStorySource {
         val zip = packageZip()
         val identity = SourceArtifactIdentity(SourceEcosystem.VBOOK, "fixture-repo", "legacy-large-genre/plugin.zip")
         val artifact = SourceArtifactLifecycle.candidate(
@@ -44,15 +84,7 @@ class VBookLegacyLargeGenreTest {
             trust = SourceTrustState.REPOSITORY_TRUSTED,
             installedAtEpochMs = 1,
         ).copy(state = SourceArtifactState.ACTIVE, activatedAtEpochMs = 2)
-        val source = VBookStorySource(artifact, zip, SourceCapabilityBrokers())
-
-        assertTrue(source.descriptor.supportsGenre)
-        val menu = source.genreMenu().requireSuccess("genre menu")
-        assertEquals(360, menu.value.size)
-        assertEquals("Fanqie Tuần", menu.value.first().label)
-        assertTrue(menu.value.first().selectable)
-        assertEquals("————", menu.value.last().label)
-        assertFalse(menu.value.last().selectable)
+        return VBookStorySource(artifact, zip, SourceCapabilityBrokers())
     }
 
     private fun <T> AppResult<T>.requireSuccess(label: String): AppResult.Success<T> = when (this) {

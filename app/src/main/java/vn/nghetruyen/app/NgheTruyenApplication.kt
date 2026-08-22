@@ -3,10 +3,7 @@ package vn.nghetruyen.app
 import android.app.Application
 import android.util.Log
 import android.webkit.WebView
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import vn.nghetruyen.app.ai.vietphrase.ReferenceVietPhraseRuntime
 import vn.nghetruyen.app.audio.AudioDirectionPreferences
@@ -33,7 +30,6 @@ class NgheTruyenApplication : Application() {
     val container: AppContainer by lazy { AppContainer(this) }
     private val chromiumRuntimeLock = Any()
     private val chromiumRuntimes = IdentityHashMap<Any, VBookActionRuntime>()
-    private val startupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var audioDirectionRuntime: AudioDirectionRuntime? = null
 
     override fun onCreate() {
@@ -45,18 +41,15 @@ class NgheTruyenApplication : Application() {
             settingsRepository = container.settingsRepository,
         )
         runCatching {
-            // Finish the destructive part before any service/runtime can hydrate old chapter plans.
-            runBlocking(Dispatchers.IO) { freshnessMaintenance.clearTransientState() }
+            // Both operations are completed before any playback/audio runtime can hydrate state.
+            // This makes a successful migration a hard boundary: once the UI is available, legacy
+            // Download/content:// audio no longer needs its external source file.
+            runBlocking(Dispatchers.IO) {
+                freshnessMaintenance.clearTransientState()
+                freshnessMaintenance.internalizeLegacyLocalAudio()
+            }
         }.onFailure { error ->
-            Log.w(STARTUP_TAG, "Không xóa hết cache/phân vai cũ lúc khởi động.", error)
-        }
-        // User audio may be large. Copy it off the main thread; DB rows keep working with their old
-        // persisted URI until each successful copy atomically replaces that URI.
-        startupScope.launch {
-            runCatching { freshnessMaintenance.internalizeLegacyLocalAudio() }
-                .onFailure { error ->
-                    Log.w(STARTUP_TAG, "Không nhập hết âm thanh cục bộ vào kho nội bộ.", error)
-                }
+            Log.w(STARTUP_TAG, "Bảo trì dữ liệu lúc khởi động chưa hoàn tất.", error)
         }
 
         registerActivityLifecycleCallbacks(DiagnosticScreenRestoreLifecycleCallbacks())

@@ -16,21 +16,33 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: fix/freesound-latency-status-cloudflare
-      - name: Inspect targets
+      - name: Inspect exact targets
         run: |
           set -euxo pipefail
-          echo '=== CACHE / READER ==='
-          grep -R -n --exclude-dir=.git -E 'READER_SCREEN_READY|fromCache|paragraphCount|chapterCache|ChapterCache|cached.*chapter|chapter.*cache' app/src/main/java | head -n 500 || true
-          echo '=== PERSISTENT / CRITICAL ==='
-          grep -R -n --exclude-dir=.git -E 'persistentInstallFailure|persistent.*critical|Persistent.*Failure|FREESOUND_IMPORT_FAILED|alwaysMirror|shouldRetainWhenDiagnosticsOff' app source-* | head -n 700 || true
-          echo '=== DATA LOSS ==='
-          grep -R -n --exclude-dir=.git -E 'eventsReportingDroppedData|logArgumentsDropped|data_loss|droppedData|DroppedData' app source-* | head -n 700 || true
-          echo '=== STORY ID / TOC NORMALIZATION ==='
-          grep -R -n --exclude-dir=.git -E 'stableId\(storyUrl|storyId|normalizeChapter\(|TOC_PAGES|chapters\(' source-vbook app/src/main/java/vn/nghetruyen/app/sourceplatform | head -n 700 || true
-          echo '=== TRUYENFULL NATIVE LUA RELEVANT ==='
-          cp app/src/main/assets/source-lua/nguon_truyenfull_native.lua.gz.gz /tmp/source.gz.gz
-          gzip -dc /tmp/source.gz.gz > /tmp/source.gz
-          gzip -dc /tmp/source.gz > /tmp/source.lua
-          sed -n '40,90p' /tmp/source.lua
-          sed -n '270,430p' /tmp/source.lua
-          sed -n '415,510p' /tmp/source.lua
+          echo '=== LibraryRepository loadCachedChapter ==='
+          f=app/src/main/java/vn/nghetruyen/app/data/repository/LibraryRepository.kt
+          grep -n 'loadCachedChapter' "$f" || true
+          line=$(grep -n 'loadCachedChapter' "$f" | head -1 | cut -d: -f1 || true); if [ -n "$line" ]; then sed -n "$((line-35)),$((line+65))p" "$f"; fi
+          echo '=== AppViewModel open chapter ==='
+          sed -n '2600,2735p' app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt
+          echo '=== SourceDiagnosticRuntime critical store/policy/export ==='
+          sed -n '1,180p' app/src/main/java/vn/nghetruyen/app/sourceplatform/SourceDiagnosticRuntime.kt
+          sed -n '280,410p' app/src/main/java/vn/nghetruyen/app/sourceplatform/SourceDiagnosticRuntime.kt
+          sed -n '455,510p' app/src/main/java/vn/nghetruyen/app/sourceplatform/SourceDiagnosticRuntime.kt
+          echo '=== PersistentCriticalDiagnosticPolicy ==='
+          grep -R -n -A120 -B20 'object PersistentCriticalDiagnosticPolicy\|class PersistentCriticalDiagnosticPolicy' app/src/main/java app/src/test || true
+          echo '=== DiagnosticDeepBlackBox data loss ==='
+          sed -n '220,285p' app/src/main/java/vn/nghetruyen/app/sourceplatform/DiagnosticDeepBlackBox.kt
+          echo '=== SourcePackStorySource paging ==='
+          sed -n '315,375p' app/src/main/java/vn/nghetruyen/app/sourceplatform/SourcePackStorySource.kt
+          sed -n '480,535p' app/src/main/java/vn/nghetruyen/app/sourceplatform/SourcePackStorySource.kt
+          sed -n '560,600p' app/src/main/java/vn/nghetruyen/app/sourceplatform/SourcePackStorySource.kt
+          echo '=== VBookJsRuntime TOC storyId ==='
+          sed -n '980,1020p' source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt
+          sed -n '1105,1148p' source-vbook/src/main/kotlin/vn/nghetruyen/source/vbook/VBookJsRuntime.kt
+          echo '=== Native source relevant ==='
+          gzip -dc app/src/main/assets/source-lua/nguon_truyenfull_native.lua.gz.gz > /tmp/a.gz
+          gzip -dc /tmp/a.gz > /tmp/source.lua
+          sed -n '45,65p' /tmp/source.lua
+          sed -n '345,420p' /tmp/source.lua
+          sed -n '390,425p' /tmp/source.lua

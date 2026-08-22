@@ -11,7 +11,7 @@ import java.nio.charset.StandardCharsets
  */
 object XpkVoiceCastSplitter {
     const val NARRATOR_ID: String = "voice_narrator"
-    const val ENGINE_VERSION: Int = 8
+    const val ENGINE_VERSION: Int = 9
 
     data class Unit(
         val id: String,
@@ -56,6 +56,7 @@ object XpkVoiceCastSplitter {
         val colonEndExclusive: Int,
         val prefix: String,
     )
+    private data class DashChunk(val text: String, val dialogue: Boolean)
 
     private val quotes = listOf(
         QuotePair("“", "”"),
@@ -135,6 +136,15 @@ object XpkVoiceCastSplitter {
         if (value.isEmpty()) return initialCounter
         var unitCounter = initialCounter
         if (metadata.forceDialogue) {
+            if (quoteContent(value).isEmpty()) return unitCounter
+            if (looksLikeDashQuotedThought(value, metadata)) {
+                return appendSized(
+                    out, value, paragraphIndex, unitCounter, 1200,
+                    narrationMetadata(metadata, "inner_thought").copy(
+                        parsingNote = "Dòng gạch đầu dòng được bọc bằng cặp ngoặc kép mở kiểu truyện web; giữ là nội tâm thay vì gán giọng nhân vật.",
+                    ),
+                )
+            }
             val narrationReason = quoteNarrationReason(value, metadata.contextBefore, metadata.contextAfter)
             if (narrationReason != null) {
                 return appendSized(
@@ -244,47 +254,87 @@ object XpkVoiceCastSplitter {
     }
 
     private fun splitDashDialogue(out: MutableList<Unit>, paragraph: String, paragraphIndex: Int): Boolean {
-        if (!Regex("^\\s*[—–-]\\s+").containsMatchIn(paragraph)) return false
-        val delimiters = listOf(" — ", " – ", " - ")
-        val parts = mutableListOf<String>()
-        var start = 0
-        while (true) {
-            var bestStart = -1
-            var bestEnd = -1
-            for (delimiter in delimiters) {
-                val found = paragraph.indexOf(delimiter, start)
-                if (found >= 0 && (bestStart < 0 || found < bestStart)) {
-                    bestStart = found
-                    bestEnd = found + delimiter.length
-                }
-            }
-            if (bestStart < 0) {
-                parts += paragraph.substring(start)
-                break
-            }
-            parts += paragraph.substring(start, bestStart)
-            start = bestEnd
+        val leadingDash = Regex("^\\s*[—–-]\\s+").find(paragraph) ?: return false
+        val chunks = mutableListOf<DashChunk>()
+        var currentDialogue = true
+        var chunkStart = 0
+        var index = leadingDash.range.last + 1
+
+        fun appendChunk(endExclusive: Int) {
+            val text = paragraph.substring(chunkStart, endExclusive).trim()
+            if (text.isNotEmpty()) chunks += DashChunk(text, currentDialogue)
         }
+
+        while (index < paragraph.length) {
+            when {
+                isCompactDashDialogueRestart(paragraph, index) -> {
+                    appendChunk(index)
+                    currentDialogue = true
+                    chunkStart = index
+                    index += 1
+                }
+                isSpacedDashDelimiter(paragraph, index) -> {
+                    appendChunk(index)
+                    currentDialogue = !currentDialogue
+                    index += 1
+                    while (index < paragraph.length && paragraph[index].isWhitespace()) index += 1
+                    chunkStart = index
+                }
+                else -> index += 1
+            }
+        }
+        appendChunk(paragraph.length)
+
         var counter = 0
-        parts.forEachIndexed { index, part ->
-            counter = if (index % 2 == 0) {
+        chunks.forEachIndexed { chunkIndex, chunk ->
+            counter = if (chunk.dialogue) {
                 splitQuoteAware(
-                    out, part, paragraphIndex, counter,
+                    out, chunk.text, paragraphIndex, counter,
                     Metadata(
                         forceDialogue = true,
-                        contextBefore = parts.getOrNull(index - 1),
-                        contextAfter = parts.getOrNull(index + 1),
+                        contextBefore = chunks.getOrNull(chunkIndex - 1)?.text,
+                        contextAfter = chunks.getOrNull(chunkIndex + 1)?.text,
                         dashDialogue = true,
                     ),
                 )
             } else {
                 splitQuoteAware(
-                    out, part, paragraphIndex, counter,
+                    out, chunk.text, paragraphIndex, counter,
                     Metadata(forceNarration = true, unitKind = "narration"),
                 )
             }
         }
         return true
+    }
+
+    private fun isCompactDashDialogueRestart(value: String, index: Int): Boolean {
+        if (index <= 0 || index >= value.length || value[index] != '-') return false
+        if (value[index - 1].isWhitespace()) return false
+        var cursor = index - 1
+        while (cursor >= 0 && value[cursor] in listOf('”', '\"', '’', '」', '』', ')', ']', '}')) cursor -= 1
+        val previous = value.getOrNull(cursor) ?: return false
+        return previous in listOf('.', '!', '?', '…', '。', '！', '？')
+    }
+
+    private fun isSpacedDashDelimiter(value: String, index: Int): Boolean {
+        if (index <= 0 || index + 1 >= value.length) return false
+        if (value[index] !in listOf('—', '–', '-')) return false
+        return value[index - 1].isWhitespace() && value[index + 1].isWhitespace()
+    }
+
+    private fun looksLikeDashQuotedThought(value: String, metadata: Metadata): Boolean {
+        if (!metadata.dashDialogue) return false
+        var trimmed = value.trim()
+        if (trimmed.firstOrNull() in listOf('-', '—', '–')) trimmed = trimmed.drop(1).trim()
+        if (trimmed.length < 2) return false
+        val malformedCurlyThought = trimmed.startsWith("“") && trimmed.endsWith("“")
+        if (malformedCurlyThought) return true
+        val thoughtContext = containsThoughtCue(metadata.contextBefore.orEmpty()) ||
+            containsThoughtCue(metadata.contextAfter.orEmpty())
+        if (!thoughtContext) return false
+        return (trimmed.startsWith("“") && trimmed.endsWith("”")) ||
+            (trimmed.startsWith("\"") && trimmed.endsWith("\"")) ||
+            (trimmed.startsWith("‘") && trimmed.endsWith("’"))
     }
 
     private fun splitColonDialogue(out: MutableList<Unit>, paragraph: String, paragraphIndex: Int): Boolean {
@@ -514,7 +564,6 @@ object XpkVoiceCastSplitter {
             val supersededBySpeech = speech != null && speech.first > narration.second
             if (closeEnough && !supersededBySpeech) return true
         }
-        // XPK currently keeps QUOTED_NARRATION_AFTER_CUES empty, so afterText is reserved for parity.
         @Suppress("UNUSED_VARIABLE") val reservedAfterText = afterText
         return false
     }

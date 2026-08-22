@@ -14,7 +14,7 @@ import vn.nghetruyen.source.packagekit.VerifiedSourcePack
  * and regenerates only host-owned src/native_v2_* resources in memory.
  */
 object NativeLuaRuntimeOverlay {
-    const val HOST_RUNTIME_MARKER = "NGHETRUYEN_NATIVE_V2_HOST_RUNTIME:2026-08-15.1"
+    const val HOST_RUNTIME_MARKER = "NGHETRUYEN_NATIVE_V2_HOST_RUNTIME:2026-08-15.2"
     private const val CORE_PATH = "src/native_v2_core.js"
     private const val SOURCE_PATH = "native/source.lua"
     private const val MODULE_INDEX_PATH = "data/native-module-index.json"

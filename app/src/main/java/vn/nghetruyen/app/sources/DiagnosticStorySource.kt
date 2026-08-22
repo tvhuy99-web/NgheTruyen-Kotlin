@@ -62,6 +62,10 @@ internal class DiagnosticStorySource(
         attributes = mapOf("page" to page.toString()),
     ) { delegate.home(page) }
 
+    override suspend fun genreMenu(): AppResult<List<SourceBrowseEntry>> = trace(
+        action = "GENRE",
+    ) { delegate.genreMenu() }
+
     override suspend fun suggestions(query: String): AppResult<List<String>> = trace(
         action = "SUGGESTIONS",
         attributes = mapOf("queryLength" to query.length.toString()),
@@ -283,6 +287,7 @@ internal object ExploreDiagnosticScreenContext {
     fun target(sourceId: String, action: String, category: String? = null): String? {
         val mode = when (action.uppercase()) {
             "HOME" -> "HOME"
+            "GENRE" -> "GENRE"
             "SEARCH" -> "SEARCH"
             "CATEGORY" -> "CATEGORY"
             else -> return null

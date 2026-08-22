@@ -150,11 +150,44 @@ private class DeferredStartupStorySource(
     override suspend fun home(page: Int): AppResult<List<StorySummary>> =
         resolver()?.home(page) ?: AppResult.Success(emptyList())
 
+    override suspend fun genreMenu() =
+        resolver()?.genreMenu() ?: AppResult.Success(
+            descriptor.categories.map { category -> SourceBrowseEntry(key = category, label = category) },
+        )
+
+    override suspend fun suggestions(query: String) =
+        resolver()?.suggestions(query) ?: AppResult.Success(emptyList())
+
     override suspend fun story(url: String): AppResult<StoryDetail> =
-        resolver()?.story(url) ?: AppResult.Failure("SOURCE_STARTUP_DEFERRED", "Nguồn chưa sẵn sàng sau khi khởi động.")
+        resolver()?.story(url) ?: unavailable()
 
     override suspend fun chapter(url: String): AppResult<ChapterContent> =
-        resolver()?.chapter(url) ?: AppResult.Failure("SOURCE_STARTUP_DEFERRED", "Nguồn chưa sẵn sàng sau khi khởi động.")
+        resolver()?.chapter(url) ?: unavailable()
+
+    override suspend fun comments(url: String) =
+        resolver()?.comments(url) ?: unavailable()
+
+    override suspend fun commentsPage(url: String) =
+        resolver()?.commentsPage(url) ?: unavailable()
+
+    override suspend fun runUiAction(
+        actionId: String,
+        surface: SourceUiSurface,
+        currentUrl: String?,
+        storyId: String?,
+        chapterId: String?,
+    ) = resolver()?.runUiAction(actionId, surface, currentUrl, storyId, chapterId) ?: unavailable()
+
+    override suspend fun latestChapter(url: String) =
+        resolver()?.latestChapter(url) ?: unavailable()
+
+    override suspend fun chapterPage(storyId: String, url: String, startIndex: Int) =
+        resolver()?.chapterPage(storyId, url, startIndex) ?: unavailable()
+
+    private fun <T> unavailable(): AppResult<T> = AppResult.Failure(
+        "SOURCE_STARTUP_DEFERRED",
+        "Nguồn chưa sẵn sàng sau khi khởi động.",
+    )
 }
 
 private fun StorySource.withExecutionAndDiagnostics(diagnostics: SourceDiagnosticRuntime?): StorySource {
@@ -186,6 +219,7 @@ private class IoBoundVBookStorySource(
     override suspend fun story(url: String) = onIo { delegate.story(url) }
     override suspend fun chapter(url: String) = onIo { delegate.chapter(url) }
     override suspend fun home(page: Int) = onIo { delegate.home(page) }
+    override suspend fun genreMenu() = onIo { delegate.genreMenu() }
     override suspend fun suggestions(query: String) = onIo { delegate.suggestions(query) }
     override suspend fun comments(url: String) = onIo { delegate.comments(url) }
     override suspend fun commentsPage(url: String) = onIo { delegate.commentsPage(url) }

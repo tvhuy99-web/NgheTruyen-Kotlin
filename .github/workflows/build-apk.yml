@@ -49,11 +49,18 @@ jobs:
           chmod +x gradlew scripts/bootstrap-wrapper.sh
           ./scripts/bootstrap-wrapper.sh
 
-      - name: Run targeted vBook routing tests
-        run: >-
-          ./gradlew --no-daemon --stacktrace
-          :source-vbook:test
-          --tests vn.nghetruyen.source.vbook.PrimaryFallbackVBookActionRuntimeTest
+      - name: Run targeted source routing tests
+        shell: bash
+        run: |
+          ./gradlew --no-daemon --stacktrace \
+            :source-vbook:test \
+            --tests vn.nghetruyen.source.vbook.PrimaryFallbackVBookActionRuntimeTest
+          ./gradlew --no-daemon --stacktrace \
+            :app:testDebugUnitTest \
+            --tests vn.nghetruyen.app.sourceplatform.VBookLegacyLargeGenreTest \
+            --tests vn.nghetruyen.app.sources.DefaultLuaSourceAliasTest \
+            --tests vn.nghetruyen.app.sources.DiagnosticStorySourceGenreContractTest \
+            --tests vn.nghetruyen.app.sources.ExploreDiagnosticScreenContextTest
 
       - name: Build debug APK
         run: ./gradlew --no-daemon --stacktrace :app:assembleDebug

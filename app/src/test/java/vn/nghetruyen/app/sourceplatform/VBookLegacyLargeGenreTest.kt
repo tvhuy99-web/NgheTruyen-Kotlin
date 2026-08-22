@@ -14,6 +14,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import vn.nghetruyen.app.core.common.AppResult
+import vn.nghetruyen.app.sources.SourceRegistry
+import vn.nghetruyen.app.sources.StorySource
 import vn.nghetruyen.source.api.JsonValue
 import vn.nghetruyen.source.api.SourceActionResponse
 import vn.nghetruyen.source.api.SourceCapabilityBrokers
@@ -41,6 +43,18 @@ class VBookLegacyLargeGenreTest {
     }
 
     @Test
+    fun registryIoBoundaryPreservesLargeDynamicGenreMenu() = runTest {
+        val raw = source()
+        val registry = SourceRegistry(
+            sources = emptyList(),
+            sourcePackSources = listOf(raw),
+        )
+        val wrapped = requireNotNull(registry.get(raw.descriptor.id))
+
+        assertLargeGenreMenu(wrapped)
+    }
+
+    @Test
     fun legacyGenreBypassesInstalledPlatformRuntimeBeforeExecution() = runTest {
         var platformCalls = 0
         VBookActionRuntimeRegistry.install { _, _ ->
@@ -62,7 +76,7 @@ class VBookLegacyLargeGenreTest {
         assertEquals(0, platformCalls)
     }
 
-    private suspend fun assertLargeGenreMenu(source: VBookStorySource) {
+    private suspend fun assertLargeGenreMenu(source: StorySource) {
         assertTrue(source.descriptor.supportsGenre)
         val menu = source.genreMenu().requireSuccess("genre menu")
         assertEquals(360, menu.value.size)

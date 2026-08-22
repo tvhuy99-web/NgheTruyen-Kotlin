@@ -241,8 +241,8 @@ class FreesoundImporter(
                 .build()
 
             val boundedClient = httpClient.newBuilder()
-                .connectTimeout(minOf(8_000L, callTimeoutMs).coerceAtLeast(500L), TimeUnit.MILLISECONDS)
-                .readTimeout(minOf(10_000L, callTimeoutMs).coerceAtLeast(500L), TimeUnit.MILLISECONDS)
+                .connectTimeout(minOf(15_000L, callTimeoutMs).coerceAtLeast(500L), TimeUnit.MILLISECONDS)
+                .readTimeout(callTimeoutMs.coerceAtLeast(500L), TimeUnit.MILLISECONDS)
                 .callTimeout(callTimeoutMs.coerceAtLeast(500L), TimeUnit.MILLISECONDS)
                 .build()
             boundedClient.newCall(request).execute().use { response ->
@@ -409,8 +409,8 @@ class FreesoundImporter(
         private const val UNKNOWN_LENGTH_REQUIRED_BYTES = 12L * 1024L * 1024L
         private const val NORMALIZATION_POLL_MS = 120L
         private const val DOWNLOAD_BUFFER_BYTES = 64 * 1024
-        internal const val PREVIEW_IMPORT_BUDGET_MS = 15_000L
-        private const val PER_PREVIEW_MAX_CALL_MS = 12_000L
+        internal const val PREVIEW_IMPORT_BUDGET_MS = 60_000L
+        private const val PER_PREVIEW_MAX_CALL_MS = 60_000L
         private const val MIN_PREVIEW_ATTEMPT_MS = 800L
         private const val NORMALIZATION_TIMEOUT_MS = 10L * 60L * 1_000L
         private const val STALE_PART_AGE_MS = 15L * 60L * 1_000L
@@ -583,9 +583,9 @@ class FreesoundImporter(
         }
 
         private fun defaultHttpClient(): OkHttpClient = OkHttpClient.Builder()
-            .connectTimeout(8, TimeUnit.SECONDS)
-            .readTimeout(20, TimeUnit.SECONDS)
-            .callTimeout(30, TimeUnit.SECONDS)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .callTimeout(60, TimeUnit.SECONDS)
             .build()
     }
 }

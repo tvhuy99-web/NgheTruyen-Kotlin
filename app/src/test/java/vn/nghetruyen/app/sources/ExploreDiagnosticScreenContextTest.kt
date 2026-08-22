@@ -33,6 +33,28 @@ class ExploreDiagnosticScreenContextTest {
     }
 
     @Test
+    fun genreUsesDedicatedExploreSession() {
+        assertTrue(
+            ExploreDiagnosticScreenContext.shouldActivate(
+                currentScreen = "explore:fiveinone:HOME:",
+                sourceId = "fiveinone",
+                action = "GENRE",
+            ),
+        )
+        assertEquals(
+            "explore:fiveinone:GENRE:",
+            ExploreDiagnosticScreenContext.target("fiveinone", "GENRE"),
+        )
+        assertFalse(
+            ExploreDiagnosticScreenContext.shouldActivate(
+                currentScreen = "explore:fiveinone:GENRE:",
+                sourceId = "fiveinone",
+                action = "GENRE",
+            ),
+        )
+    }
+
+    @Test
     fun singleSourceSearchPromotesHomeToSearch() {
         assertTrue(
             ExploreDiagnosticScreenContext.shouldActivate(

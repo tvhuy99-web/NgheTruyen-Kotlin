@@ -254,11 +254,27 @@ object DiagnosticDeepBlackBox {
                 key.contains("truncat", true) && value.equals("true", true)
             }
         })
-        put("eventsReportingDroppedData", events.count { event ->
-            event.attributes.keys.any { key -> key.contains("drop", true) || key.contains("evict", true) || key.contains("reject", true) }
-        })
-        put("lossVisible", recorderStats.evictedEvents > 0 || evidenceStats.evictedItems > 0 || evidenceStats.truncatedItems > 0)
+        val eventsReportingDroppedData = events.count(::reportsDroppedData)
+        put("eventsReportingDroppedData", eventsReportingDroppedData)
+        put(
+            "lossVisible",
+            recorderStats.evictedEvents > 0 || evidenceStats.evictedItems > 0 ||
+                evidenceStats.truncatedItems > 0 || eventsReportingDroppedData > 0,
+        )
     }.toString(2)
+
+    private fun reportsDroppedData(event: DiagnosticEvent): Boolean = event.attributes.any { (key, rawValue) ->
+        if (!key.contains("drop", true) && !key.contains("evict", true) && !key.contains("reject", true)) {
+            return@any false
+        }
+        val value = rawValue.trim()
+        value.toLongOrNull()?.let { return@any it > 0L }
+        when (value.lowercase(Locale.ROOT)) {
+            "", "0", "false", "no", "none", "null" -> false
+            "true", "yes" -> true
+            else -> true
+        }
+    }
 
     private fun flowLogs(events: List<DiagnosticEvent>): Map<String, String> = events
         .groupBy(::flow)

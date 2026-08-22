@@ -715,12 +715,17 @@ internal object PersistentCriticalDiagnosticPolicy {
         if (isObsolete(event)) return false
         if (event.severity !in setOf(DiagnosticSeverity.ERROR, DiagnosticSeverity.WARN)) return false
         val name = event.name.uppercase()
-        return event.category in setOf(
+        val durableCategory = event.category in setOf(
             DiagnosticCategory.PACKAGE,
             DiagnosticCategory.TRUST,
             DiagnosticCategory.STORE,
             DiagnosticCategory.SECURITY,
-        ) || listOf("INSTALL", "IMPORT", "PACKAGE", "REPOSITORY").any(name::contains)
+        )
+        // Runtime operations can legitimately contain words such as IMPORT (for example
+        // FREESOUND_IMPORT_FAILED). They are session diagnostics, not durable install failures.
+        val sourceLifecycleFailure = name.startsWith("SOURCE_") &&
+            listOf("INSTALL", "IMPORT", "PACKAGE", "REPOSITORY").any(name::contains)
+        return durableCategory || sourceLifecycleFailure
     }
 
     fun isObsolete(event: DiagnosticEvent): Boolean =
@@ -770,8 +775,8 @@ private class CriticalDiagnosticStore(context: Context) : DiagnosticSink {
     private fun purgeObsoleteEvents() = synchronized(lock) {
         if (!eventFile.isFile) return@synchronized
         val existing = eventFile.useLines { it.toList() }
-        val retained = existing.filterNot { line ->
-            parseDiagnosticEventLine(line)?.let(PersistentCriticalDiagnosticPolicy::isObsolete) == true
+        val retained = existing.filter { line ->
+            parseDiagnosticEventLine(line)?.let(PersistentCriticalDiagnosticPolicy::shouldPersist) == true
         }
         if (retained.size != existing.size) rewrite(retained.takeLast(MAX_EVENTS))
     }

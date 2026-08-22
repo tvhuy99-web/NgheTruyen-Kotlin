@@ -990,6 +990,7 @@ class VBookJsRuntime(
                 request.input.string("url").orEmpty(),
             ) ?: JsonValue.Null
             SourceActionName.TOC, SourceActionName.TOC_PAGES -> {
+                val canonicalStoryId = request.input.string("storyId").orEmpty()
                 val rawItems = when (unwrapped) {
                     is JsonValue.Arr -> unwrapped.values
                     is JsonValue.Obj -> unwrapped.array("chapters")?.values
@@ -1000,7 +1001,7 @@ class VBookJsRuntime(
                 }
                 JsonValue.Obj(linkedMapOf(
                     "chapters" to JsonValue.Arr(rawItems.mapIndexedNotNull { index, value ->
-                        normalizeChapter(value, index, request.input.string("url").orEmpty())
+                        normalizeChapter(value, index, request.input.string("url").orEmpty(), canonicalStoryId)
                     }),
                     "nextPageUrl" to (responseData2
                         ?: (unwrapped as? JsonValue.Obj)?.string("nextPageUrl")
@@ -1110,12 +1111,12 @@ class VBookJsRuntime(
         return JsonValue.Arr(comments)
     }
 
-    private fun normalizeChapter(value: JsonValue, index: Int, storyUrl: String): JsonValue.Obj? {
+    private fun normalizeChapter(value: JsonValue, index: Int, storyUrl: String, canonicalStoryId: String = ""): JsonValue.Obj? {
         val obj = value as? JsonValue.Obj ?: return null
         val url = absoluteUrl(obj.string("host"), obj.string("url") ?: obj.string("link")) ?: return null
         val title = obj.string("title") ?: obj.string("name") ?: "Chương ${index + 1}"
         return JsonValue.Obj(linkedMapOf(
-            "id" to JsonValue.Str(stableId(url)), "storyId" to JsonValue.Str(stableId(storyUrl)),
+            "id" to JsonValue.Str(stableId(url)), "storyId" to JsonValue.Str(canonicalStoryId.ifBlank { stableId(storyUrl) }),
             "index" to JsonValue.Num(index.toDouble(), index.toString()), "title" to JsonValue.Str(title), "url" to JsonValue.Str(url),
         ))
     }

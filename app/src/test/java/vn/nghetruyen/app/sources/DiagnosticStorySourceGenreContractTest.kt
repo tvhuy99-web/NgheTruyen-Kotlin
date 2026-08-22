@@ -1,17 +1,22 @@
 package vn.nghetruyen.app.sources
 
-import kotlin.coroutines.Continuation
-import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DiagnosticStorySourceGenreContractTest {
     @Test
-    fun diagnosticWrapperExplicitlyOverridesGenreMenu() {
-        val method = DiagnosticStorySource::class.java.getDeclaredMethod(
-            "genreMenu",
-            Continuation::class.java,
-        )
+    fun diagnosticWrapperCoversEveryStorySourceApi() {
+        val sourceApi = StorySource::class.java.declaredMethods
+            .asSequence()
+            .map { it.name }
+            .filterNot { it.endsWith("\$default") }
+            .toSet()
+        val diagnosticApi = DiagnosticStorySource::class.java.declaredMethods
+            .asSequence()
+            .map { it.name }
+            .toSet()
 
-        assertEquals(DiagnosticStorySource::class.java, method.declaringClass)
+        val missing = sourceApi - diagnosticApi
+        assertTrue("DiagnosticStorySource is missing StorySource methods: $missing", missing.isEmpty())
     }
 }

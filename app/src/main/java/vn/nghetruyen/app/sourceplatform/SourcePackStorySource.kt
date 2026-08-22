@@ -12,6 +12,7 @@ import vn.nghetruyen.app.core.model.StoryCommentPage
 import vn.nghetruyen.app.core.model.StoryDetail
 import vn.nghetruyen.app.core.model.StorySummary
 import vn.nghetruyen.app.sources.BuiltInSourcePackBridge
+import vn.nghetruyen.app.sources.SourceBrowseEntry
 import vn.nghetruyen.app.sources.SourceCommentCapability
 import vn.nghetruyen.app.sources.SourceDescriptor
 import vn.nghetruyen.app.sources.SourceImplementationKind
@@ -93,6 +94,8 @@ class SourcePackStorySource(
         },
         supportsHome = builtInDelegate?.descriptor?.supportsHome == true ||
             SourceActionName.HOME in pack.manifest.actions || categories.isNotEmpty() || SourceActionName.SEARCH in pack.manifest.actions,
+        supportsGenre = builtInDelegate?.descriptor?.supportsGenre == true ||
+            SourceActionName.GENRE in pack.manifest.actions || categories.isNotEmpty(),
         supportsSuggestions = builtInDelegate?.descriptor?.supportsSuggestions == true ||
             SourceActionName.SUGGESTIONS in pack.manifest.actions,
         implementationKind = if (bridgeActive) {
@@ -136,6 +139,28 @@ class SourcePackStorySource(
             is AppResult.Failure -> fallback
         }
     }
+    }
+
+    override suspend fun genreMenu(): AppResult<List<SourceBrowseEntry>> {
+        if (builtInDelegate?.descriptor?.supportsGenre == true) return builtInDelegate.genreMenu()
+        val staticEntries = descriptor.categories.map { category ->
+            SourceBrowseEntry(key = category, label = category)
+        }
+        if (SourceActionName.GENRE !in pack.manifest.actions) return AppResult.Success(staticEntries)
+        return guarded {
+            val value = execute(
+                SourceActionName.GENRE,
+                JsonValue.Obj(linkedMapOf(
+                    "category" to JsonValue.Str(""),
+                    "input" to JsonValue.Str(""),
+                    "query" to JsonValue.Str(""),
+                    "page" to JsonValue.Num(1.0, "1"),
+                    "pageToken" to JsonValue.Str(""),
+                )),
+            )
+            val dynamicEntries = value?.let(::browseEntries).orEmpty()
+            AppResult.Success(if (dynamicEntries.isNotEmpty()) dynamicEntries else staticEntries)
+        }
     }
 
     override suspend fun suggestions(query: String): AppResult<List<String>> {
@@ -469,6 +494,51 @@ class SourcePackStorySource(
         return candidates.mapNotNull(::storySummary).distinctBy { it.url.ifBlank { it.id } }.take(MAX_STORY_ITEMS)
     }
 
+    private fun browseEntries(value: JsonValue): List<SourceBrowseEntry> {
+        val candidates = when (value) {
+            is JsonValue.Arr -> value.values
+            is JsonValue.Obj -> value.array("entries")?.values
+                ?: value.array("categories")?.values
+                ?: value.array("items")?.values
+                ?: value.array("results")?.values
+                ?: value.array("data")?.values
+                ?: emptyList()
+            else -> emptyList()
+        }
+        return candidates.mapNotNull { candidate ->
+            when (candidate) {
+                is JsonValue.Str -> candidate.value.trim().takeIf(String::isNotBlank)?.let { label ->
+                    SourceBrowseEntry(key = label, label = label)
+                }
+                is JsonValue.Obj -> {
+                    val hasBrowseSpecificField = listOf("key", "input", "value", "label", "selectable").any { key ->
+                        candidate.values.containsKey(key)
+                    }
+                    val looksLikeStory = !hasBrowseSpecificField && (
+                        candidate.string("id")?.isNotBlank() == true ||
+                            candidate.values.containsKey("author") ||
+                            candidate.values.containsKey("coverUrl") ||
+                            candidate.values.containsKey("description")
+                        )
+                    if (looksLikeStory) return@mapNotNull null
+                    val label = sequenceOf("label", "title", "name", "text")
+                        .mapNotNull(candidate::string)
+                        .map(String::trim)
+                        .firstOrNull(String::isNotBlank)
+                        ?: return@mapNotNull null
+                    val key = sequenceOf("key", "input", "value", "url", "link")
+                        .mapNotNull(candidate::string)
+                        .map(String::trim)
+                        .firstOrNull(String::isNotBlank)
+                        ?: label
+                    val selectable = (candidate.values["selectable"] as? JsonValue.Bool)?.value ?: true
+                    SourceBrowseEntry(key = key, label = label, selectable = selectable)
+                }
+                else -> null
+            }
+        }.distinctBy { entry -> entry.key.lowercase() }.take(MAX_GENRE_MENU_ENTRIES)
+    }
+
     private fun suggestionItems(value: JsonValue): List<String> {
         val candidates = when (value) {
             is JsonValue.Arr -> value.values
@@ -613,6 +683,7 @@ class SourcePackStorySource(
         private const val MAX_SELECTION_PRIORITY = 1_000
         private const val DEFAULT_TOC_PAGE_SIZE = 50
         private const val MAX_STORY_ITEMS = 500
+        private const val MAX_GENRE_MENU_ENTRIES = 500
         private const val MAX_SUGGESTIONS = 12
         private const val CONTINUATION_PREFIX = "sourcepack-page:"
         private val NEXT_PAGE_KEYS = listOf("nextPageUrl", "nextUrl", "nextPage", "next", "data2", "cursor")

@@ -17,15 +17,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: fix/freesound-latency-status-cloudflare
-      - name: Inspect TruyenFull native Lua
+      - name: Locate result normalization
         run: |
           set -euxo pipefail
-          cp app/src/main/assets/source-lua/nguon_truyenfull_native.lua.gz.gz /tmp/source.gz.gz
-          gzip -dc /tmp/source.gz.gz > /tmp/source.gz
-          gzip -dc /tmp/source.gz > /tmp/source.lua
-          echo '=== SIZE ==='
-          wc -c -l /tmp/source.lua
-          echo '=== CHAPTER MATCHES ==='
-          grep -n -E 'chapter|chapters|paragraph|chapter-c|chapter-content|articleBody|remove|selector|content' /tmp/source.lua | head -n 500 || true
-          echo '=== SOURCE ==='
-          sed -n '1,520p' /tmp/source.lua
+          echo '=== NORMALIZED MARKER ==='
+          grep -R -n --exclude-dir=.git 'VBOOK_STAGE_RESULT_NORMALIZED' source-* app/src/main/java || true
+          echo '=== RAW MARKER ==='
+          grep -R -n --exclude-dir=.git 'VBOOK_STAGE_RESULT_STRINGIFIED\|executor-result-normalized\|executor-result-raw' source-* app/src/main/java || true
+          echo '=== chapterBody calls ==='
+          grep -R -n --exclude-dir=.git 'chapterBody(' source-* app/src/main/java || true
+          echo '=== VBookStoryNormalizer calls ==='
+          grep -R -n --exclude-dir=.git 'VBookStoryNormalizer' source-* app/src/main/java || true

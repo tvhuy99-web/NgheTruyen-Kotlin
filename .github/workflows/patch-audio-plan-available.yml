@@ -1,0 +1,72 @@
+name: Patch audioPlanAvailable
+
+on:
+  push:
+    branches:
+      - fix/freesound-timeout-clean-reassign
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]' || !contains(github.event.head_commit.message, 'Fix audioPlanAvailable diagnostic')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/freesound-timeout-clean-reassign
+          fetch-depth: 0
+
+      - name: Patch diagnostic semantics
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt')
+          text = path.read_text(encoding='utf-8')
+
+          old_block = '''                    val configured = applyConfiguredVoice(useStoryProfile = true)\n                    withContext(Dispatchers.Main) {\n                        if (PlaybackQueueStore.state.value.chapterId != snapshot.chapterId) return@withContext\n                        narrationPreparedChapterId = snapshot.chapterId\n                        narrationPlanningChapterId = ""\n                        voiceSettingsReady = configured\n                        val musicApplied = hasSceneMusicPlan()'''
+          new_block = '''                    val configured = applyConfiguredVoice(useStoryProfile = true)\n                    val audioDirectionSettings = AudioDirectionPreferences.currentSnapshot()\n                    val audioPlanAvailable = if (\n                        content != null &&\n                        (audioDirectionSettings.ambienceEnabled || audioDirectionSettings.soundEffectsEnabled)\n                    ) {\n                        runCatching {\n                            container.narrationPlanCoordinator.loadAudioDirectionPlan(content) != null\n                        }.getOrDefault(false)\n                    } else {\n                        false\n                    }\n                    withContext(Dispatchers.Main) {\n                        if (PlaybackQueueStore.state.value.chapterId != snapshot.chapterId) return@withContext\n                        narrationPreparedChapterId = snapshot.chapterId\n                        narrationPlanningChapterId = ""\n                        voiceSettingsReady = configured\n                        val musicApplied = hasSceneMusicPlan()'''
+
+          old_expr = '''                                    "audioPlanAvailable" to ((planResult?.audioPlanCreated == true) || (planResult?.freesoundPlanCreated == true)).toString(),'''
+          new_expr = '''                                    "audioPlanAvailable" to audioPlanAvailable.toString(),'''
+
+          changed = False
+          if old_block in text:
+              if text.count(old_block) != 1:
+                  raise SystemExit(f'expected exactly 1 planning block, found {text.count(old_block)}')
+              text = text.replace(old_block, new_block, 1)
+              changed = True
+          elif 'val audioPlanAvailable = if (' not in text:
+              raise SystemExit('planning block not found and patch marker absent')
+
+          if old_expr in text:
+              if text.count(old_expr) != 1:
+                  raise SystemExit(f'expected exactly 1 diagnostic expression, found {text.count(old_expr)}')
+              text = text.replace(old_expr, new_expr, 1)
+              changed = True
+          elif '"audioPlanAvailable" to audioPlanAvailable.toString(),' not in text:
+              raise SystemExit('diagnostic expression not found and patch marker absent')
+
+          if changed:
+              path.write_text(text, encoding='utf-8')
+          PY
+
+          git diff --check
+          git diff -- app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "Already patched"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt
+          git commit -m "Fix audioPlanAvailable diagnostic"
+          git push origin HEAD:fix/freesound-timeout-clean-reassign

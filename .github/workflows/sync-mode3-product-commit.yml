@@ -1,0 +1,28 @@
+name: Sync Mode 3 product commit
+
+on:
+  push:
+    branches:
+      - build/mode3-dedupe-temp
+
+permissions:
+  contents: write
+
+jobs:
+  sync-product-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout development branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/unified-audio-library-modes
+          fetch-depth: 0
+
+      - name: Cherry-pick validated product commit
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin build/mode3-dedupe-temp
+          git cherry-pick 2f5fca0533b18b1bbca50a4ccd2ac198eb2056da
+          git push origin HEAD:agent/unified-audio-library-modes

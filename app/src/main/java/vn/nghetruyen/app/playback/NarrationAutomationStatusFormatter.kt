@@ -15,13 +15,23 @@ internal object NarrationAutomationStatusFormatter {
             .toList()
         if (normalized.isEmpty()) return emptyList()
 
-        val specific = normalized.filterNot(::isSummaryOnlyIssue)
-        return if (specific.isNotEmpty()) specific else normalized
+        // Retry attempts are diagnostic history, not separate final errors. Once the coordinator
+        // emits a final Freesound summary, collapse every Freesound retry/detail warning into that
+        // one final state while preserving unrelated real issues (TTS, AI, persistence, etc.).
+        val finalFreesoundSummary = normalized.lastOrNull(::isSummaryOnlyIssue)
+        if (finalFreesoundSummary != null) {
+            return normalized
+                .filterNot(::isFreesoundIssue)
+                .plus(finalFreesoundSummary)
+                .distinctBy { it.lowercase(Locale.ROOT) }
+        }
+
+        return normalized.filterNot(::isSummaryOnlyIssue)
     }
 
     fun errorReport(messages: List<String>): String {
         val errors = normalizeIssues(messages)
-        if (errors.isEmpty()) return " • 0 lỗi"
+        if (errors.isEmpty()) return ""
         return buildString {
             append(" • ").append(errors.size).append(" lỗi: ")
             errors.forEachIndexed { index, error ->
@@ -60,6 +70,9 @@ internal object NarrationAutomationStatusFormatter {
         if (beginPlayback) append(". Đang bắt đầu phát")
         append('.')
     }
+
+    private fun isFreesoundIssue(message: String): Boolean =
+        message.lowercase(Locale.ROOT).contains("freesound")
 
     private fun isSummaryOnlyIssue(message: String): Boolean {
         val value = message.lowercase(Locale.ROOT)

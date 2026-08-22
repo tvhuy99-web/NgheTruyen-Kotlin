@@ -35,6 +35,16 @@ class DefaultLuaSourceAliasTest {
     }
 
     @Test
+    fun stableAliasPreservesDynamicGenreMenu() = runBlocking {
+        val native = FakeSource("vn.nghetruyen.native.truyenfull-native", priority = 50)
+            .withStableDefaultLuaId()
+
+        val menu = native.genreMenu() as AppResult.Success
+        assertEquals(listOf("dynamic-genre"), menu.value.map { it.key })
+        assertEquals(listOf("Thể loại động"), menu.value.map { it.label })
+    }
+
+    @Test
     fun registryNormalizesRawBundledLuaSourceWithoutCallerHelp() = runBlocking {
         val legacy = FakeSource("sangtacviet", priority = 100)
         val nativeId = "vn.nghetruyen.native.sangtacviet-native-instant-fast-v50"
@@ -106,6 +116,7 @@ class DefaultLuaSourceAliasTest {
             displayName = id,
             baseUrl = "https://example.com",
             health = SourceHealth.READY,
+            supportsGenre = true,
             implementationKind = SourceImplementationKind.NATIVE_LUA,
         )
         override val selectionPriority: Int = priority
@@ -119,6 +130,9 @@ class DefaultLuaSourceAliasTest {
 
         override suspend fun search(query: String, page: Int) = AppResult.Success(listOf(summary()))
         override suspend fun category(category: String, page: Int) = AppResult.Success(listOf(summary()))
+        override suspend fun genreMenu() = AppResult.Success(
+            listOf(SourceBrowseEntry(key = "dynamic-genre", label = "Thể loại động")),
+        )
         override suspend fun story(url: String) = AppResult.Success(StoryDetail(story = summary()))
         override suspend fun chapter(url: String) = AppResult.Success(
             ChapterContent(

@@ -224,6 +224,6 @@ assert "a[href*='/chuong-']" in source
 assert 'Truyenfull' in source
 assert 'storyId = storyId.ifBlank { chapter.storyId }' in sp.read_text(encoding='utf-8')
 assert 'events.count(::reportsDroppedData)' in deep.read_text(encoding='utf-8')
-assert 'FREESOUND_IMPORT_FAILED' not in new_policy
+assert 'val sourceLifecycleFailure = name.startsWith("SOURCE_")' in new_policy
 assert 'loadValidatedCachedChapter' in lib.read_text(encoding='utf-8')
 print("Applied all six requested diagnostic fixes")

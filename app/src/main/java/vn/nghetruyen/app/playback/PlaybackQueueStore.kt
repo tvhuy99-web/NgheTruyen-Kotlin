@@ -109,9 +109,7 @@ object PlaybackQueueStore {
     private val prefetchedFreesoundTransfers = LinkedHashMap<String, FreesoundTransferSummary>()
 
     private const val MAX_PREFETCH_TRANSFER_ENTRIES = 8
-    // AppViewModel starts a user-requested "Phân vai" rebuild at 20%. Automatic preparation starts
-    // later (35%), so this boundary lets the queue invalidate only the manual rebuild runtime state.
-    private const val MANUAL_NARRATION_REBUILD_START_PROGRESS = 0.2f
+    private const val MANUAL_NARRATION_REBUILD_MESSAGE = "Đang phân vai chương hiện tại."
 
     fun load(
         sourceId: String,
@@ -211,7 +209,7 @@ object PlaybackQueueStore {
     ) {
         if (
             stage == NarrationAutomationStage.CURRENT_PLANNING &&
-            progress <= MANUAL_NARRATION_REBUILD_START_PROGRESS
+            message?.trim() == MANUAL_NARRATION_REBUILD_MESSAGE
         ) {
             clearCurrentNarrationRuntimeForManualRebuild()
         }

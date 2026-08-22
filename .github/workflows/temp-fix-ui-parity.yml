@@ -1,0 +1,41 @@
+name: Temporary UI parity patch
+
+on:
+  push:
+    branches:
+      - fix/mode3-resolution-quality-20260822
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+      - name: Restore expected Mode 1 parity token and remove temporary workflow
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('app/src/main/java/vn/nghetruyen/app/ui/components/AudioDirectionLayerSwitches.kt')
+          text = p.read_text(encoding='utf-8')
+          old = 'Text("MODE 1 · PHÁT THỦ CÔNG TỪ THƯ VIỆN")'
+          new = 'Text("MODE 1 · PHÁT THỦ CÔNG TỪ THƯ VIỆN LOCAL")'
+          if old in text:
+              text = text.replace(old, new, 1)
+              p.write_text(text, encoding='utf-8')
+          elif new not in text:
+              raise SystemExit('Mode 1 parity anchor not found')
+          Path('.github/workflows/temp-fix-ui-parity.yml').unlink()
+          PY
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/vn/nghetruyen/app/ui/components/AudioDirectionLayerSwitches.kt .github/workflows/temp-fix-ui-parity.yml
+          git commit -m "fix: restore Mode 1 UI parity token"
+          git push origin HEAD:${GITHUB_REF_NAME}

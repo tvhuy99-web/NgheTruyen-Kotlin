@@ -53,8 +53,13 @@ internal object Mode3LibraryAssetMatcher {
     ): Match? {
         if (!track.enabled || AudioAssetClassifier.classify(track) != need.kind) return null
         val query = FreesoundAutoRequirementAggregator.normalizeQuery(need.query)
-        val queryTokens = FreesoundAutoRequirementAggregator.queryTokens(query)
-        if (queryTokens.isEmpty()) return null
+        val rawQueryTokens = FreesoundAutoRequirementAggregator.queryTokens(query)
+        if (rawQueryTokens.isEmpty()) return null
+        // The AI/network contract may add neutral search anchors such as "cinematic" or "music".
+        // Those words help Freesound search but must not make a semantically correct local asset
+        // fail merely because a hand-written description does not repeat the technical anchor.
+        val meaningfulQueryTokens = rawQueryTokens.filterNot(LOCAL_QUERY_ANCHORS::contains).toSet()
+        val queryTokens = meaningfulQueryTokens.ifEmpty { rawQueryTokens }
 
         val title = normalized(track.title)
         val sections = sections(track.tagsCsv)
@@ -151,11 +156,15 @@ internal object Mode3LibraryAssetMatcher {
     private const val MIN_COVERAGE = 0.50
     private const val MAX_AVOID_COVERAGE = 0.50
 
+    private val LOCAL_QUERY_ANCHORS = setOf(
+        "music", "cinematic", "background", "audio", "sound", "effect", "ambience", "ambient",
+    )
+
     /**
-     * Small bilingual semantic bridge for the English Mode-3 search contract and the user's
-     * Vietnamese descriptions. It is intentionally made of broad acoustic/story concepts rather
-     * than titles of individual tracks, so periodically re-standardizing descriptions keeps
-     * improving selection without a schema migration.
+     * Small bilingual semantic bridge for the English Mode-3 search contract and Vietnamese
+     * descriptions. It is intentionally made of broad acoustic/story concepts rather than titles
+     * of individual tracks, so periodically re-standardizing descriptions keeps improving selection
+     * without a schema migration.
      */
     private val CONCEPT_GROUPS: List<Set<String>> = listOf(
         setOf("sad", "melancholic", "sorrow", "grief", "buon", "u sau", "dau buon", "mat mat", "chia ly", "tuyet vong"),

@@ -1,0 +1,84 @@
+name: Mode 3 dedupe APK only
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout temporary source branch
+        uses: actions/checkout@v4
+        with:
+          ref: build/mode3-dedupe-temp
+          fetch-depth: 0
+
+      - name: Reconstruct and apply source patch
+        shell: bash
+        run: |
+          cat scripts/mode3_dedupe_fix.b64.* | base64 -d > /tmp/mode3_dedupe_fix.py
+          python3 /tmp/mode3_dedupe_fix.py
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install required Android SDK packages
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Bootstrap Gradle Wrapper
+        shell: bash
+        run: |
+          chmod +x gradlew scripts/bootstrap-wrapper.sh
+          ./scripts/bootstrap-wrapper.sh
+
+      - name: Build debug APK only
+        shell: bash
+        run: ./gradlew --no-daemon --stacktrace :app:assembleDebug
+
+      - name: Package APK
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk dist/NgheTruyen-mode3-dedupe.apk
+          sha256sum dist/NgheTruyen-mode3-dedupe.apk > dist/NgheTruyen-mode3-dedupe.apk.sha256
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NgheTruyen-mode3-dedupe-apk
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            dist/NgheTruyen-mode3-dedupe.apk
+            dist/NgheTruyen-mode3-dedupe.apk.sha256
+
+      - name: Commit patched product source
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            app/src/main/java/vn/nghetruyen/app/freesound/Mode3LibraryAssetMatcher.kt \
+            app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt \
+            app/src/main/java/vn/nghetruyen/app/freesound/FreesoundImporter.kt \
+            app/src/main/java/vn/nghetruyen/app/ui/components/UnifiedAudioAssetManagerDialog.kt
+          git commit -m "Fix Mode 3 arbitration and add duplicate audio scanner [skip ci]"
+          git push origin HEAD:build/mode3-dedupe-temp

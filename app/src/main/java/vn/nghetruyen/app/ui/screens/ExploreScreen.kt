@@ -63,10 +63,7 @@ import vn.nghetruyen.app.ui.components.StoryCard
 @Composable
 fun ExploreScreen(
     state: MainUiState,
-    onQueryChange: (String) -> Unit,
-    onSearch: () -> Unit,
-    onSearchAllSourcesChange: (Boolean) -> Unit,
-    onSortModeChange: (SearchSortMode) -> Unit,
+    onSearch: (String, Boolean, SearchSortMode) -> Unit,
     onCancelSearch: () -> Unit,
     onSourceSelected: (String) -> Unit,
     onHomeSelected: () -> Unit,
@@ -466,11 +463,11 @@ fun ExploreScreen(
                             .putBoolean("group_duplicates", searchGroupDraft)
                             .apply()
                         rememberSearch(searchQueryDraft)
-                        onQueryChange(searchQueryDraft)
-                        onSortModeChange(searchSortDraft)
-                        onSearchAllSourcesChange(searchAllDraft)
+                        val submittedQuery = searchQueryDraft.trim()
+                        val submittedAllSources = searchAllDraft
+                        val submittedSortMode = searchSortDraft
                         searchDialogOpen = false
-                        onSearch()
+                        onSearch(submittedQuery, submittedAllSources, submittedSortMode)
                     },
                 ) { Text("TÌM") }
             },

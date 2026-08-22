@@ -71,10 +71,7 @@ fun NgheTruyenApp(
                 Destination.Root -> when (state.rootTab) {
                     RootTab.EXPLORE -> ExploreScreen(
                         state = state,
-                        onQueryChange = viewModel::updateQuery,
-                        onSearch = { viewModel.search() },
-                        onSearchAllSourcesChange = viewModel::setSearchAllSources,
-                        onSortModeChange = viewModel::setSearchSortMode,
+                        onSearch = viewModel::submitSearch,
                         onCancelSearch = viewModel::cancelSearch,
                         onSourceSelected = viewModel::selectSource,
                         onHomeSelected = viewModel::browseHome,

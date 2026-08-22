@@ -520,7 +520,7 @@ class SourcePackStorySource(
         val shouldRebase = startIndex > 0 && chapters.maxOf(ChapterSummary::index) < startIndex
         return chapters.mapIndexed { offset, chapter ->
             chapter.copy(
-                storyId = chapter.storyId.ifBlank { storyId },
+                storyId = storyId.ifBlank { chapter.storyId },
                 index = if (shouldRebase) startIndex + offset else chapter.index,
             )
         }

@@ -115,23 +115,15 @@ fun ReferenceNgheTruyenApp(
                 Destination.Root -> when (state.rootTab) {
                     RootTab.EXPLORE -> ExploreScreen(
                         state = state,
-                        onQueryChange = viewModel::updateQuery,
-                        onSearch = {
-                            val mode = if (state.query.trim().isBlank() && !state.searchAllSources) {
+                        onSearch = { query, allSources, sortMode ->
+                            val mode = if (query.trim().isBlank() && !allSources) {
                                 ExploreMode.HOME
                             } else {
                                 ExploreMode.SEARCH
                             }
                             activateExploreDiagnosticContext(mode = mode)
-                            viewModel.search()
+                            viewModel.submitSearch(query, allSources, sortMode)
                         },
-                        onSearchAllSourcesChange = { enabled ->
-                            activateExploreDiagnosticContext(
-                                mode = if (enabled) ExploreMode.SEARCH else ExploreMode.HOME,
-                            )
-                            viewModel.setSearchAllSources(enabled)
-                        },
-                        onSortModeChange = viewModel::setSearchSortMode,
                         onCancelSearch = viewModel::cancelSearch,
                         onSourceSelected = { sourceId ->
                             activateExploreDiagnosticContext(

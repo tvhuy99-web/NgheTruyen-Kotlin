@@ -197,13 +197,18 @@ class NarrationPlanCoordinator(
         }
         if (cachedFreesoundRetryExhausted) {
             freesoundRetryExhaustedChapters += content.chapter.id
+            val reusable = cachedFreesoundRequirements?.let { cachedFreesoundTrackIds(it, freesoundKinds) }.orEmpty()
             restoredFreesound = FreesoundApplyResult(
                 musicCreated = false,
                 audioCreated = false,
-                resolvedAssets = 0,
-                warnings = listOf("Freesound đã thất bại sau 3 lần; cần bắt đầu một lượt phân vai mới."),
-                retryableFailure = true,
-                diagnostics = listOf("RESOLVE_BLOCKED retryExhausted=true attempts=3"),
+                resolvedAssets = reusable.size,
+                warnings = listOf(
+                    if (reusable.isEmpty()) "Freesound còn thiếu sau 3 lần; phần TTS vẫn được phát và có thể phân vai lại để thử âm thanh mới."
+                    else "Một số âm thanh Freesound còn thiếu sau 3 lần; vẫn phát ${reusable.size} asset đã chuẩn bị hợp lệ.",
+                ),
+                reusedTrackIds = reusable,
+                retryableFailure = false,
+                diagnostics = listOf("RESOLVE_PARTIAL_REUSE retryExhausted=true attempts=3 reusable=${reusable.size}"),
                 attempts = MAX_FREESOUND_RUNTIME_ATTEMPTS,
                 retryExhausted = true,
             )
@@ -443,9 +448,6 @@ class NarrationPlanCoordinator(
         } else emptyList()
         val effectiveAmbience = audioSettings.ambienceEnabled && ambienceTracks.isNotEmpty()
         val effectiveSfx = audioSettings.soundEffectsEnabled && soundEffectTracks.isNotEmpty()
-        if (StoryAudioModeRouter.usesAiFreesound(sourceMode) && freesoundResolutionRetryRequired(effectiveContent)) {
-            return null
-        }
         if (!effectiveAmbience && !effectiveSfx) return AmbienceSfxPlan()
 
         val sourceHash = if (StoryAudioModeRouter.usesAiFreesound(sourceMode)) {
@@ -736,12 +738,17 @@ class NarrationPlanCoordinator(
         }
 
         freesoundRetryExhaustedChapters += content.chapter.id
+        val partialResolved = latest.resolvedAssets > 0
         return latest.copy(
-            warnings = (warnings + "Freesound không tạo được kế hoạch âm thanh hợp lệ sau 3 lần thử.").distinct(),
+            warnings = (warnings + if (partialResolved) {
+                "Một số âm thanh Freesound còn thiếu sau 3 lần; ứng dụng sẽ phát phần đã tải hợp lệ thay vì làm câm cả chương."
+            } else {
+                "Freesound chưa tải được asset nào sau 3 lần; TTS vẫn được phép phát."
+            }).distinct(),
             downloadedTrackIds = downloadedTrackIds,
             reusedTrackIds = reusedTrackIds - downloadedTrackIds,
-            retryableFailure = true,
-            diagnostics = (diagnostics + "RUNTIME_RETRY_EXHAUSTED attempts=$MAX_FREESOUND_RUNTIME_ATTEMPTS").distinct(),
+            retryableFailure = false,
+            diagnostics = (diagnostics + "RUNTIME_RETRY_EXHAUSTED attempts=$MAX_FREESOUND_RUNTIME_ATTEMPTS partialResolved=$partialResolved").distinct(),
             attempts = MAX_FREESOUND_RUNTIME_ATTEMPTS,
             retryExhausted = true,
         )
@@ -1103,10 +1110,12 @@ class NarrationPlanCoordinator(
             .put("resolved_asset_count", resolvedAssets.coerceAtLeast(0))
             .put("resolution_state", when {
                 requirements.isEmpty() -> "AI_EMPTY"
+                retryExhausted && resolvedAssets > 0 -> "PARTIAL"
+                retryExhausted -> "FAILED"
                 retryRequired -> "INCOMPLETE"
                 else -> "COMPLETE"
             })
-            .put("resolution_retry_required", retryRequired)
+            .put("resolution_retry_required", retryRequired && !retryExhausted)
             .put("resolution_retry_attempts", retryAttempts.coerceIn(0, MAX_FREESOUND_RUNTIME_ATTEMPTS))
             .put("resolution_retry_exhausted", retryExhausted)
             .put(FreesoundAutoRequirementCodec.JSON_KEY, FreesoundAutoRequirementCodec.toJson(requirements))

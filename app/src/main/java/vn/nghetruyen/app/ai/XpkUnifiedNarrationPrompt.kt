@@ -211,6 +211,7 @@ object XpkUnifiedNarrationPrompt {
                 appendLine("MUSIC:")
                 appendLine("- Đọc toàn bộ chương và continuity trước khi đặt ranh giới. Im lặng là lựa chọn bình đẳng với nhạc; khoảng không có MUSIC hoàn toàn hợp lệ.")
                 appendLine("- Nhạc hỗ trợ chức năng kể chuyện, hướng cảm xúc, nhịp, mức căng thẳng và quy mô; không dùng BGM như SFX để nhấn một hành động đơn lẻ.")
+                appendLine("- Cảnh thân mật/lãng mạn hoặc bước ngoặt cảm xúc kéo dài là ứng viên MUSIC mạnh. Mưa, gió hay ambience đang phát không phải lý do bỏ nhạc nếu nhạc thực sự nâng đỡ cảm xúc; các lớp được phối hợp độc lập.")
                 appendLine("- Chỉ đổi trạng thái MUSIC khi chuyển biến đủ bền. Không đổi vì một câu thoại, một cảm xúc thoáng qua, một SFX/AMBIENCE đơn lẻ hay một từ khóa.")
                 appendLine("- Giữ cùng nhu cầu nhạc trong toàn vùng còn phù hợp. Không có số UNIT tối thiểu hay quota số cảnh; một vùng ngắn vẫn hợp lệ nếu đúng ranh giới kể chuyện thực sự.")
                 appendLine("- MUSIC là lớp duy nhất bị giới hạn: tại mọi UNIT chỉ được có tối đa MỘT bài/trạng thái MUSIC. Không tạo hai MUSIC chồng nhau. AI tự quyết định dùng ít, nhiều, đổi bài hay im lặng; continuity chương trước chỉ là tùy chọn, không bắt buộc dùng lại bài cũ.")
@@ -227,6 +228,7 @@ object XpkUnifiedNarrationPrompt {
                 appendLine("- Ở ranh giới chương cũng áp dụng đúng quy tắc này: sang chương mới KHÔNG phải là lý do đổi ambience. Nếu vẫn cùng núi tuyết, hang động, mưa, gió, sông, đám đông... thì ưu tiên giữ nguồn phù hợp đang có; nhưng không được giữ nếu chương mới cho thấy nguồn/cảnh đã thay đổi hoặc im lặng hợp lý hơn.")
                 appendLine("- Không chồng asset tổng hợp với thành phần đã có sẵn bên trong; không biến hành động foreground thành ambience chỉ vì hành động kéo dài.")
                 appendLine("- Không suy diễn ambience từ so sánh, ẩn dụ, hồi tưởng, dự đoán hoặc lời kể gián tiếp. Query ưu tiên nguồn vật lý + môi trường: forest wind, heavy rain, cave water.")
+                appendLine("- Cường độ và khoảng cách phải bám đúng cảnh: mưa đang trút trực tiếp quanh nhân vật dùng heavy rain/rain roof/rain awning; chỉ dùng distant/far khi truyện thật sự mô tả nguồn ở xa. Không làm yếu nguồn gần chỉ để query dễ tìm.")
             }
             if (AudioAssetKind.SFX in kinds) {
                 appendLine()

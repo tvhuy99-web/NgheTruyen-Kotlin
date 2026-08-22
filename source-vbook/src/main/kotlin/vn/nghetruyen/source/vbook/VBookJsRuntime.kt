@@ -59,6 +59,30 @@ import java.util.Base64
 import java.util.Locale
 import kotlin.math.max
 
+internal fun normalizeVBookChapterParagraphs(html: String): List<String> {
+    if (html.isBlank()) return emptyList()
+    val body = Jsoup.parseBodyFragment(html).body()
+    body.select("script,style,noscript,iframe,template,[hidden],[aria-hidden=true]").remove()
+    body.select("[style]").forEach { element ->
+        val style = element.attr("style").lowercase(Locale.ROOT).replace(Regex("\\s+"), "")
+        val zeroFontSize = Regex("(?:^|;)font-size:0(?:px)?(?:;|$)").containsMatchIn(style)
+        if ("display:none" in style || "visibility:hidden" in style || zeroFontSize) {
+            element.remove()
+        }
+    }
+    body.select("br").forEach { it.after("\n") }
+    body.select("p,div,section,article,blockquote,li,h1,h2,h3,h4,h5,h6").forEach { element ->
+        element.before("\n")
+        element.after("\n")
+    }
+    return body.wholeText()
+        .replace('\r', '\n')
+        .split(Regex("\\n+"))
+        .map { line -> line.replace(Regex("[ \\t]+"), " ").trim() }
+        .filter(String::isNotBlank)
+        .take(20_000)
+}
+
 class VBookJsRuntime(
     private val brokers: SourceCapabilityBrokers = SourceCapabilityBrokers(),
     private val diagnostics: DiagnosticSink = DiagnosticSink.NONE,
@@ -966,6 +990,7 @@ class VBookJsRuntime(
                 request.input.string("url").orEmpty(),
             ) ?: JsonValue.Null
             SourceActionName.TOC, SourceActionName.TOC_PAGES -> {
+                val canonicalStoryId = request.input.string("storyId").orEmpty()
                 val rawItems = when (unwrapped) {
                     is JsonValue.Arr -> unwrapped.values
                     is JsonValue.Obj -> unwrapped.array("chapters")?.values
@@ -976,7 +1001,7 @@ class VBookJsRuntime(
                 }
                 JsonValue.Obj(linkedMapOf(
                     "chapters" to JsonValue.Arr(rawItems.mapIndexedNotNull { index, value ->
-                        normalizeChapter(value, index, request.input.string("url").orEmpty())
+                        normalizeChapter(value, index, request.input.string("url").orEmpty(), canonicalStoryId)
                     }),
                     "nextPageUrl" to (responseData2
                         ?: (unwrapped as? JsonValue.Obj)?.string("nextPageUrl")
@@ -1086,29 +1111,38 @@ class VBookJsRuntime(
         return JsonValue.Arr(comments)
     }
 
-    private fun normalizeChapter(value: JsonValue, index: Int, storyUrl: String): JsonValue.Obj? {
+    private fun normalizeChapter(value: JsonValue, index: Int, storyUrl: String, canonicalStoryId: String = ""): JsonValue.Obj? {
         val obj = value as? JsonValue.Obj ?: return null
         val url = absoluteUrl(obj.string("host"), obj.string("url") ?: obj.string("link")) ?: return null
         val title = obj.string("title") ?: obj.string("name") ?: "Chương ${index + 1}"
         return JsonValue.Obj(linkedMapOf(
-            "id" to JsonValue.Str(stableId(url)), "storyId" to JsonValue.Str(stableId(storyUrl)),
+            "id" to JsonValue.Str(stableId(url)), "storyId" to JsonValue.Str(canonicalStoryId.ifBlank { stableId(storyUrl) }),
             "index" to JsonValue.Num(index.toDouble(), index.toString()), "title" to JsonValue.Str(title), "url" to JsonValue.Str(url),
         ))
     }
 
     private fun normalizeChapterContent(value: JsonValue, url: String): JsonValue {
         val obj = value as? JsonValue.Obj
-        val html = when (value) { is JsonValue.Str -> value.value; is JsonValue.Obj -> value.string("content") ?: value.string("html").orEmpty(); else -> "" }
-        val paragraphs = Jsoup.parseBodyFragment(html).select("p,div,br").mapNotNull { it.text().trim().takeIf(String::isNotBlank) }.ifEmpty {
-            Jsoup.parseBodyFragment(html).text().split(Regex("\\n+|(?<=[.!?])\\s+(?=[A-ZÀ-Ỹ])")).map(String::trim).filter(String::isNotBlank)
-        }.distinct()
+        val explicitParagraphs = obj?.array("paragraphs")?.values.orEmpty().mapNotNull { item ->
+            (item as? JsonValue.Str)?.value?.trim()?.takeIf(String::isNotBlank)
+        }
+        val html = when (value) {
+            is JsonValue.Str -> value.value
+            is JsonValue.Obj -> value.string("content") ?: value.string("html").orEmpty()
+            else -> ""
+        }
+        val paragraphs = explicitParagraphs.ifEmpty { normalizeVBookChapterParagraphs(html) }
         val title = obj?.string("title") ?: obj?.string("name") ?: "Chương"
+        val previousChapterUrl = (obj?.string("previousChapterUrl") ?: obj?.string("prev") ?: obj?.string("previous"))
+            ?.trim()?.takeIf { it.isNotBlank() && !it.equals("NO_PREV", ignoreCase = true) }
+        val nextChapterUrl = (obj?.string("nextChapterUrl") ?: obj?.string("next"))
+            ?.trim()?.takeIf { it.isNotBlank() && !it.equals("NO_NEXT", ignoreCase = true) }
         return JsonValue.Obj(linkedMapOf(
             "id" to JsonValue.Str(stableId(url)), "storyId" to JsonValue.Str(""),
             "index" to JsonValue.Num(0.0, "0"), "title" to JsonValue.Str(title), "url" to JsonValue.Str(url),
             "paragraphs" to JsonValue.Arr(paragraphs.map(JsonValue::Str)),
-            "previousChapterUrl" to (obj?.string("previousChapterUrl")?.let(JsonValue::Str) ?: JsonValue.Null),
-            "nextChapterUrl" to (obj?.string("nextChapterUrl")?.let(JsonValue::Str) ?: JsonValue.Null),
+            "previousChapterUrl" to previousChapterUrl?.let(JsonValue::Str).orNull(),
+            "nextChapterUrl" to nextChapterUrl?.let(JsonValue::Str).orNull(),
         ))
     }
 
@@ -1594,6 +1628,19 @@ private class GraphicsCanvasObject(
     }
 }
 
+internal object VBookBrowserChallengeDetector {
+    fun isChallenge(html: String): Boolean {
+        if (html.isBlank()) return false
+        val normalized = Jsoup.parse(html).text().lowercase(Locale.ROOT)
+        return normalized.contains("cloudflare") ||
+            normalized.contains("thực hiện xác minh bảo mật") ||
+            normalized.contains("security verification") ||
+            normalized.contains("checking your browser") ||
+            normalized.contains("verify you are human") ||
+            normalized.contains("chờ một chút") && normalized.contains("bảo mật")
+    }
+}
+
 private class BrowserCompatObject(
     private val cx: Context,
     private val ownerScope: Scriptable,
@@ -1725,20 +1772,37 @@ private class BrowserCompatObject(
     private fun waitSelector(raw: Any?, timeoutMs: Long): Any {
         val selectors = stringList(raw)
         if (selectors.isEmpty()) return false
-        val perSelector = (timeoutMs / selectors.size).coerceAtLeast(250L)
-        selectors.forEach { selector ->
-            val response = brokers.browser.execute(manifest, SourceBrowserRequest(
+        val deadline = clockMs() + timeoutMs
+        do {
+            selectors.forEach { selector ->
+                val remaining = (deadline - clockMs()).coerceAtLeast(100L)
+                val response = brokers.browser.execute(manifest, SourceBrowserRequest(
+                    sourceId = manifest.id,
+                    action = SourceBrowserAction.WAIT_SELECTOR,
+                    selector = selector,
+                    timeoutMs = minOf(750L, remaining),
+                    traceId = request.traceId,
+                ))
+                if (response is SourcePlatformResult.Success) {
+                    lastUrl = response.value.finalUrl ?: lastUrl
+                    return selector
+                }
+                if (clockMs() >= deadline) return false
+            }
+            val snapshot = brokers.browser.execute(manifest, SourceBrowserRequest(
                 sourceId = manifest.id,
-                action = SourceBrowserAction.WAIT_SELECTOR,
-                selector = selector,
-                timeoutMs = perSelector,
+                action = SourceBrowserAction.DOM_SNAPSHOT,
+                timeoutMs = minOf(1_000L, (deadline - clockMs()).coerceAtLeast(100L)),
                 traceId = request.traceId,
             ))
-            if (response is SourcePlatformResult.Success) {
-                lastUrl = response.value.finalUrl ?: lastUrl
-                return selector
+            if (snapshot is SourcePlatformResult.Success) {
+                lastUrl = snapshot.value.finalUrl ?: lastUrl
+                lastHtml = snapshot.value.value.orEmpty()
+                if (VBookBrowserChallengeDetector.isChallenge(lastHtml)) {
+                    error("BROWSER_ANTIBOT_CHALLENGE: Trang nguồn đang yêu cầu xác minh bảo mật/Cloudflare.")
+                }
             }
-        }
+        } while (clockMs() < deadline)
         return false
     }
 

@@ -681,16 +681,38 @@ class LibraryRepository(private val db: AppDatabase) {
     suspend fun getChapter(chapterId: String): ChapterEntity? = db.chapterDao().get(chapterId)
 
     suspend fun loadCachedChapter(chapterId: String): ChapterContent? =
-        db.chapterDao().get(chapterId)?.toContentWithNeighbors()
+        loadValidatedCachedChapter(db.chapterDao().get(chapterId))
 
     suspend fun loadCachedChapterByUrl(storyId: String, remoteUrl: String): ChapterContent? =
-        db.chapterDao().getByRemoteUrl(storyId, remoteUrl)?.toContentWithNeighbors()
+        loadValidatedCachedChapter(db.chapterDao().getByRemoteUrl(storyId, remoteUrl))
 
     suspend fun loadNextCachedChapter(storyId: String, chapterIndex: Int): ChapterContent? =
-        db.chapterDao().getNextAfter(storyId, chapterIndex)?.toContentWithNeighbors()
+        loadValidatedCachedChapter(db.chapterDao().getNextAfter(storyId, chapterIndex))
 
     suspend fun loadPreviousCachedChapter(storyId: String, chapterIndex: Int): ChapterContent? =
-        db.chapterDao().getPreviousBefore(storyId, chapterIndex)?.toContentWithNeighbors()
+        loadValidatedCachedChapter(db.chapterDao().getPreviousBefore(storyId, chapterIndex))
+
+    private suspend fun loadValidatedCachedChapter(entity: ChapterEntity?): ChapterContent? {
+        val stored = entity ?: return null
+        val content = stored.toContentWithNeighbors() ?: return null
+        if (!isLegacyBrokenTruyenFullCache(content)) return content
+        // Old TruyenFull parser builds cached only the two hidden boilerplate paragraphs. Drop only
+        // that exact stale signature; legitimate short chapters and explicit downloads stay intact.
+        db.chapterDao().clearContent(stored.id)
+        return null
+    }
+
+    private fun isLegacyBrokenTruyenFullCache(content: ChapterContent): Boolean {
+        if (!content.chapter.url.contains("truyenfull.", ignoreCase = true)) return false
+        if (content.paragraphs.isEmpty() || content.paragraphs.size > 3) return false
+        var residue = content.paragraphs.joinToString(" ")
+            .lowercase(Locale.ROOT)
+            .replace(Regex("""[\s,.;:|/_-]+"""), "")
+        listOf("truyenfulllive", "truyenfullvn", "truyenfull").forEach { token ->
+            residue = residue.replace(token, "")
+        }
+        return residue.isBlank()
+    }
 
     suspend fun importBook(book: ImportedBook): StorySummary = db.withTransaction {
         val storyId = "offline:${UUID.randomUUID()}"

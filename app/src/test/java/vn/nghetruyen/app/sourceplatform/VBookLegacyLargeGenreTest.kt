@@ -62,7 +62,7 @@ class VBookLegacyLargeGenreTest {
         assertEquals(0, platformCalls)
     }
 
-    private fun assertLargeGenreMenu(source: VBookStorySource) {
+    private suspend fun assertLargeGenreMenu(source: VBookStorySource) {
         assertTrue(source.descriptor.supportsGenre)
         val menu = source.genreMenu().requireSuccess("genre menu")
         assertEquals(360, menu.value.size)

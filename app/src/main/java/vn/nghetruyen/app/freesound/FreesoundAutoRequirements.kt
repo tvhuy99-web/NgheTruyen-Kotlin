@@ -21,6 +21,12 @@ data class FreesoundAutoRequirement(
     val repeatCount: Int = 1,
     val cadence: SfxCadence = SfxCadence.NORMAL,
     val loopUntilStop: Boolean = false,
+    /**
+     * Story text attached locally after the AI has already chosen the timeline usage. This field is
+     * only evidence for selecting an existing library file. It is deliberately absent from toJson()
+     * so it never changes the short Freesound query or any AI-owned playback instruction.
+     */
+    val localContext: String = "",
 )
 
 data class FreesoundAutoSearchNeed(
@@ -237,7 +243,7 @@ object FreesoundAutoRequirementAggregator {
                     val representative = normalizeQuery(group.first().query)
                     representative == normalized || jaccard(tokens, queryTokens(representative)) >= 0.80
                 }
-                if (existing != null) existing += requirement else groups += mutableListOf(requirement)
+                if (existing != null) existing += requirement else groups += mutableListOf(requirement>()
             }
             groups
                 .sortedWith(

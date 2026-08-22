@@ -9,11 +9,13 @@ internal object FreesoundPlaybackStatusFormatter {
         audioLayersEnabled: Boolean,
     ): String {
         if (!audioLayersEnabled) return ""
+        val downloaded = downloadedAssets.coerceAtLeast(0)
+        val reused = reusedAssets.coerceAtLeast(0)
         val parts = buildList {
-            val downloaded = downloadedAssets.coerceAtLeast(0)
-            val reused = reusedAssets.coerceAtLeast(0)
-            add("$downloaded tải mới")
-            add("$reused bộ nhớ tạm")
+            // Normal zero activity is not useful status information. Only surface transfer counters
+            // when something was actually downloaded/reused, or surface an abnormal plan state.
+            if (downloaded > 0) add("$downloaded tải mới")
+            if (reused > 0) add("$reused bộ nhớ tạm")
             if (!resultPresent) add("chưa có kế hoạch âm thanh")
             else if (retryRequired) add("còn thiếu")
         }

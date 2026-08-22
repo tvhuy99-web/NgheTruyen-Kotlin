@@ -7,6 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import vn.nghetruyen.app.ai.vietphrase.ReferenceVietPhraseRuntime
 import vn.nghetruyen.app.audio.AudioDirectionPreferences
+import vn.nghetruyen.app.freesound.Mode3LibraryAssetMatcher
 import vn.nghetruyen.app.playback.AudioDirectionRuntime
 import vn.nghetruyen.app.sourceplatform.AndroidChromiumVBookRuntime
 import vn.nghetruyen.app.sourceplatform.AndroidWebViewSessionNetworkBroker
@@ -34,6 +35,11 @@ class NgheTruyenApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+
+        // Mode-3 local matching owns its own detailed diagnostic events and preprocessed metadata
+        // index. Install only the application context; the AppContainer remains lazy until a match
+        // actually runs.
+        Mode3LibraryAssetMatcher.initialize(this)
 
         val freshnessMaintenance = StartupFreshnessMaintenance(
             context = this,

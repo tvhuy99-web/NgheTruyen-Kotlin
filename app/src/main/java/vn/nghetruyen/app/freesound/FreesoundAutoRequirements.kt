@@ -243,7 +243,7 @@ object FreesoundAutoRequirementAggregator {
                     val representative = normalizeQuery(group.first().query)
                     representative == normalized || jaccard(tokens, queryTokens(representative)) >= 0.80
                 }
-                if (existing != null) existing += requirement else groups += mutableListOf(requirement>()
+                if (existing != null) existing += requirement else groups += mutableListOf(requirement)
             }
             groups
                 .sortedWith(

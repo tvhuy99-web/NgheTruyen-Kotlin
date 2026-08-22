@@ -1,6 +1,43 @@
 name: Source Platform vBook
 
 on:
+  pull_request:
+    paths:
+      - 'app/src/main/java/vn/nghetruyen/app/sourceplatform/**'
+      - 'app/src/main/java/vn/nghetruyen/app/NgheTruyenApplication.kt'
+      - 'app/src/main/java/vn/nghetruyen/app/AppContainer.kt'
+      - 'app/src/main/java/vn/nghetruyen/app/ui/AppViewModel.kt'
+      - 'app/src/main/java/vn/nghetruyen/app/ui/NgheTruyenApp.kt'
+      - 'app/src/main/java/vn/nghetruyen/app/ui/ReferenceNgheTruyenApp.kt'
+      - 'app/src/main/java/vn/nghetruyen/app/ui/screens/PersonalScreen.kt'
+      - 'app/src/main/java/vn/nghetruyen/app/ui/screens/SourcePackConfigDialog.kt'
+      - 'app/src/main/res/xml/backup_rules.xml'
+      - 'app/src/main/res/xml/data_extraction_rules.xml'
+      - 'source-api/**'
+      - 'source-package/**'
+      - 'source-store/**'
+      - 'source-runtime/**'
+      - 'source-diagnostics/**'
+      - 'source-network/**'
+      - 'source-repository/**'
+      - 'source-vbook/**'
+      - 'source-lua/**'
+      - 'source-js-sandbox/**'
+      - 'source-compat-testkit/**'
+      - 'settings.gradle.kts'
+      - 'build.gradle.kts'
+      - 'gradle/**'
+      - 'gradlew'
+      - 'scripts/check_source_engine_specificity.py'
+      - 'scripts/check_vbook_static.py'
+      - 'scripts/check_vbook_chromium_static.py'
+      - 'scripts/check_vbook_differential_coverage.py'
+      - 'scripts/capture_vbook_reference.py'
+      - 'scripts/capture_vbook_reference_matrix.py'
+      - 'scripts/fetch_vbook_corpus.py'
+      - 'scripts/run_vbook_compat_lab.py'
+      - 'scripts/vbook-reference-plan*.json'
+      - '.github/workflows/source-platform-vbook.yml'
   push:
     branches:
       - 'agent/source-platform-s0-s1'

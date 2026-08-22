@@ -34,3 +34,5 @@ jobs:
                   app/src/main/java/vn/nghetruyen/app/ai/XpkUnifiedNarrationPrompt.kt
           git commit -m "Make Mode 3 source-neutral and improve local matching [skip ci]"
           git push origin HEAD:agent/unified-audio-library-modes
+
+# trigger source-only patch 2026-08-22

@@ -43,6 +43,8 @@ internal object Mode3LibraryAssetMatcher {
         val structured: Boolean = false,
         /** Coverage of the most important audible/source query token. */
         val coreCoverage: Double = 0.0,
+        /** SFX action/event token coverage (e.g. explosion/shatter/slam). */
+        val eventCoverage: Double = 0.0,
         /** Normalized fit used only to compare candidates; source provenance never contributes. */
         val selectionScore: Double = 0.0,
         val metadataQuality: String = "RAW",
@@ -60,6 +62,8 @@ internal object Mode3LibraryAssetMatcher {
     data class RemoteFit(
         val score: Double,
         val coreCoverage: Double,
+        val eventCoverage: Double,
+        val qualified: Boolean,
     )
 
     private data class LocalText(
@@ -88,8 +92,10 @@ internal object Mode3LibraryAssetMatcher {
     }
 
     private data class NeedProfile(
+        val kind: AudioAssetKind,
         val queryTokens: Set<String>,
         val coreToken: String?,
+        val eventToken: String?,
         val hints: List<LocalHint>,
     ) {
         val hintAware: Boolean get() = hints.isNotEmpty()
@@ -259,6 +265,7 @@ internal object Mode3LibraryAssetMatcher {
         val meaningful = rawQueryTokens.filterNot(LOCAL_QUERY_ANCHORS::contains)
         val queryTokens = meaningful.toSet().ifEmpty { rawQueryTokens.toSet() }
         val coreToken = coreQueryToken(rawQueryTokens)
+        val eventToken = eventQueryToken(rawQueryTokens, need.kind)
         val hints = need.usages.asSequence()
             .map(FreesoundAutoRequirement::localContext)
             .map(String::trim)
@@ -267,7 +274,13 @@ internal object Mode3LibraryAssetMatcher {
             .map(::parseLocalHint)
             .filter(LocalHint::isPresent)
             .toList()
-        return NeedProfile(queryTokens = queryTokens, coreToken = coreToken, hints = hints)
+        return NeedProfile(
+            kind = need.kind,
+            queryTokens = queryTokens,
+            coreToken = coreToken,
+            eventToken = eventToken,
+            hints = hints,
+        )
     }
 
     private fun coreQueryToken(rawTokens: List<String>): String? {
@@ -282,13 +295,27 @@ internal object Mode3LibraryAssetMatcher {
     private fun coreQueryToken(query: String): String? =
         coreQueryToken(FreesoundAutoRequirementAggregator.queryTokens(query).toList())
 
+    private fun eventQueryToken(rawTokens: List<String>, kind: AudioAssetKind): String? {
+        if (kind != AudioAssetKind.SFX) return null
+        val meaningful = rawTokens
+            .filterNot(LOCAL_QUERY_ANCHORS::contains)
+            .filterNot(QUERY_MODIFIERS::contains)
+        if (meaningful.size < 2) return null
+        val core = coreQueryToken(rawTokens)
+        return meaningful.lastOrNull { it != core }
+    }
+
     fun remoteFit(
         need: FreesoundAutoSearchNeed,
         sound: FreesoundSound,
         lexicalCoverage: Double,
         selectedScore: Double,
     ): RemoteFit {
-        val core = coreQueryToken(need.query)
+        @Suppress("UNUSED_VARIABLE")
+        val rankOnlyScore = selectedScore
+        val rawTokens = FreesoundAutoRequirementAggregator.queryTokens(need.query).toList()
+        val core = coreQueryToken(rawTokens)
+        val event = eventQueryToken(rawTokens, need.kind)
         val remoteTokens = FreesoundAutoRequirementAggregator.queryTokens(
             buildString {
                 append(sound.name).append(' ')
@@ -297,14 +324,31 @@ internal object Mode3LibraryAssetMatcher {
             },
         )
         val coreCoverage = if (core != null && core in remoteTokens) 1.0 else 0.0
-        // Same 0..1 fit space used by local candidates. The remote ranking score is intentionally a
-        // minority signal; audible-source lexical evidence matters more than popularity/rank bonuses.
-        val fit = (
-            coreCoverage * 0.45 +
-                lexicalCoverage.coerceIn(0.0, 1.0) * 0.35 +
-                selectedScore.coerceIn(0.0, 1.0) * 0.20
-            ).coerceIn(0.0, 1.0)
-        return RemoteFit(score = fit, coreCoverage = coreCoverage)
+        val eventCoverage = if (event != null && event in remoteTokens) 1.0 else 0.0
+        val lexical = lexicalCoverage.coerceIn(0.0, 1.0)
+        val qualified = when (need.kind) {
+            AudioAssetKind.SFX -> if (event != null) {
+                coreCoverage >= CORE_PRESENT_COVERAGE &&
+                    eventCoverage >= CORE_PRESENT_COVERAGE &&
+                    lexical >= SFX_REMOTE_MIN_QUERY_COVERAGE
+            } else {
+                coreCoverage >= CORE_PRESENT_COVERAGE && lexical >= RAW_MIN_QUERY_COVERAGE
+            }
+            else -> lexical >= LEGACY_MIN_QUERY_COVERAGE
+        }
+        val fit = if (!qualified) {
+            0.0
+        } else if (need.kind == AudioAssetKind.SFX && event != null) {
+            (coreCoverage * 0.36 + eventCoverage * 0.36 + lexical * 0.28).coerceIn(0.0, 1.0)
+        } else {
+            (coreCoverage * 0.52 + lexical * 0.48).coerceIn(0.0, 1.0)
+        }
+        return RemoteFit(
+            score = fit,
+            coreCoverage = coreCoverage,
+            eventCoverage = eventCoverage,
+            qualified = qualified,
+        )
     }
 
     private fun score(
@@ -322,6 +366,12 @@ internal object Mode3LibraryAssetMatcher {
             max(
                 if (core in indexed.englishTitleTokens) 1.0 else 0.0,
                 if (core in indexed.englishMetadataTokens) 0.92 else 0.0,
+            )
+        } ?: 0.0
+        val eventCoverage = profile.eventToken?.let { event ->
+            max(
+                if (event in indexed.englishTitleTokens) 1.0 else 0.0,
+                if (event in indexed.englishMetadataTokens) 0.92 else 0.0,
             )
         } ?: 0.0
 
@@ -380,11 +430,20 @@ internal object Mode3LibraryAssetMatcher {
         val contextEvidence = if (hintAware && semanticMetadata && contextScore > 0.0) {
             (0.55 + contextScore * 0.45).coerceIn(0.0, 1.0)
         } else 0.0
-        val queryEvidence = (
-            coreCoverage * 0.52 +
-                queryCoverage * 0.43 +
-                titleQueryCoverage * 0.05
-            ).coerceIn(0.0, 1.0)
+        val queryEvidence = if (profile.kind == AudioAssetKind.SFX && profile.eventToken != null) {
+            (
+                coreCoverage * 0.36 +
+                    eventCoverage * 0.36 +
+                    queryCoverage * 0.23 +
+                    titleQueryCoverage * 0.05
+                ).coerceIn(0.0, 1.0)
+        } else {
+            (
+                coreCoverage * 0.52 +
+                    queryCoverage * 0.43 +
+                    titleQueryCoverage * 0.05
+                ).coerceIn(0.0, 1.0)
+        }
         val selectionScore = (
             max(contextEvidence, queryEvidence) -
                 avoidCoverage * 0.45 -
@@ -392,12 +451,15 @@ internal object Mode3LibraryAssetMatcher {
             ).coerceIn(0.0, 1.0)
 
         val rejectReason = rejectReason(
+            kind = profile.kind,
+            eventRequired = profile.eventToken != null,
             hintAware = hintAware,
             semanticMetadata = semanticMetadata,
             score = finalScore,
             contextScore = contextScore,
             queryCoverage = queryCoverage,
             coreCoverage = coreCoverage,
+            eventCoverage = eventCoverage,
             conflict = avoidCoverage,
         )
         return Match(
@@ -417,27 +479,40 @@ internal object Mode3LibraryAssetMatcher {
             rejectReason = rejectReason,
             structured = indexed.sections.structured,
             coreCoverage = coreCoverage,
+            eventCoverage = eventCoverage,
             selectionScore = selectionScore,
             metadataQuality = metadataQuality,
         )
     }
 
     private fun rejectReason(
+        kind: AudioAssetKind,
+        eventRequired: Boolean,
         hintAware: Boolean,
         semanticMetadata: Boolean,
         score: Double,
         contextScore: Double,
         queryCoverage: Double,
         coreCoverage: Double,
+        eventCoverage: Double,
         conflict: Double,
     ): String {
         val reasons = buildList {
             if (conflict >= MAX_CONFLICT) add("conflict>=$MAX_CONFLICT")
             if (!hintAware) {
-                if (score < LEGACY_MIN_SCORE) add("score<$LEGACY_MIN_SCORE")
-                if (queryCoverage < LEGACY_MIN_QUERY_COVERAGE) add("queryCoverage<$LEGACY_MIN_QUERY_COVERAGE")
+                if (kind == AudioAssetKind.SFX && eventRequired) {
+                    if (
+                        coreCoverage < CORE_PRESENT_COVERAGE ||
+                        eventCoverage < CORE_PRESENT_COVERAGE ||
+                        queryCoverage < SFX_RAW_MIN_QUERY_COVERAGE
+                    ) add("sfxSourceEventMismatch")
+                } else {
+                    if (score < LEGACY_MIN_SCORE) add("score<$LEGACY_MIN_SCORE")
+                    if (queryCoverage < LEGACY_MIN_QUERY_COVERAGE) add("queryCoverage<$LEGACY_MIN_QUERY_COVERAGE")
+                }
             } else if (semanticMetadata) {
                 val semanticPass =
+                    (kind == AudioAssetKind.SFX && contextScore >= SFX_CONTEXT_ONLY_SCORE) ||
                     contextScore >= DECISIVE_CONTEXT_SCORE ||
                     (
                         contextScore >= BALANCED_CONTEXT_SCORE &&
@@ -448,16 +523,25 @@ internal object Mode3LibraryAssetMatcher {
                 if (!semanticPass) {
                     add(
                         "semanticEvidence<context=$DECISIVE_CONTEXT_SCORE" +
+                            "|sfxContext=$SFX_CONTEXT_ONLY_SCORE" +
                             "|balanced=$BALANCED_CONTEXT_SCORE+$BALANCED_QUERY_COVERAGE+$BALANCED_MIN_SCORE" +
                             "|exactQuery=$EXACT_QUERY_COVERAGE",
                     )
                 }
             } else {
-                val queryPass =
+                val queryPass = if (kind == AudioAssetKind.SFX && eventRequired) {
+                    coreCoverage >= CORE_PRESENT_COVERAGE &&
+                        eventCoverage >= CORE_PRESENT_COVERAGE &&
+                        queryCoverage >= SFX_RAW_MIN_QUERY_COVERAGE
+                } else {
                     queryCoverage >= RAW_MIN_QUERY_COVERAGE ||
-                    (coreCoverage >= CORE_PRESENT_COVERAGE && queryCoverage >= CORE_ONLY_MIN_QUERY_COVERAGE)
+                        (coreCoverage >= CORE_PRESENT_COVERAGE && queryCoverage >= CORE_ONLY_MIN_QUERY_COVERAGE)
+                }
                 if (!queryPass) {
-                    add("rawQueryEvidence<query=$RAW_MIN_QUERY_COVERAGE|core+$CORE_ONLY_MIN_QUERY_COVERAGE")
+                    add(
+                        if (kind == AudioAssetKind.SFX && eventRequired) "sfxSourceEventMismatch"
+                        else "rawQueryEvidence<query=$RAW_MIN_QUERY_COVERAGE|core+$CORE_ONLY_MIN_QUERY_COVERAGE",
+                    )
                 }
             }
         }
@@ -640,12 +724,14 @@ internal object Mode3LibraryAssetMatcher {
                 "acceptedScore" to format(evaluation.accepted?.score ?: 0.0),
                 "acceptedFit" to format(evaluation.accepted?.selectionScore ?: 0.0),
                 "acceptedCoreCoverage" to format(evaluation.accepted?.coreCoverage ?: 0.0),
+                "acceptedEventCoverage" to format(evaluation.accepted?.eventCoverage ?: 0.0),
                 "acceptedMetadataQuality" to evaluation.accepted?.metadataQuality.orEmpty(),
                 "bestTrackId" to best?.track?.id.orEmpty(),
                 "bestScore" to format(best?.score ?: 0.0),
                 "bestFit" to format(best?.selectionScore ?: 0.0),
                 "bestCoreCoverage" to format(best?.coreCoverage ?: 0.0),
-                "bestMetadataQuality" to best?.metadataQuality.orEmpty(),
+                "bestEventCoverage" to format(best?.eventCoverage ?: 0.0),
+          "bestMetadataQuality" to best?.metadataQuality.orEmpty(),
                 "bestRejectReason" to (best?.rejectReason ?: if (evaluation.candidateTracks == 0) "NO_LEXICAL_CANDIDATES" else "NO_SCORED_CANDIDATE"),
                 "decisiveContextThreshold" to DECISIVE_CONTEXT_SCORE.toString(),
                 "balancedContextThreshold" to BALANCED_CONTEXT_SCORE.toString(),
@@ -673,6 +759,7 @@ internal object Mode3LibraryAssetMatcher {
                     "selectionFit" to format(candidate.selectionScore),
                     "queryCoverage" to format(candidate.coverage),
                     "coreCoverage" to format(candidate.coreCoverage),
+                    "eventCoverage" to format(candidate.eventCoverage),
                     "contextScore" to format(candidate.contextScore),
                     "useScore" to format(candidate.useScore),
                     "shadeScore" to format(candidate.shadeScore),
@@ -731,6 +818,9 @@ internal object Mode3LibraryAssetMatcher {
     private const val BALANCED_MIN_SCORE = 0.40
     private const val EXACT_QUERY_COVERAGE = 0.85
     private const val RAW_MIN_QUERY_COVERAGE = 0.78
+    private const val SFX_RAW_MIN_QUERY_COVERAGE = 0.60
+    private const val SFX_REMOTE_MIN_QUERY_COVERAGE = 0.66
+    private const val SFX_CONTEXT_ONLY_SCORE = 0.40
     private const val CORE_PRESENT_COVERAGE = 0.92
     private const val CORE_ONLY_MIN_QUERY_COVERAGE = 0.32
     private const val LEGACY_MIN_SCORE = 0.56
@@ -755,6 +845,7 @@ internal object Mode3LibraryAssetMatcher {
         "distant", "far", "near", "close", "night", "day", "dark", "bright", "slow", "fast",
         "deep", "warm", "cold", "dramatic", "epic", "strong", "intense", "mysterious", "eerie",
         "emotional", "suspenseful", "calm", "melancholic", "happy", "angry", "scary", "creepy", "wet",
+        "magic", "magical", "mind", "mental", "psychic",
     )
 
     private val LOCAL_STOPWORDS = setOf(

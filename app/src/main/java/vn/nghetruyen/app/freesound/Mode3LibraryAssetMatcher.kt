@@ -212,12 +212,12 @@ internal object Mode3LibraryAssetMatcher {
             else -> 1.0
         }
 
-        val contextTokens = contextTokens(context)
-        val metadataTokens = contextTokens(metadata)
-        val lexicalShared = contextTokens.count(metadataTokens::contains)
+        val sceneTokens = semanticTokens(context)
+        val metadataTokens = semanticTokens(metadata)
+        val lexicalShared = sceneTokens.count(metadataTokens::contains)
         val lexicalScore = (lexicalShared / 5.0).coerceIn(0.0, 1.0)
 
-        val contextBigrams = bigrams(contextTokens)
+        val contextBigrams = bigrams(sceneTokens)
         val metadataBigrams = bigrams(metadataTokens)
         val sharedBigrams = contextBigrams.count(metadataBigrams::contains)
         val bigramScore = when (sharedBigrams) {
@@ -235,7 +235,7 @@ internal object Mode3LibraryAssetMatcher {
         .filter { index -> CONCEPT_GROUPS[index].any { alias -> containsPhrase(text, alias) } }
         .toSet()
 
-    private fun contextTokens(text: String): List<String> = normalized(text)
+    private fun semanticTokens(text: String): List<String> = normalized(text)
         .split(' ')
         .asSequence()
         .map(String::trim)

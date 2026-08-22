@@ -22,9 +22,9 @@ data class FreesoundAutoRequirement(
     val cadence: SfxCadence = SfxCadence.NORMAL,
     val loopUntilStop: Boolean = false,
     /**
-     * Story text attached locally after the AI has already chosen the timeline usage. This field is
-     * only evidence for selecting an existing library file. It is deliberately absent from toJson()
-     * so it never changes the short Freesound query or any AI-owned playback instruction.
+     * Story text attached locally after AI has already chosen every timeline/playback instruction.
+     * It is persisted only so cached Mode-3 requirements can keep the same local-file matching
+     * quality after reload. Freesound search code reads [query] only and never sends this context.
      */
     val localContext: String = "",
 )
@@ -40,6 +40,7 @@ data class FreesoundAutoSearchNeed(
 object FreesoundAutoRequirementCodec {
     const val JSON_KEY = "freesound_requirements"
     private const val MAX_QUERY_CHARS = 160
+    private const val MAX_LOCAL_CONTEXT_CHARS = 6_000
 
     fun parse(
         root: JSONObject,
@@ -67,6 +68,7 @@ object FreesoundAutoRequirementCodec {
                             .trim().uppercase(Locale.ROOT),
                     )
                 }.getOrDefault(FreesoundRequirementImportance.OPTIONAL)
+                val localContext = oneLine(row.optString("local_context")).take(MAX_LOCAL_CONTEXT_CHARS)
 
                 when (kind) {
                     AudioAssetKind.MUSIC, AudioAssetKind.AMBIENCE -> {
@@ -91,6 +93,7 @@ object FreesoundAutoRequirementCodec {
                                 importance = importance,
                                 startUnitId = validUnitIds[safeStartIndex],
                                 endUnitId = validUnitIds[safeEndIndex],
+                                localContext = localContext,
                             ),
                         )
                     }
@@ -118,6 +121,7 @@ object FreesoundAutoRequirementCodec {
                                 repeatCount = repeat,
                                 cadence = cadence,
                                 loopUntilStop = loop,
+                                localContext = localContext,
                             ),
                         )
                     }
@@ -135,6 +139,9 @@ object FreesoundAutoRequirementCodec {
                     .put("query", requirement.query)
                     .put("importance", requirement.importance.name)
                     .also { row ->
+                        requirement.localContext.trim().takeIf(String::isNotBlank)?.let {
+                            row.put("local_context", oneLine(it).take(MAX_LOCAL_CONTEXT_CHARS))
+                        }
                         when (requirement.kind) {
                             AudioAssetKind.MUSIC, AudioAssetKind.AMBIENCE -> {
                                 row.put("start_id", requirement.startUnitId)

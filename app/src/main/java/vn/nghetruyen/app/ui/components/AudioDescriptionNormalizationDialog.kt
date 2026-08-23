@@ -66,7 +66,7 @@ internal fun audioDescriptionIsVietnameseStructured(tagsCsv: String): Boolean {
 }
 
 internal fun audioDescriptionNeedsNormalization(tagsCsv: String): Boolean =
-    audioDescriptionText(tagsCsv).isNotBlank() && !audioDescriptionIsVietnameseStructured(tagsCsv)
+    !audioDescriptionIsVietnameseStructured(tagsCsv)
 
 private fun audioDescriptionTypeMarker(kind: AudioAssetKind): String = when (kind) {
     AudioAssetKind.MUSIC -> "type:music"
@@ -103,7 +103,7 @@ fun AudioDescriptionNormalizationDialog(
     val normalizedCount = tracks.count(::trackHasNormalizedDescription)
     val targetCount = when (mode) {
         AudioDescriptionNormalizationScope.MISSING_VIETNAMESE -> missingCount
-        AudioDescriptionNormalizationScope.ALL_LIBRARY -> tracks.count { audioDescriptionText(it.tagsCsv).isNotBlank() }
+        AudioDescriptionNormalizationScope.ALL_LIBRARY -> tracks.size
     }
 
     fun start() {
@@ -116,72 +116,72 @@ fun AudioDescriptionNormalizationDialog(
         failures = emptyList()
         providerModel = ""
         job = scope.launch {
-  val targets = tracks.filter { track ->
-      val description = audioDescriptionText(track.tagsCsv)
-      description.isNotBlank() && when (mode) {
-          AudioDescriptionNormalizationScope.MISSING_VIETNAMESE -> !audioDescriptionIsVietnameseStructured(track.tagsCsv)
-          AudioDescriptionNormalizationScope.ALL_LIBRARY -> true
-      }
-  }
-  val converted = mutableListOf<AudioDescriptionPreview>()
-  val errors = mutableListOf<String>()
-  targets.chunked(DESCRIPTION_BATCH_SIZE).forEach { batch ->
-      val prepared = mutableListOf<PreparedDescription>()
-      for (track in batch) {
-          val current = audioDescriptionText(track.tagsCsv)
-          var source = current
-          var refreshed = false
-          if (
-              mode == AudioDescriptionNormalizationScope.ALL_LIBRARY &&
-              audioDescriptionIsVietnameseStructured(track.tagsCsv)
-          ) {
-              val soundId = FreesoundImporter.soundIdFromManagedUri(track.uri)
-              if (soundId != null) {
-                  val original = application.container.freesoundClient.sound(soundId)?.description.orEmpty().trim()
-                  if (original.isNotBlank()) {
-                      source = original
-                      refreshed = true
-                  }
-              }
-          }
-          if (source.isBlank()) {
-              errors += "${track.title}: không có mô tả nguồn để chuẩn hóa."
-          } else {
-              prepared += PreparedDescription(
-                  track = track,
-                  kind = AudioAssetClassifier.classify(track),
-                  source = source,
-                  refreshed = refreshed,
-              )
-          }
-      }
-      if (prepared.isNotEmpty()) {
-          when (val result = application.container.xpkNarrationAiServices.completeAuxiliaryJson(
-              storyId = GLOBAL_VOICE_PROFILE_STORY_ID,
-              prompt = descriptionBatchPrompt(prepared),
-          )) {
-              is AppResult.Success -> {
-                  providerModel = "${result.value.provider} / ${result.value.model}"
-                  val parsed = runCatching { parseDescriptionBatch(result.value, prepared) }
-                      .getOrElse { error ->
-                          errors += "Lô ${processed + 1}-${processed + batch.size}: ${error.message ?: "AI trả JSON không hợp lệ."}"
-                          emptyList()
-                      }
-                  converted += parsed
-                  val returnedIds = parsed.mapTo(hashSetOf(), AudioDescriptionPreview::trackId)
-                  prepared.filter { it.track.id !in returnedIds }.forEach { missing ->
-                      errors += "${missing.track.title}: AI không trả kết quả."
-                  }
-              }
-              is AppResult.Failure -> errors += "AI: ${result.message}"
-          }
-      }
-      processed += batch.size
-      previews = converted.toList()
-      failures = errors.toList()
-  }
-  running = false
-  job = null
+            val targets = tracks.filter { track ->
+                when (mode) {
+                    AudioDescriptionNormalizationScope.MISSING_VIETNAMESE -> !audioDescriptionIsVietnameseStructured(track.tagsCsv)
+                    AudioDescriptionNormalizationScope.ALL_LIBRARY -> true
+                }
+            }
+            val converted = mutableListOf<AudioDescriptionPreview>()
+            val errors = mutableListOf<String>()
+            targets.chunked(DESCRIPTION_BATCH_SIZE).forEach { batch ->
+                val prepared = mutableListOf<PreparedDescription>()
+                for (track in batch) {
+                    val current = audioDescriptionText(track.tagsCsv)
+                    var source = current
+                    var refreshed = false
+                    if (
+                        source.isBlank() ||
+                        (mode == AudioDescriptionNormalizationScope.ALL_LIBRARY &&
+                            audioDescriptionIsVietnameseStructured(track.tagsCsv))
+                    ) {
+                        val soundId = FreesoundImporter.soundIdFromManagedUri(track.uri)
+                        if (soundId != null) {
+                            val original = application.container.freesoundClient.sound(soundId)?.description.orEmpty().trim()
+                            if (original.isNotBlank()) {
+                                source = original
+                                refreshed = true
+                            }
+                        }
+                    }
+                    if (source.isBlank()) {
+                        errors += "${track.title}: không có mô tả nguồn để chuẩn hóa."
+                    } else {
+                        prepared += PreparedDescription(
+                            track = track,
+                            kind = AudioAssetClassifier.classify(track),
+                            source = source,
+                            refreshed = refreshed,
+                        )
+                    }
+                }
+                if (prepared.isNotEmpty()) {
+                    when (val result = application.container.xpkNarrationAiServices.completeAuxiliaryJson(
+                        storyId = GLOBAL_VOICE_PROFILE_STORY_ID,
+                        prompt = descriptionBatchPrompt(prepared),
+                    )) {
+                        is AppResult.Success -> {
+                            providerModel = "${result.value.provider} / ${result.value.model}"
+                            val parsed = runCatching { parseDescriptionBatch(result.value, prepared) }
+                                .getOrElse { error ->
+                                    errors += "Lô ${processed + 1}-${processed + batch.size}: ${error.message ?: "AI trả JSON không hợp lệ."}"
+                                    emptyList()
+                                }
+                            converted += parsed
+                            val returnedIds = parsed.mapTo(hashSetOf(), AudioDescriptionPreview::trackId)
+                            prepared.filter { it.track.id !in returnedIds }.forEach { missing ->
+                                errors += "${missing.track.title}: AI không trả kết quả."
+                            }
+                        }
+                        is AppResult.Failure -> errors += "AI: ${result.message}"
+                    }
+                }
+                processed += batch.size
+                previews = converted.toList()
+                failures = errors.toList()
+            }
+            running = false
+            job = null
         }
     }
 
@@ -189,25 +189,25 @@ fun AudioDescriptionNormalizationDialog(
         if (running || previews.isEmpty()) return
         running = true
         job = scope.launch {
-  val now = System.currentTimeMillis()
-  val previewById = previews.associateBy(AudioDescriptionPreview::trackId)
-  val updated = tracks.mapNotNull { track ->
-      val preview = previewById[track.id] ?: return@mapNotNull null
-      val kind = AudioAssetClassifier.classify(track)
-      track.copy(
-          tagsCsv = audioDescriptionTags(kind, preview.convertedDescription),
-          updatedAt = now,
-      )
-  }
-  withContext(Dispatchers.IO) {
-      application.container.database.sceneMusicTrackDao().upsertAll(updated)
-  }
-  if (PlaybackQueueStore.state.value.isPlaying) {
-      ReaderPlaybackService.command(application, ReaderPlaybackService.ACTION_REFRESH)
-  }
-  applied = true
-  running = false
-  job = null
+            val now = System.currentTimeMillis()
+            val previewById = previews.associateBy(AudioDescriptionPreview::trackId)
+            val updated = tracks.mapNotNull { track ->
+                val preview = previewById[track.id] ?: return@mapNotNull null
+                val kind = AudioAssetClassifier.classify(track)
+                track.copy(
+                    tagsCsv = audioDescriptionTags(kind, preview.convertedDescription),
+                    updatedAt = now,
+                )
+            }
+            withContext(Dispatchers.IO) {
+                application.container.database.sceneMusicTrackDao().upsertAll(updated)
+            }
+            if (PlaybackQueueStore.state.value.isPlaying) {
+                ReaderPlaybackService.command(application, ReaderPlaybackService.ACTION_REFRESH)
+            }
+            applied = true
+            running = false
+            job = null
         }
     }
 
@@ -215,70 +215,70 @@ fun AudioDescriptionNormalizationDialog(
         onDismissRequest = { if (!running) onDismiss() },
         title = { Text("CHUẨN HÓA MÔ TẢ TOÀN BỘ THƯ VIỆN") },
         text = {
-  Column(Modifier.fillMaxWidth()) {
-      Text("Áp dụng cho cùng một kho MUSIC / AMBIENCE / SFX ở cả Mode 1, 2 và 3.")
-      Text("Mô tả gốc được gửi cho cùng AI/provider/model đang dùng để phân vai. AI chỉ chuyển thành metadata tiếng Việt theo cấu trúc: Sắc thái / Dùng / Tránh; không được tự bịa nhạc cụ, vật liệu hay nguồn âm nếu mô tả gốc không nói.")
-      HorizontalDivider(Modifier.padding(vertical = 6.dp))
-      Row(Modifier.fillMaxWidth()) {
-          Button(
-              onClick = { if (!running) mode = AudioDescriptionNormalizationScope.MISSING_VIETNAMESE },
-              enabled = !running,
-              modifier = Modifier.weight(1f),
-          ) { Text(if (mode == AudioDescriptionNormalizationScope.MISSING_VIETNAMESE) "✓ CHƯA CÓ TIẾNG VIỆT" else "CHƯA CÓ TIẾNG VIỆT") }
-          Button(
-              onClick = { if (!running) mode = AudioDescriptionNormalizationScope.ALL_LIBRARY },
-              enabled = !running,
-              modifier = Modifier.weight(1f),
-          ) { Text(if (mode == AudioDescriptionNormalizationScope.ALL_LIBRARY) "✓ TOÀN BỘ" else "TOÀN BỘ") }
-      }
-      Text("Tổng thư viện: ${tracks.size} • Đã chuẩn: $normalizedCount • Cần chuẩn: $missingCount • Trống mô tả: $blankCount")
-      if (mode == AudioDescriptionNormalizationScope.ALL_LIBRARY) {
-          Text("TOÀN BỘ: với file Freesound đã có tiếng Việt, ứng dụng cố lấy lại mô tả gốc bằng sound ID trước khi AI chuẩn hóa lại. File local không có nguồn gốc mạng sẽ dùng mô tả hiện tại làm nguồn.")
-      }
-      if (running || processed > 0) {
-          Text("Đã xử lý: $processed / $total • Thành công: ${previews.size} • Cần kiểm tra: ${failures.size}")
-      }
-      if (providerModel.isNotBlank()) Text("AI: $providerModel")
-      if (previews.isNotEmpty()) {
-          Text("KẾT QUẢ XEM TRƯỚC — chưa ghi vào thư viện:")
-          LazyColumn(Modifier.fillMaxWidth().heightIn(max = 320.dp)) {
-              items(previews, key = { it.trackId }) { preview ->
-                  Text("${preview.kind.name} • ${preview.title}")
-                  if (preview.sourceRefreshed) Text("Nguồn: mô tả gốc Freesound đã lấy lại")
-                  Text(preview.convertedDescription)
-                  HorizontalDivider(Modifier.padding(vertical = 4.dp))
-              }
-          }
-      }
-      if (failures.isNotEmpty()) {
-          Text("CẦN KIỂM TRA (${failures.size}):")
-          failures.take(12).forEach { Text("• $it") }
-          if (failures.size > 12) Text("… và ${failures.size - 12} mục khác.")
-      }
-      if (applied) Text("Đã áp dụng ${previews.size} mô tả vào thư viện chung.")
-  }
+            Column(Modifier.fillMaxWidth()) {
+                Text("Áp dụng cho cùng một kho MUSIC / AMBIENCE / SFX ở cả Mode 1, 2 và 3.")
+                Text("Mô tả gốc được gửi cho cùng AI/provider/model đang dùng để phân vai. AI chỉ chuyển thành metadata tiếng Việt theo cấu trúc: Sắc thái / Dùng / Tránh; không được tự bịa nhạc cụ, vật liệu hay nguồn âm nếu mô tả gốc không nói.")
+                HorizontalDivider(Modifier.padding(vertical = 6.dp))
+                Row(Modifier.fillMaxWidth()) {
+                    Button(
+                        onClick = { if (!running) mode = AudioDescriptionNormalizationScope.MISSING_VIETNAMESE },
+                        enabled = !running,
+                        modifier = Modifier.weight(1f),
+                    ) { Text(if (mode == AudioDescriptionNormalizationScope.MISSING_VIETNAMESE) "✓ CHƯA CÓ TIẾNG VIỆT" else "CHƯA CÓ TIẾNG VIỆT") }
+                    Button(
+                        onClick = { if (!running) mode = AudioDescriptionNormalizationScope.ALL_LIBRARY },
+                        enabled = !running,
+                        modifier = Modifier.weight(1f),
+                    ) { Text(if (mode == AudioDescriptionNormalizationScope.ALL_LIBRARY) "✓ TOÀN BỘ" else "TOÀN BỘ") }
+                }
+                Text("Tổng thư viện: ${tracks.size} • Đã chuẩn: $normalizedCount • Cần chuẩn: $missingCount • Trống mô tả: $blankCount")
+                if (mode == AudioDescriptionNormalizationScope.ALL_LIBRARY) {
+                    Text("TOÀN BỘ: với file Freesound, ứng dụng cố lấy lại mô tả gốc bằng sound ID trước khi AI chuẩn hóa lại. File local không có mô tả nguồn sẽ được liệt kê để bổ sung, không cho AI đoán từ tên.")
+                }
+                if (running || processed > 0) {
+                    Text("Đã xử lý: $processed / $total • Thành công: ${previews.size} • Cần kiểm tra: ${failures.size}")
+                }
+                if (providerModel.isNotBlank()) Text("AI: $providerModel")
+                if (previews.isNotEmpty()) {
+                    Text("KẾT QUẢ XEM TRƯỚC — chưa ghi vào thư viện:")
+                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 320.dp)) {
+                        items(previews, key = { it.trackId }) { preview ->
+                            Text("${preview.kind.name} • ${preview.title}")
+                            if (preview.sourceRefreshed) Text("Nguồn: mô tả gốc Freesound đã lấy lại")
+                            Text(preview.convertedDescription)
+                            HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                        }
+                    }
+                }
+                if (failures.isNotEmpty()) {
+                    Text("CẦN KIỂM TRA (${failures.size}):")
+                    failures.take(12).forEach { Text("• $it") }
+                    if (failures.size > 12) Text("… và ${failures.size - 12} mục khác.")
+                }
+                if (applied) Text("Đã áp dụng ${previews.size} mô tả vào thư viện chung.")
+            }
         },
         confirmButton = {
-  Column {
-      if (!running && previews.isEmpty() && targetCount > 0) {
-          TextButton(onClick = ::start) { Text("BẮT ĐẦU CHUẨN HÓA ($targetCount)") }
-      }
-      if (!running && previews.isNotEmpty() && !applied) {
-          TextButton(onClick = ::applyResults) { Text("ÁP DỤNG ${previews.size} MỤC") }
-      }
-      if (applied) TextButton(onClick = onDismiss) { Text("XONG") }
-  }
+            Column {
+                if (!running && previews.isEmpty() && targetCount > 0) {
+                    TextButton(onClick = ::start) { Text("BẮT ĐẦU CHUẨN HÓA ($targetCount)") }
+                }
+                if (!running && previews.isNotEmpty() && !applied) {
+                    TextButton(onClick = ::applyResults) { Text("ÁP DỤNG ${previews.size} MỤC") }
+                }
+                if (applied) TextButton(onClick = onDismiss) { Text("XONG") }
+            }
         },
         dismissButton = {
-  if (running) {
-      TextButton(onClick = {
-          job?.cancel()
-          job = null
-          running = false
-      }) { Text("DỪNG") }
-  } else if (!applied) {
-      TextButton(onClick = onDismiss) { Text("HỦY") }
-  }
+            if (running) {
+                TextButton(onClick = {
+                    job?.cancel()
+                    job = null
+                    running = false
+                }) { Text("DỪNG") }
+            } else if (!applied) {
+                TextButton(onClick = onDismiss) { Text("HỦY") }
+            }
         },
     )
 }
@@ -296,13 +296,13 @@ private fun trackHasNormalizedDescription(track: SceneMusicTrackEntity): Boolean
 private fun descriptionBatchPrompt(items: List<PreparedDescription>): String {
     val payload = JSONArray().also { array ->
         items.forEach { item ->
-  array.put(
-      JSONObject()
-          .put("id", item.track.id)
-          .put("kind", item.kind.name)
-          .put("title", item.track.title.take(160))
-          .put("original_description", item.source.take(4_000)),
-  )
+            array.put(
+                JSONObject()
+                    .put("id", item.track.id)
+                    .put("kind", item.kind.name)
+                    .put("title", item.track.title.take(160))
+                    .put("original_description", item.source.take(4_000)),
+            )
         }
     }
     return """
@@ -347,16 +347,16 @@ private fun parseDescriptionBatch(
         val description = row.optString("description").replace(Regex("\\s+"), " ").trim().take(300)
         val lower = description.lowercase()
         val valid = ("sắc thái:" in lower || "sac thai:" in lower) &&
-  ("dùng:" in lower || "dung:" in lower) &&
-  ("tránh:" in lower || "tranh:" in lower)
+            ("dùng:" in lower || "dung:" in lower) &&
+            ("tránh:" in lower || "tranh:" in lower)
         if (!valid) continue
         output += AudioDescriptionPreview(
-  trackId = id,
-  title = source.track.title,
-  kind = source.kind,
-  sourceDescription = source.source,
-  convertedDescription = description,
-  sourceRefreshed = source.refreshed,
+            trackId = id,
+            title = source.track.title,
+            kind = source.kind,
+            sourceDescription = source.source,
+            convertedDescription = description,
+            sourceRefreshed = source.refreshed,
         )
     }
     return output.distinctBy(AudioDescriptionPreview::trackId)
@@ -365,8 +365,8 @@ private fun parseDescriptionBatch(
 private const val DESCRIPTION_BATCH_SIZE = 12
 
 private val AUDIO_DESCRIPTION_TYPE_MARKER_REGEX = Regex(
-    """(?i)(?:type\\s*[:=]\\s*(?:sfx[_-]?continuous|continuous|sfx|sound[_-]?effect|ambience|environment|music)|\\[(?:continuous|sfx[_-]?continuous|sfx|ambience|environment|music)])""",
+    """(?i)(?:type\s*[:=]\s*(?:sfx[_-]?continuous|continuous|sfx|sound[_-]?effect|ambience|environment|music)|\[(?:continuous|sfx[_-]?continuous|sfx|ambience|environment|music)])""",
 )
 private val AUDIO_DESCRIPTION_LEGACY_PROVENANCE_REGEX = Regex(
-    """(?i)(?:^|[,;]\\s*)freesound_(?:id|user|license|url)\\s*:[^,;]*""",
+    """(?i)(?:^|[,;]\s*)freesound_(?:id|user|license|url)\s*:[^,;]*""",
 )

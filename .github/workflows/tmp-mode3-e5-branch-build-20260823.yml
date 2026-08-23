@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  patch-build:
+  build-only:
     if: ${{ !contains(github.event.head_commit.message, '[skip e5-build]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -20,34 +20,22 @@ jobs:
           ref: fix/mode3-resolution-quality-20260822
           fetch-depth: 0
 
-      - name: Apply E5 integration
+      - name: Verify integrated source
         shell: bash
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path('.github/scripts/apply_mode3_e5_integration_20260823.py')
-          text = path.read_text(encoding='utf-8')
-          old = '''    if count != 1:\n        raise SystemExit(f"{label}: expected 1 match, found {count}")'''
-          new = '''    if count < 1:\n        raise SystemExit(f"{label}: expected at least 1 match, found {count}")'''
-          if old not in text:
-              raise SystemExit('replace_once guard not found')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
-          PY
-          python3 .github/scripts/apply_mode3_e5_integration_20260823.py
-          git diff --check
           grep -q 'Mode3E5SemanticEngine.similarityOrNull' app/src/main/java/vn/nghetruyen/app/freesound/Mode3LibraryAssetMatcher.kt
           grep -q 'TẢI MÔ HÌNH TÌM KIẾM NGỮ NGHĨA' app/src/main/java/vn/nghetruyen/app/MainActivity.kt
+          grep -q 'onnxruntime-android' app/build.gradle.kts
+          git diff --check
 
-      - name: Commit integrated source
+      - name: Record build run
         shell: bash
         run: |
-          rm -f .github/scripts/apply_mode3_e5_integration_20260823.py
-          rm -f .mode3-e5-trigger-20260823 .mode3-e5-trigger2-20260823
+          printf '%s\n' "$GITHUB_RUN_ID" > .mode3-e5-last-run
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A app/src/main/java/vn/nghetruyen/app app/build.gradle.kts .github/scripts/apply_mode3_e5_integration_20260823.py .mode3-e5-trigger-20260823 .mode3-e5-trigger2-20260823
-          git diff --cached --check
-          git commit -m "feat(mode3): complete downloadable E5 integration [skip e5-build]"
+          git add .mode3-e5-last-run
+          git commit -m "ci: record Mode3 E5 build run [skip e5-build]"
           git push origin HEAD:fix/mode3-resolution-quality-20260822
 
       - name: Set up JDK 17

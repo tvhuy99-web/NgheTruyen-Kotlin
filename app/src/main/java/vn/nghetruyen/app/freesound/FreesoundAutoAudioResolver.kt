@@ -1222,7 +1222,8 @@ class FreesoundAutoAudioResolver(
 
     companion object {
         private const val SEARCH_PAGE_SIZE = 30
-        private const val REMOTE_MIN_SCORE = 0.22
+        private const val REMOTE_MIN_SCORE = 0.16
+        private const val REMOTE_SCORE_NORMALIZER = 1.38
         private const val REMOTE_MIN_LEXICAL_COVERAGE = 0.50
         private const val RETRY_TWO_TERM_EVIDENCE_WEIGHT = 0.90
         private const val RETRY_ONE_TERM_EVIDENCE_WEIGHT = 0.68
@@ -1274,7 +1275,7 @@ class FreesoundAutoAudioResolver(
             val titleCoverage = coverage(sound.name)
             val descriptionCoverage = coverage(sound.description)
             val tagCoverage = coverage(sound.tags.joinToString(" "))
-            return max(titleCoverage, max(tagCoverage * 0.96, descriptionCoverage * 0.78))
+            return max(descriptionCoverage, max(titleCoverage * 0.85, tagCoverage * 0.75))
         }
 
         internal fun candidateLexicalCoverage(
@@ -1339,9 +1340,9 @@ class FreesoundAutoAudioResolver(
             if (lexicalCoverage <= 0.0) return 0.0
 
             val phraseBonus = when {
-                titleNorm.contains(queryNorm) -> 0.20
-                tagNorm.contains(queryNorm) -> 0.14
-                descriptionNorm.contains(queryNorm) -> 0.08
+                descriptionNorm.contains(queryNorm) -> 0.20
+                titleNorm.contains(queryNorm) -> 0.12
+                tagNorm.contains(queryNorm) -> 0.08
                 else -> 0.0
             }
             val expectedCategory = when (need.kind) {
@@ -1395,8 +1396,8 @@ class FreesoundAutoAudioResolver(
             } else 0.0
             val rankBonus = 0.08 / (rankIndex.coerceAtLeast(0) + 1.0)
             return (
-                lexicalCoverage * 0.62 + phraseBonus + categoryBonus + durationBonus +
-                    ratingBonus + downloadsBonus + apiScoreBonus + rankBonus
+                (lexicalCoverage * 0.62 + phraseBonus + categoryBonus + durationBonus +
+                    ratingBonus + downloadsBonus + apiScoreBonus + rankBonus) / REMOTE_SCORE_NORMALIZER
                 ).coerceIn(0.0, 1.0)
         }
     }

@@ -1,0 +1,90 @@
+name: Temporary Mode3 E5 Branch Build
+
+on:
+  push:
+    branches:
+      - fix/mode3-resolution-quality-20260822
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build:
+    if: ${{ !contains(github.event.head_commit.message, '[skip e5-build]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/mode3-resolution-quality-20260822
+          fetch-depth: 0
+
+      - name: Apply E5 integration
+        shell: bash
+        run: |
+          python3 .github/scripts/apply_mode3_e5_integration_20260823.py
+          git diff --check
+          grep -q 'Mode3E5SemanticEngine.similarityOrNull' app/src/main/java/vn/nghetruyen/app/freesound/Mode3LibraryAssetMatcher.kt
+          grep -q 'TẢI MÔ HÌNH TÌM KIẾM NGỮ NGHĨA' app/src/main/java/vn/nghetruyen/app/MainActivity.kt
+
+      - name: Commit integrated source
+        shell: bash
+        run: |
+          rm -f .github/scripts/apply_mode3_e5_integration_20260823.py
+          rm -f .mode3-e5-trigger-20260823
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A app/src/main/java/vn/nghetruyen/app app/build.gradle.kts .github/scripts/apply_mode3_e5_integration_20260823.py .mode3-e5-trigger-20260823
+          git diff --cached --check
+          git commit -m "feat(mode3): complete downloadable E5 integration [skip e5-build]"
+          git push origin HEAD:fix/mode3-resolution-quality-20260822
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Bootstrap Gradle Wrapper
+        shell: bash
+        run: |
+          chmod +x gradlew scripts/bootstrap-wrapper.sh
+          ./scripts/bootstrap-wrapper.sh
+
+      - name: Build debug APK without tests
+        shell: bash
+        run: |
+          FINAL_SHA="$(git rev-parse HEAD)"
+          env -u GITHUB_SHA NGHETRUYEN_BUILD_SHA="$FINAL_SHA" ./gradlew --no-daemon --stacktrace :app:assembleDebug
+
+      - name: Package APK
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk dist/NgheTruyen-Mode3-E5-Downloadable-20260823.apk
+          sha256sum dist/NgheTruyen-Mode3-E5-Downloadable-20260823.apk > dist/NgheTruyen-Mode3-E5-Downloadable-20260823.apk.sha256
+          git rev-parse HEAD > dist/source-commit.txt
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NgheTruyen-Mode3-E5-Downloadable-apk
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            dist/NgheTruyen-Mode3-E5-Downloadable-20260823.apk
+            dist/NgheTruyen-Mode3-E5-Downloadable-20260823.apk.sha256
+            dist/source-commit.txt

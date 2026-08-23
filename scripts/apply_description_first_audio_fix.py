@@ -68,9 +68,7 @@ replace_once(
     'remote phrase bonus description-name-tags',
 )
 
-# The old scorer can exceed 1.0 before clamping, which erases field priority for strong hits.
-# Normalize by the theoretical maximum (1.38) so description/name/tag differences remain visible.
-# Lower the acceptance threshold by the same factor to preserve the previous effective strictness.
+# Prevent strong candidates from all saturating at 1.0 and losing field priority.
 replace_once(
     resolver,
     'private const val REMOTE_MIN_SCORE = 0.22',
@@ -90,7 +88,6 @@ replace_once(
     'remote score normalization prevents saturation',
 )
 
-# Guards against accidental policy drift in this patch run.
 m = matcher.read_text(encoding='utf-8')
 r = resolver.read_text(encoding='utf-8')
 assert 'entry.englishMetadataTokens.forEach { token ->' in m

@@ -2,7 +2,7 @@ name: Description-First Audio Fix Runner
 
 on:
   pull_request:
-    types: [opened, reopened]
+    types: [opened, reopened, synchronize]
     branches:
       - fix/mode3-resolution-quality-20260822
 

@@ -1,9 +1,7 @@
 name: Temporary Gradle Cache Export
 
 on:
-  pull_request:
-    branches:
-      - main
+  pull_request_target:
     types: [opened, reopened, synchronize]
 
 permissions:
@@ -11,13 +9,15 @@ permissions:
 
 jobs:
   export-cache:
-    if: github.head_ref == 'fix/mode3-resolution-quality-20260822'
+    if: github.event.pull_request.head.ref == 'fix/mode3-resolution-quality-20260822'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
       - name: Checkout requested branch
         uses: actions/checkout@v4
         with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
       - name: Set up JDK 17

@@ -129,7 +129,7 @@ internal object Mode3LibraryAssetMatcher {
         val passages = tracks.asSequence()
             .filter { it.enabled }
             .map { indexTrackCached(it).first.sections }
-            .flatMap(Sections::semanticPassages)
+            .flatMap { sections -> sections.semanticPassages() }
             .toList()
         Mode3E5SemanticEngine.requestPrewarm(passages)
     }

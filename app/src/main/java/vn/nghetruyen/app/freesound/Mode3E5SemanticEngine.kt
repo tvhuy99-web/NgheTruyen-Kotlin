@@ -558,6 +558,7 @@ internal object Mode3E5SemanticEngine {
     private const val DOWNLOAD_BUFFER_BYTES = 128 * 1024
     private const val CACHE_MAGIC = 0x4535534D
     private const val CACHE_VERSION = 1
+    private const val PAD_TOKEN_ID = 1L
     private const val QUERY_PREFIX = "query: "
     private const val PASSAGE_PREFIX = "passage: "
     private const val RAW_COSINE_FLOOR = 0.68

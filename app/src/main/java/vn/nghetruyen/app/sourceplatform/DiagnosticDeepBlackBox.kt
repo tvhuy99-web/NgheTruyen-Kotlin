@@ -264,6 +264,9 @@ object DiagnosticDeepBlackBox {
     }.toString(2)
 
     private fun reportsDroppedData(event: DiagnosticEvent): Boolean = event.attributes.any { (key, rawValue) ->
+        // A semantic matcher field such as rejectReason describes a candidate decision, not lost
+        // diagnostics. Only data-retention counters/flags are allowed to make lossVisible=true.
+        if (key.contains("reason", true)) return@any false
         if (!key.contains("drop", true) && !key.contains("evict", true) && !key.contains("reject", true)) {
             return@any false
         }

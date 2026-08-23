@@ -1,6 +1,8 @@
 package vn.nghetruyen.app.freesound
 
 import android.content.Context
+import android.net.Uri
+import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
 import kotlinx.coroutines.async
@@ -211,23 +213,27 @@ class FreesoundAutoAudioResolver(
     }
 
     private fun resolutionCycleKey(needs: List<FreesoundAutoSearchNeed>): String =
-        needs.joinToString("\u001e") { need ->
+        needs.sortedWith(
+            compareBy<FreesoundAutoSearchNeed> { it.kind.name }
+                .thenBy { FreesoundAutoRequirementAggregator.normalizeQuery(it.query) }
+                .thenBy { it.importance.name },
+        ).joinToString("\u001e") { need ->
+            // Asset identity depends on semantic need, not on volatile unit/timeline ids.
+            // Keeping unit ids in this fingerprint made the same completed 7/7 asset set resolve again
+            // when prefetch and active playback represented the same scene with different boundaries.
+            val contexts = need.usages.asSequence()
+                .map { it.localContext.trim().replace(Regex("\\s+"), " ").lowercase() }
+                .filter(String::isNotBlank)
+                .distinct()
+                .sorted()
+                .toList()
             buildString {
                 append(need.kind.name)
                 append('\u001f')
                 append(FreesoundAutoRequirementAggregator.normalizeQuery(need.query))
                 append('\u001f')
                 append(need.importance.name)
-                need.usages.forEach { usage ->
-                    append('\u001d').append(usage.localContext.trim())
-                    append('\u001c').append(usage.startUnitId.orEmpty())
-                    append('\u001c').append(usage.endUnitId.orEmpty())
-                    append('\u001c').append(usage.unitId.orEmpty())
-                    append('\u001c').append(usage.stopUnitId.orEmpty())
-                    append('\u001c').append(usage.repeatCount)
-                    append('\u001c').append(usage.cadence.name)
-                    append('\u001c').append(usage.loopUntilStop)
-                }
+                contexts.forEach { context -> append('\u001d').append(context) }
             }
         }
 
@@ -276,9 +282,29 @@ class FreesoundAutoAudioResolver(
     private fun isUsableLibraryTrack(track: SceneMusicTrackEntity, kind: AudioAssetKind): Boolean {
         if (!track.enabled || track.id.isBlank() || track.uri.isBlank()) return false
         if (AudioAssetClassifier.classify(track) != kind) return false
-        if (!isManagedFreesoundTrack(track)) return true
+        if (!isManagedFreesoundTrack(track)) return libraryUriExists(track.uri)
         return FreesoundImporter.soundIdFromManagedUri(track.uri) != null &&
             FreesoundImporter.managedFileExists(appContext, track.uri)
+    }
+
+    private fun libraryUriExists(uriValue: String): Boolean {
+        val clean = uriValue.trim()
+        if (clean.isBlank()) return false
+        val parsed = runCatching { Uri.parse(clean) }.getOrNull()
+        return when (parsed?.scheme?.lowercase()) {
+            "content" -> runCatching {
+                appContext.contentResolver.openFileDescriptor(parsed, "r")?.use { descriptor ->
+                    descriptor.statSize != 0L
+                } ?: false
+            }.getOrDefault(false)
+            "file" -> parsed.path?.let(::File)?.let { it.isFile && it.length() > 0L } == true
+            null, "" -> File(clean).let { it.isFile && it.length() > 0L }
+            else -> runCatching {
+                appContext.contentResolver.openAssetFileDescriptor(parsed, "r")?.use { descriptor ->
+                    descriptor.length != 0L
+                } ?: false
+            }.getOrDefault(false)
+        }
     }
 
     private fun cachedTrackForNeed(

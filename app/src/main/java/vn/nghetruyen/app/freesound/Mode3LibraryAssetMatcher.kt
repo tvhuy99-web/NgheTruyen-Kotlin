@@ -97,6 +97,7 @@ internal object Mode3LibraryAssetMatcher {
         val queryTokens: Set<String>,
         val coreToken: String?,
         val eventToken: String?,
+        val requiredConcepts: Set<String>,
         val hints: List<LocalHint>,
     ) {
         val hintAware: Boolean get() = hints.isNotEmpty()
@@ -110,6 +111,7 @@ internal object Mode3LibraryAssetMatcher {
         val englishMetadataTokens: Set<String>,
         val englishAvoidTokens: Set<String>,
         val sections: Sections,
+        val audibleConcepts: Set<String>,
     )
 
     private data class LibraryIndex(
@@ -250,12 +252,18 @@ internal object Mode3LibraryAssetMatcher {
 
     private fun indexTrack(track: SceneMusicTrackEntity): IndexedTrack {
         val sections = sections(track.tagsCsv)
+        val audibleText = if (sections.structured) {
+            listOf(track.title, sections.shadeText, sections.useText).joinToString(" ")
+        } else {
+            "${track.title} ${track.tagsCsv}"
+        }
         return IndexedTrack(
             track = track,
             englishTitleTokens = FreesoundAutoRequirementAggregator.queryTokens(track.title),
             englishMetadataTokens = FreesoundAutoRequirementAggregator.queryTokens(track.tagsCsv),
             englishAvoidTokens = FreesoundAutoRequirementAggregator.queryTokens(sections.avoidText),
             sections = sections,
+            audibleConcepts = audibleConcepts(audibleText),
         )
     }
 
@@ -304,6 +312,7 @@ internal object Mode3LibraryAssetMatcher {
             queryTokens = queryTokens,
             coreToken = coreToken,
             eventToken = eventToken,
+            requiredConcepts = audibleConcepts(need.query),
             hints = hints,
         )
     }
@@ -353,7 +362,7 @@ internal object Mode3LibraryAssetMatcher {
         val lexical = lexicalCoverage.coerceIn(0.0, 1.0)
         val corePresent = coreCoverage >= CORE_PRESENT_COVERAGE
         val eventPresent = eventCoverage >= CORE_PRESENT_COVERAGE
-        val qualified = when (need.kind) {
+        val lexicalQualified = when (need.kind) {
             AudioAssetKind.SFX -> if (event != null) {
                 lexical >= REMOTE_SFX_STRONG_QUERY_COVERAGE ||
                     (lexical >= REMOTE_SFX_RELAXED_QUERY_COVERAGE && (corePresent || eventPresent))
@@ -363,6 +372,17 @@ internal object Mode3LibraryAssetMatcher {
             }
             else -> lexical >= LEGACY_MIN_QUERY_COVERAGE
         }
+        val requiredConcepts = audibleConcepts(need.query)
+        val candidateConcepts = audibleConcepts(
+            buildString {
+                append(sound.name).append(' ')
+                append(sound.description).append(' ')
+                append(sound.tags.joinToString(" "))
+            },
+        )
+        val conceptCoverage = conceptCoverage(requiredConcepts, candidateConcepts)
+        val conceptConflict = requiredConcepts.isNotEmpty() && candidateConcepts.isNotEmpty() && conceptCoverage <= 0.0
+        val qualified = lexicalQualified && !conceptConflict
         val fit = if (!qualified) {
             0.0
         } else if (need.kind == AudioAssetKind.SFX && event != null) {
@@ -451,6 +471,11 @@ internal object Mode3LibraryAssetMatcher {
             indexed.sections.structured -> "PARTIAL"
             else -> "RAW"
         }
+        val requiredConcepts = profile.requiredConcepts
+        val conceptCoverage = conceptCoverage(requiredConcepts, indexed.audibleConcepts)
+        val conceptConflict = requiredConcepts.isNotEmpty() &&
+            indexed.audibleConcepts.isNotEmpty() &&
+            conceptCoverage <= 0.0
 
         if (!hintAware && queryCoverage <= 0.0) return null
         if (hintAware && contextScore <= 0.0 && queryCoverage <= 0.0 && coreCoverage <= 0.0) return null
@@ -504,8 +529,13 @@ internal object Mode3LibraryAssetMatcher {
             // or fresh Freesound results. Provenance contributes zero points.
             queryEvidence * 0.84
         }
+        val conceptFactor = if (requiredConcepts.isEmpty() || indexed.audibleConcepts.isEmpty()) {
+            1.0
+        } else {
+            0.80 + conceptCoverage * 0.20
+        }
         val selectionScore = (
-            selectionBase -
+            selectionBase * conceptFactor -
                 avoidCoverage * 0.48 -
                 repetitionPenalty * 0.50
             ).coerceIn(0.0, 1.0)
@@ -521,6 +551,7 @@ internal object Mode3LibraryAssetMatcher {
             coreCoverage = coreCoverage,
             eventCoverage = eventCoverage,
             conflict = avoidCoverage,
+            conceptConflict = conceptConflict,
         )
         return Match(
             track = currentTrack,
@@ -556,8 +587,10 @@ internal object Mode3LibraryAssetMatcher {
         coreCoverage: Double,
         eventCoverage: Double,
         conflict: Double,
+        conceptConflict: Boolean,
     ): String {
         val reasons = buildList {
+            if (conceptConflict) add("sourceConceptMismatch")
             if (conflict >= MAX_CONFLICT) add("conflict>=$MAX_CONFLICT")
             if (!hintAware) {
                 if (kind == AudioAssetKind.SFX && eventRequired) {
@@ -691,6 +724,22 @@ internal object Mode3LibraryAssetMatcher {
             emptyList(),
         )
         return LocalHint(raw = value, shade = localText(shade), use = localText(use), avoid = localText(avoid))
+    }
+
+
+    private fun audibleConcepts(value: String): Set<String> {
+        val normalized = localNormalize(value)
+        if (normalized.isBlank()) return emptySet()
+        val padded = " $normalized "
+        return AUDIBLE_CONCEPT_ALIASES.asSequence()
+  .filter { (_, aliases) -> aliases.any { alias -> padded.contains(" $alias ") } }
+  .mapTo(linkedSetOf()) { it.key }
+    }
+
+    private fun conceptCoverage(required: Set<String>, candidate: Set<String>): Double {
+        if (required.isEmpty()) return 1.0
+        if (candidate.isEmpty()) return 0.0
+        return required.count(candidate::contains).toDouble() / required.size.toDouble()
     }
 
     private fun firstMarker(lower: String, vararg markers: String): Int = markers
@@ -940,6 +989,38 @@ internal object Mode3LibraryAssetMatcher {
         "deep", "warm", "cold", "dramatic", "epic", "strong", "intense", "mysterious", "eerie",
         "emotional", "suspenseful", "calm", "melancholic", "happy", "angry", "scary", "creepy", "wet",
         "magic", "magical", "mind", "mental", "psychic",
+    )
+
+
+    private val AUDIBLE_CONCEPT_ALIASES = linkedMapOf(
+        "WIND" to setOf("wind", "winds", "windy", "gust", "gusts", "breeze", "breezy", "gio", "gió"),
+        "RAIN" to setOf("rain", "rainy", "rainfall", "raindrop", "raindrops", "drizzle", "mua", "mưa", "hat mua", "hạt mưa"),
+        "WATER" to setOf("water", "river", "stream", "waves", "wave", "ocean", "sea", "nuoc", "nước", "song", "sông", "suoi", "suối", "sóng", "bien", "biển"),
+        "FIRE" to setOf("fire", "flame", "flames", "burn", "burning", "lua", "lửa", "chay", "cháy"),
+        "THUNDER" to setOf("thunder", "thunderclap", "rumble", "sam", "sấm", "sam set", "sấm sét"),
+        "LIGHTNING" to setOf("lightning", "electric", "electricity", "set", "sét", "tia set", "tia sét", "dien", "điện"),
+        "EXPLOSION" to setOf("explosion", "explosions", "explode", "explosive", "blast", "boom", "no", "nổ", "vu no", "vụ nổ"),
+        "SWORD" to setOf("sword", "blade", "katana", "kiem", "kiếm", "luoi kiem", "lưỡi kiếm", "dao", "đao"),
+        "SHIELD" to setOf("shield", "khien", "khiên", "tam chan", "tấm chắn"),
+        "SHATTER" to setOf("shatter", "shattering", "break", "breaking", "crack", "cracking", "vo", "vỡ", "vo vun", "vỡ vụn", "nut", "nứt", "gay", "gãy"),
+        "STRIKE" to setOf("strike", "hit", "impact", "slam", "slash", "smash", "clash", "danh", "đánh", "dap", "đập", "chem", "chém", "va cham", "va chạm"),
+        "WHOOSH" to setOf("whoosh", "woosh", "swoosh", "swish", "vut", "vút", "rit gio", "rít gió"),
+        "FOOTSTEP" to setOf("footstep", "footsteps", "walking", "running", "steps", "buoc chan", "bước chân"),
+        "DOOR" to setOf("door", "cua", "cửa"),
+        "BELL" to setOf("bell", "bells", "chime", "chuong", "chuông"),
+        "CROWD" to setOf("crowd", "chatter", "people", "conversation", "dam dong", "đám đông", "tro chuyen", "trò chuyện", "tieng nguoi", "tiếng người"),
+        "TRAFFIC" to setOf("traffic", "cars", "car", "vehicle", "vehicles", "road", "street", "giao thong", "giao thông", "xe co", "xe cộ"),
+        "BICYCLE" to setOf("bicycle", "bike", "cycling", "xe dap", "xe đạp"),
+        "PIANO" to setOf("piano", "keyboard", "dan piano", "đàn piano", "duong cam", "dương cầm"),
+        "GUITAR" to setOf("guitar", "acoustic guitar", "dan guitar", "đàn guitar"),
+        "ORCHESTRA" to setOf("orchestra", "orchestral", "dan nhac", "dàn nhạc"),
+        "STRINGS" to setOf("strings", "string", "violin", "violins", "cello", "dan day", "đàn dây", "vi cam", "vĩ cầm"),
+        "DRUMS" to setOf("drum", "drums", "percussion", "trong", "trống", "bo go", "bộ gõ"),
+        "FLUTE" to setOf("flute", "sao", "sáo"),
+        "VOCAL" to setOf("vocal", "vocals", "choir", "singing", "voice", "giong hat", "giọng hát", "hop xuong", "hợp xướng"),
+        "COMBAT" to setOf("battle", "combat", "fight", "fighting", "war", "chien dau", "chiến đấu", "dai chien", "đại chiến", "giao chien", "giao chiến"),
+        "BIRD" to setOf("bird", "birds", "birdsong", "chim", "tieng chim", "tiếng chim"),
+        "FOREST" to setOf("forest", "woods", "woodland", "rung", "rừng"),
     )
 
     private val LOCAL_STOPWORDS = setOf(

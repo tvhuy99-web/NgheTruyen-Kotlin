@@ -242,7 +242,6 @@ class ReaderPlaybackService : Service() {
             .filter { detail ->
                 val normalized = detail.uppercase(Locale.ROOT)
                 normalized.contains("FAILED") ||
-                    normalized.contains("ERROR") ||
                     normalized.contains("RETRY_EXHAUSTED") ||
                     normalized.contains("NEED_UNRESOLVED") ||
                     normalized.contains("CACHE_STALE") ||

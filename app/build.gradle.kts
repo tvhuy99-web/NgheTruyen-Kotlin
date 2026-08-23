@@ -198,7 +198,7 @@ dependencies {
     implementation("co.ntbl:lame:1.0.0")
 
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.29.0")
-    implementation("ai.djl.huggingface:tokenizers:0.36.0")
+    implementation("ai.djl.huggingface:tokenizers:0.33.0")
     runtimeOnly("ai.djl.android:tokenizer-native:0.33.0")
 
     testImplementation("junit:junit:4.13.2")

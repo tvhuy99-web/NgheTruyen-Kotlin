@@ -1,5 +1,6 @@
 package vn.nghetruyen.app.freesound
 
+import ai.djl.huggingface.tokenizers.HuggingFaceTokenizer
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
@@ -27,8 +28,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.bytedeco.sentencepiece.IntVector
-import org.bytedeco.sentencepiece.SentencePieceProcessor
 
 internal object Mode3E5SemanticEngine {
     data class DownloadProgress(
@@ -54,7 +53,7 @@ internal object Mode3E5SemanticEngine {
     private data class Runtime(
         val environment: OrtEnvironment,
         val session: OrtSession,
-        val tokenizer: SentencePieceProcessor,
+        val tokenizer: HuggingFaceTokenizer,
     )
 
     private data class Tokenized(
@@ -107,7 +106,7 @@ internal object Mode3E5SemanticEngine {
     fun backendName(): String = when {
         runtime != null -> "MULTILINGUAL_E5_SMALL_INT8"
         isInstalled() -> "MULTILINGUAL_E5_SMALL_INT8_LOADING"
-        else -> "DESCRIPTION_VECTOR_OPEN_VOCABULARY_FALLBACK"
+        else -> "DISABLED_NO_E5_MODEL"
     }
 
     fun isInstalled(): Boolean {
@@ -150,7 +149,7 @@ internal object Mode3E5SemanticEngine {
                 expectedSha256 = TOKENIZER_SHA256,
                 baseCompletedBytes = model.length(),
                 overallTotalBytes = maxOf(APPROXIMATE_PACK_BYTES, model.length() + TOKENIZER_APPROXIMATE_BYTES),
-                label = "Tokenizer SentencePiece",
+                label = "Tokenizer Hugging Face",
                 progress = progress,
             )
             writeManifest(directory)
@@ -254,11 +253,13 @@ internal object Mode3E5SemanticEngine {
             if (!isInstalled()) return@synchronized null
             val context = applicationContext ?: return@synchronized null
             runCatching {
-                val tokenizer = SentencePieceProcessor()
-                val tokenizerStatus = tokenizer.Load(File(modelDirectory(context), TOKENIZER_FILE).absolutePath)
-                check(tokenizerStatus.ok()) { "Không mở được tokenizer E5: ${tokenizerStatus.ToString()}" }
+                val tokenizer = HuggingFaceTokenizer.newInstance(
+                    File(modelDirectory(context), TOKENIZER_FILE).toPath(),
+                )
                 val environment = OrtEnvironment.getEnvironment()
-                val options = OrtSession.SessionOptions()
+                val options = OrtSession.SessionOptions().apply {
+                    setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+                }
                 val session = environment.createSession(File(modelDirectory(context), MODEL_FILE).absolutePath, options)
                 Runtime(environment, session, tokenizer).also {
                     runtime = it
@@ -379,20 +380,17 @@ internal object Mode3E5SemanticEngine {
         }
     }
 
-    private fun tokenize(processor: SentencePieceProcessor, text: String): Tokenized {
-        val raw: IntVector = processor.EncodeAsIds(text)
-        raw.use {
-            val available = minOf(raw.size().toInt(), MAX_TOKENS - 2)
-            val ids = LongArray(available + 2)
-            val mask = LongArray(available + 2) { 1L }
-            ids[0] = BOS_TOKEN_ID
-            for (index in 0 until available) {
-                val sentencePieceId = raw[index.toLong()]
-                ids[index + 1] = if (sentencePieceId == 0) UNKNOWN_TOKEN_ID else sentencePieceId.toLong() + TOKEN_ID_OFFSET
-            }
-            ids[ids.lastIndex] = EOS_TOKEN_ID
-            return Tokenized(ids, mask)
-        }
+    private fun tokenize(tokenizer: HuggingFaceTokenizer, text: String): Tokenized {
+        val encoding = tokenizer.encode(text)
+        val rawIds = encoding.ids
+        val rawMask = encoding.attentionMask
+        if (rawIds.size <= MAX_TOKENS) return Tokenized(rawIds, rawMask)
+
+        val ids = rawIds.copyOfRange(0, MAX_TOKENS)
+        val mask = rawMask.copyOfRange(0, MAX_TOKENS)
+        ids[MAX_TOKENS - 1] = rawIds.last()
+        mask[MAX_TOKENS - 1] = rawMask.last()
+        return Tokenized(ids, mask)
     }
 
     private fun meanPoolAndNormalize(
@@ -543,16 +541,16 @@ internal object Mode3E5SemanticEngine {
     }
 
     private const val MODEL_ID = "multilingual-e5-small"
-    private const val PACK_VERSION = 1
+    private const val PACK_VERSION = 2
     private const val MODEL_FILE = "model_int8.onnx"
-    private const val TOKENIZER_FILE = "sentencepiece.bpe.model"
+    private const val TOKENIZER_FILE = "tokenizer.json"
     private const val MANIFEST_FILE = "model-pack.properties"
     private const val MODEL_URL = "https://huggingface.co/Xenova/multilingual-e5-small/resolve/main/onnx/model_int8.onnx?download=true"
-    private const val TOKENIZER_URL = "https://huggingface.co/intfloat/multilingual-e5-small/resolve/main/onnx/sentencepiece.bpe.model?download=true"
+    private const val TOKENIZER_URL = "https://huggingface.co/Xenova/multilingual-e5-small/resolve/main/tokenizer.json?download=true"
     private const val MODEL_SHA256 = "4d24e2bc01a447951524466ef533e52944bf48509e6552810bcee1a2711cb02c"
-    private const val TOKENIZER_SHA256 = "cfc8146abe2a0488e9e2a0c56de7952f7c11ab059eca145a0a727afce0db2865"
-    private const val APPROXIMATE_PACK_BYTES = 124_000_000L
-    private const val TOKENIZER_APPROXIMATE_BYTES = 5_100_000L
+    private const val TOKENIZER_SHA256 = "0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39"
+    private const val APPROXIMATE_PACK_BYTES = 136_000_000L
+    private const val TOKENIZER_APPROXIMATE_BYTES = 17_082_730L
     private const val EMBEDDING_DIMENSIONS = 384
     private const val MAX_TOKENS = 512
     private const val PREWARM_BATCH_SIZE = 12
@@ -560,11 +558,6 @@ internal object Mode3E5SemanticEngine {
     private const val DOWNLOAD_BUFFER_BYTES = 128 * 1024
     private const val CACHE_MAGIC = 0x4535534D
     private const val CACHE_VERSION = 1
-    private const val PAD_TOKEN_ID = 1L
-    private const val BOS_TOKEN_ID = 0L
-    private const val EOS_TOKEN_ID = 2L
-    private const val UNKNOWN_TOKEN_ID = 3L
-    private const val TOKEN_ID_OFFSET = 1L
     private const val QUERY_PREFIX = "query: "
     private const val PASSAGE_PREFIX = "passage: "
     private const val RAW_COSINE_FLOOR = 0.68

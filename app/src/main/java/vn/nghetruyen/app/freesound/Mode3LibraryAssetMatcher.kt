@@ -62,7 +62,6 @@ internal object Mode3LibraryAssetMatcher {
 
     private data class LocalText(
         val text: String,
-        val fingerprint: Mode3OpenDescriptionVector.Fingerprint,
     ) {
         val isPresent: Boolean get() = text.isNotBlank()
     }
@@ -98,6 +97,7 @@ internal object Mode3LibraryAssetMatcher {
         val queryTokens: Set<String>,
         val coreToken: String?,
         val eventToken: String?,
+        val queryText: LocalText,
         val hints: List<LocalHint>,
     ) {
         val hintAware: Boolean get() = hints.isNotEmpty()
@@ -161,11 +161,25 @@ internal object Mode3LibraryAssetMatcher {
             .flatMap { it.sections.semanticPassages() }
             .distinct()
             .toList()
-        val useE5 = semanticPassages.isNotEmpty() && Mode3E5SemanticEngine.allPassagesCached(semanticPassages)
-        if (!useE5 && semanticPassages.isNotEmpty()) Mode3E5SemanticEngine.requestPrewarm(semanticPassages)
+        val e5Ready = Mode3E5SemanticEngine.status().ready
+        val fullyIndexed = e5Ready && semanticPassages.isNotEmpty() &&
+            Mode3E5SemanticEngine.allPassagesCached(semanticPassages)
+        if (!fullyIndexed) {
+            if (semanticPassages.isNotEmpty()) Mode3E5SemanticEngine.requestPrewarm(semanticPassages)
+            val evaluation = Evaluation(
+                accepted = null,
+                topCandidates = emptyList(),
+                indexedTracks = eligible.size,
+                candidateTracks = 0,
+                elapsedMs = (System.nanoTime() - started) / 1_000_000L,
+                indexCacheHit = eligible.isNotEmpty() && cacheHits == eligible.size,
+            )
+            emitDiagnostics(need, evaluation)
+            return evaluation
+        }
 
         val ranked = eligible.asSequence()
-            .mapNotNull { indexed -> score(profile, indexed, indexed.track, nowMillis, useE5) }
+            .mapNotNull { indexed -> score(profile, indexed, indexed.track, nowMillis) }
             .sortedWith(
                 compareByDescending<Match> { it.selectionScore }
                     .thenByDescending { it.contextScore }
@@ -196,9 +210,13 @@ internal object Mode3LibraryAssetMatcher {
         val profile = needProfile(need)
         val indexed = indexTrackCached(track).first
         val passages = indexed.sections.semanticPassages().toList()
-        val useE5 = passages.isNotEmpty() && Mode3E5SemanticEngine.allPassagesCached(passages)
-        if (!useE5) Mode3E5SemanticEngine.requestPrewarm(passages)
-        return score(profile, indexed, track, nowMillis, useE5)?.takeIf(Match::accepted)
+        val ready = Mode3E5SemanticEngine.status().ready && passages.isNotEmpty() &&
+            Mode3E5SemanticEngine.allPassagesCached(passages)
+        if (!ready) {
+            Mode3E5SemanticEngine.requestPrewarm(passages)
+            return null
+        }
+        return score(profile, indexed, track, nowMillis)?.takeIf(Match::accepted)
     }
 
     fun isDecisive(match: Match?): Boolean {
@@ -376,6 +394,7 @@ internal object Mode3LibraryAssetMatcher {
             queryTokens = queryTokens,
             coreToken = coreToken,
             eventToken = eventToken,
+            queryText = localText(need.query),
             hints = hints,
         )
     }
@@ -414,7 +433,6 @@ internal object Mode3LibraryAssetMatcher {
         indexed: IndexedTrack,
         currentTrack: SceneMusicTrackEntity,
         nowMillis: Long,
-        useE5: Boolean,
     ): Match? {
         val queryCoverage = tokenCoverage(profile.queryTokens, indexed.metadataTokens)
         val coreCoverage = profile.coreToken?.let { core ->
@@ -425,49 +443,59 @@ internal object Mode3LibraryAssetMatcher {
         } ?: 0.0
 
         val hintAware = profile.hintAware
+        val querySemanticScore = max(
+            localSimilarity(profile.queryText, indexed.sections.positive),
+            localSimilarity(profile.queryText, indexed.sections.all) * 0.96,
+        )
         val useScore = if (hintAware) average(profile.hints.map { hint ->
-            val direct = localSimilarity(hint.use, indexed.sections.use, useE5)
-            val shadeToUse = localSimilarity(hint.shade, indexed.sections.use, useE5) * 0.35
-            val useToShade = localSimilarity(hint.use, indexed.sections.shade, useE5) * 0.45
-            val positiveFallback = localSimilarity(hint.positive, indexed.sections.positive, useE5) * 0.55
-            max(max(direct, shadeToUse), max(useToShade, positiveFallback))
-        }) else 0.0
+            val direct = localSimilarity(hint.use, indexed.sections.use)
+            val shadeToUse = localSimilarity(hint.shade, indexed.sections.use) * 0.32
+            val useToShade = localSimilarity(hint.use, indexed.sections.shade) * 0.42
+            val positiveBridge = localSimilarity(hint.positive, indexed.sections.positive) * 0.52
+            max(max(direct, shadeToUse), max(useToShade, positiveBridge))
+        }) else querySemanticScore
         val shadeScore = if (hintAware) average(profile.hints.map { hint ->
             val expectedShade = if (hint.shade.isPresent) hint.shade else hint.use
             max(
-                localSimilarity(expectedShade, indexed.sections.shade, useE5),
-                localSimilarity(hint.use, indexed.sections.shade, useE5) * 0.45,
+                localSimilarity(expectedShade, indexed.sections.shade),
+                localSimilarity(hint.use, indexed.sections.shade) * 0.42,
             )
-        }) else 0.0
+        }) else querySemanticScore
         val allScore = if (hintAware) average(profile.hints.map { hint ->
-            localSimilarity(hint.positive, indexed.sections.positive, useE5)
-        }) else 0.0
+            localSimilarity(hint.positive, indexed.sections.positive)
+        }) else querySemanticScore
 
-        val candidateAvoidConflict = if (hintAware && indexed.sections.avoid.isPresent) {
-            average(profile.hints.map { hint ->
-                max(
-                    localSimilarity(hint.positive, indexed.sections.avoid, useE5),
+        val candidateAvoidConflict = if (indexed.sections.avoid.isPresent) {
+            if (hintAware) {
+                average(profile.hints.map { hint ->
                     max(
-                        localSimilarity(hint.use, indexed.sections.avoid, useE5),
-                        localSimilarity(hint.shade, indexed.sections.avoid, useE5) * 0.80,
-                    ),
-                )
-            })
+                        localSimilarity(hint.positive, indexed.sections.avoid),
+                        max(
+                            localSimilarity(hint.use, indexed.sections.avoid),
+                            localSimilarity(hint.shade, indexed.sections.avoid) * 0.78,
+                        ),
+                    )
+                })
+            } else {
+                localSimilarity(profile.queryText, indexed.sections.avoid)
+            }
         } else 0.0
         val needAvoidConflict = if (hintAware) {
             average(profile.hints.map { hint ->
                 if (!hint.avoid.isPresent) 0.0 else max(
-                    localSimilarity(hint.avoid, indexed.sections.positive, useE5),
+                    localSimilarity(hint.avoid, indexed.sections.positive),
                     max(
-                        localSimilarity(hint.avoid, indexed.sections.use, useE5),
-                        localSimilarity(hint.avoid, indexed.sections.shade, useE5) * 0.80,
+                        localSimilarity(hint.avoid, indexed.sections.use),
+                        localSimilarity(hint.avoid, indexed.sections.shade) * 0.78,
                     ),
                 )
             })
         } else 0.0
         val avoidCoverage = max(candidateAvoidConflict, needAvoidConflict)
 
-        val contextScore = max(useScore, max(shadeScore * 0.92, allScore * 0.86))
+        val contextScore = if (hintAware) {
+            max(useScore, max(shadeScore * 0.93, allScore * 0.88))
+        } else querySemanticScore
         val semanticMetadata = indexed.sections.structured &&
             (indexed.sections.use.isPresent || indexed.sections.shade.isPresent)
         val metadataQuality = when {
@@ -476,8 +504,7 @@ internal object Mode3LibraryAssetMatcher {
             else -> "RAW"
         }
 
-        if (hintAware && contextScore <= 0.0 && allScore <= 0.0) return null
-        if (!hintAware && queryCoverage <= 0.0 && coreCoverage <= 0.0) return null
+        if (contextScore <= 0.0) return null
 
         val repetitionPenalty = repetitionPenalty(currentTrack, nowMillis)
         val structuredDescriptionScore = (
@@ -487,20 +514,17 @@ internal object Mode3LibraryAssetMatcher {
                 avoidCoverage * LOCAL_DESCRIPTION_AVOID_PENALTY -
                 repetitionPenalty
         ).coerceIn(0.0, 1.0)
-        val rawDescriptionScore = (
-            allScore * LOCAL_RAW_DESCRIPTION_WEIGHT +
-                queryCoverage * LOCAL_RAW_QUERY_FALLBACK_WEIGHT -
-                avoidCoverage * LOCAL_RAW_AVOID_PENALTY -
-                repetitionPenalty
+        val unstructuredHintScore = (
+            allScore - avoidCoverage * LOCAL_DESCRIPTION_AVOID_PENALTY - repetitionPenalty
         ).coerceIn(0.0, 1.0)
-        val queryOnlyFallback = (
-            queryCoverage * 0.90 + coreCoverage * 0.10 - repetitionPenalty * 0.50
+        val queryDescriptionScore = (
+            querySemanticScore - avoidCoverage * LOCAL_DESCRIPTION_AVOID_PENALTY - repetitionPenalty
         ).coerceIn(0.0, 1.0)
 
         val selectionScore = when {
             hintAware && semanticMetadata -> structuredDescriptionScore
-            hintAware -> rawDescriptionScore
-            else -> queryOnlyFallback
+            hintAware -> unstructuredHintScore
+            else -> queryDescriptionScore
         }
         val rejectReason = localRejectReason(
             kind = profile.kind,
@@ -777,18 +801,12 @@ internal object Mode3LibraryAssetMatcher {
         return queryTokens.count(targetTokens::contains).toDouble() / queryTokens.size.toDouble()
     }
 
-    private fun localSimilarity(first: LocalText, second: LocalText, useE5: Boolean): Double {
+    private fun localSimilarity(first: LocalText, second: LocalText): Double {
         if (!first.isPresent || !second.isPresent) return 0.0
-        if (useE5) {
-            Mode3E5SemanticEngine.similarityOrNull(first.text, second.text)?.let { return it }
-        }
-        return Mode3OpenDescriptionVector.cosine(first.fingerprint, second.fingerprint)
+        return Mode3E5SemanticEngine.similarityOrNull(first.text, second.text) ?: 0.0
     }
 
-    private fun localText(value: String): LocalText {
-        val text = semanticText(value)
-        return LocalText(text, Mode3OpenDescriptionVector.build(text))
-    }
+    private fun localText(value: String): LocalText = LocalText(semanticText(value))
 
     private fun semanticText(value: String): String = value.replace(Regex("\\s+"), " ").trim()
 
@@ -911,8 +929,8 @@ internal object Mode3LibraryAssetMatcher {
 
     private fun format(value: Double): String = "%.3f".format(Locale.US, value)
 
-    private const val DECISIVE_MIN_CONTEXT_SCORE = 0.48
-    private const val DECISIVE_SEMANTIC_SCORE = 0.68
+    private const val DECISIVE_MIN_CONTEXT_SCORE = 0.60
+    private const val DECISIVE_SEMANTIC_SCORE = 0.64
     private const val RAW_MIN_QUERY_COVERAGE = 0.78
     private const val REMOTE_SFX_STRONG_QUERY_COVERAGE = 0.78
     private const val REMOTE_SFX_RELAXED_QUERY_COVERAGE = 0.60
@@ -925,26 +943,23 @@ internal object Mode3LibraryAssetMatcher {
     private const val MIN_SELECTION_FIT_MUSIC = 0.52
     private const val MIN_SELECTION_FIT_AMBIENCE = 0.52
     private const val MIN_SELECTION_FIT_SFX = 0.56
-    private const val DECISIVE_SELECTION_FIT = 0.68
+    private const val DECISIVE_SELECTION_FIT = 0.66
     private const val SOFT_SOURCE_CONFLICT_PENALTY = 0.18
     private const val SOFT_SPECIALIZATION_PENALTY = 0.34
-    private const val MIN_LOCAL_SELECTION_FIT_MUSIC = 0.36
-    private const val MIN_LOCAL_SELECTION_FIT_AMBIENCE = 0.38
-    private const val MIN_LOCAL_SELECTION_FIT_SFX = 0.40
-    private const val LOCAL_DESCRIPTION_USE_WEIGHT = 0.50
-    private const val LOCAL_DESCRIPTION_SHADE_WEIGHT = 0.28
-    private const val LOCAL_DESCRIPTION_WHOLE_WEIGHT = 0.22
-    private const val LOCAL_DESCRIPTION_AVOID_PENALTY = 0.68
-    private const val LOCAL_RAW_DESCRIPTION_WEIGHT = 0.88
-    private const val LOCAL_RAW_QUERY_FALLBACK_WEIGHT = 0.12
-    private const val LOCAL_RAW_AVOID_PENALTY = 0.60
+    private const val MIN_LOCAL_SELECTION_FIT_MUSIC = 0.44
+    private const val MIN_LOCAL_SELECTION_FIT_AMBIENCE = 0.48
+    private const val MIN_LOCAL_SELECTION_FIT_SFX = 0.52
+    private const val LOCAL_DESCRIPTION_USE_WEIGHT = 0.58
+    private const val LOCAL_DESCRIPTION_SHADE_WEIGHT = 0.27
+    private const val LOCAL_DESCRIPTION_WHOLE_WEIGHT = 0.15
+    private const val LOCAL_DESCRIPTION_AVOID_PENALTY = 0.72
     private const val REMOTE_TITLE_MIN_SOURCE_COVERAGE = 0.60
     private const val HARD_REMOTE_TITLE_IDENTITY_CONFLICT = 0.90
     private const val REMOTE_TITLE_IDENTITY_PENALTY = 0.48
     private const val REMOTE_METADATA_CONFLICT_PENALTY = 0.12
-    private const val REMOTE_LEGACY_WEIGHT = 0.38
-    private const val REMOTE_E5_WEIGHT = 0.62
-    private const val REMOTE_E5_MIN_FIT = 0.50
+    private const val REMOTE_LEGACY_WEIGHT = 0.30
+    private const val REMOTE_E5_WEIGHT = 0.70
+    private const val REMOTE_E5_MIN_FIT = 0.48
     private const val MAX_LOCAL_TOKENS = 72
     private const val MAX_TRACK_CACHE_ENTRIES = 1024
     private const val MAX_DIAGNOSTIC_CANDIDATES = 5
@@ -953,7 +968,7 @@ internal object Mode3LibraryAssetMatcher {
     private const val MAX_RECENT_DIAGNOSTICS = 100
     private const val DIAGNOSTIC_DEDUP_MS = 1_500L
 
-    private val EMPTY_LOCAL_TEXT = LocalText("", Mode3OpenDescriptionVector.build(""))
+    private val EMPTY_LOCAL_TEXT = LocalText("")
 
     private val LOCAL_QUERY_ANCHORS = setOf(
         "music", "cinematic", "background", "audio", "sound", "effect", "ambience", "ambient",

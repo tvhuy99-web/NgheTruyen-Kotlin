@@ -127,13 +127,13 @@ fun FreesoundSettingsCard(modifier: Modifier = Modifier) {
                     semanticBusy -> "Trạng thái: Đang xử lý"
                     semanticStatus.ready -> "Trạng thái: Multilingual E5 Small INT8 đã sẵn sàng"
                     semanticStatus.installed -> "Trạng thái: Đã tải, đang khởi tạo"
-                    else -> "Trạng thái: Chưa tải • khoảng 124 MB"
+                    else -> "Trạng thái: Chưa tải • khoảng 136 MB"
                 },
                 style = MaterialTheme.typography.bodyMedium,
             )
             Text(
                 "Mô hình được lưu riêng khỏi APK và dùng lại qua các lần cập nhật ứng dụng. " +
-                    "Nếu chưa có mô hình, Mode 3 tự dùng matcher nhẹ dự phòng.",
+                    "Nếu chưa tải mô hình, tìm kiếm ngữ nghĩa cục bộ sẽ không hoạt động.",
                 style = MaterialTheme.typography.bodySmall,
             )
             semanticProgress?.let { Text(it, style = MaterialTheme.typography.bodySmall) }

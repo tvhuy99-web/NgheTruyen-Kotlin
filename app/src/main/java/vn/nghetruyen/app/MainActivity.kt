@@ -322,7 +322,7 @@ class MainActivity : ComponentActivity() {
         AlertDialog.Builder(this)
             .setTitle("TẢI MÔ HÌNH TÌM KIẾM NGỮ NGHĨA")
             .setMessage(
-                "Multilingual E5 Small INT8, khoảng 124 MB. " +
+                "Multilingual E5 Small INT8, khoảng 136 MB. " +
                     "Mô hình được tải một lần và lưu riêng trong dữ liệu ứng dụng; " +
                     "cập nhật APK sau này không cần tải lại nếu phiên bản mô hình không đổi.",
             )
@@ -367,7 +367,7 @@ class MainActivity : ComponentActivity() {
             }.onFailure { error ->
                 AlertDialog.Builder(this@MainActivity)
                     .setTitle("KHÔNG TẢI ĐƯỢC MÔ HÌNH")
-                    .setMessage(error.message ?: "Lỗi không xác định. Matcher nhẹ vẫn tiếp tục hoạt động.")
+                    .setMessage(error.message ?: "Lỗi không xác định. Tìm kiếm ngữ nghĩa sẽ không hoạt động cho đến khi mô hình được tải thành công.")
                     .setPositiveButton("THỬ LẠI") { _, _ -> downloadSemanticModel() }
                     .setNegativeButton("ĐỂ SAU", null)
                     .show()

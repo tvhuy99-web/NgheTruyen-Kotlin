@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Guard the final XPK-aligned Reader, TTS, audio-library, and voice-cast UI details."""
+"""Guard the final XPK-aligned Reader, TTS, shared audio-library, and voice-cast UI details."""
 
 from pathlib import Path
 
@@ -39,71 +39,77 @@ for removed in [
         raise SystemExit("XPK_FINAL_UI obsolete explanatory music prose/control remains: " + removed)
 
 # Audio Director owns normalization. MUSIC / AMBIENCE / SFX keep independent LUFS targets,
-# while the visible controls are now deliberately separated by source mode.
+# while all source modes share the same physical library and manager entry points.
 for marker in [
     'Text("MODE 1 · PHÁT THỦ CÔNG TỪ THƯ VIỆN LOCAL")',
-    'Text("MODE 2 · AI CHỌN TỪ THƯ VIỆN LOCAL")',
-    'Text("MODE 3 · AI TỰ TÌM TRÊN FREESOUND")',
-    'title = "Attack nhạc AI local"',
-    'title = "Release nhạc AI local"',
+    'Text("MODE 2 · AI CHỌN TỪ THƯ VIỆN")',
+    'Text("MODE 3 · AI TỰ ĐỘNG — THƯ VIỆN + FREESOUND")',
+    'title = "Attack nhạc AI"',
+    'title = "Release nhạc AI"',
     'title = "Attack nhạc Mode 3"',
     'title = "Release nhạc Mode 3"',
-    'label = "CHUẨN HÓA KHO NHẠC"',
-    'label = "CHUẨN HÓA THƯ VIỆN AI LOCAL"',
-    'label = "CHUẨN HÓA / BẢO TRÌ FILE ÂM THANH MODE 3"',
+    'label = "CHUẨN HÓA TOÀN BỘ THƯ VIỆN"',
     'title = { Text(if (normalizationKinds == setOf(AudioAssetKind.MUSIC)) "CHUẨN HÓA KHO NHẠC" else "CHUẨN HÓA KHO ÂM THANH") }',
-    'title = "Nhạc nền ($musicCount tệp)"',
-    'title = "Âm thanh môi trường ($ambienceCount tệp)"',
-    'title = "Hiệu ứng âm thanh ($sfxCount tệp)"',
+    'title = "Nhạc nền ($normalizationMusicCount tệp)"',
+    'title = "Âm thanh môi trường ($normalizationAmbienceCount tệp)"',
+    'title = "Hiệu ứng âm thanh ($normalizationSfxCount tệp)"',
     "settingsRepository.setSceneMusicTargetLufs(musicTarget)",
     "preferences.setAmbienceNormalizationTargetLufs(ambienceTarget)",
     "preferences.setSoundEffectsNormalizationTargetLufs(sfxTarget)",
     "AudioAssetKind.MUSIC -> musicTarget",
     "AudioAssetKind.AMBIENCE -> ambienceTarget",
     "AudioAssetKind.SFX -> sfxTarget",
-    'label = "QUẢN LÝ NHẠC ($musicTrackCount)"',
-    'label = "QUẢN LÝ NHẠC LOCAL ($musicTrackCount)"',
-    'label = "QUẢN LÝ MÔI TRƯỜNG LOCAL (',
-    'label = "QUẢN LÝ SFX LOCAL (',
-    'label = "QUẢN LÝ NHẠC ĐÃ TẢI (',
-    'label = "QUẢN LÝ MÔI TRƯỜNG ĐÃ TẢI (',
-    'label = "QUẢN LÝ SFX ĐÃ TẢI (',
+    'label = "QUẢN LÝ NHẠC ($musicCount)"',
+    'label = "QUẢN LÝ MÔI TRƯỜNG ($ambienceCount)"',
+    'label = "QUẢN LÝ SFX ($sfxCount)"',
     "UnifiedAudioAssetManagerDialog(",
+    "managedFreesoundOnly = false",
 ]:
     if marker not in component:
         raise SystemExit("XPK_FINAL_UI audio routing marker missing: " + marker)
 
-# Keep the three manager entry points adjacent and in MUSIC / AMBIENCE / SFX order
-# inside both AI-local and AI-Freesound modes.
+# The three shared manager entry points must stay adjacent and in MUSIC / AMBIENCE / SFX order.
+shared_start = component.find("fun SharedLibraryManagementButtons()")
+shared_end = component.find("\n    Column(", shared_start)
+if shared_start < 0 or shared_end < 0:
+    raise SystemExit("XPK_FINAL_UI shared audio manager block missing")
+shared_block = component[shared_start:shared_end]
+shared_positions = [
+    shared_block.find('label = "QUẢN LÝ NHẠC ($musicCount)"'),
+    shared_block.find('label = "QUẢN LÝ MÔI TRƯỜNG ($ambienceCount)"'),
+    shared_block.find('label = "QUẢN LÝ SFX ($sfxCount)"'),
+]
+if not (0 <= shared_positions[0] < shared_positions[1] < shared_positions[2]):
+    raise SystemExit("XPK_FINAL_UI shared managers must stay in Music/Ambience/SFX order")
+
+mode1_start = component.find("StoryAudioSourceMode.LOCAL_MANUAL ->")
 mode2_start = component.find("StoryAudioSourceMode.AI_LOCAL ->")
 mode3_start = component.find("StoryAudioSourceMode.AI_FREESOUND ->")
-if mode2_start < 0 or mode3_start < 0 or mode2_start >= mode3_start:
+if not (0 <= mode1_start < mode2_start < mode3_start):
     raise SystemExit("XPK_FINAL_UI source-mode blocks missing or reordered")
+mode1 = component[mode1_start:mode2_start]
 mode2 = component[mode2_start:mode3_start]
 mode3 = component[mode3_start:]
-for block_name, block, markers in [
-    (
-        "AI_LOCAL",
-        mode2,
-        [
-            'label = "QUẢN LÝ NHẠC LOCAL',
-            'label = "QUẢN LÝ MÔI TRƯỜNG LOCAL',
-            'label = "QUẢN LÝ SFX LOCAL',
-        ],
-    ),
-    (
-        "AI_FREESOUND",
-        mode3,
-        [
-            'label = "QUẢN LÝ NHẠC ĐÃ TẢI',
-            'label = "QUẢN LÝ MÔI TRƯỜNG ĐÃ TẢI',
-            'label = "QUẢN LÝ SFX ĐÃ TẢI',
-        ],
-    ),
+for block_name, block in [("LOCAL_MANUAL", mode1), ("AI_LOCAL", mode2), ("AI_FREESOUND", mode3)]:
+    if "SharedLibraryManagementButtons()" not in block:
+        raise SystemExit(f"XPK_FINAL_UI {block_name} must use the shared audio managers")
+
+for obsolete in [
+    'Text("MODE 2 · AI CHỌN TỪ THƯ VIỆN LOCAL")',
+    'Text("MODE 3 · AI TỰ TÌM TRÊN FREESOUND")',
+    'title = "Attack nhạc AI local"',
+    'title = "Release nhạc AI local"',
+    'label = "CHUẨN HÓA THƯ VIỆN AI LOCAL"',
+    'label = "CHUẨN HÓA / BẢO TRÌ FILE ÂM THANH MODE 3"',
+    'label = "QUẢN LÝ NHẠC LOCAL',
+    'label = "QUẢN LÝ MÔI TRƯỜNG LOCAL',
+    'label = "QUẢN LÝ SFX LOCAL',
+    'label = "QUẢN LÝ NHẠC ĐÃ TẢI',
+    'label = "QUẢN LÝ MÔI TRƯỜNG ĐÃ TẢI',
+    'label = "QUẢN LÝ SFX ĐÃ TẢI',
 ]:
-    positions = [block.find(marker) for marker in markers]
-    if not (0 <= positions[0] < positions[1] < positions[2]):
-        raise SystemExit(f"XPK_FINAL_UI {block_name} managers must stay in Music/Ambience/SFX order")
+    if obsolete in component:
+        raise SystemExit("XPK_FINAL_UI obsolete split-library audio UI remains: " + obsolete)
 
 for marker in [
     "ActivityResultContracts.OpenMultipleDocuments()",

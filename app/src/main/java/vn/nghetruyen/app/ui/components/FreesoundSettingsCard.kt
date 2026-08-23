@@ -27,6 +27,8 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import vn.nghetruyen.app.NgheTruyenApplication
 import vn.nghetruyen.app.freesound.FreesoundCredentialStore
+import vn.nghetruyen.app.freesound.Mode3E5SemanticEngine
+import vn.nghetruyen.app.freesound.Mode3LibraryAssetMatcher
 
 @Composable
 fun FreesoundSettingsCard(modifier: Modifier = Modifier) {
@@ -41,6 +43,9 @@ fun FreesoundSettingsCard(modifier: Modifier = Modifier) {
     var hasStoredKey by remember(credentialStore) { mutableStateOf(credentialStore.hasApiKey()) }
     var testing by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
+    var semanticStatus by remember { mutableStateOf(Mode3E5SemanticEngine.status()) }
+    var semanticBusy by remember { mutableStateOf(false) }
+    var semanticProgress by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(statusMessage) {
         statusMessage?.takeIf(String::isNotBlank)?.let(view::announceForAccessibility)
@@ -114,6 +119,75 @@ fun FreesoundSettingsCard(modifier: Modifier = Modifier) {
             ) { Text("XÓA KHÓA") }
             statusMessage?.let { message ->
                 Text(message, style = MaterialTheme.typography.bodySmall)
+            }
+
+            Text("MÔ HÌNH TÌM KIẾM NGỮ NGHĨA", fontWeight = FontWeight.SemiBold)
+            Text(
+                when {
+                    semanticBusy -> "Trạng thái: Đang xử lý"
+                    semanticStatus.ready -> "Trạng thái: Multilingual E5 Small INT8 đã sẵn sàng"
+                    semanticStatus.installed -> "Trạng thái: Đã tải, đang khởi tạo"
+                    else -> "Trạng thái: Chưa tải • khoảng 124 MB"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(
+                "Mô hình được lưu riêng khỏi APK và dùng lại qua các lần cập nhật ứng dụng. " +
+                    "Nếu chưa có mô hình, Mode 3 tự dùng matcher nhẹ dự phòng.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            semanticProgress?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+            if (!semanticStatus.installed) {
+                Button(
+                    onClick = {
+                        semanticBusy = true
+                        semanticProgress = "Đang bắt đầu tải…"
+                        scope.launch {
+                            val result = Mode3E5SemanticEngine.install { progress ->
+                                val percent = (progress.fraction * 100.0).toInt().coerceIn(0, 100)
+                                semanticProgress = "$percent% • ${progress.currentFile}"
+                            }
+                            semanticBusy = false
+                            semanticStatus = Mode3E5SemanticEngine.status()
+                            result.onSuccess {
+                                semanticProgress = "Đã tải xong. Đang lập chỉ mục mô tả âm thanh ở nền."
+                                val tracks = application.container.database.sceneMusicTrackDao().listAll()
+                                Mode3LibraryAssetMatcher.prewarmSemanticIndex(tracks)
+                            }.onFailure { semanticProgress = it.message ?: "Không tải được mô hình." }
+                        }
+                    },
+                    enabled = !semanticBusy,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("TẢI MÔ HÌNH NGỮ NGHĨA") }
+            } else {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                semanticBusy = true
+                                semanticProgress = "Đang lập chỉ mục các mô tả còn thiếu…"
+                                val tracks = application.container.database.sceneMusicTrackDao().listAll()
+                                Mode3LibraryAssetMatcher.prewarmSemanticIndex(tracks)
+                                semanticBusy = false
+                                semanticStatus = Mode3E5SemanticEngine.status()
+                                semanticProgress = "Đã yêu cầu lập chỉ mục ở nền."
+                            }
+                        },
+                        enabled = !semanticBusy,
+                        modifier = Modifier.weight(1f),
+                    ) { Text("LẬP CHỈ MỤC") }
+                    TextButton(
+                        onClick = {
+                            semanticBusy = true
+                            val deleted = Mode3E5SemanticEngine.deleteModel()
+                            semanticBusy = false
+                            semanticStatus = Mode3E5SemanticEngine.status()
+                            semanticProgress = if (deleted) "Đã xóa mô hình; âm thanh trong thư viện không bị xóa." else "Không xóa được mô hình."
+                        },
+                        enabled = !semanticBusy,
+                        modifier = Modifier.weight(1f),
+                    ) { Text("XÓA MÔ HÌNH") }
+                }
             }
         }
     }

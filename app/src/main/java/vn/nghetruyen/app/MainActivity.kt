@@ -27,6 +27,8 @@ import vn.nghetruyen.app.core.common.AppResult
 import vn.nghetruyen.app.core.model.AudioExportFormat
 import vn.nghetruyen.app.core.model.ReaderMode
 import vn.nghetruyen.app.following.FollowingUpdateWorker
+import vn.nghetruyen.app.freesound.Mode3E5SemanticEngine
+import vn.nghetruyen.app.freesound.Mode3LibraryAssetMatcher
 import vn.nghetruyen.app.playback.ReaderVolumeKeyPolicy
 import vn.nghetruyen.app.sourceplatform.installExtensionHostKernel
 import vn.nghetruyen.app.startup.StartupWorkGate
@@ -40,6 +42,7 @@ import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     private val viewModel: AppViewModel by viewModels()
+    private var semanticModelPromptShown = false
 
     override fun onStop() {
         viewModel.persistCurrentReadingPosition()
@@ -72,6 +75,7 @@ class MainActivity : ComponentActivity() {
         StartupWorkGate.beginFirstActivityStartup(this)
         installExtensionHostKernel(viewModel)
         handleFollowingIntent(intent)
+        prepareSemanticModel()
         setContent {
             val importLauncher = rememberLauncherForActivityResult(
                 contract = ActivityResultContracts.OpenDocument(),
@@ -305,6 +309,76 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    private fun prepareSemanticModel() {
+        val status = Mode3E5SemanticEngine.status()
+        if (status.installed) {
+            lifecycleScope.launch { prewarmSemanticLibrary() }
+            return
+        }
+        if (semanticModelPromptShown || isFinishing) return
+        semanticModelPromptShown = true
+        AlertDialog.Builder(this)
+            .setTitle("TẢI MÔ HÌNH TÌM KIẾM NGỮ NGHĨA")
+            .setMessage(
+                "Multilingual E5 Small INT8, khoảng 124 MB. " +
+                    "Mô hình được tải một lần và lưu riêng trong dữ liệu ứng dụng; " +
+                    "cập nhật APK sau này không cần tải lại nếu phiên bản mô hình không đổi.",
+            )
+            .setPositiveButton("TẢI XUỐNG") { _, _ -> downloadSemanticModel() }
+            .setNegativeButton("ĐỂ SAU", null)
+            .show()
+    }
+
+    private fun downloadSemanticModel() {
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("ĐANG TẢI MÔ HÌNH NGỮ NGHĨA")
+            .setMessage("Đang chuẩn bị tải…")
+            .setCancelable(false)
+            .create()
+        dialog.show()
+        lifecycleScope.launch {
+            val result = Mode3E5SemanticEngine.install { progress ->
+                val downloadedMb = progress.downloadedBytes / (1024.0 * 1024.0)
+                val totalMb = progress.totalBytes / (1024.0 * 1024.0)
+                val percent = (progress.fraction * 100.0).toInt().coerceIn(0, 100)
+                runOnUiThread {
+                    if (dialog.isShowing) {
+                        dialog.setMessage(
+                            "${progress.currentFile}\n$percent% • %.1f / %.1f MB".format(
+                                Locale.ROOT, downloadedMb, totalMb,
+                            ),
+                        )
+                    }
+                }
+            }
+            dialog.dismiss()
+            result.onSuccess {
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle("ĐÃ CÀI MÔ HÌNH NGỮ NGHĨA")
+                    .setMessage(
+                        "Multilingual E5 Small đã sẵn sàng. Ứng dụng sẽ lập chỉ mục mô tả âm thanh ở nền; " +
+                            "những lần cập nhật APK sau không cần tải lại mô hình này.",
+                    )
+                    .setPositiveButton("OK", null)
+                    .show()
+                prewarmSemanticLibrary()
+            }.onFailure { error ->
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle("KHÔNG TẢI ĐƯỢC MÔ HÌNH")
+                    .setMessage(error.message ?: "Lỗi không xác định. Matcher nhẹ vẫn tiếp tục hoạt động.")
+                    .setPositiveButton("THỬ LẠI") { _, _ -> downloadSemanticModel() }
+                    .setNegativeButton("ĐỂ SAU", null)
+                    .show()
+            }
+        }
+    }
+
+    private suspend fun prewarmSemanticLibrary() {
+        val container = (application as NgheTruyenApplication).container
+        val tracks = container.database.sceneMusicTrackDao().listAll()
+        Mode3LibraryAssetMatcher.prewarmSemanticIndex(tracks)
     }
 
     private fun handleBackupRestoreSelection(uri: Uri) {

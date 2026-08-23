@@ -1,0 +1,125 @@
+name: Temporary Mode3 E5 Final2 Build
+
+on:
+  push:
+    branches:
+      - fix/mode3-resolution-quality-20260822
+
+permissions:
+  contents: write
+
+jobs:
+  build-only:
+    if: ${{ !contains(github.event.head_commit.message, '[skip e5-final2]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/mode3-resolution-quality-20260822
+          fetch-depth: 0
+
+      - name: Fix final compile errors
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          engine = Path('app/src/main/java/vn/nghetruyen/app/freesound/Mode3E5SemanticEngine.kt')
+          text = engine.read_text(encoding='utf-8')
+          marker = '    private const val CACHE_VERSION = 1\n'
+          insert = marker + '    private const val PAD_TOKEN_ID = 1L\n'
+          if 'private const val PAD_TOKEN_ID = 1L' not in text:
+              if marker not in text:
+                  raise SystemExit('CACHE_VERSION marker not found')
+              text = text.replace(marker, insert, 1)
+          engine.write_text(text, encoding='utf-8')
+
+          matcher = Path('app/src/main/java/vn/nghetruyen/app/freesound/Mode3LibraryAssetMatcher.kt')
+          text = matcher.read_text(encoding='utf-8')
+          old = '.flatMap(Sections::semanticPassages)'
+          if old in text:
+              text = text.replace(old, '.flatMap { sections -> sections.semanticPassages() }')
+          if old in text:
+              raise SystemExit('semanticPassages function reference still present')
+          matcher.write_text(text, encoding='utf-8')
+          PY
+          git diff --check
+
+      - name: Commit source fixes and record run
+        shell: bash
+        run: |
+          printf '%s\n' "$GITHUB_RUN_ID" > .mode3-e5-final-run-id
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/vn/nghetruyen/app/freesound/Mode3E5SemanticEngine.kt app/src/main/java/vn/nghetruyen/app/freesound/Mode3LibraryAssetMatcher.kt .mode3-e5-final-run-id
+          git diff --cached --check
+          git commit -m "fix(mode3): finish E5-only Android integration [skip e5-final2]"
+          git push origin HEAD:fix/mode3-resolution-quality-20260822
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Bootstrap Gradle Wrapper
+        shell: bash
+        run: |
+          chmod +x gradlew scripts/bootstrap-wrapper.sh
+          ./scripts/bootstrap-wrapper.sh
+
+      - name: Assemble debug APK only
+        shell: bash
+        run: |
+          FINAL_SHA="$(git rev-parse HEAD)"
+          env -u GITHUB_SHA NGHETRUYEN_BUILD_SHA="$FINAL_SHA" ./gradlew --no-daemon --stacktrace :app:assembleDebug
+
+      - name: Package APK
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk dist/NgheTruyen-Mode3-E5-Only-20260823.apk
+          sha256sum dist/NgheTruyen-Mode3-E5-Only-20260823.apk > dist/NgheTruyen-Mode3-E5-Only-20260823.apk.sha256
+          git rev-parse HEAD > dist/source-commit.txt
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NgheTruyen-Mode3-E5-Only-apk
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            dist/NgheTruyen-Mode3-E5-Only-20260823.apk
+            dist/NgheTruyen-Mode3-E5-Only-20260823.apk.sha256
+            dist/source-commit.txt
+
+      - name: Remove temporary build files
+        if: always()
+        shell: bash
+        run: |
+          git fetch origin fix/mode3-resolution-quality-20260822
+          git reset --hard origin/fix/mode3-resolution-quality-20260822
+          rm -f .github/workflows/tmp-mode3-e5-final2-build.yml
+          rm -f .mode3-e5-final-run-id .mode3-e5-final2-trigger
+          rm -f .mode3-e5-build-run-id .mode3-e5-compile-trigger
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A .github/workflows/tmp-mode3-e5-final2-build.yml .mode3-e5-final-run-id .mode3-e5-final2-trigger .mode3-e5-build-run-id .mode3-e5-compile-trigger
+          if ! git diff --cached --quiet; then
+            git commit -m "ci: remove temporary E5 build files [skip e5-final2]"
+            git push origin HEAD:fix/mode3-resolution-quality-20260822
+          fi

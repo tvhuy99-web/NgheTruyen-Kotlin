@@ -1,4 +1,5 @@
 name: Build Semantic + Description Normalization APK
+# Final build-only trigger after direct blank-description source fix.
 
 on:
   push:

@@ -350,11 +350,6 @@ class AudioDirectionRuntime(
         sourceMode: StoryAudioSourceMode,
     ): List<AudioDirectionAsset> = rawTracks
         .asSequence()
-        .filter { track ->
-            !StoryAudioModeRouter.usesAiFreesound(sourceMode) ||
-                (FreesoundImporter.soundIdFromManagedUri(track.uri) != null &&
-                    FreesoundImporter.managedFileExists(appContext, track.uri))
-        }
         .map { track ->
         val asset = AudioAssetClassifier.toAsset(track)
         if (asset.kind == AudioAssetKind.MUSIC) {

@@ -368,9 +368,9 @@ internal object Mode3LibraryAssetMatcher {
         } else if (need.kind == AudioAssetKind.SFX && event != null) {
             // Do not require both exact source and exact event words. A strong combined lexical match
             // is valid evidence on its own; exact core/event tokens add confidence when present.
-            (coreCoverage * 0.24 + eventCoverage * 0.24 + lexical * 0.52).coerceIn(0.0, 1.0)
+            ((coreCoverage * 0.24 + eventCoverage * 0.24 + lexical * 0.52) * 0.84).coerceIn(0.0, 1.0)
         } else {
-            (coreCoverage * 0.52 + lexical * 0.48).coerceIn(0.0, 1.0)
+            ((coreCoverage * 0.52 + lexical * 0.48) * 0.84).coerceIn(0.0, 1.0)
         }
         return RemoteFit(
             score = fit,
@@ -500,7 +500,9 @@ internal object Mode3LibraryAssetMatcher {
         val selectionBase = if (hintAware && semanticMetadata && contextEvidence > 0.0) {
             contextEvidence * 0.65 + queryEvidence * 0.35
         } else {
-            queryEvidence
+            // Query-only candidates use the same evidence ceiling whether they are local files
+            // or fresh Freesound results. Provenance contributes zero points.
+            queryEvidence * 0.84
         }
         val selectionScore = (
             selectionBase -

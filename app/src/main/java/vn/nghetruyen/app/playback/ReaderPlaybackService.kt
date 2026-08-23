@@ -2476,11 +2476,6 @@ class ReaderPlaybackService : Service() {
         val enabledMusicTracks = if (useStoryProfile && chapterId.isNotBlank()) {
             container.libraryRepository.listEnabledSceneMusicTracks()
                 .filter { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }
-                .filter { track ->
-                    !StoryAudioModeRouter.usesAiFreesound(storyAudioSourceMode) ||
-                        (FreesoundImporter.soundIdFromManagedUri(track.uri) != null &&
-                            FreesoundImporter.managedFileExists(applicationContext, track.uri))
-                }
         } else emptyList()
         val musicSourceHash = originalChapter?.let { chapter ->
             container.narrationPlanCoordinator.musicSourceHashForPlayback(chapter, enabledMusicTracks)

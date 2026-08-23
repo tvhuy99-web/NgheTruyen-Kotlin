@@ -319,7 +319,7 @@ class FreesoundImporter(
             val title = titleForImport(sound.name, "Âm thanh Freesound ${sound.id}")
             val tagsCsv = tagsForImport(
                 kind = kind,
-                description = semanticDescription.trim().ifBlank { sound.description },
+                description = sound.description,
                 soundId = sound.id,
                 username = sound.username,
                 license = sound.license,
@@ -519,7 +519,7 @@ class FreesoundImporter(
                 AudioAssetKind.AMBIENCE -> "type:ambience"
                 AudioAssetKind.SFX -> "type:sfx"
             }
-            val cleanDescription = description.trim().take(300)
+            val cleanDescription = description.trim()
             return if (cleanDescription.isBlank()) marker else "$marker, $cleanDescription"
         }
 

@@ -1,0 +1,164 @@
+name: Temporary Description-First Audio Runner
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - fix/mode3-resolution-quality-20260822
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-build:
+    if: github.event.pull_request.head.ref == 'build/description-first-audio-20260823'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: build/description-first-audio-20260823
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Patch matching policy
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          matcher = Path('app/src/main/java/vn/nghetruyen/app/freesound/Mode3LibraryAssetMatcher.kt')
+          resolver = Path('app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt')
+
+          def rep(path, old, new, label):
+              s = path.read_text(encoding='utf-8')
+              if new in s:
+                  print('ALREADY', label); return
+              n = s.count(old)
+              if n != 1: raise SystemExit(f'{label}: expected 1, found {n}')
+              path.write_text(s.replace(old, new, 1), encoding='utf-8')
+              print('PATCHED', label)
+
+          rep(matcher,
+              '(entry.englishTitleTokens + entry.englishMetadataTokens).forEach { token ->',
+              'entry.englishMetadataTokens.forEach { token ->',
+              'local candidate index description-only')
+          rep(matcher,
+              '''        val audibleText = if (sections.structured) {
+            listOf(track.title, sections.shadeText, sections.useText).joinToString(" ")
+        } else {
+            "${track.title} ${track.tagsCsv}"
+        }''',
+              '''        val audibleText = if (sections.structured) {
+            listOf(sections.shadeText, sections.useText).joinToString(" ")
+        } else {
+            track.tagsCsv
+        }''',
+              'local concepts description-only')
+          rep(matcher,
+              'englishTitleTokens = FreesoundAutoRequirementAggregator.queryTokens(track.title),',
+              'englishTitleTokens = emptySet(),',
+              'local title tokens zero')
+          rep(resolver,
+              'return max(titleCoverage, max(tagCoverage * 0.96, descriptionCoverage * 0.78))',
+              'return max(descriptionCoverage, max(titleCoverage * 0.85, tagCoverage * 0.75))',
+              'remote lexical description-name-tags')
+          rep(resolver,
+              '''            val phraseBonus = when {
+                titleNorm.contains(queryNorm) -> 0.20
+                tagNorm.contains(queryNorm) -> 0.14
+                descriptionNorm.contains(queryNorm) -> 0.08
+                else -> 0.0
+            }''',
+              '''            val phraseBonus = when {
+                descriptionNorm.contains(queryNorm) -> 0.20
+                titleNorm.contains(queryNorm) -> 0.12
+                tagNorm.contains(queryNorm) -> 0.08
+                else -> 0.0
+            }''',
+              'remote bonus description-name-tags')
+          PY
+
+      - name: Add regression tests
+        shell: bash
+        run: |
+          cat > app/src/test/java/vn/nghetruyen/app/freesound/DescriptionFirstMatchingTest.kt <<'KOTLIN'
+          package vn.nghetruyen.app.freesound
+
+          import org.junit.Assert.assertEquals
+          import org.junit.Assert.assertNull
+          import org.junit.Assert.assertTrue
+          import org.junit.Test
+          import vn.nghetruyen.app.audio.AudioAssetKind
+          import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
+
+          class DescriptionFirstMatchingTest {
+              @Test fun localLibraryIgnoresTitleAndUsesDescription() {
+                  val need = FreesoundAutoSearchNeed(AudioAssetKind.SFX, "sword clash", FreesoundRequirementImportance.REQUIRED, emptyList())
+                  val titleOnly = track("title-only", "sword clash", "type:sfx, gentle rain on roof")
+                  val descriptionMatch = track("description-match", "random file 001", "type:sfx, sword clash metal impact")
+                  assertNull(Mode3LibraryAssetMatcher.evaluate(need, listOf(titleOnly), 0L).accepted)
+                  assertEquals("description-match", Mode3LibraryAssetMatcher.evaluate(need, listOf(descriptionMatch), 0L).accepted?.track?.id)
+              }
+
+              @Test fun remoteUsesAllThreeWithDescriptionStrongest() {
+                  val need = FreesoundAutoSearchNeed(AudioAssetKind.AMBIENCE, "forest wind", FreesoundRequirementImportance.REQUIRED, emptyList())
+                  val base = FreesoundSound(1, "misc recording", "personal uploader note", 60.0, "https://cdn.example/a.mp3", null, category = "Soundscapes")
+                  val dSound = base.copy(id = 10, description = "forest wind")
+                  val nSound = base.copy(id = 11, name = "forest wind")
+                  val tSound = base.copy(id = 12, tags = listOf("forest", "wind"))
+                  val d = FreesoundAutoAudioResolver.candidateLexicalCoverage(need, dSound)
+                  val n = FreesoundAutoAudioResolver.candidateLexicalCoverage(need, nSound)
+                  val t = FreesoundAutoAudioResolver.candidateLexicalCoverage(need, tSound)
+                  assertTrue(d > n && n > t)
+                  assertTrue(FreesoundAutoAudioResolver.candidateMeetsLexicalFloor(need, dSound))
+                  assertTrue(FreesoundAutoAudioResolver.candidateMeetsLexicalFloor(need, nSound))
+                  assertTrue(FreesoundAutoAudioResolver.candidateMeetsLexicalFloor(need, tSound))
+                  assertTrue(FreesoundAutoAudioResolver.scoreCandidate(need, dSound, 0) > FreesoundAutoAudioResolver.scoreCandidate(need, nSound, 0))
+                  assertTrue(FreesoundAutoAudioResolver.scoreCandidate(need, nSound, 0) > FreesoundAutoAudioResolver.scoreCandidate(need, tSound, 0))
+              }
+
+              private fun track(id: String, title: String, description: String) = SceneMusicTrackEntity(
+                  id = id, title = title, uri = "file:///tmp/$id.mp3", tagsCsv = description,
+                  volume = 1.0f, enabled = true, updatedAt = 1L,
+              )
+          }
+          KOTLIN
+
+      - name: Run focused tests
+        run: ./gradlew --no-daemon :app:testDebugUnitTest --tests 'vn.nghetruyen.app.freesound.DescriptionFirstMatchingTest' --tests 'vn.nghetruyen.app.freesound.FreesoundAutoAudioTest'
+
+      - name: Build APK
+        run: ./gradlew --no-daemon :app:assembleDebug
+
+      - name: Commit verified code to audio PR branch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/vn/nghetruyen/app/freesound/Mode3LibraryAssetMatcher.kt \
+                  app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt \
+                  app/src/test/java/vn/nghetruyen/app/freesound/DescriptionFirstMatchingTest.kt
+          if ! git diff --cached --quiet; then
+            git commit -m "fix(audio): description-only local matching and description-first Freesound ranking"
+            git push origin HEAD:build/description-first-audio-20260823
+          fi
+
+      - name: Prepare APK artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+          APK=$(find app/build/outputs/apk/debug -type f -name '*.apk' | head -n 1)
+          test -n "$APK"
+          cp "$APK" dist/NgheTruyen_Mode3_DescriptionFirst_20260823.apk
+          sha256sum dist/NgheTruyen_Mode3_DescriptionFirst_20260823.apk > dist/NgheTruyen_Mode3_DescriptionFirst_20260823.apk.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NgheTruyen-Mode3-DescriptionFirst-APK
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14

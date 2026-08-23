@@ -1,4 +1,4 @@
-name: Build Mode3 Audio Fixes APK
+name: Build Semantic + Description Normalization APK
 
 on:
   push:
@@ -20,39 +20,36 @@ jobs:
           ref: fix/mode3-resolution-quality-20260822
           fetch-depth: 0
 
-      - name: Apply prepared audio fixes
+      - name: Apply semantic and description fixes once
         shell: bash
         run: |
-          python3 - <<'PY'
+          if [ ! -f app/src/main/java/vn/nghetruyen/app/ui/components/AudioDescriptionNormalizationDialog.kt ]; then
+            python3 - <<'PY'
           from pathlib import Path
-          src = Path('.github/workflows/fix-mode3-audio-quality-description-converter.yml').read_text(encoding='utf-8')
-          start_marker = '      - name: Apply fixes\n'
-          end_marker = '      - name: Commit fixed source\n'
+          src = Path('.github/workflows/fix-semantic-and-description-normalization.yml').read_text(encoding='utf-8')
+          start_marker = "          python3 - <<'PY'\n"
           start = src.index(start_marker) + len(start_marker)
-          end = src.index(end_marker, start)
+          end = src.index("\n          PY", start)
           block = src[start:end]
-          run_marker = '        run: |\n'
-          run_at = block.index(run_marker) + len(run_marker)
-          script_lines = []
-          for line in block[run_at:].splitlines():
-              script_lines.append(line[10:] if line.startswith('          ') else line)
-          Path('/tmp/apply_audio_fixes.sh').write_text('\n'.join(script_lines) + '\n', encoding='utf-8')
+          lines = []
+          for line in block.splitlines():
+              lines.append(line[10:] if line.startswith('          ') else line)
+          Path('/tmp/apply_semantic_description.py').write_text('\n'.join(lines) + '\n', encoding='utf-8')
           PY
-          bash /tmp/apply_audio_fixes.sh
-          printf '%s\n' "$GITHUB_RUN_ID" > .mode3-description-converter-last-run
+            python3 /tmp/apply_semantic_description.py
+          else
+            echo 'Semantic/description source already patched; skip duplicate patch.'
+          fi
+          printf '%s\n' "$GITHUB_RUN_ID" > .mode3-semantic-description-last-run
 
       - name: Commit fixed source
         shell: bash
         run: |
           git config user.name "chatgpt-build-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt \
-                  app/src/main/java/vn/nghetruyen/app/freesound/Mode3LibraryAssetMatcher.kt \
-                  app/src/main/java/vn/nghetruyen/app/playback/ReaderPlaybackService.kt \
-                  app/src/main/java/vn/nghetruyen/app/sourceplatform/DiagnosticDeepBlackBox.kt \
-                  app/src/main/java/vn/nghetruyen/app/ui/components/UnifiedAudioAssetManagerDialog.kt \
-                  .mode3-description-converter-last-run
-          git commit -m "fix(mode3): audio selection and AI description converter [skip ci]"
+          git add app/src/main/java/vn/nghetruyen/app \
+                  .mode3-semantic-description-last-run
+          git commit -m "fix: semantic accuracy and global description normalization [skip ci]" || true
           git push origin HEAD:fix/mode3-resolution-quality-20260822
 
       - name: Set up JDK 17
@@ -68,9 +65,7 @@ jobs:
         shell: bash
         run: |
           yes | sdkmanager --licenses >/dev/null || true
-          if [ -f .sdk-packages ]; then
-            xargs -r sdkmanager < .sdk-packages
-          fi
+          if [ -f .sdk-packages ]; then xargs -r sdkmanager < .sdk-packages; fi
 
       - name: Build APK only
         shell: bash
@@ -83,14 +78,14 @@ jobs:
         run: |
           APK=$(find app/build/outputs/apk/debug -name '*.apk' -type f | head -n 1)
           test -n "$APK"
-          cp "$APK" NgheTruyen-Mode3-Audio-Fixes-Description-Converter.apk
-          sha256sum NgheTruyen-Mode3-Audio-Fixes-Description-Converter.apk > NgheTruyen-Mode3-Audio-Fixes-Description-Converter.apk.sha256
+          cp "$APK" NgheTruyen-Semantic-Description-Normalization.apk
+          sha256sum NgheTruyen-Semantic-Description-Normalization.apk > NgheTruyen-Semantic-Description-Normalization.apk.sha256
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: NgheTruyen-Mode3-Audio-Fixes-Description-Converter
+          name: NgheTruyen-Semantic-Description-Normalization
           path: |
-            NgheTruyen-Mode3-Audio-Fixes-Description-Converter.apk
-            NgheTruyen-Mode3-Audio-Fixes-Description-Converter.apk.sha256
+            NgheTruyen-Semantic-Description-Normalization.apk
+            NgheTruyen-Semantic-Description-Normalization.apk.sha256
           retention-days: 30

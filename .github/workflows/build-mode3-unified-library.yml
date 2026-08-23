@@ -1,6 +1,7 @@
-name: Build Final Mode3 Semantic Accuracy APK
+name: Build Mode3 APK
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - fix/mode3-resolution-quality-20260822
@@ -11,8 +12,9 @@ permissions:
   contents: write
 
 jobs:
-  patch-and-build-only:
+  build-apk-only:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout branch
         uses: actions/checkout@v4
@@ -20,28 +22,14 @@ jobs:
           ref: fix/mode3-resolution-quality-20260822
           fetch-depth: 0
 
-      - name: Extract and apply final semantic patch
-        shell: bash
-        run: |
-          python3 -c 'import subprocess,pathlib; src=subprocess.check_output(["git","show","HEAD^:.github/workflows/build-mode3-unified-library.yml"], text=True); m="          python3 - <<'"'"'PY'"'"'\n"; s=src.index(m)+len(m); e=src.index("\n          PY",s); block=src[s:e]; lines=[line[10:] if line.startswith("          ") else line for line in block.splitlines()]; pathlib.Path("/tmp/final_mode3_patch.py").write_text("\n".join(lines)+"\n", encoding="utf-8")'
-          python3 /tmp/final_mode3_patch.py
-          printf '%s\n' "$GITHUB_RUN_ID" > .mode3-semantic-description-last-run
-
-      - name: Commit fixed source
-        shell: bash
-        run: |
-          git config user.name "chatgpt-build-bot"
-          git config user.email "actions@users.noreply.github.com"
-          git add app/src/main/java/vn/nghetruyen/app \
-                  .mode3-semantic-description-last-run
-          git commit -m "fix(mode3): semantic matching, cycle reuse and description diagnostics [skip ci]" || true
-          git push origin HEAD:fix/mode3-resolution-quality-20260822
-
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v4
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
@@ -50,27 +38,50 @@ jobs:
         shell: bash
         run: |
           yes | sdkmanager --licenses >/dev/null || true
-          if [ -f .sdk-packages ]; then xargs -r sdkmanager < .sdk-packages; fi
+          if [ -f .sdk-packages ]; then
+            xargs -r sdkmanager < .sdk-packages
+          else
+            sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+          fi
 
-      - name: Build APK only
+      - name: Bootstrap Gradle Wrapper
         shell: bash
         run: |
-          chmod +x gradlew
-          ./gradlew --no-daemon assembleDebug
+          chmod +x gradlew scripts/bootstrap-wrapper.sh
+          ./scripts/bootstrap-wrapper.sh
+
+      - name: Build debug APK without tests
+        shell: bash
+        run: |
+          SOURCE_SHA="$(git rev-parse HEAD)"
+          env -u GITHUB_SHA NGHETRUYEN_BUILD_SHA="$SOURCE_SHA" ./gradlew --no-daemon --stacktrace :app:assembleDebug
 
       - name: Package APK
         shell: bash
         run: |
-          APK=$(find app/build/outputs/apk/debug -name '*.apk' -type f | head -n 1)
-          test -n "$APK"
-          cp "$APK" NgheTruyen-Mode3-Semantic-Final.apk
-          sha256sum NgheTruyen-Mode3-Semantic-Final.apk > NgheTruyen-Mode3-Semantic-Final.apk.sha256
+          SOURCE_SHA="$(git rev-parse HEAD)"
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk dist/NgheTruyen-Mode3-open-description-local-20260823.apk
+          sha256sum dist/NgheTruyen-Mode3-open-description-local-20260823.apk > dist/NgheTruyen-Mode3-open-description-local-20260823.apk.sha256
+          printf '%s\n' "$SOURCE_SHA" > dist/source-commit.txt
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: NgheTruyen-Mode3-Semantic-Final
-          path: |
-            NgheTruyen-Mode3-Semantic-Final.apk
-            NgheTruyen-Mode3-Semantic-Final.apk.sha256
+          name: NgheTruyen-Mode3-open-description-local-apk
+          if-no-files-found: error
           retention-days: 30
+          path: |
+            dist/NgheTruyen-Mode3-open-description-local-20260823.apk
+            dist/NgheTruyen-Mode3-open-description-local-20260823.apk.sha256
+            dist/source-commit.txt
+
+      - name: Record successful build run
+        shell: bash
+        run: |
+          printf '%s\n' "$GITHUB_RUN_ID" > .mode3-open-description-last-build
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .mode3-open-description-last-build
+          git commit -m "ci: record Mode3 APK build [skip ci]"
+          git push origin HEAD:fix/mode3-resolution-quality-20260822

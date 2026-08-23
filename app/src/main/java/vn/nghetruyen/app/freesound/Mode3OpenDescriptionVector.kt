@@ -77,7 +77,7 @@ internal object Mode3OpenDescriptionVector {
 
     private fun addCharacterFeatures(values: FloatArray, token: String) {
         if (token.length < 3) return
-        val padded = "^$token$"
+        val padded = "^${token}${'$'}"
         for (size in CHAR_GRAM_MIN..CHAR_GRAM_MAX) {
             if (padded.length < size) continue
             val weight = if (size == 3) CHAR_TRIGRAM_WEIGHT else CHAR_FOURGRAM_WEIGHT
@@ -132,7 +132,7 @@ internal object Mode3OpenDescriptionVector {
 
     private val FUNCTION_WORDS = setOf(
         "va", "hoac", "nhung", "cua", "cho", "trong", "ngoai", "khi", "sau", "truoc", "voi", "den",
-        "dang", "duoc", "khong", "mot", "nhung", "cac", "nay", "do", "thi", "ma", "theo", "rat", "hoi",
+        "dang", "duoc", "khong", "mot", "cac", "nay", "do", "thi", "ma", "theo", "rat", "hoi",
         "canh", "tieng", "am", "thanh", "hieu", "ung", "sac", "thai", "dung", "tranh", "phu", "hop",
         "tao", "co", "la", "nen", "nghe", "keo", "dai", "ngan", "lien", "tuc",
         "and", "or", "the", "with", "for", "from", "into", "this", "that", "sound", "audio",

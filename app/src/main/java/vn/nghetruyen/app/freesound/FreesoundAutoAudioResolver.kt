@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import java.io.File
 import java.security.MessageDigest
+import java.util.LinkedHashMap
 import java.util.UUID
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -105,6 +106,10 @@ private data class FreesoundAutoImportOutcome(
     val elapsedMs: Long,
 )
 
+private data class CompletedResolutionCycle(
+    val resolvedTrackIdsByNeed: Map<String, String>,
+)
+
 data class FreesoundAutoResolvedNeed(
     val need: FreesoundAutoSearchNeed,
     val trackId: String?,
@@ -193,6 +198,14 @@ class FreesoundAutoAudioResolver(
     private var activeResolutionCycleKey: String? = null
     private var activeResolutionCycleComplete: Boolean = false
     private val activeResolutionImportedTrackIds = linkedSetOf<String>()
+    private val completedResolutionCycles = object : LinkedHashMap<String, CompletedResolutionCycle>(
+        MAX_COMPLETED_CYCLE_CACHE_ENTRIES,
+        0.75f,
+        true,
+    ) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CompletedResolutionCycle>?): Boolean =
+            size > MAX_COMPLETED_CYCLE_CACHE_ENTRIES
+    }
 
     private fun failedSoundKey(need: FreesoundAutoSearchNeed): String =
         "${need.kind.name}:${FreesoundAutoRequirementAggregator.normalizeQuery(need.query)}"
@@ -365,6 +378,7 @@ class FreesoundAutoAudioResolver(
 
     fun clearResolutionCaches() {
         clearRuntimeResolutionState()
+        synchronized(completedResolutionCycles) { completedResolutionCycles.clear() }
         client.clearSearchCache()
     }
 
@@ -385,6 +399,15 @@ class FreesoundAutoAudioResolver(
         val traceId = "freesound-resolve:${UUID.randomUUID()}"
         val needs = FreesoundAutoRequirementAggregator.aggregate(requirements)
         val cycleKey = resolutionCycleKey(needs)
+        if (retryAttempt <= 1 && activeResolutionCycleKey != cycleKey) {
+            val historical = synchronized(completedResolutionCycles) { completedResolutionCycles[cycleKey] }
+            if (historical != null) {
+                clearRuntimeResolutionState()
+                activeResolutionCycleKey = cycleKey
+                resolvedTrackIdsByNeed.putAll(historical.resolvedTrackIdsByNeed)
+                activeResolutionCycleComplete = true
+            }
+        }
         val completedCycleReuse = retryAttempt <= 1 &&
             activeResolutionCycleComplete &&
             activeResolutionCycleKey == cycleKey
@@ -722,6 +745,8 @@ class FreesoundAutoAudioResolver(
                     "remoteLexicalCoverage" to "%.3f".format(java.util.Locale.US, search.selectedLexicalCoverage),
                     "remoteCoreCoverage" to "%.3f".format(java.util.Locale.US, remoteFit.coreCoverage),
                     "remoteEventCoverage" to "%.3f".format(java.util.Locale.US, remoteFit.eventCoverage),
+                    "remoteSourceConceptCoverage" to "%.3f".format(java.util.Locale.US, remoteFit.sourceConceptCoverage),
+                    "remoteSourceConflictConfidence" to "%.3f".format(java.util.Locale.US, remoteFit.sourceConflictConfidence),
                     "remoteQualified" to remoteQualified.toString(),
                     "sameAsset" to sameAsset.toString(),
                     "winner" to if (useLibrary) "LIBRARY" else if (remoteQualified) "FREESOUND" else "NONE",
@@ -1020,6 +1045,11 @@ class FreesoundAutoAudioResolver(
         val clientSearches = searched.sumOf { it.search?.requestCount ?: 0 }
         activeResolutionImportedTrackIds += imported
         activeResolutionCycleComplete = resolutions.isNotEmpty() && resolutions.all { !it.trackId.isNullOrBlank() }
+        if (activeResolutionCycleComplete) {
+            synchronized(completedResolutionCycles) {
+                completedResolutionCycles[cycleKey] = CompletedResolutionCycle(resolvedTrackIdsByNeed.toMap())
+            }
+        }
         val transactionImportedTrackIds = activeResolutionImportedTrackIds.toSet()
         diagnostics += "RESOLVE_DONE requirements=${requirements.size} aggregated=${needs.size} resolved=${resolutions.count { !it.trackId.isNullOrBlank() }} unresolved=${resolutions.count { it.trackId.isNullOrBlank() }} unresolvedRequired=$unresolvedRequired retryLockedReuses=$retryLockedReuses decisiveLocalSkips=$decisiveLocalSkips networkNeeds=${networkSeeds.size} queryCacheHits=$queryCacheHits localLibraryMatches=$localLibraryMatches clientSearches=$clientSearches parallelSearchLimit=${FreesoundParallelSearchPolicy.MAX_PARALLEL_SEARCHES} parallelImportLimit=${FreesoundParallelImportPolicy.MAX_PARALLEL_IMPORTS} cacheLookupMs=$cacheLookupMs networkSearchWallMs=$networkSearchWallMs importWallMs=$parallelImportWallMs importAttempts=$importAttempts localSoundIdReuses=$localSoundIdReuses normalizationResumes=$normalizationResumes imported=${transactionImportedTrackIds.size} importedThisCall=${imported.size} importElapsedTotalMs=$importElapsedTotalMs retryableFailure=$retryableFailure retryRecommended=$retryRecommended elapsedMs=$totalElapsedMs"
         liveDiagnostic(
@@ -1197,6 +1227,7 @@ class FreesoundAutoAudioResolver(
         private const val RETRY_TWO_TERM_EVIDENCE_WEIGHT = 0.90
         private const val RETRY_ONE_TERM_EVIDENCE_WEIGHT = 0.68
         private const val SOURCE_FIT_TIE_EPSILON = 0.015
+        private const val MAX_COMPLETED_CYCLE_CACHE_ENTRIES = 12
         private val RETRY_QUERY_STOPWORDS = setOf(
             "a", "an", "the", "on", "in", "at", "with", "and", "or", "of", "to", "from", "for", "by",
             "into", "onto", "single", "one", "sound", "effect", "audio",

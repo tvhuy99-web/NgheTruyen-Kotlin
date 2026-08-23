@@ -26,6 +26,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.UUID
 import org.json.JSONArray
 import org.json.JSONObject
 import vn.nghetruyen.app.NgheTruyenApplication
@@ -38,6 +39,8 @@ import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
 import vn.nghetruyen.app.freesound.FreesoundImporter
 import vn.nghetruyen.app.playback.PlaybackQueueStore
 import vn.nghetruyen.app.playback.ReaderPlaybackService
+import vn.nghetruyen.source.diagnostics.DiagnosticCategory
+import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 
 enum class AudioDescriptionNormalizationScope {
     MISSING_VIETNAMESE,
@@ -97,6 +100,25 @@ fun AudioDescriptionNormalizationDialog(
     var providerModel by remember { mutableStateOf("") }
     var applied by remember { mutableStateOf(false) }
     var job by remember { mutableStateOf<Job?>(null) }
+    var diagnosticTraceId by remember { mutableStateOf("") }
+
+    fun diagnostic(
+        name: String,
+        severity: DiagnosticSeverity = DiagnosticSeverity.INFO,
+        attributes: Map<String, String> = emptyMap(),
+    ) {
+        val traceId = diagnosticTraceId.ifBlank { "audio-description:${UUID.randomUUID()}" }
+        runCatching {
+            application.container.sourceDiagnostics.mark(
+                name = name,
+                category = DiagnosticCategory.RUNTIME,
+                severity = severity,
+                sourceId = "audio-description",
+                traceId = traceId,
+                attributes = attributes,
+            )
+        }
+    }
 
     val missingCount = tracks.count { audioDescriptionNeedsNormalization(it.tagsCsv) }
     val blankCount = tracks.count { audioDescriptionText(it.tagsCsv).isBlank() }
@@ -110,11 +132,23 @@ fun AudioDescriptionNormalizationDialog(
         if (running) return
         running = true
         applied = false
+        diagnosticTraceId = "audio-description:${UUID.randomUUID()}"
         processed = 0
         total = targetCount
         previews = emptyList()
         failures = emptyList()
         providerModel = ""
+        diagnostic(
+            "AUDIO_DESCRIPTION_NORMALIZATION_START",
+            attributes = mapOf(
+                "scope" to mode.name,
+                "targets" to targetCount.toString(),
+                "music" to tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }.toString(),
+                "ambience" to tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.AMBIENCE }.toString(),
+                "sfx" to tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.SFX }.toString(),
+                "blankSourceDescriptions" to blankCount.toString(),
+            ),
+        )
         job = scope.launch {
             val targets = tracks.filter { track ->
                 when (mode) {
@@ -179,7 +213,29 @@ fun AudioDescriptionNormalizationDialog(
                 processed += batch.size
                 previews = converted.toList()
                 failures = errors.toList()
+                diagnostic(
+                    "AUDIO_DESCRIPTION_BATCH_PARSED",
+                    attributes = mapOf(
+                        "batchSize" to batch.size.toString(),
+                        "processed" to processed.toString(),
+                        "total" to total.toString(),
+                        "prepared" to prepared.size.toString(),
+                        "convertedTotal" to converted.size.toString(),
+                        "failuresTotal" to errors.size.toString(),
+                        "sourceRefetchedTotal" to converted.count(AudioDescriptionPreview::sourceRefreshed).toString(),
+                    ),
+                )
             }
+            diagnostic(
+                "AUDIO_DESCRIPTION_PREVIEW_READY",
+                attributes = mapOf(
+                    "scope" to mode.name,
+                    "processed" to processed.toString(),
+                    "converted" to converted.size.toString(),
+                    "failures" to errors.size.toString(),
+                    "sourceRefetched" to converted.count(AudioDescriptionPreview::sourceRefreshed).toString(),
+                ),
+            )
             running = false
             job = null
         }
@@ -188,6 +244,10 @@ fun AudioDescriptionNormalizationDialog(
     fun applyResults() {
         if (running || previews.isEmpty()) return
         running = true
+        diagnostic(
+            "AUDIO_DESCRIPTION_APPLY_START",
+            attributes = mapOf("items" to previews.size.toString()),
+        )
         job = scope.launch {
             val now = System.currentTimeMillis()
             val previewById = previews.associateBy(AudioDescriptionPreview::trackId)
@@ -205,6 +265,16 @@ fun AudioDescriptionNormalizationDialog(
             if (PlaybackQueueStore.state.value.isPlaying) {
                 ReaderPlaybackService.command(application, ReaderPlaybackService.ACTION_REFRESH)
             }
+            diagnostic(
+                "AUDIO_DESCRIPTION_APPLIED",
+                attributes = mapOf(
+                    "items" to updated.size.toString(),
+                    "music" to updated.count { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }.toString(),
+                    "ambience" to updated.count { AudioAssetClassifier.classify(it) == AudioAssetKind.AMBIENCE }.toString(),
+                    "sfx" to updated.count { AudioAssetClassifier.classify(it) == AudioAssetKind.SFX }.toString(),
+                    "sourceRefetched" to previews.count(AudioDescriptionPreview::sourceRefreshed).toString(),
+                ),
+            )
             applied = true
             running = false
             job = null
@@ -273,6 +343,14 @@ fun AudioDescriptionNormalizationDialog(
             if (running) {
                 TextButton(onClick = {
                     job?.cancel()
+                    diagnostic(
+                        "AUDIO_DESCRIPTION_NORMALIZATION_CANCELLED",
+                        attributes = mapOf(
+                            "processed" to processed.toString(),
+                            "total" to total.toString(),
+                            "converted" to previews.size.toString(),
+                        ),
+                    )
                     job = null
                     running = false
                 }) { Text("DỪNG") }
@@ -320,6 +398,7 @@ Sắc thái: <nguồn âm/vật liệu/hành động/cường độ/nhịp/khôn
 - AMBIENCE: phân biệt chính xác gió/mưa/nước/biển/đám đông/giao thông/rừng/phòng trong nhà...
 - SFX: phân biệt nguồn + hành động + vật liệu, ví dụ đấm/đá/kiếm/nổ/vỡ/quần áo/rơi/ngã/va chạm.
 - Không thêm tên truyện, nhân vật, ID hay tên file vào description.
+- Trong trường Tránh, hãy nêu trực tiếp loại âm khác cần tránh; hạn chế cấu trúc phủ định kiểu “X không có Y” vì metadata này được dùng để đối chiếu semantic.
 
 Chỉ trả JSON hợp lệ, không markdown:
 {"items":[{"id":"...","description":"Sắc thái: ...; Dùng: ...; Tránh: ..."}]}

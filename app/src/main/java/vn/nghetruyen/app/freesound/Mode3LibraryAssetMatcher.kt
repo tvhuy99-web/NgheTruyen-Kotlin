@@ -90,6 +90,7 @@ internal object Mode3LibraryAssetMatcher {
         val shade: LocalText,
         val use: LocalText,
         val avoid: LocalText,
+        val avoidText: String = "",
     ) {
         val isPresent: Boolean get() = shade.tokens.isNotEmpty() || use.tokens.isNotEmpty() || avoid.tokens.isNotEmpty()
     }
@@ -197,21 +198,14 @@ internal object Mode3LibraryAssetMatcher {
      * Borderline accepted matches still go online and compete against the remote candidate.
      */
     fun isDecisive(match: Match?): Boolean {
-        if (match == null || !match.accepted || match.avoidCoverage >= MAX_CONFLICT) return false
-        return when (match.metadataQuality) {
-            "STRUCTURED" -> {
-                val descriptionDecisive = match.contextScore >= DECISIVE_CONTEXT_SCORE
-                val exactWithContext =
-                    match.selectionScore >= LOCAL_NETWORK_SKIP_FIT &&
-                        match.coverage >= EXACT_QUERY_COVERAGE &&
-                        match.coreCoverage >= CORE_PRESENT_COVERAGE &&
-                        match.contextScore >= DECISIVE_EXACT_MIN_CONTEXT_SCORE
-                descriptionDecisive || exactWithContext
-            }
-            else ->
-                match.selectionScore >= LOCAL_NETWORK_SKIP_FIT &&
-                    match.coverage >= EXACT_QUERY_COVERAGE &&
-                    match.coreCoverage >= CORE_PRESENT_COVERAGE
+        if (match == null || !match.accepted || match.avoidCoverage >= HARD_AVOID_CONFLICT) return false
+        if (match.selectionScore < DECISIVE_SELECTION_FIT) return false
+        return if (match.metadataQuality == "STRUCTURED") {
+            match.contextScore >= DECISIVE_EXACT_MIN_CONTEXT_SCORE ||
+                match.coverage >= BALANCED_QUERY_COVERAGE
+        } else {
+            match.coverage >= LEGACY_MIN_QUERY_COVERAGE ||
+                match.coreCoverage >= CORE_PRESENT_COVERAGE
         }
     }
 
@@ -302,20 +296,26 @@ internal object Mode3LibraryAssetMatcher {
         val coreToken = coreQueryToken(rawQueryTokens)
         val eventToken = eventQueryToken(rawQueryTokens, need.kind)
         val hints = need.usages.asSequence()
-            .map(FreesoundAutoRequirement::localContext)
-            .map(String::trim)
-            .filter(String::isNotBlank)
-            .distinct()
-            .map(::parseLocalHint)
-            .filter(LocalHint::isPresent)
-            .toList()
+  .map(FreesoundAutoRequirement::localContext)
+  .map(String::trim)
+  .filter(String::isNotBlank)
+  .distinct()
+  .map(::parseLocalHint)
+  .filter(LocalHint::isPresent)
+  .toList()
+        val requiredConcepts = buildSet {
+  addAll(audibleConcepts(need.query))
+  hints.forEach { hint ->
+      addAll(audibleConcepts((hint.shade.tokens + hint.use.tokens).joinToString(" ")))
+  }
+        }
         return NeedProfile(
-            kind = need.kind,
-            queryTokens = queryTokens,
-            coreToken = coreToken,
-            eventToken = eventToken,
-            requiredConcepts = audibleConcepts(need.query),
-            hints = hints,
+  kind = need.kind,
+  queryTokens = queryTokens,
+  coreToken = coreToken,
+  eventToken = eventToken,
+  requiredConcepts = requiredConcepts,
+  hints = hints,
         )
     }
 
@@ -349,63 +349,65 @@ internal object Mode3LibraryAssetMatcher {
     ): RemoteFit {
         @Suppress("UNUSED_VARIABLE")
         val rankOnlyScore = selectedScore
-        val rawTokens = FreesoundAutoRequirementAggregator.queryTokens(need.query).toList()
-        val core = coreQueryToken(rawTokens)
-        val event = eventQueryToken(rawTokens, need.kind)
-        val remoteTokens = FreesoundAutoRequirementAggregator.queryTokens(
-            buildString {
-                append(sound.name).append(' ')
-                append(sound.description).append(' ')
-                append(sound.tags.joinToString(" "))
-            },
-        )
-        val coreCoverage = if (core != null && core in remoteTokens) 1.0 else 0.0
-        val eventCoverage = if (event != null && event in remoteTokens) 1.0 else 0.0
+        val profile = needProfile(need)
+        val remoteText = buildString {
+  append(sound.name).append(' ')
+  append(sound.description).append(' ')
+  append(sound.tags.joinToString(" "))
+        }
+        val remoteTokens = FreesoundAutoRequirementAggregator.queryTokens(remoteText)
+        val candidateConcepts = audibleConcepts(remoteText)
+
+        val rawCoreCoverage = profile.coreToken?.let { if (it in remoteTokens) 1.0 else 0.0 } ?: 0.0
+        val coreConcepts = profile.coreToken?.let(::audibleConcepts).orEmpty()
+        val coreCoverage = if (
+  coreConcepts.any(AUDIBLE_SOURCE_CONCEPTS::contains) &&
+  coreConcepts.none(candidateConcepts::contains)
+        ) 0.0 else rawCoreCoverage
+
+        val rawEventCoverage = profile.eventToken?.let { if (it in remoteTokens) 1.0 else 0.0 } ?: 0.0
+        val eventConcepts = profile.eventToken?.let(::audibleConcepts).orEmpty()
+        val eventCoverage = if (eventConcepts.isNotEmpty() && eventConcepts.none(candidateConcepts::contains)) {
+  0.0
+        } else rawEventCoverage
+
         val lexical = lexicalCoverage.coerceIn(0.0, 1.0)
         val corePresent = coreCoverage >= CORE_PRESENT_COVERAGE
         val eventPresent = eventCoverage >= CORE_PRESENT_COVERAGE
         val lexicalQualified = when (need.kind) {
-            AudioAssetKind.SFX -> if (event != null) {
-                lexical >= REMOTE_SFX_STRONG_QUERY_COVERAGE ||
-                    (lexical >= REMOTE_SFX_RELAXED_QUERY_COVERAGE && (corePresent || eventPresent))
-            } else {
-                lexical >= RAW_MIN_QUERY_COVERAGE ||
-                    (corePresent && lexical >= CORE_ONLY_MIN_QUERY_COVERAGE)
-            }
-            else -> lexical >= LEGACY_MIN_QUERY_COVERAGE
+  AudioAssetKind.SFX -> if (profile.eventToken != null) {
+      lexical >= REMOTE_SFX_STRONG_QUERY_COVERAGE ||
+          (lexical >= REMOTE_SFX_RELAXED_QUERY_COVERAGE && (corePresent || eventPresent))
+  } else {
+      lexical >= RAW_MIN_QUERY_COVERAGE ||
+          (corePresent && lexical >= CORE_ONLY_MIN_QUERY_COVERAGE)
+  }
+  else -> lexical >= LEGACY_MIN_QUERY_COVERAGE
         }
-        val requiredConcepts = audibleConcepts(need.query)
-        val candidateConcepts = audibleConcepts(
-            buildString {
-                append(sound.name).append(' ')
-                append(sound.description).append(' ')
-                append(sound.tags.joinToString(" "))
-            },
-        )
-        val sourceCoverage = sourceConceptCoverage(requiredConcepts, candidateConcepts)
-        val sourceConflict = sourceConflictConfidence(requiredConcepts, candidateConcepts)
-        val qualified = lexicalQualified && sourceConflict < HARD_SOURCE_CONFLICT_CONFIDENCE
-        val fit = if (!qualified) {
-            0.0
-        } else {
-            commonSemanticFit(
-                kind = need.kind,
-                lexicalCoverage = lexical,
-                coreCoverage = coreCoverage,
-                eventCoverage = eventCoverage,
-                sourceCoverage = sourceCoverage,
-                hasSourceRequirement = requiredConcepts.any(AUDIBLE_SOURCE_CONCEPTS::contains),
-                contextScore = 0.0,
-                hasStructuredContext = false,
-            )
-        }
+
+        val sourceCoverage = sourceConceptCoverage(profile.requiredConcepts, candidateConcepts)
+        val sourceConflict = sourceConflictConfidence(profile.requiredConcepts, candidateConcepts)
+        val conceptContext = conceptCoverage(profile.requiredConcepts, candidateConcepts)
+        val fit = commonSemanticFit(
+  kind = need.kind,
+  lexicalCoverage = lexical,
+  coreCoverage = coreCoverage,
+  eventCoverage = eventCoverage,
+  sourceCoverage = sourceCoverage,
+  hasSourceRequirement = profile.requiredConcepts.any(AUDIBLE_SOURCE_CONCEPTS::contains),
+  contextScore = conceptContext,
+  hasStructuredContext = profile.hintAware && profile.requiredConcepts.isNotEmpty(),
+        ).coerceIn(0.0, 1.0)
+        val qualified = lexicalQualified &&
+  sourceConflict < HARD_SOURCE_CONFLICT_CONFIDENCE &&
+  fit >= minimumSelectionFit(need.kind)
         return RemoteFit(
-            score = fit,
-            coreCoverage = coreCoverage,
-            eventCoverage = eventCoverage,
-            qualified = qualified,
-            sourceConceptCoverage = sourceCoverage,
-            sourceConflictConfidence = sourceConflict,
+  score = if (qualified) fit else 0.0,
+  coreCoverage = coreCoverage,
+  eventCoverage = eventCoverage,
+  qualified = qualified,
+  sourceConceptCoverage = sourceCoverage,
+  sourceConflictConfidence = sourceConflict,
         )
     }
 
@@ -418,67 +420,75 @@ internal object Mode3LibraryAssetMatcher {
         val queryTokens = profile.queryTokens
         val titleQueryCoverage = tokenCoverage(queryTokens, indexed.englishTitleTokens)
         val metadataQueryCoverage = tokenCoverage(queryTokens, indexed.englishMetadataTokens)
-        // Metadata is the semantic source of truth. A very good filename remains useful evidence,
-        // but can no longer outrank a contradictory structured description by itself.
         val queryCoverage = max(metadataQueryCoverage, titleQueryCoverage * TITLE_QUERY_EVIDENCE_WEIGHT)
-        val queryAvoidCoverage = tokenCoverage(queryTokens, indexed.englishAvoidTokens)
-        val coreCoverage = profile.coreToken?.let { core ->
-            max(
-                if (core in indexed.englishMetadataTokens) 1.0 else 0.0,
-                if (core in indexed.englishTitleTokens) TITLE_CORE_EVIDENCE_WEIGHT else 0.0,
-            )
+
+        val rawCoreCoverage = profile.coreToken?.let { core ->
+  max(
+      if (core in indexed.englishMetadataTokens) 1.0 else 0.0,
+      if (core in indexed.englishTitleTokens) TITLE_CORE_EVIDENCE_WEIGHT else 0.0,
+  )
         } ?: 0.0
-        val eventCoverage = profile.eventToken?.let { event ->
-            max(
-                if (event in indexed.englishMetadataTokens) 1.0 else 0.0,
-                if (event in indexed.englishTitleTokens) TITLE_CORE_EVIDENCE_WEIGHT else 0.0,
-            )
+        val coreConcepts = profile.coreToken?.let(::audibleConcepts).orEmpty()
+        val coreCoverage = if (
+  coreConcepts.any(AUDIBLE_SOURCE_CONCEPTS::contains) &&
+  coreConcepts.none(indexed.audibleConcepts::contains)
+        ) 0.0 else rawCoreCoverage
+
+        val rawEventCoverage = profile.eventToken?.let { event ->
+  max(
+      if (event in indexed.englishMetadataTokens) 1.0 else 0.0,
+      if (event in indexed.englishTitleTokens) TITLE_CORE_EVIDENCE_WEIGHT else 0.0,
+  )
         } ?: 0.0
+        val eventConcepts = profile.eventToken?.let(::audibleConcepts).orEmpty()
+        val eventCoverage = if (eventConcepts.isNotEmpty() && eventConcepts.none(indexed.audibleConcepts::contains)) {
+  0.0
+        } else rawEventCoverage
 
         val hintAware = profile.hintAware
         val useScore = if (hintAware) average(profile.hints.map { hint ->
-            val direct = localSimilarity(hint.use, indexed.sections.use)
-            val shadeToUse = localSimilarity(hint.shade, indexed.sections.use) * 0.45
-            val useToShade = localSimilarity(hint.use, indexed.sections.shade) * 0.55
-            val fallback = max(
-                localSimilarity(hint.use, indexed.sections.all),
-                localSimilarity(hint.shade, indexed.sections.all),
-            ) * 0.45
-            max(max(direct, shadeToUse), max(useToShade, fallback))
+  val direct = localSimilarity(hint.use, indexed.sections.use)
+  val shadeToUse = localSimilarity(hint.shade, indexed.sections.use) * 0.45
+  val useToShade = localSimilarity(hint.use, indexed.sections.shade) * 0.55
+  val fallback = max(
+      localSimilarity(hint.use, indexed.sections.all),
+      localSimilarity(hint.shade, indexed.sections.all),
+  ) * 0.45
+  max(max(direct, shadeToUse), max(useToShade, fallback))
         }) else 0.0
         val shadeScore = if (hintAware) average(profile.hints.map { hint ->
-            val expectedShade = if (hint.shade.tokens.isNotEmpty()) hint.shade else hint.use
-            max(
-                localSimilarity(expectedShade, indexed.sections.shade),
-                localSimilarity(hint.use, indexed.sections.shade) * 0.70,
-            )
+  val expectedShade = if (hint.shade.tokens.isNotEmpty()) hint.shade else hint.use
+  max(
+      localSimilarity(expectedShade, indexed.sections.shade),
+      localSimilarity(hint.use, indexed.sections.shade) * 0.70,
+  )
         }) else 0.0
         val allScore = if (hintAware) average(profile.hints.map { hint ->
-            max(
-                localSimilarity(hint.use, indexed.sections.all),
-                localSimilarity(hint.shade, indexed.sections.all),
-            )
+  max(
+      localSimilarity(hint.use, indexed.sections.all),
+      localSimilarity(hint.shade, indexed.sections.all),
+  )
         }) else 0.0
-        val hintConflict = if (hintAware) profile.hints.maxOf { hint ->
-            max(
-                max(
-                    localSimilarity(hint.use, indexed.sections.avoid),
-                    localSimilarity(hint.shade, indexed.sections.avoid),
-                ),
-                max(
-                    localSimilarity(hint.avoid, indexed.sections.use),
-                    localSimilarity(hint.avoid, indexed.sections.shade),
-                ),
-            )
+
+        // `Tránh` is a semantic exclusion, not a bag of forbidden words. A clause such as
+        // "vụ nổ không có yếu tố lửa" must not reject a FIRE+EXPLOSION need merely because
+        // it contains the words "nổ" and "lửa". Likewise "tuyết lở" is not a conflict with
+        // footsteps on snow unless the avoid meaning covers the actual positive need.
+        val candidateAvoidConflict = avoidConceptConflict(profile.requiredConcepts, indexed.sections.avoidText)
+        val needAvoidConflict = if (hintAware) {
+  profile.hints.maxOfOrNull { hint ->
+      avoidConceptConflict(indexed.audibleConcepts, hint.avoidText)
+  } ?: 0.0
         } else 0.0
-        val avoidCoverage = max(queryAvoidCoverage, hintConflict)
+        val avoidCoverage = max(candidateAvoidConflict, needAvoidConflict)
+
         val contextScore = max(useScore, max(shadeScore * 0.94, allScore * 0.62))
         val semanticMetadata = indexed.sections.structured &&
-            (indexed.sections.use.tokens.isNotEmpty() || indexed.sections.shade.tokens.isNotEmpty())
+  (indexed.sections.use.tokens.isNotEmpty() || indexed.sections.shade.tokens.isNotEmpty())
         val metadataQuality = when {
-            semanticMetadata -> "STRUCTURED"
-            indexed.sections.structured -> "PARTIAL"
-            else -> "RAW"
+  semanticMetadata -> "STRUCTURED"
+  indexed.sections.structured -> "PARTIAL"
+  else -> "RAW"
         }
         val requiredConcepts = profile.requiredConcepts
         val sourceCoverage = sourceConceptCoverage(requiredConcepts, indexed.audibleConcepts)
@@ -491,144 +501,86 @@ internal object Mode3LibraryAssetMatcher {
         val titleBonus = titleQueryCoverage * 0.02
         val repetitionPenalty = repetitionPenalty(currentTrack, nowMillis)
         val finalScore = if (hintAware && semanticMetadata) {
-            // Vietnamese structured metadata is primary; filename/query evidence is deliberately
-            // secondary so renamed files and Freesound imports compete on meaning, not provenance.
-            useScore * 0.52 +
-                shadeScore * 0.22 +
-                allScore * 0.10 +
-                queryCoverage * 0.08 +
-                structuredBonus +
-                titleBonus -
-                avoidCoverage * 0.78 -
-                repetitionPenalty
+  useScore * 0.52 +
+      shadeScore * 0.22 +
+      allScore * 0.10 +
+      queryCoverage * 0.08 +
+      structuredBonus +
+      titleBonus -
+      avoidCoverage * 0.50 -
+      repetitionPenalty
         } else {
-            // Weak/raw metadata cannot be judged fairly against Vietnamese local_hint. Fall back to
-            // the unchanged query/title instead of punishing an otherwise exact asset.
-            queryCoverage * 0.78 +
-                coreCoverage * 0.16 +
-                structuredBonus * 0.30 +
-                titleBonus -
-                queryAvoidCoverage * 0.62 -
-                repetitionPenalty
+  queryCoverage * 0.78 +
+      coreCoverage * 0.16 +
+      structuredBonus * 0.30 +
+      titleBonus -
+      avoidCoverage * 0.42 -
+      repetitionPenalty
         }.coerceIn(0.0, 1.0)
 
-        // LOCAL and fresh Freesound candidates now share the exact same base fit formula.
-        // Structured Vietnamese context is only a small refinement; it no longer creates a separate
-        // lower/higher score universe depending on where the file came from.
         val selectionBase = commonSemanticFit(
-            kind = profile.kind,
-            lexicalCoverage = queryCoverage,
-            coreCoverage = coreCoverage,
-            eventCoverage = eventCoverage,
-            sourceCoverage = sourceCoverage,
-            hasSourceRequirement = requiredConcepts.any(AUDIBLE_SOURCE_CONCEPTS::contains),
-            contextScore = contextScore,
-            hasStructuredContext = hintAware && semanticMetadata,
+  kind = profile.kind,
+  lexicalCoverage = queryCoverage,
+  coreCoverage = coreCoverage,
+  eventCoverage = eventCoverage,
+  sourceCoverage = sourceCoverage,
+  hasSourceRequirement = requiredConcepts.any(AUDIBLE_SOURCE_CONCEPTS::contains),
+  contextScore = contextScore,
+  hasStructuredContext = hintAware && semanticMetadata,
         )
         val selectionScore = (
-            selectionBase -
-                avoidCoverage * 0.48 -
-                sourceConflict * SOFT_SOURCE_CONFLICT_PENALTY -
-                repetitionPenalty * 0.50
-            ).coerceIn(0.0, 1.0)
+  selectionBase -
+      avoidCoverage * 0.48 -
+      sourceConflict * SOFT_SOURCE_CONFLICT_PENALTY -
+      repetitionPenalty * 0.50
+  ).coerceIn(0.0, 1.0)
 
         val rejectReason = rejectReason(
-            kind = profile.kind,
-            eventRequired = profile.eventToken != null,
-            hintAware = hintAware,
-            semanticMetadata = semanticMetadata,
-            score = finalScore,
-            contextScore = contextScore,
-            queryCoverage = queryCoverage,
-            coreCoverage = coreCoverage,
-            eventCoverage = eventCoverage,
-            conflict = avoidCoverage,
-            sourceConflictConfidence = sourceConflict,
+  kind = profile.kind,
+  selectionScore = selectionScore,
+  conflict = avoidCoverage,
+  sourceConflictConfidence = sourceConflict,
         )
         return Match(
-            track = currentTrack,
-            score = finalScore,
-            coverage = queryCoverage,
-            contextScore = contextScore,
-            anchorCoverage = coreCoverage,
-            avoidCoverage = avoidCoverage,
-            contextAware = hintAware,
-            anchorRequired = profile.coreToken != null,
-            useScore = useScore,
-            shadeScore = shadeScore,
-            allScore = allScore,
-            repetitionPenalty = repetitionPenalty,
-            accepted = rejectReason.isBlank(),
-            rejectReason = rejectReason,
-            structured = indexed.sections.structured,
-            coreCoverage = coreCoverage,
-            eventCoverage = eventCoverage,
-            selectionScore = selectionScore,
-            metadataQuality = metadataQuality,
+  track = currentTrack,
+  score = finalScore,
+  coverage = queryCoverage,
+  contextScore = contextScore,
+  anchorCoverage = coreCoverage,
+  avoidCoverage = avoidCoverage,
+  contextAware = hintAware,
+  anchorRequired = profile.coreToken != null,
+  useScore = useScore,
+  shadeScore = shadeScore,
+  allScore = allScore,
+  repetitionPenalty = repetitionPenalty,
+  accepted = rejectReason.isBlank(),
+  rejectReason = rejectReason,
+  structured = indexed.sections.structured,
+  coreCoverage = coreCoverage,
+  eventCoverage = eventCoverage,
+  selectionScore = selectionScore,
+  metadataQuality = metadataQuality,
         )
     }
 
     private fun rejectReason(
         kind: AudioAssetKind,
-        eventRequired: Boolean,
-        hintAware: Boolean,
-        semanticMetadata: Boolean,
-        score: Double,
-        contextScore: Double,
-        queryCoverage: Double,
-        coreCoverage: Double,
-        eventCoverage: Double,
+        selectionScore: Double,
         conflict: Double,
         sourceConflictConfidence: Double,
     ): String {
         val reasons = buildList {
-            if (sourceConflictConfidence >= HARD_SOURCE_CONFLICT_CONFIDENCE) {
-                add("sourceConceptMismatch>=${HARD_SOURCE_CONFLICT_CONFIDENCE}")
-            }
-            if (conflict >= MAX_CONFLICT) add("conflict>=$MAX_CONFLICT")
-            if (!hintAware) {
-                if (kind == AudioAssetKind.SFX && eventRequired) {
-                    val hasStrongQueryEvidence =
-                        queryCoverage >= REMOTE_SFX_STRONG_QUERY_COVERAGE ||
-                            (queryCoverage >= REMOTE_SFX_RELAXED_QUERY_COVERAGE &&
-                                (coreCoverage >= CORE_PRESENT_COVERAGE || eventCoverage >= CORE_PRESENT_COVERAGE))
-                    if (!hasStrongQueryEvidence) add("sfxSourceEventMismatch")
-                } else {
-                    if (score < LEGACY_MIN_SCORE) add("score<$LEGACY_MIN_SCORE")
-                    if (queryCoverage < LEGACY_MIN_QUERY_COVERAGE) add("queryCoverage<$LEGACY_MIN_QUERY_COVERAGE")
-                }
-            } else if (semanticMetadata) {
-                val semanticPass =
-                    contextScore >= CONTEXT_ONLY_SCORE ||
-                    (
-                        contextScore >= BALANCED_CONTEXT_SCORE &&
-                            queryCoverage >= BALANCED_QUERY_COVERAGE &&
-                            score >= BALANCED_MIN_SCORE
-                        ) ||
-                    (queryCoverage >= EXACT_QUERY_COVERAGE && coreCoverage >= CORE_PRESENT_COVERAGE)
-                if (!semanticPass) {
-                    add(
-                        "semanticEvidence<context=$CONTEXT_ONLY_SCORE" +
-                            "|balanced=$BALANCED_CONTEXT_SCORE+$BALANCED_QUERY_COVERAGE+$BALANCED_MIN_SCORE" +
-                            "|exactQuery=$EXACT_QUERY_COVERAGE",
-                    )
-                }
-            } else {
-                val queryPass = if (kind == AudioAssetKind.SFX && eventRequired) {
-                    queryCoverage >= REMOTE_SFX_STRONG_QUERY_COVERAGE ||
-                        (queryCoverage >= REMOTE_SFX_RELAXED_QUERY_COVERAGE &&
-                            (coreCoverage >= CORE_PRESENT_COVERAGE || eventCoverage >= CORE_PRESENT_COVERAGE))
-                } else {
-                    queryCoverage >= RAW_MIN_QUERY_COVERAGE ||
-                        (coreCoverage >= CORE_PRESENT_COVERAGE && queryCoverage >= CORE_ONLY_MIN_QUERY_COVERAGE)
-                }
-                if (!queryPass) {
-                    add(
-                        if (kind == AudioAssetKind.SFX && eventRequired) "sfxSourceEventMismatch"
-                        else "rawQueryEvidence<query=$RAW_MIN_QUERY_COVERAGE|core+$CORE_ONLY_MIN_QUERY_COVERAGE",
-                    )
-                }
-            }
+  if (sourceConflictConfidence >= HARD_SOURCE_CONFLICT_CONFIDENCE) {
+      add("sourceConceptMismatch>=${HARD_SOURCE_CONFLICT_CONFIDENCE}")
+  }
+  if (conflict >= HARD_AVOID_CONFLICT) {
+      add("semanticAvoidConflict>=${HARD_AVOID_CONFLICT}")
+  }
+  val minimumFit = minimumSelectionFit(kind)
+  if (selectionScore < minimumFit) {
+      add("selectionFit<$minimumFit")
+  }
         }
         return reasons.joinToString("+")
     }
@@ -692,6 +644,7 @@ internal object Mode3LibraryAssetMatcher {
                 shade = EMPTY_LOCAL_TEXT,
                 use = localText(localNormalize(value)),
                 avoid = EMPTY_LOCAL_TEXT,
+                avoidText = "",
             )
         }
 
@@ -717,7 +670,13 @@ internal object Mode3LibraryAssetMatcher {
             markerLengthAt(lower, avoidAt, "tránh:", "tranh:"),
             emptyList(),
         )
-        return LocalHint(raw = value, shade = localText(shade), use = localText(use), avoid = localText(avoid))
+        return LocalHint(
+            raw = value,
+            shade = localText(shade),
+            use = localText(use),
+            avoid = localText(avoid),
+            avoidText = avoid,
+        )
     }
 
 
@@ -725,9 +684,42 @@ internal object Mode3LibraryAssetMatcher {
         val normalized = localNormalize(value)
         if (normalized.isBlank()) return emptySet()
         val padded = " $normalized "
-        return AUDIBLE_CONCEPT_ALIASES.asSequence()
+        val concepts = AUDIBLE_CONCEPT_ALIASES.asSequence()
   .filter { (_, aliases) -> aliases.any { alias -> padded.contains(" $alias ") } }
   .mapTo(linkedSetOf()) { it.key }
+
+        // English "fire" is polysemous. Rifle/artillery contexts mean gunfire, not literal flames.
+        val firearmContext = FIREARM_CONTEXT_TERMS.any { term -> padded.contains(" $term ") }
+        val literalFireEvidence = LITERAL_FIRE_TERMS.any { term -> padded.contains(" $term ") }
+        if (firearmContext) {
+  concepts += "GUNFIRE"
+  if (!literalFireEvidence) concepts -= "FIRE"
+        }
+        return concepts
+    }
+
+    private fun avoidConceptConflict(positiveConcepts: Set<String>, avoidText: String): Double {
+        if (positiveConcepts.isEmpty() || avoidText.isBlank()) return 0.0
+        val normalized = localNormalize(avoidText)
+        if (normalized.isBlank()) return 0.0
+        val padded = " $normalized "
+        // Conditional negatives such as "explosion without fire" describe a different sound.
+        // Treating every token inside that phrase as forbidden caused the false positives seen in logs.
+        if (NEGATION_TERMS.any { term -> padded.contains(" $term ") }) return 0.0
+        val avoidConcepts = audibleConcepts(normalized)
+        if (avoidConcepts.isEmpty()) return 0.0
+        val matched = positiveConcepts.count(avoidConcepts::contains)
+        if (matched <= 0) return 0.0
+        val coverage = matched.toDouble() / positiveConcepts.size.toDouble()
+        // One shared broad concept is not enough to reject a multi-concept need (snow vs avalanche,
+        // stone vs generic impact, etc.). Full/near-full semantic overlap remains a real exclusion.
+        return if (positiveConcepts.size >= 2 && matched == 1) coverage * 0.35 else coverage
+    }
+
+    private fun minimumSelectionFit(kind: AudioAssetKind): Double = when (kind) {
+        AudioAssetKind.SFX -> MIN_SELECTION_FIT_SFX
+        AudioAssetKind.MUSIC -> MIN_SELECTION_FIT_MUSIC
+        AudioAssetKind.AMBIENCE -> MIN_SELECTION_FIT_AMBIENCE
     }
 
     private fun conceptCoverage(required: Set<String>, candidate: Set<String>): Double {
@@ -1023,7 +1015,12 @@ internal object Mode3LibraryAssetMatcher {
     private const val LEGACY_MIN_SCORE = 0.56
     private const val LEGACY_MIN_QUERY_COVERAGE = 0.50
     private const val MAX_CONFLICT = 0.48
+    private const val HARD_AVOID_CONFLICT = 0.72
     private const val HARD_SOURCE_CONFLICT_CONFIDENCE = 0.82
+    private const val MIN_SELECTION_FIT_MUSIC = 0.52
+    private const val MIN_SELECTION_FIT_AMBIENCE = 0.52
+    private const val MIN_SELECTION_FIT_SFX = 0.56
+    private const val DECISIVE_SELECTION_FIT = 0.78
     private const val SOFT_SOURCE_CONFLICT_PENALTY = 0.18
     private const val MAX_LOCAL_TOKENS = 72
     private const val MAX_INDEX_CACHE_ENTRIES = 6
@@ -1052,8 +1049,8 @@ internal object Mode3LibraryAssetMatcher {
         "WIND" to setOf("wind", "winds", "windy", "gust", "gusts", "breeze", "breezy", "gio", "gió"),
         "RAIN" to setOf("rain", "rainy", "rainfall", "raindrop", "raindrops", "drizzle", "mua", "mưa", "hat mua", "hạt mưa"),
         "WATER" to setOf("water", "river", "stream", "waves", "wave", "ocean", "sea", "nuoc", "nước", "song", "sông", "suoi", "suối", "sóng", "bien", "biển"),
-        "FIRE" to setOf("fire", "flame", "flames", "burn", "burning", "lua", "lửa", "chay", "cháy"),
-        "THUNDER" to setOf("thunder", "thunderclap", "rumble", "sam", "sấm", "sam set", "sấm sét"),
+        "FIRE" to setOf("fire", "flame", "flames", "burn", "burning", "lua", "lửa", "chay", "cháy", "hoa", "hỏa", "hoa thuat", "hỏa thuật", "hoa cau", "hỏa cầu"),
+        "THUNDER" to setOf("thunder", "thunderclap", "sam", "sấm", "sam set", "sấm sét"),
         "LIGHTNING" to setOf("lightning", "electric", "electricity", "set", "sét", "tia set", "tia sét", "dien", "điện"),
         "EXPLOSION" to setOf("explosion", "explosions", "explode", "explosive", "blast", "boom", "no", "nổ", "vu no", "vụ nổ"),
         "SWORD" to setOf("sword", "blade", "katana", "kiem", "kiếm", "luoi kiem", "lưỡi kiếm", "dao", "đao"),
@@ -1082,13 +1079,30 @@ internal object Mode3LibraryAssetMatcher {
         "GRAB" to setOf("grab", "grabbing", "grip", "grasp", "nam", "nắm", "chop", "chộp", "giat", "giật"),
         "BIRD" to setOf("bird", "birds", "birdsong", "chim", "tieng chim", "tiếng chim"),
         "FOREST" to setOf("forest", "woods", "woodland", "rung", "rừng"),
+        "GUNFIRE" to setOf("gun", "gunfire", "gunshot", "rifle", "pistol", "firearm", "artillery", "cannon", "shooting", "shot", "sung", "súng", "dan", "đạn"),
+        "SNOW" to setOf("snow", "snowy", "tuyet", "tuyết"),
+        "EARTHQUAKE" to setOf("earthquake", "quake", "tremor", "dong dat", "động đất", "chan dong", "chấn động"),
+        "STONE" to setOf("stone", "stones", "rock", "rocks", "rocky", "da tang", "đá tảng", "da nui", "đá núi"),
+        "DEBRIS" to setOf("debris", "rubble", "wreckage", "manh vo", "mảnh vỡ", "do vo", "đổ vỡ"),
+        "ICE" to setOf("ice", "icy", "frozen", "freezing", "freeze", "bang", "băng", "dong bang", "đóng băng"),
     )
 
     private val AUDIBLE_SOURCE_CONCEPTS = setOf(
         "WIND", "RAIN", "WATER", "FIRE", "THUNDER", "LIGHTNING", "EXPLOSION",
         "SWORD", "SHIELD", "WHOOSH", "FOOTSTEP", "DOOR", "BELL", "CROWD",
         "TRAFFIC", "BICYCLE", "PIANO", "GUITAR", "ORCHESTRA", "STRINGS", "DRUMS",
-        "FLUTE", "VOCAL", "BIRD", "PUNCH", "KICK", "CLOTH",
+        "FLUTE", "VOCAL", "BIRD", "PUNCH", "KICK", "CLOTH", "GUNFIRE", "SNOW",
+        "EARTHQUAKE", "STONE", "DEBRIS", "ICE",
+    )
+
+    private val FIREARM_CONTEXT_TERMS = setOf(
+        "gun", "gunfire", "gunshot", "rifle", "pistol", "firearm", "artillery", "cannon", "shooting", "shot",
+    )
+    private val LITERAL_FIRE_TERMS = setOf(
+        "flame", "flames", "burn", "burning", "fireball", "lua", "lửa", "chay", "cháy", "hoa", "hỏa",
+    )
+    private val NEGATION_TERMS = setOf(
+        "khong", "không", "without", "not", "excluding", "except",
     )
 
     private val LOCAL_STOPWORDS = setOf(

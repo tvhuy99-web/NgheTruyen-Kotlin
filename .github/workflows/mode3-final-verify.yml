@@ -38,7 +38,7 @@ jobs:
         shell: bash
         run: |
           ./gradlew --no-daemon --stacktrace :source-network:test --tests vn.nghetruyen.source.network.PartitionedSourceCookieJarTest
-          ./gradlew --no-daemon --stacktrace :app:testDebugUnitTest --tests vn.nghetruyen.app.sourceplatform.ExploreDiagnosticScreenContextTest
+          ./gradlew --no-daemon --stacktrace :app:testDebugUnitTest --tests vn.nghetruyen.app.sources.ExploreDiagnosticScreenContextTest
       - name: Build debug APK
         run: ./gradlew --no-daemon --stacktrace :app:assembleDebug
       - name: Package APK and checksum

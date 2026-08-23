@@ -42,6 +42,10 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
 
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
+
         javaCompileOptions {
             annotationProcessorOptions {
                 arguments += mapOf(
@@ -192,6 +196,11 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp")
     implementation("org.jsoup:jsoup:1.23.1")
     implementation("co.ntbl:lame:1.0.0")
+
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.29.0")
+    implementation("org.bytedeco:sentencepiece:0.2.1-1.5.13")
+    runtimeOnly("org.bytedeco:sentencepiece:0.2.1-1.5.13:android-arm64")
+    runtimeOnly("org.bytedeco:sentencepiece:0.2.1-1.5.13:android-arm")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")

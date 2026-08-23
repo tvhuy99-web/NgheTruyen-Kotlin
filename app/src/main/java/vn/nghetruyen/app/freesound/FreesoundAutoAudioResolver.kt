@@ -1263,7 +1263,7 @@ class FreesoundAutoAudioResolver(
             "deep", "warm", "cold", "dramatic", "epic", "strong", "intense",
         )
         private val RETRY_ACTION_TERMS = setOf(
-            "crumble", "crash", "break", "shatter", "roar", "growl", "rush", "suction", "suck",
+            "crumble", "crash", "break", "shatter", "roar", "growl", "suction", "suck",
             "rattle", "slide", "slam", "strike", "hit", "clash", "slash", "whoosh", "burst",
             "pulse", "snap", "drop", "knock", "creak", "splash", "shout", "ring", "tear", "rip",
             "burn", "gust", "howl", "rumble",

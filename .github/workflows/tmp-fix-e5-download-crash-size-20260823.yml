@@ -20,101 +20,25 @@ jobs:
           ref: fix/mode3-resolution-quality-20260822
           fetch-depth: 0
 
-      - name: Apply crash and size fixes
+      - name: Record build run ID
         shell: bash
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          def replace_once(path, old, new, label):
-              p = Path(path)
-              text = p.read_text(encoding='utf-8')
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f'{label}: expected 1 match, got {count}')
-              p.write_text(text.replace(old, new, 1), encoding='utf-8')
-
-          engine = 'app/src/main/java/vn/nghetruyen/app/freesound/Mode3E5SemanticEngine.kt'
-          replace_once(
-              engine,
-              '''    fun initialize(context: Context) {\n        applicationContext = context.applicationContext\n        if (isInstalled()) {\n            backgroundScope.launch { ensureRuntime() }\n        }\n    }''',
-              '''    fun initialize(context: Context) {\n        applicationContext = context.applicationContext\n    }''',
-              'lazy runtime initialization',
-          )
-          replace_once(
-              engine,
-              '''            writeManifest(directory)\n            closeRuntime()\n            requireNotNull(ensureRuntime()) { lastError ?: "Không khởi tạo được mô hình ngữ nghĩa." }\n            lastError = null''',
-              '''            writeManifest(directory)\n            closeRuntime()\n            synchronized(memoryLock) { memoryCache.clear() }\n            lastError = null''',
-              'download must not start runtime',
-          )
-          replace_once(engine, 'private const val MAX_TOKENS = 512', 'private const val MAX_TOKENS = 192', 'lower E5 token window')
-          replace_once(engine, 'private const val PREWARM_BATCH_SIZE = 12', 'private const val PREWARM_BATCH_SIZE = 4', 'lower E5 prewarm batch')
-          replace_once(
-              engine,
-              'setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)',
-              'setOptimizationLevel(OrtSession.SessionOptions.OptLevel.BASIC_OPT)',
-              'lower startup memory optimization',
-          )
-
-          main = 'app/src/main/java/vn/nghetruyen/app/MainActivity.kt'
-          replace_once(
-              main,
-              '''        if (status.installed) {\n            lifecycleScope.launch { prewarmSemanticLibrary() }\n            return\n        }''',
-              '''        if (status.installed) return''',
-              'remove startup full-library prewarm',
-          )
-          replace_once(
-              main,
-              '''                AlertDialog.Builder(this@MainActivity)\n                    .setTitle("ĐÃ CÀI MÔ HÌNH NGỮ NGHĨA")\n                    .setMessage(\n                        "Multilingual E5 Small đã sẵn sàng. Ứng dụng sẽ lập chỉ mục mô tả âm thanh ở nền; " +\n                            "những lần cập nhật APK sau không cần tải lại mô hình này.",\n                    )\n                    .setPositiveButton("OK", null)\n                    .show()\n                prewarmSemanticLibrary()''',
-              '''                if (!isFinishing && !isDestroyed) {\n                    AlertDialog.Builder(this@MainActivity)\n                        .setTitle("ĐÃ TẢI MÔ HÌNH NGỮ NGHĨA")\n                        .setMessage(\n                            "Multilingual E5 Small đã được tải và kiểm tra toàn vẹn. " +\n                                "Mô hình chỉ được nạp khi Mode 3 thực sự cần, để tránh tăng RAM ngay sau khi tải.",\n                        )\n                        .setPositiveButton("OK", null)\n                        .show()\n                }''',
-              'remove post-download prewarm',
-          )
-          replace_once(
-              main,
-              '''                    if (dialog.isShowing) {\n                        dialog.setMessage(''',
-              '''                    if (!isFinishing && !isDestroyed && dialog.isShowing) {\n                        dialog.setMessage(''',
-              'guard progress dialog lifecycle',
-          )
-          replace_once(
-              main,
-              '''            dialog.dismiss()\n            result.onSuccess {''',
-              '''            if (!isFinishing && !isDestroyed && dialog.isShowing) dialog.dismiss()\n            if (isFinishing || isDestroyed) return@launch\n            result.onSuccess {''',
-              'guard result dialog lifecycle',
-          )
-          replace_once(
-              main,
-              '''\n    private suspend fun prewarmSemanticLibrary() {\n        val container = (application as NgheTruyenApplication).container\n        val tracks = container.database.sceneMusicTrackDao().listAll()\n        Mode3LibraryAssetMatcher.prewarmSemanticIndex(tracks)\n    }\n''',
-              '\n',
-              'remove eager prewarm helper',
-          )
-          replace_once(
-              main,
-              'import vn.nghetruyen.app.freesound.Mode3LibraryAssetMatcher\n',
-              '',
-              'remove unused matcher import',
-          )
-
-          gradle = 'app/build.gradle.kts'
-          replace_once(
-              gradle,
-              '''    packaging {\n        resources.excludes += setOf(\n            "/META-INF/{AL2.0,LGPL2.1}",\n            "META-INF/DEPENDENCIES",\n            "META-INF/LICENSE*",\n            "META-INF/NOTICE*",\n        )\n    }''',
-              '''    packaging {\n        jniLibs.useLegacyPackaging = true\n        resources.excludes += setOf(\n            "/META-INF/{AL2.0,LGPL2.1}",\n            "META-INF/DEPENDENCIES",\n            "META-INF/LICENSE*",\n            "META-INF/NOTICE*",\n            "native/lib/**",\n            "com/sun/jna/**/libjnidispatch.*",\n        )\n    }''',
-              'compress Android native libs and remove desktop binaries',
-          )
-          PY
-
-          git diff --check
-          git grep -n 'prewarmSemanticLibrary' -- app/src/main/java/vn/nghetruyen/app/MainActivity.kt && exit 1 || true
-          git grep -n 'OptLevel.ALL_OPT' -- app/src/main/java/vn/nghetruyen/app/freesound/Mode3E5SemanticEngine.kt && exit 1 || true
-
-      - name: Commit source fixes
-        shell: bash
-        run: |
+          printf '%s\n' "$GITHUB_RUN_ID" > .mode3-e5-download-fix-run-id
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/build.gradle.kts app/src/main/java/vn/nghetruyen/app/MainActivity.kt app/src/main/java/vn/nghetruyen/app/freesound/Mode3E5SemanticEngine.kt
-          git commit -m "fix(mode3): make E5 download lazy and reduce APK size [skip mode3-download-fix]"
+          git add .mode3-e5-download-fix-run-id
+          git commit -m "ci: record E5 download fix build [skip mode3-download-fix]"
           git push origin HEAD:fix/mode3-resolution-quality-20260822
+
+      - name: Verify fixed source
+        shell: bash
+        run: |
+          grep -q 'jniLibs.useLegacyPackaging = true' app/build.gradle.kts
+          grep -q 'private const val MAX_TOKENS = 192' app/src/main/java/vn/nghetruyen/app/freesound/Mode3E5SemanticEngine.kt
+          grep -q 'private const val PREWARM_BATCH_SIZE = 4' app/src/main/java/vn/nghetruyen/app/freesound/Mode3E5SemanticEngine.kt
+          grep -q 'OptLevel.BASIC_OPT' app/src/main/java/vn/nghetruyen/app/freesound/Mode3E5SemanticEngine.kt
+          ! grep -q 'prewarmSemanticLibrary' app/src/main/java/vn/nghetruyen/app/MainActivity.kt
+          git diff --check
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -169,17 +93,17 @@ jobs:
             dist/apk-size-bytes.txt
             dist/source-commit.txt
 
-      - name: Remove temporary workflow
+      - name: Remove temporary workflow and marker
         if: always()
         shell: bash
         run: |
           git fetch origin fix/mode3-resolution-quality-20260822
           git reset --hard origin/fix/mode3-resolution-quality-20260822
-          rm -f .github/workflows/tmp-fix-e5-download-crash-size-20260823.yml
+          rm -f .github/workflows/tmp-fix-e5-download-crash-size-20260823.yml .mode3-e5-download-fix-run-id
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A .github/workflows/tmp-fix-e5-download-crash-size-20260823.yml
+          git add -A .github/workflows/tmp-fix-e5-download-crash-size-20260823.yml .mode3-e5-download-fix-run-id
           if ! git diff --cached --quiet; then
-            git commit -m "ci: remove temporary E5 download fix workflow [skip mode3-download-fix]"
+            git commit -m "ci: remove temporary E5 download fix build files [skip mode3-download-fix]"
             git push origin HEAD:fix/mode3-resolution-quality-20260822
           fi

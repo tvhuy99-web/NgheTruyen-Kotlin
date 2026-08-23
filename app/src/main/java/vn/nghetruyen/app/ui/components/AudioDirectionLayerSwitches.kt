@@ -254,7 +254,7 @@ fun AudioDirectionLayerSwitches(
         )
         AudioManagerButton(
             label = "CHUẨN HÓA MÔ TẢ ($pendingDescriptionCount CẦN XỬ LÝ)",
-            enabled = tracks.any { audioDescriptionText(it.tagsCsv).isNotBlank() },
+            enabled = tracks.isNotEmpty(),
             onClick = { showDescriptionNormalizationDialog = true },
         )
     }

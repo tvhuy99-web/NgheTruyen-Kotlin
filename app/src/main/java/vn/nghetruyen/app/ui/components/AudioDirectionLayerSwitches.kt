@@ -81,6 +81,7 @@ fun AudioDirectionLayerSwitches(
     var releaseMillis by remember { mutableIntStateOf(2050) }
     var dynamicsSettingsDirty by remember { mutableStateOf(false) }
     var managerKind by remember { mutableStateOf<AudioAssetKind?>(null) }
+    var showDescriptionNormalizationDialog by remember { mutableStateOf(false) }
 
     var showNormalizationDialog by remember { mutableStateOf(false) }
     var normalizationKinds by remember { mutableStateOf(setOf(AudioAssetKind.MUSIC)) }
@@ -242,6 +243,22 @@ fun AudioDirectionLayerSwitches(
     val ambienceCount = tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.AMBIENCE }
     val sfxCount = tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.SFX }
 
+    val pendingDescriptionCount = tracks.count { audioDescriptionNeedsNormalization(it.tagsCsv) }
+
+    @Composable
+    fun SharedLibraryMaintenanceButtons() {
+        AudioManagerButton(
+            label = "CHUẨN HÓA TOÀN BỘ THƯ VIỆN",
+            enabled = tracks.isNotEmpty(),
+            onClick = { openNormalization(AudioAssetKind.entries.toSet()) },
+        )
+        AudioManagerButton(
+            label = "CHUẨN HÓA MÔ TẢ ($pendingDescriptionCount CẦN XỬ LÝ)",
+            enabled = tracks.any { audioDescriptionText(it.tagsCsv).isNotBlank() },
+            onClick = { showDescriptionNormalizationDialog = true },
+        )
+    }
+
     @Composable
     fun SharedLibraryManagementButtons() {
         AudioManagerButton(
@@ -274,11 +291,7 @@ fun AudioDirectionLayerSwitches(
                 Text("MODE 1 · PHÁT THỦ CÔNG TỪ THƯ VIỆN LOCAL")
                 Text("Mode này thay đổi cơ chế phát, không thay đổi thư viện. MUSIC, AMBIENCE và SFX vẫn dùng chung toàn bộ asset đã có.")
                 SharedLibraryManagementButtons()
-                AudioManagerButton(
-                    label = "CHUẨN HÓA TOÀN BỘ THƯ VIỆN",
-                    enabled = tracks.isNotEmpty(),
-                    onClick = { openNormalization(AudioAssetKind.entries.toSet()) },
-                )
+                SharedLibraryMaintenanceButtons()
             }
 
             StoryAudioSourceMode.AI_LOCAL -> {
@@ -324,11 +337,7 @@ fun AudioDirectionLayerSwitches(
                     )
                 }
                 HorizontalDivider(Modifier.padding(vertical = 6.dp))
-                AudioManagerButton(
-                    label = "CHUẨN HÓA TOÀN BỘ THƯ VIỆN",
-                    enabled = tracks.isNotEmpty(),
-                    onClick = { openNormalization(AudioAssetKind.entries.toSet()) },
-                )
+                SharedLibraryMaintenanceButtons()
                 SharedLibraryManagementButtons()
             }
 
@@ -375,15 +384,18 @@ fun AudioDirectionLayerSwitches(
                     )
                 }
                 HorizontalDivider(Modifier.padding(vertical = 6.dp))
-                AudioManagerButton(
-                    label = "CHUẨN HÓA TOÀN BỘ THƯ VIỆN",
-                    enabled = tracks.isNotEmpty(),
-                    onClick = { openNormalization(AudioAssetKind.entries.toSet()) },
-                )
+                SharedLibraryMaintenanceButtons()
                 SharedLibraryManagementButtons()
                 Text("Thư viện ở Mode 3 giống Mode 1/2: file tự thêm và file Freesound đã tải đều hiển thị, chỉnh sửa, chuẩn hóa và được xét như nhau. Nguồn file chỉ phục vụ quản lý/chẩn đoán, không quyết định độ ưu tiên.")
             }
         }
+    }
+
+    if (showDescriptionNormalizationDialog) {
+        AudioDescriptionNormalizationDialog(
+            tracks = tracks,
+            onDismiss = { showDescriptionNormalizationDialog = false },
+        )
     }
 
     if (showNormalizationDialog) {

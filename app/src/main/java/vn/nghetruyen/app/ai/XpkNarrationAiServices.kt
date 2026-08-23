@@ -89,24 +89,57 @@ class XpkNarrationAiServices(
         }
         val config = resolveConfiguration(storyId)
         validateConfiguration(config)?.let { return it }
+        val traceId = "ai-aux:${UUID.randomUUID()}"
+        val startedNanos = System.nanoTime()
         diagnostic(
             "AI_AUXILIARY_JSON_START",
+            DiagnosticSeverity.INFO,
             attributes = mapOf(
                 "storyId" to storyId,
                 "provider" to config.provider.name,
                 "model" to config.model,
                 "inputChars" to clean.length.toString(),
             ),
+            traceId = traceId,
         )
         return when (val response = chat(clean, config)) {
-            is AppResult.Failure -> response
-            is AppResult.Success -> AppResult.Success(
-                AiAuxiliaryJsonResult(
-                    content = response.value,
-                    provider = config.provider.name,
-                    model = config.model,
-                ),
-            )
+            is AppResult.Failure -> {
+                diagnostic(
+                    "AI_AUXILIARY_JSON_FAILED",
+                    DiagnosticSeverity.WARN,
+                    attributes = mapOf(
+                        "storyId" to storyId,
+                        "provider" to config.provider.name,
+                        "model" to config.model,
+                        "elapsedMs" to ((System.nanoTime() - startedNanos) / 1_000_000L).toString(),
+                        "code" to response.code,
+                        "message" to response.message.take(300),
+                    ),
+                    traceId = traceId,
+                )
+                response
+            }
+            is AppResult.Success -> {
+                diagnostic(
+                    "AI_AUXILIARY_JSON_COMPLETED",
+                    DiagnosticSeverity.INFO,
+                    attributes = mapOf(
+                        "storyId" to storyId,
+                        "provider" to config.provider.name,
+                        "model" to config.model,
+                        "elapsedMs" to ((System.nanoTime() - startedNanos) / 1_000_000L).toString(),
+                        "outputChars" to response.value.length.toString(),
+                    ),
+                    traceId = traceId,
+                )
+                AppResult.Success(
+                    AiAuxiliaryJsonResult(
+                        content = response.value,
+                        provider = config.provider.name,
+                        model = config.model,
+                    ),
+                )
+            }
         }
     }
 

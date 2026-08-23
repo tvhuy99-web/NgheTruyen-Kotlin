@@ -64,6 +64,8 @@ internal object Mode3LibraryAssetMatcher {
         val coreCoverage: Double,
         val eventCoverage: Double,
         val qualified: Boolean,
+        val sourceConceptCoverage: Double = 0.0,
+        val sourceConflictConfidence: Double = 0.0,
     )
 
     private data class LocalText(
@@ -380,23 +382,30 @@ internal object Mode3LibraryAssetMatcher {
                 append(sound.tags.joinToString(" "))
             },
         )
-        val conceptCoverage = conceptCoverage(requiredConcepts, candidateConcepts)
-        val conceptConflict = requiredConcepts.isNotEmpty() && candidateConcepts.isNotEmpty() && conceptCoverage <= 0.0
-        val qualified = lexicalQualified && !conceptConflict
+        val sourceCoverage = sourceConceptCoverage(requiredConcepts, candidateConcepts)
+        val sourceConflict = sourceConflictConfidence(requiredConcepts, candidateConcepts)
+        val qualified = lexicalQualified && sourceConflict < HARD_SOURCE_CONFLICT_CONFIDENCE
         val fit = if (!qualified) {
             0.0
-        } else if (need.kind == AudioAssetKind.SFX && event != null) {
-            // Do not require both exact source and exact event words. A strong combined lexical match
-            // is valid evidence on its own; exact core/event tokens add confidence when present.
-            ((coreCoverage * 0.24 + eventCoverage * 0.24 + lexical * 0.52) * 0.84).coerceIn(0.0, 1.0)
         } else {
-            ((coreCoverage * 0.52 + lexical * 0.48) * 0.84).coerceIn(0.0, 1.0)
+            commonSemanticFit(
+                kind = need.kind,
+                lexicalCoverage = lexical,
+                coreCoverage = coreCoverage,
+                eventCoverage = eventCoverage,
+                sourceCoverage = sourceCoverage,
+                hasSourceRequirement = requiredConcepts.any(AUDIBLE_SOURCE_CONCEPTS::contains),
+                contextScore = 0.0,
+                hasStructuredContext = false,
+            )
         }
         return RemoteFit(
             score = fit,
             coreCoverage = coreCoverage,
             eventCoverage = eventCoverage,
             qualified = qualified,
+            sourceConceptCoverage = sourceCoverage,
+            sourceConflictConfidence = sourceConflict,
         )
     }
 
@@ -472,10 +481,8 @@ internal object Mode3LibraryAssetMatcher {
             else -> "RAW"
         }
         val requiredConcepts = profile.requiredConcepts
-        val conceptCoverage = conceptCoverage(requiredConcepts, indexed.audibleConcepts)
-        val conceptConflict = requiredConcepts.isNotEmpty() &&
-            indexed.audibleConcepts.isNotEmpty() &&
-            conceptCoverage <= 0.0
+        val sourceCoverage = sourceConceptCoverage(requiredConcepts, indexed.audibleConcepts)
+        val sourceConflict = sourceConflictConfidence(requiredConcepts, indexed.audibleConcepts)
 
         if (!hintAware && queryCoverage <= 0.0) return null
         if (hintAware && contextScore <= 0.0 && queryCoverage <= 0.0 && coreCoverage <= 0.0) return null
@@ -505,38 +512,23 @@ internal object Mode3LibraryAssetMatcher {
                 repetitionPenalty
         }.coerceIn(0.0, 1.0)
 
-        val contextEvidence = if (hintAware && semanticMetadata && contextScore > 0.0) {
-            (0.55 + contextScore * 0.45).coerceIn(0.0, 1.0)
-        } else 0.0
-        val queryEvidence = if (profile.kind == AudioAssetKind.SFX && profile.eventToken != null) {
-            (
-                coreCoverage * 0.36 +
-                    eventCoverage * 0.36 +
-                    queryCoverage * 0.23 +
-                    titleQueryCoverage * 0.05
-                ).coerceIn(0.0, 1.0)
-        } else {
-            (
-                coreCoverage * 0.52 +
-                    queryCoverage * 0.43 +
-                    titleQueryCoverage * 0.05
-                ).coerceIn(0.0, 1.0)
-        }
-        val selectionBase = if (hintAware && semanticMetadata && contextEvidence > 0.0) {
-            contextEvidence * 0.65 + queryEvidence * 0.35
-        } else {
-            // Query-only candidates use the same evidence ceiling whether they are local files
-            // or fresh Freesound results. Provenance contributes zero points.
-            queryEvidence * 0.84
-        }
-        val conceptFactor = if (requiredConcepts.isEmpty() || indexed.audibleConcepts.isEmpty()) {
-            1.0
-        } else {
-            0.80 + conceptCoverage * 0.20
-        }
+        // LOCAL and fresh Freesound candidates now share the exact same base fit formula.
+        // Structured Vietnamese context is only a small refinement; it no longer creates a separate
+        // lower/higher score universe depending on where the file came from.
+        val selectionBase = commonSemanticFit(
+            kind = profile.kind,
+            lexicalCoverage = queryCoverage,
+            coreCoverage = coreCoverage,
+            eventCoverage = eventCoverage,
+            sourceCoverage = sourceCoverage,
+            hasSourceRequirement = requiredConcepts.any(AUDIBLE_SOURCE_CONCEPTS::contains),
+            contextScore = contextScore,
+            hasStructuredContext = hintAware && semanticMetadata,
+        )
         val selectionScore = (
-            selectionBase * conceptFactor -
+            selectionBase -
                 avoidCoverage * 0.48 -
+                sourceConflict * SOFT_SOURCE_CONFLICT_PENALTY -
                 repetitionPenalty * 0.50
             ).coerceIn(0.0, 1.0)
 
@@ -551,7 +543,7 @@ internal object Mode3LibraryAssetMatcher {
             coreCoverage = coreCoverage,
             eventCoverage = eventCoverage,
             conflict = avoidCoverage,
-            conceptConflict = conceptConflict,
+            sourceConflictConfidence = sourceConflict,
         )
         return Match(
             track = currentTrack,
@@ -587,10 +579,12 @@ internal object Mode3LibraryAssetMatcher {
         coreCoverage: Double,
         eventCoverage: Double,
         conflict: Double,
-        conceptConflict: Boolean,
+        sourceConflictConfidence: Double,
     ): String {
         val reasons = buildList {
-            if (conceptConflict) add("sourceConceptMismatch")
+            if (sourceConflictConfidence >= HARD_SOURCE_CONFLICT_CONFIDENCE) {
+                add("sourceConceptMismatch>=${HARD_SOURCE_CONFLICT_CONFIDENCE}")
+            }
             if (conflict >= MAX_CONFLICT) add("conflict>=$MAX_CONFLICT")
             if (!hintAware) {
                 if (kind == AudioAssetKind.SFX && eventRequired) {
@@ -740,6 +734,66 @@ internal object Mode3LibraryAssetMatcher {
         if (required.isEmpty()) return 1.0
         if (candidate.isEmpty()) return 0.0
         return required.count(candidate::contains).toDouble() / required.size.toDouble()
+    }
+
+    private fun sourceConceptCoverage(required: Set<String>, candidate: Set<String>): Double {
+        val requiredSources = required.filterTo(linkedSetOf(), AUDIBLE_SOURCE_CONCEPTS::contains)
+        if (requiredSources.isEmpty()) return 1.0
+        val candidateSources = candidate.filterTo(linkedSetOf(), AUDIBLE_SOURCE_CONCEPTS::contains)
+        if (candidateSources.isEmpty()) return 0.0
+        return requiredSources.count(candidateSources::contains).toDouble() / requiredSources.size.toDouble()
+    }
+
+    /**
+     * Hard mismatch is reserved for a clear, specific audible-source contradiction. Missing concept
+     * vocabulary is not a contradiction. This prevents a high-quality classroom chatter description
+     * from being rejected merely because one alias was unknown, while rain-vs-wind or explosion-vs-sword
+     * remain strongly contradictory when both sources are explicitly present.
+     */
+    private fun sourceConflictConfidence(required: Set<String>, candidate: Set<String>): Double {
+        val requiredSources = required.filterTo(linkedSetOf(), AUDIBLE_SOURCE_CONCEPTS::contains)
+        val candidateSources = candidate.filterTo(linkedSetOf(), AUDIBLE_SOURCE_CONCEPTS::contains)
+        if (requiredSources.isEmpty() || candidateSources.isEmpty()) return 0.0
+        if (requiredSources.any(candidateSources::contains)) return 0.0
+        fun specificity(size: Int): Double = when (size) {
+            1 -> 1.0
+            2 -> 0.86
+            else -> 0.70
+        }
+        return ((specificity(requiredSources.size) + specificity(candidateSources.size)) / 2.0)
+            .coerceIn(0.0, 1.0)
+    }
+
+    private fun commonSemanticFit(
+        kind: AudioAssetKind,
+        lexicalCoverage: Double,
+        coreCoverage: Double,
+        eventCoverage: Double,
+        sourceCoverage: Double,
+        hasSourceRequirement: Boolean,
+        contextScore: Double,
+        hasStructuredContext: Boolean,
+    ): Double {
+        val lexical = lexicalCoverage.coerceIn(0.0, 1.0)
+        val core = coreCoverage.coerceIn(0.0, 1.0)
+        val event = eventCoverage.coerceIn(0.0, 1.0)
+        val source = sourceCoverage.coerceIn(0.0, 1.0)
+        val base = when (kind) {
+            AudioAssetKind.SFX -> if (hasSourceRequirement) {
+                lexical * 0.30 + core * 0.20 + event * 0.20 + source * 0.30
+            } else {
+                lexical * 0.45 + core * 0.30 + event * 0.25
+            }
+            AudioAssetKind.MUSIC, AudioAssetKind.AMBIENCE -> if (hasSourceRequirement) {
+                lexical * 0.35 + core * 0.25 + source * 0.40
+            } else {
+                lexical * 0.58 + core * 0.42
+            }
+        }
+        val contextAdjustment = if (hasStructuredContext) {
+            ((contextScore.coerceIn(0.0, 1.0) - 0.50) * 0.18).coerceIn(-0.09, 0.09)
+        } else 0.0
+        return (base + contextAdjustment).coerceIn(0.0, 1.0)
     }
 
     private fun firstMarker(lower: String, vararg markers: String): Int = markers
@@ -969,6 +1023,8 @@ internal object Mode3LibraryAssetMatcher {
     private const val LEGACY_MIN_SCORE = 0.56
     private const val LEGACY_MIN_QUERY_COVERAGE = 0.50
     private const val MAX_CONFLICT = 0.48
+    private const val HARD_SOURCE_CONFLICT_CONFIDENCE = 0.82
+    private const val SOFT_SOURCE_CONFLICT_PENALTY = 0.18
     private const val MAX_LOCAL_TOKENS = 72
     private const val MAX_INDEX_CACHE_ENTRIES = 6
     private const val MAX_DIAGNOSTIC_CANDIDATES = 5
@@ -1008,7 +1064,7 @@ internal object Mode3LibraryAssetMatcher {
         "FOOTSTEP" to setOf("footstep", "footsteps", "walking", "running", "steps", "buoc chan", "bước chân"),
         "DOOR" to setOf("door", "cua", "cửa"),
         "BELL" to setOf("bell", "bells", "chime", "chuong", "chuông"),
-        "CROWD" to setOf("crowd", "chatter", "people", "conversation", "dam dong", "đám đông", "tro chuyen", "trò chuyện", "tieng nguoi", "tiếng người"),
+        "CROWD" to setOf("crowd", "chatter", "people", "conversation", "talk", "talking", "students", "student", "voices", "dam dong", "đám đông", "tro chuyen", "trò chuyện", "noi chuyen", "nói chuyện", "hoc sinh", "học sinh", "tieng nguoi", "tiếng người"),
         "TRAFFIC" to setOf("traffic", "cars", "car", "vehicle", "vehicles", "road", "street", "giao thong", "giao thông", "xe co", "xe cộ"),
         "BICYCLE" to setOf("bicycle", "bike", "cycling", "xe dap", "xe đạp"),
         "PIANO" to setOf("piano", "keyboard", "dan piano", "đàn piano", "duong cam", "dương cầm"),
@@ -1019,8 +1075,20 @@ internal object Mode3LibraryAssetMatcher {
         "FLUTE" to setOf("flute", "sao", "sáo"),
         "VOCAL" to setOf("vocal", "vocals", "choir", "singing", "voice", "giong hat", "giọng hát", "hop xuong", "hợp xướng"),
         "COMBAT" to setOf("battle", "combat", "fight", "fighting", "war", "chien dau", "chiến đấu", "dai chien", "đại chiến", "giao chien", "giao chiến"),
+        "PUNCH" to setOf("punch", "punching", "fist", "dam", "đấm", "cu dam", "cú đấm", "quyen", "quyền"),
+        "KICK" to setOf("kick", "kicking", "da", "đá", "cu da", "cú đá"),
+        "FALL" to setOf("fall", "falling", "body fall", "drop", "collapse", "nga", "ngã", "roi", "rơi", "do nguoi", "đổ người"),
+        "CLOTH" to setOf("cloth", "clothes", "clothing", "fabric", "jacket", "ao", "áo", "quan ao", "quần áo", "vai", "vải"),
+        "GRAB" to setOf("grab", "grabbing", "grip", "grasp", "nam", "nắm", "chop", "chộp", "giat", "giật"),
         "BIRD" to setOf("bird", "birds", "birdsong", "chim", "tieng chim", "tiếng chim"),
         "FOREST" to setOf("forest", "woods", "woodland", "rung", "rừng"),
+    )
+
+    private val AUDIBLE_SOURCE_CONCEPTS = setOf(
+        "WIND", "RAIN", "WATER", "FIRE", "THUNDER", "LIGHTNING", "EXPLOSION",
+        "SWORD", "SHIELD", "WHOOSH", "FOOTSTEP", "DOOR", "BELL", "CROWD",
+        "TRAFFIC", "BICYCLE", "PIANO", "GUITAR", "ORCHESTRA", "STRINGS", "DRUMS",
+        "FLUTE", "VOCAL", "BIRD", "PUNCH", "KICK", "CLOTH",
     )
 
     private val LOCAL_STOPWORDS = setOf(

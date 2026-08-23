@@ -541,42 +541,6 @@ fun UnifiedAudioAssetManagerDialog(
                             editingTrack = track
                             selectedTrackId = null
                         }
-                        UnifiedAssetActionButton("CHUYỂN HÓA MÔ TẢ") {
-                            val original = description.trim()
-                            if (original.isBlank()) {
-                                notify("Tệp này chưa có mô tả để chuyển hóa.")
-                            } else {
-                                stopPreview()
-                                convertingTrack = track
-                                conversionOriginal = original
-                                conversionPreview = ""
-                                conversionError = ""
-                                conversionProviderModel = ""
-                                conversionBusy = true
-                                selectedTrackId = null
-                                scope.launch {
-                                    when (val result = application.container.xpkNarrationAiServices.completeAuxiliaryJson(
-                                        storyId = GLOBAL_VOICE_PROFILE_STORY_ID,
-                                        prompt = audioDescriptionConversionPrompt(kind, track.title, original),
-                                    )) {
-                                        is AppResult.Success -> {
-                                            runCatching { parseConvertedAudioDescription(result.value.content) }
-                                                .onSuccess { converted ->
-                                                    conversionPreview = converted
-                                                    conversionProviderModel = "${result.value.provider} / ${result.value.model}"
-                                                }
-                                                .onFailure { error ->
-                                                    conversionError = error.message ?: "AI trả mô tả không đúng định dạng."
-                                                }
-                                        }
-                                        is AppResult.Failure -> {
-                                            conversionError = result.message.ifBlank { "Không chuyển hóa được mô tả bằng AI." }
-                                        }
-                                    }
-                                    conversionBusy = false
-                                }
-                            }
-                        }
                         UnifiedAssetActionButton("TÌM ÂM THANH TƯƠNG TỰ") {
                             stopPreview()
                             similarTrack = track

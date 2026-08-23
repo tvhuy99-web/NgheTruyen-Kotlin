@@ -88,6 +88,63 @@ class FreesoundClient(
         )
     }
 
+
+    /** Fetch one sound by id so legacy AI-written metadata can be rebuilt from Freesound's source description. */
+    suspend fun sound(soundId: Int): FreesoundSound? = withContext(Dispatchers.IO) {
+        if (soundId <= 0) return@withContext null
+        val apiKey = credentialStore.apiKey() ?: return@withContext null
+        awaitLocalRatePermit()
+        val url = API_BASE_URL.toHttpUrl().newBuilder()
+  .addPathSegment("sounds")
+  .addPathSegment(soundId.toString())
+  .addPathSegment("")
+  .addQueryParameter("fields", SEARCH_FIELDS)
+  .build()
+        val request = Request.Builder()
+  .url(url)
+  .header("Authorization", "Token $apiKey")
+  .header("Accept", "application/json")
+  .header("User-Agent", USER_AGENT)
+  .get()
+  .build()
+        runCatching {
+  httpClient.newCall(request).execute().use { response ->
+      if (!response.isSuccessful) return@use null
+      val item = JSONObject(response.body.string())
+      val id = item.optInt("id", -1)
+      if (id <= 0) return@use null
+      val previews = item.optJSONObject("previews")
+      FreesoundSound(
+          id = id,
+          name = item.optString("name").trim().ifBlank { "Sound #$id" },
+          description = item.optString("description").trim().take(4_000),
+          durationSeconds = item.optDouble("duration", 0.0).coerceAtLeast(0.0),
+          previewHqMp3 = previews?.optString("preview-hq-mp3")
+              ?.trim()?.takeIf { it.startsWith("https://", ignoreCase = true) },
+          previewHqOgg = previews?.optString("preview-hq-ogg")
+              ?.trim()?.takeIf { it.startsWith("https://", ignoreCase = true) },
+          username = item.optString("username").trim().take(120),
+          license = item.optString("license").trim().take(240),
+          webUrl = item.optString("url").trim()
+              .takeIf { it.startsWith("https://freesound.org/", ignoreCase = true) }.orEmpty(),
+          tags = buildList {
+              val array = item.optJSONArray("tags")
+              if (array != null) for (index in 0 until array.length()) {
+                  array.optString(index).trim().takeIf(String::isNotBlank)?.let(::add)
+              }
+          },
+          category = item.optString("category").trim().take(120),
+          subcategory = item.optString("subcategory").trim().take(160),
+          categoryCode = item.optString("category_code").trim().take(40),
+          avgRating = item.optDouble("avg_rating", 0.0).takeIf(Double::isFinite)?.coerceIn(0.0, 5.0) ?: 0.0,
+          numRatings = item.optInt("num_ratings", 0).coerceAtLeast(0),
+          numDownloads = item.optInt("num_downloads", 0).coerceAtLeast(0),
+          searchScore = item.optDouble("score", 0.0).takeIf(Double::isFinite)?.coerceAtLeast(0.0) ?: 0.0,
+      )
+  }
+        }.getOrNull()
+    }
+
     fun clearSearchCache() {
         synchronized(cacheLock) { pageCache.clear() }
     }

@@ -61,10 +61,10 @@ internal object Mode3LibraryAssetMatcher {
     )
 
     private data class LocalText(
-        val tokens: LinkedHashSet<String>,
-        val bigrams: Set<String>,
-        val concepts: Set<String>,
-    )
+        val fingerprint: Mode3OpenDescriptionVector.Fingerprint,
+    ) {
+        val isPresent: Boolean get() = fingerprint.hasContent
+    }
 
     private data class Sections(
         val allText: String,
@@ -76,6 +76,7 @@ internal object Mode3LibraryAssetMatcher {
         val use: LocalText,
         val avoid: LocalText,
         val structured: Boolean,
+        val positive: LocalText = all,
     )
 
     private data class LocalHint(
@@ -85,9 +86,10 @@ internal object Mode3LibraryAssetMatcher {
         val shade: LocalText,
         val use: LocalText,
         val avoid: LocalText,
+        val positive: LocalText = use,
     ) {
         val isPresent: Boolean
-            get() = shade.tokens.isNotEmpty() || use.tokens.isNotEmpty() || avoid.tokens.isNotEmpty()
+            get() = shade.isPresent || use.isPresent || avoid.isPresent
     }
 
     private data class NeedProfile(
@@ -95,7 +97,6 @@ internal object Mode3LibraryAssetMatcher {
         val queryTokens: Set<String>,
         val coreToken: String?,
         val eventToken: String?,
-        val requiredConcepts: Set<String>,
         val hints: List<LocalHint>,
     ) {
         val hintAware: Boolean get() = hints.isNotEmpty()
@@ -106,7 +107,6 @@ internal object Mode3LibraryAssetMatcher {
         val track: SceneMusicTrackEntity,
         val metadataTokens: Set<String>,
         val sections: Sections,
-        val audibleConcepts: Set<String>,
     )
 
     @Volatile
@@ -240,7 +240,7 @@ internal object Mode3LibraryAssetMatcher {
             else -> lexical >= LEGACY_MIN_QUERY_COVERAGE
         }
 
-        val required = profile.requiredConcepts
+        val required = remoteRequiredConcepts(need)
         val sourceCoverage = sourceConceptCoverage(required, candidateConcepts)
         val titleSourceCoverage = sourceConceptCoverage(required, titleConcepts)
         val metadataSourceCoverage = sourceConceptCoverage(required, metadataConcepts)
@@ -313,17 +313,11 @@ internal object Mode3LibraryAssetMatcher {
             trackCache[key]?.let { return it to true }
         }
         val sections = sections(track.tagsCsv)
-        val audibleText = if (sections.structured) {
-            listOf(sections.shadeText, sections.useText).joinToString(" ")
-        } else {
-            track.tagsCsv
-        }
         val indexed = IndexedTrack(
             key = key,
             track = track,
             metadataTokens = FreesoundAutoRequirementAggregator.queryTokens(track.tagsCsv),
             sections = sections,
-            audibleConcepts = audibleConcepts(audibleText),
         )
         synchronized(cacheLock) {
             trackCache[key] = indexed
@@ -345,20 +339,23 @@ internal object Mode3LibraryAssetMatcher {
             .map(::parseLocalHint)
             .filter(LocalHint::isPresent)
             .toList()
-        val requiredConcepts = buildSet {
-            addAll(audibleConcepts(need.query))
-            hints.forEach { hint ->
-                addAll(audibleConcepts("${hint.shadeText} ${hint.useText}"))
-            }
-        }
         return NeedProfile(
             kind = need.kind,
             queryTokens = queryTokens,
             coreToken = coreToken,
             eventToken = eventToken,
-            requiredConcepts = requiredConcepts,
             hints = hints,
         )
+    }
+
+    private fun remoteRequiredConcepts(need: FreesoundAutoSearchNeed): Set<String> = buildSet {
+        addAll(audibleConcepts(need.query))
+        need.usages.asSequence()
+            .map(FreesoundAutoRequirement::localContext)
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .map(::parseLocalHint)
+            .forEach { hint -> addAll(audibleConcepts("${hint.shadeText} ${hint.useText}")) }
     }
 
     private fun coreQueryToken(rawTokens: List<String>): String? {
@@ -387,134 +384,99 @@ internal object Mode3LibraryAssetMatcher {
         nowMillis: Long,
     ): Match? {
         val queryCoverage = tokenCoverage(profile.queryTokens, indexed.metadataTokens)
-        val rawCoreCoverage = profile.coreToken?.let { core ->
+        val coreCoverage = profile.coreToken?.let { core ->
             if (core in indexed.metadataTokens) 1.0 else 0.0
         } ?: 0.0
-        val coreConcepts = profile.coreToken?.let(::audibleConcepts).orEmpty()
-        val coreCoverage = if (
-            coreConcepts.any(AUDIBLE_SOURCE_CONCEPTS::contains) &&
-            coreConcepts.none(indexed.audibleConcepts::contains)
-        ) 0.0 else rawCoreCoverage
-
-        val rawEventCoverage = profile.eventToken?.let { event ->
+        val eventCoverage = profile.eventToken?.let { event ->
             if (event in indexed.metadataTokens) 1.0 else 0.0
         } ?: 0.0
-        val eventConcepts = profile.eventToken?.let(::audibleConcepts).orEmpty()
-        val eventCoverage = if (
-            eventConcepts.isNotEmpty() &&
-            eventConcepts.none(indexed.audibleConcepts::contains)
-        ) 0.0 else rawEventCoverage
 
         val hintAware = profile.hintAware
         val useScore = if (hintAware) average(profile.hints.map { hint ->
             val direct = localSimilarity(hint.use, indexed.sections.use)
-            val shadeToUse = localSimilarity(hint.shade, indexed.sections.use) * 0.45
-            val useToShade = localSimilarity(hint.use, indexed.sections.shade) * 0.55
-            val fallback = max(
-                localSimilarity(hint.use, indexed.sections.all),
-                localSimilarity(hint.shade, indexed.sections.all),
-            ) * 0.45
-            max(max(direct, shadeToUse), max(useToShade, fallback))
+            val shadeToUse = localSimilarity(hint.shade, indexed.sections.use) * 0.35
+            val useToShade = localSimilarity(hint.use, indexed.sections.shade) * 0.45
+            val positiveFallback = localSimilarity(hint.positive, indexed.sections.positive) * 0.55
+            max(max(direct, shadeToUse), max(useToShade, positiveFallback))
         }) else 0.0
         val shadeScore = if (hintAware) average(profile.hints.map { hint ->
-            val expectedShade = if (hint.shade.tokens.isNotEmpty()) hint.shade else hint.use
+            val expectedShade = if (hint.shade.isPresent) hint.shade else hint.use
             max(
                 localSimilarity(expectedShade, indexed.sections.shade),
-                localSimilarity(hint.use, indexed.sections.shade) * 0.70,
+                localSimilarity(hint.use, indexed.sections.shade) * 0.45,
             )
         }) else 0.0
         val allScore = if (hintAware) average(profile.hints.map { hint ->
-            max(
-                localSimilarity(hint.use, indexed.sections.all),
-                localSimilarity(hint.shade, indexed.sections.all),
-            )
+            localSimilarity(hint.positive, indexed.sections.positive)
         }) else 0.0
 
-        val candidateAvoidConflict = avoidConceptConflict(profile.requiredConcepts, indexed.sections.avoidText)
+        val candidateAvoidConflict = if (hintAware && indexed.sections.avoid.isPresent) {
+            average(profile.hints.map { hint ->
+                max(
+                    localSimilarity(hint.positive, indexed.sections.avoid),
+                    max(
+                        localSimilarity(hint.use, indexed.sections.avoid),
+                        localSimilarity(hint.shade, indexed.sections.avoid) * 0.80,
+                    ),
+                )
+            })
+        } else 0.0
         val needAvoidConflict = if (hintAware) {
-            profile.hints.maxOfOrNull { hint ->
-                avoidConceptConflict(indexed.audibleConcepts, hint.avoidText)
-            } ?: 0.0
+            average(profile.hints.map { hint ->
+                if (!hint.avoid.isPresent) 0.0 else max(
+                    localSimilarity(indexed.sections.positive, hint.avoid),
+                    max(
+                        localSimilarity(indexed.sections.use, hint.avoid),
+                        localSimilarity(indexed.sections.shade, hint.avoid) * 0.80,
+                    ),
+                )
+            })
         } else 0.0
         val avoidCoverage = max(candidateAvoidConflict, needAvoidConflict)
 
-        val contextScore = max(useScore, max(shadeScore * 0.94, allScore * 0.62))
+        val contextScore = max(useScore, max(shadeScore * 0.92, allScore * 0.86))
         val semanticMetadata = indexed.sections.structured &&
-            (indexed.sections.use.tokens.isNotEmpty() || indexed.sections.shade.tokens.isNotEmpty())
+            (indexed.sections.use.isPresent || indexed.sections.shade.isPresent)
         val metadataQuality = when {
             semanticMetadata -> "STRUCTURED"
             indexed.sections.structured -> "PARTIAL"
             else -> "RAW"
         }
 
-        val requiredConcepts = profile.requiredConcepts
-        val conceptScore = if (requiredConcepts.isEmpty()) 0.0
-        else conceptCoverage(requiredConcepts, indexed.audibleConcepts)
-        val sourceCoverage = sourceConceptCoverage(requiredConcepts, indexed.audibleConcepts)
-        val explicitSourceConflict = sourceConflictConfidence(requiredConcepts, indexed.audibleConcepts)
-        val specializationConflict = unwantedSpecializationConfidence(
-            kind = profile.kind,
-            required = requiredConcepts,
-            candidate = indexed.audibleConcepts,
-        )
-
-        val effectiveSourceConflict = if (hintAware && semanticMetadata) {
-            explicitSourceConflict.coerceAtMost(LOCAL_STRUCTURED_MAX_SOURCE_CONFLICT)
-        } else explicitSourceConflict
-        val effectiveSpecializationConflict = if (hintAware && semanticMetadata) {
-            specializationConflict.coerceAtMost(LOCAL_STRUCTURED_MAX_SPECIALIZATION_CONFLICT)
-        } else specializationConflict
-
-        if (!hintAware && queryCoverage <= 0.0 && coreCoverage <= 0.0 && sourceCoverage <= 0.0) return null
-        if (
-            hintAware && contextScore <= 0.0 && conceptScore <= 0.0 &&
-            queryCoverage <= 0.0 && coreCoverage <= 0.0 && sourceCoverage <= 0.0
-        ) return null
+        if (hintAware && contextScore <= 0.0 && allScore <= 0.0) return null
+        if (!hintAware && queryCoverage <= 0.0 && coreCoverage <= 0.0) return null
 
         val repetitionPenalty = repetitionPenalty(currentTrack, nowMillis)
-        val structuredSemanticScore = (
-            useScore * LOCAL_USE_WEIGHT +
-                shadeScore * LOCAL_SHADE_WEIGHT +
-                conceptScore * LOCAL_CONCEPT_WEIGHT +
-                queryCoverage * LOCAL_QUERY_WEIGHT +
-                allScore * LOCAL_ALL_WEIGHT +
-                LOCAL_STRUCTURED_BONUS -
-                avoidCoverage * LOCAL_AVOID_PENALTY -
-                effectiveSourceConflict * LOCAL_SOURCE_PENALTY -
-                effectiveSpecializationConflict * LOCAL_SPECIALIZATION_PENALTY -
+        val structuredDescriptionScore = (
+            useScore * LOCAL_DESCRIPTION_USE_WEIGHT +
+                shadeScore * LOCAL_DESCRIPTION_SHADE_WEIGHT +
+                allScore * LOCAL_DESCRIPTION_WHOLE_WEIGHT -
+                avoidCoverage * LOCAL_DESCRIPTION_AVOID_PENALTY -
                 repetitionPenalty
         ).coerceIn(0.0, 1.0)
-
-        val legacySelectionScore = (
-            commonSemanticFit(
-                kind = profile.kind,
-                lexicalCoverage = queryCoverage,
-                coreCoverage = coreCoverage,
-                eventCoverage = eventCoverage,
-                sourceCoverage = sourceCoverage,
-                hasSourceRequirement = requiredConcepts.any(AUDIBLE_SOURCE_CONCEPTS::contains),
-                contextScore = contextScore,
-                hasStructuredContext = false,
-            ) -
-                avoidCoverage * 0.48 -
-                effectiveSourceConflict * SOFT_SOURCE_CONFLICT_PENALTY -
-                effectiveSpecializationConflict * SOFT_SPECIALIZATION_PENALTY -
-                repetitionPenalty * 0.50
+        val rawDescriptionScore = (
+            allScore * LOCAL_RAW_DESCRIPTION_WEIGHT +
+                queryCoverage * LOCAL_RAW_QUERY_FALLBACK_WEIGHT -
+                avoidCoverage * LOCAL_RAW_AVOID_PENALTY -
+                repetitionPenalty
+        ).coerceIn(0.0, 1.0)
+        val queryOnlyFallback = (
+            queryCoverage * 0.90 + coreCoverage * 0.10 - repetitionPenalty * 0.50
         ).coerceIn(0.0, 1.0)
 
-        val selectionScore = if (hintAware && semanticMetadata) structuredSemanticScore else legacySelectionScore
-        val finalScore = selectionScore
-
-        val rejectReason = rejectReason(
+        val selectionScore = when {
+            hintAware && semanticMetadata -> structuredDescriptionScore
+            hintAware -> rawDescriptionScore
+            else -> queryOnlyFallback
+        }
+        val rejectReason = localRejectReason(
             kind = profile.kind,
             selectionScore = selectionScore,
             conflict = avoidCoverage,
-            sourceConflictConfidence = effectiveSourceConflict,
-            specializationConflictConfidence = effectiveSpecializationConflict,
         )
         return Match(
             track = currentTrack,
-            score = finalScore,
+            score = selectionScore,
             coverage = queryCoverage,
             contextScore = contextScore,
             anchorCoverage = coreCoverage,
@@ -535,29 +497,27 @@ internal object Mode3LibraryAssetMatcher {
         )
     }
 
-    private fun rejectReason(
+    private fun localRejectReason(
         kind: AudioAssetKind,
         selectionScore: Double,
         conflict: Double,
-        sourceConflictConfidence: Double,
-        specializationConflictConfidence: Double,
     ): String {
         val reasons = buildList {
-            if (specializationConflictConfidence >= HARD_SPECIALIZATION_CONFLICT_CONFIDENCE) {
-                add("unrequestedSpecialization>=${HARD_SPECIALIZATION_CONFLICT_CONFIDENCE}")
-            }
-            if (sourceConflictConfidence >= HARD_SOURCE_CONFLICT_CONFIDENCE) {
-                add("sourceConceptMismatch>=${HARD_SOURCE_CONFLICT_CONFIDENCE}")
-            }
             if (conflict >= HARD_AVOID_CONFLICT) {
-                add("semanticAvoidConflict>=${HARD_AVOID_CONFLICT}")
+                add("descriptionAvoidConflict>=${HARD_AVOID_CONFLICT}")
             }
-            val minimumFit = minimumSelectionFit(kind)
+            val minimumFit = minimumLocalSelectionFit(kind)
             if (selectionScore < minimumFit) {
-                add("selectionFit<$minimumFit")
+                add("descriptionFit<$minimumFit")
             }
         }
         return reasons.joinToString("+")
+    }
+
+    private fun minimumLocalSelectionFit(kind: AudioAssetKind): Double = when (kind) {
+        AudioAssetKind.SFX -> MIN_LOCAL_SELECTION_FIT_SFX
+        AudioAssetKind.MUSIC -> MIN_LOCAL_SELECTION_FIT_MUSIC
+        AudioAssetKind.AMBIENCE -> MIN_LOCAL_SELECTION_FIT_AMBIENCE
     }
 
     private fun sections(raw: String): Sections {
@@ -595,6 +555,7 @@ internal object Mode3LibraryAssetMatcher {
             use = localText(useText),
             avoid = localText(avoidText),
             structured = true,
+            positive = localText("$shadeText $useText"),
         )
     }
 
@@ -626,6 +587,7 @@ internal object Mode3LibraryAssetMatcher {
             shade = localText(shadeText),
             use = localText(useText),
             avoid = localText(avoidText),
+            positive = localText("$shadeText $useText"),
         )
     }
 
@@ -775,50 +737,11 @@ internal object Mode3LibraryAssetMatcher {
         return queryTokens.count(targetTokens::contains).toDouble() / queryTokens.size.toDouble()
     }
 
-    private fun localSimilarity(first: LocalText, second: LocalText): Double {
-        if (first.tokens.isEmpty() || second.tokens.isEmpty()) return 0.0
-        val shared = first.tokens.count(second.tokens::contains)
-        val firstCoverage = shared.toDouble() / first.tokens.size.toDouble()
-        val secondCoverage = shared.toDouble() / second.tokens.size.coerceAtMost(12).toDouble()
-        val bigramCoverage = if (first.bigrams.isEmpty()) 0.0 else {
-            first.bigrams.count(second.bigrams::contains).toDouble() / first.bigrams.size.toDouble()
-        }
-        val lexicalScore = max(
-            firstCoverage * 0.86 + secondCoverage.coerceIn(0.0, 1.0) * 0.14,
-            bigramCoverage * 0.94,
-        ).coerceIn(0.0, 1.0)
-        val conceptScore = if (first.concepts.isEmpty() || second.concepts.isEmpty()) {
-            0.0
-        } else {
-            val sharedConcepts = first.concepts.count(second.concepts::contains)
-            val expectedCoverage = sharedConcepts.toDouble() / first.concepts.size.toDouble()
-            val candidateCoverage = sharedConcepts.toDouble() / second.concepts.size.toDouble()
-            (expectedCoverage * 0.78 + candidateCoverage * 0.22).coerceIn(0.0, 1.0)
-        }
-        return max(lexicalScore, conceptScore * LOCAL_CONCEPT_SIMILARITY_WEIGHT).coerceIn(0.0, 1.0)
-    }
+    private fun localSimilarity(first: LocalText, second: LocalText): Double =
+        Mode3OpenDescriptionVector.cosine(first.fingerprint, second.fingerprint)
 
-    private fun localText(value: String): LocalText {
-        val tokens = localTokens(value)
-        return LocalText(
-            tokens = tokens,
-            bigrams = bigrams(tokens.toList()),
-            concepts = audibleConcepts(value),
-        )
-    }
-
-    private fun localTokens(value: String): LinkedHashSet<String> = localNormalize(value)
-        .split(' ')
-        .asSequence()
-        .map(String::trim)
-        .filter { it.length >= 2 && it !in LOCAL_STOPWORDS }
-        .take(MAX_LOCAL_TOKENS)
-        .toCollection(linkedSetOf())
-
-    private fun bigrams(tokens: List<String>): Set<String> {
-        if (tokens.size < 2) return emptySet()
-        return (0 until tokens.lastIndex).mapTo(linkedSetOf()) { index -> "${tokens[index]} ${tokens[index + 1]}" }
-    }
+    private fun localText(value: String): LocalText =
+        LocalText(Mode3OpenDescriptionVector.build(value))
 
     private fun localNormalize(value: String): String = value
         .lowercase(Locale.ROOT)
@@ -885,7 +808,7 @@ internal object Mode3LibraryAssetMatcher {
                 "bestTrackId" to best?.track?.id.orEmpty(),
                 "bestFit" to format(best?.selectionScore ?: 0.0),
                 "bestRejectReason" to (best?.rejectReason ?: if (evaluation.candidateTracks == 0) "NO_SEMANTIC_CANDIDATES" else "NO_ACCEPTED_CANDIDATE"),
-                "localSemanticPolicy" to "DESCRIPTION_ONLY",
+                "localSemanticPolicy" to "DESCRIPTION_VECTOR_OPEN_VOCABULARY",
             ),
         )
 
@@ -939,7 +862,7 @@ internal object Mode3LibraryAssetMatcher {
 
     private fun format(value: Double): String = "%.3f".format(Locale.US, value)
 
-    private const val DECISIVE_MIN_CONTEXT_SCORE = 0.42
+    private const val DECISIVE_MIN_CONTEXT_SCORE = 0.48
     private const val DECISIVE_SEMANTIC_SCORE = 0.68
     private const val RAW_MIN_QUERY_COVERAGE = 0.78
     private const val REMOTE_SFX_STRONG_QUERY_COVERAGE = 0.78
@@ -947,27 +870,25 @@ internal object Mode3LibraryAssetMatcher {
     private const val CORE_PRESENT_COVERAGE = 0.92
     private const val CORE_ONLY_MIN_QUERY_COVERAGE = 0.32
     private const val LEGACY_MIN_QUERY_COVERAGE = 0.50
-    private const val HARD_AVOID_CONFLICT = 0.72
+    private const val HARD_AVOID_CONFLICT = 0.66
     private const val HARD_SOURCE_CONFLICT_CONFIDENCE = 0.82
     private const val HARD_SPECIALIZATION_CONFLICT_CONFIDENCE = 0.82
     private const val MIN_SELECTION_FIT_MUSIC = 0.52
     private const val MIN_SELECTION_FIT_AMBIENCE = 0.52
     private const val MIN_SELECTION_FIT_SFX = 0.56
-    private const val DECISIVE_SELECTION_FIT = 0.78
+    private const val DECISIVE_SELECTION_FIT = 0.68
     private const val SOFT_SOURCE_CONFLICT_PENALTY = 0.18
     private const val SOFT_SPECIALIZATION_PENALTY = 0.34
-    private const val LOCAL_USE_WEIGHT = 0.40
-    private const val LOCAL_SHADE_WEIGHT = 0.25
-    private const val LOCAL_CONCEPT_WEIGHT = 0.22
-    private const val LOCAL_QUERY_WEIGHT = 0.06
-    private const val LOCAL_ALL_WEIGHT = 0.03
-    private const val LOCAL_STRUCTURED_BONUS = 0.04
-    private const val LOCAL_AVOID_PENALTY = 0.55
-    private const val LOCAL_SOURCE_PENALTY = 0.10
-    private const val LOCAL_SPECIALIZATION_PENALTY = 0.10
-    private const val LOCAL_STRUCTURED_MAX_SOURCE_CONFLICT = 0.55
-    private const val LOCAL_STRUCTURED_MAX_SPECIALIZATION_CONFLICT = 0.50
-    private const val LOCAL_CONCEPT_SIMILARITY_WEIGHT = 0.94
+    private const val MIN_LOCAL_SELECTION_FIT_MUSIC = 0.36
+    private const val MIN_LOCAL_SELECTION_FIT_AMBIENCE = 0.38
+    private const val MIN_LOCAL_SELECTION_FIT_SFX = 0.40
+    private const val LOCAL_DESCRIPTION_USE_WEIGHT = 0.50
+    private const val LOCAL_DESCRIPTION_SHADE_WEIGHT = 0.28
+    private const val LOCAL_DESCRIPTION_WHOLE_WEIGHT = 0.22
+    private const val LOCAL_DESCRIPTION_AVOID_PENALTY = 0.68
+    private const val LOCAL_RAW_DESCRIPTION_WEIGHT = 0.88
+    private const val LOCAL_RAW_QUERY_FALLBACK_WEIGHT = 0.12
+    private const val LOCAL_RAW_AVOID_PENALTY = 0.60
     private const val REMOTE_TITLE_MIN_SOURCE_COVERAGE = 0.60
     private const val HARD_REMOTE_TITLE_IDENTITY_CONFLICT = 0.90
     private const val REMOTE_TITLE_IDENTITY_PENALTY = 0.48
@@ -980,7 +901,7 @@ internal object Mode3LibraryAssetMatcher {
     private const val MAX_RECENT_DIAGNOSTICS = 100
     private const val DIAGNOSTIC_DEDUP_MS = 1_500L
 
-    private val EMPTY_LOCAL_TEXT = LocalText(linkedSetOf(), emptySet(), emptySet())
+    private val EMPTY_LOCAL_TEXT = LocalText(Mode3OpenDescriptionVector.build(""))
 
     private val LOCAL_QUERY_ANCHORS = setOf(
         "music", "cinematic", "background", "audio", "sound", "effect", "ambience", "ambient",

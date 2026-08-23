@@ -106,6 +106,13 @@ private data class FreesoundAutoImportOutcome(
     val elapsedMs: Long,
 )
 
+private data class FreesoundSemanticCandidate(
+    val sound: FreesoundSound,
+    val rankScore: Double,
+    val lexicalCoverage: Double,
+    val semanticFit: Mode3LibraryAssetMatcher.RemoteFit,
+)
+
 private data class CompletedResolutionCycle(
     val resolvedTrackIdsByNeed: Map<String, String>,
 )
@@ -297,7 +304,8 @@ class FreesoundAutoAudioResolver(
         if (AudioAssetClassifier.classify(track) != kind) return false
         if (!isManagedFreesoundTrack(track)) return libraryUriExists(track.uri)
         return FreesoundImporter.soundIdFromManagedUri(track.uri) != null &&
-            FreesoundImporter.managedFileExists(appContext, track.uri)
+            FreesoundImporter.managedFileExists(appContext, track.uri) &&
+            FreesoundImporter.hasValidNormalization(track)
     }
 
     private fun libraryUriExists(uriValue: String): Boolean {
@@ -1180,24 +1188,40 @@ class FreesoundAutoAudioResolver(
                 val selected = result.page.results
                     .asSequence()
                     .filterNot { it.id in excluded }
-                    .mapIndexed { index, sound -> sound to scoreCandidateForSearch(need, sound, index, query) }
-                    .filter { (sound, _) ->
-                        sound.preferredPreviewUrl != null &&
-                            candidateMeetsLexicalFloor(need, sound, query) &&
-                            candidateMeetsDurationLimit(need, sound)
+                    .mapIndexedNotNull { index, sound ->
+                        if (
+                            sound.preferredPreviewUrl == null ||
+                            !candidateMeetsLexicalFloor(need, sound, query) ||
+                            !candidateMeetsDurationLimit(need, sound)
+                        ) return@mapIndexedNotNull null
+                        val lexicalCoverage = candidateSearchCoverage(need, sound, query)
+                        val rankScore = scoreCandidateForSearch(need, sound, index, query)
+                        if (rankScore < REMOTE_MIN_SCORE) return@mapIndexedNotNull null
+                        val semanticFit = Mode3LibraryAssetMatcher.remoteFit(
+                            need = need,
+                            sound = sound,
+                            lexicalCoverage = lexicalCoverage,
+                            selectedScore = rankScore,
+                        )
+                        FreesoundSemanticCandidate(sound, rankScore, lexicalCoverage, semanticFit)
                     }
-                    .maxByOrNull { it.second }
-                    ?.takeIf { it.second >= REMOTE_MIN_SCORE }
+                    .filter { it.semanticFit.qualified }
+                    .maxWithOrNull(
+                        compareBy<FreesoundSemanticCandidate> { it.semanticFit.score }
+                            .thenBy { it.rankScore }
+                            .thenBy { it.lexicalCoverage },
+                    )
+
                 FreesoundAutoSearchOutcome(
-                    sound = selected?.first,
+                    sound = selected?.sound,
                     resultCount = result.page.results.size,
                     httpCode = 200,
                     queryUsed = query,
                     categoryUsed = category.name,
-                    selectedName = selected?.first?.name.orEmpty(),
-                    selectedDurationSec = selected?.first?.durationSeconds ?: 0.0,
-                    selectedScore = selected?.second ?: 0.0,
-                    selectedLexicalCoverage = selected?.first?.let { candidateSearchCoverage(need, it, query) } ?: 0.0,
+                    selectedName = selected?.sound?.name.orEmpty(),
+                    selectedDurationSec = selected?.sound?.durationSeconds ?: 0.0,
+                    selectedScore = selected?.rankScore ?: 0.0,
+                    selectedLexicalCoverage = selected?.lexicalCoverage ?: 0.0,
                     excludedSoundIds = excluded,
                 )
             }
@@ -1238,6 +1262,12 @@ class FreesoundAutoAudioResolver(
             "distant", "far", "near", "close", "night", "day", "dark", "bright", "slow", "fast",
             "deep", "warm", "cold", "dramatic", "epic", "strong", "intense",
         )
+        private val RETRY_ACTION_TERMS = setOf(
+            "crumble", "crash", "break", "shatter", "roar", "growl", "rush", "suction", "suck",
+            "rattle", "slide", "slam", "strike", "hit", "clash", "slash", "whoosh", "burst",
+            "pulse", "snap", "drop", "knock", "creak", "splash", "shout", "ring", "tear", "rip",
+            "burn", "gust", "howl", "rumble",
+        )
 
         internal fun isRetryableSearchFailure(httpCode: Int?): Boolean =
             httpCode == null || httpCode == 429 || httpCode >= 500
@@ -1251,13 +1281,28 @@ class FreesoundAutoAudioResolver(
                 .filter { it.length >= 2 && it !in RETRY_QUERY_STOPWORDS }
             if (tokens.isEmpty()) return original
             val acoustic = tokens.filterNot(RETRY_QUERY_MODIFIERS::contains).ifEmpty { tokens }
+
+            fun sourceAndAction(): String {
+                if (acoustic.size <= 1) return acoustic.firstOrNull().orEmpty()
+                val action = acoustic.lastOrNull(RETRY_ACTION_TERMS::contains)
+                if (action == null) return acoustic.take(2).joinToString(" ")
+                val source = acoustic.firstOrNull { it != action } ?: acoustic.first()
+                return listOf(source, action)
+                    .distinct()
+                    .take(2)
+                    .joinToString(" ")
+                    .ifBlank { acoustic.take(2).joinToString(" ") }
+            }
+
             return when {
-                retryAttempt == 2 && acoustic.size >= 2 -> acoustic.take(2).joinToString(" ")
-                retryAttempt == 2 && acoustic.size == 1 -> {
-                    val modifier = tokens.lastOrNull { it != acoustic.first() && it in RETRY_QUERY_MODIFIERS }
+                acoustic.size >= 2 -> sourceAndAction()
+                acoustic.size == 1 -> {
+                    val modifier = tokens.lastOrNull {
+                        it != acoustic.first() && it in RETRY_QUERY_MODIFIERS
+                    }
                     listOfNotNull(modifier, acoustic.first()).distinct().joinToString(" ")
                 }
-                else -> acoustic.first()
+                else -> original
             }.ifBlank { original }
         }
 

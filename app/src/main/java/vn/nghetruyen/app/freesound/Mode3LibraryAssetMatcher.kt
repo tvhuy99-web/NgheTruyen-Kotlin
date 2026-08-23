@@ -226,7 +226,7 @@ internal object Mode3LibraryAssetMatcher {
         val englishMutable = linkedMapOf<String, MutableSet<Int>>()
         val localMutable = linkedMapOf<String, MutableSet<Int>>()
         entries.forEachIndexed { index, entry ->
-            (entry.englishTitleTokens + entry.englishMetadataTokens).forEach { token ->
+            entry.englishMetadataTokens.forEach { token ->
                 englishMutable.getOrPut(token) { linkedSetOf() }.add(index)
             }
             entry.sections.all.tokens.forEach { token ->
@@ -249,13 +249,13 @@ internal object Mode3LibraryAssetMatcher {
     private fun indexTrack(track: SceneMusicTrackEntity): IndexedTrack {
         val sections = sections(track.tagsCsv)
         val audibleText = if (sections.structured) {
-            listOf(track.title, sections.shadeText, sections.useText).joinToString(" ")
+            listOf(sections.shadeText, sections.useText).joinToString(" ")
         } else {
-            "${track.title} ${track.tagsCsv}"
+            track.tagsCsv
         }
         return IndexedTrack(
             track = track,
-            englishTitleTokens = FreesoundAutoRequirementAggregator.queryTokens(track.title),
+            englishTitleTokens = emptySet(),
             englishMetadataTokens = FreesoundAutoRequirementAggregator.queryTokens(track.tagsCsv),
             englishAvoidTokens = FreesoundAutoRequirementAggregator.queryTokens(sections.avoidText),
             sections = sections,

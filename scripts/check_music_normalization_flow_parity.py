@@ -22,18 +22,18 @@ for token in [
     if token not in worker:
         raise SystemExit("MUSIC_NORMALIZE_FLOW worker missing: " + token)
 
+# The three source modes share one physical MUSIC/AMBIENCE/SFX library. Keep mode-specific
+# playback dynamics where appropriate, but normalization and library management are shared.
 for token in [
-    'title = "Attack nhạc AI local"',
-    'title = "Release nhạc AI local"',
+    'title = "Attack nhạc AI"',
+    'title = "Release nhạc AI"',
     'title = "Attack nhạc Mode 3"',
     'title = "Release nhạc Mode 3"',
-    'label = "CHUẨN HÓA KHO NHẠC"',
-    'label = "CHUẨN HÓA THƯ VIỆN AI LOCAL"',
-    'label = "CHUẨN HÓA / BẢO TRÌ FILE ÂM THANH MODE 3"',
+    'label = "CHUẨN HÓA TOÀN BỘ THƯ VIỆN"',
     'title = { Text(if (normalizationKinds == setOf(AudioAssetKind.MUSIC)) "CHUẨN HÓA KHO NHẠC" else "CHUẨN HÓA KHO ÂM THANH") }',
-    'title = "Nhạc nền ($musicCount tệp)"',
-    'title = "Âm thanh môi trường ($ambienceCount tệp)"',
-    'title = "Hiệu ứng âm thanh ($sfxCount tệp)"',
+    'title = "Nhạc nền ($normalizationMusicCount tệp)"',
+    'title = "Âm thanh môi trường ($normalizationAmbienceCount tệp)"',
+    'title = "Hiệu ứng âm thanh ($normalizationSfxCount tệp)"',
     "AudioAssetKind.MUSIC -> musicTarget",
     "AudioAssetKind.AMBIENCE -> ambienceTarget",
     "AudioAssetKind.SFX -> sfxTarget",
@@ -100,6 +100,8 @@ for forbidden in [
     'title = { Text("CHUẨN HÓA TOÀN BỘ ÂM THANH") }',
     'title = "Mức chuẩn hóa"',
     "normalizationTarget(kind)",
+    'label = "CHUẨN HÓA THƯ VIỆN AI LOCAL"',
+    'label = "CHUẨN HÓA / BẢO TRÌ FILE ÂM THANH MODE 3"',
 ]:
     if forbidden in component + manager:
         raise SystemExit("MUSIC_NORMALIZE_FLOW obsolete single-target flow remains: " + forbidden)

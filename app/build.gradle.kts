@@ -198,9 +198,8 @@ dependencies {
     implementation("co.ntbl:lame:1.0.0")
 
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.29.0")
-    implementation("org.bytedeco:sentencepiece:0.2.1-1.5.13")
-    runtimeOnly("org.bytedeco:sentencepiece:0.2.1-1.5.13:android-arm64")
-    runtimeOnly("org.bytedeco:sentencepiece:0.2.1-1.5.13:android-arm")
+    implementation("ai.djl.huggingface:tokenizers:0.36.0")
+    runtimeOnly("ai.djl.android:tokenizer-native:0.33.0")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")

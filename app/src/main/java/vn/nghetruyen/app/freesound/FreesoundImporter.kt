@@ -12,6 +12,7 @@ import java.io.InterruptedIOException
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import kotlin.math.abs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -89,22 +90,47 @@ class FreesoundImporter(
                     }.thenBy { it.orderIndex }.thenBy { it.updatedAt },
                 )
                 .firstOrNull()
+
             if (incomingTitleKey.isNotBlank() && exactTitleTrack != null) {
-                return@withLock Result.success(
-                    FreesoundImportResult(
-                        trackId = exactTitleTrack.id,
-                        uri = exactTitleTrack.uri,
-                        title = exactTitleTrack.title,
-                        downloadedNewFile = false,
-                        reusedExistingFile = true,
-                    ),
-                )
+                val managedTitleSoundId = rawSoundIdFromManagedUri(exactTitleTrack.uri)
+                when {
+                    managedTitleSoundId == null -> {
+                        return@withLock Result.success(
+                            FreesoundImportResult(
+                                trackId = exactTitleTrack.id,
+                                uri = exactTitleTrack.uri,
+                                title = exactTitleTrack.title,
+                                downloadedNewFile = false,
+                                reusedExistingFile = true,
+                            ),
+                        )
+                    }
+                    managedTitleSoundId == sound.id && managedFileExists(appContext, exactTitleTrack.uri) -> {
+                        if (hasValidNormalizationForTarget(exactTitleTrack, normalizationTargetLufs)) {
+                            normalizationMarker(exactTitleTrack.uri)?.delete()
+                            return@withLock Result.success(
+                                FreesoundImportResult(
+                                    trackId = exactTitleTrack.id,
+                                    uri = exactTitleTrack.uri,
+                                    title = exactTitleTrack.title,
+                                    downloadedNewFile = false,
+                                    reusedExistingFile = true,
+                                ),
+                            )
+                        }
+                        return@withLock resumeExistingNormalization(
+                            track = exactTitleTrack,
+                            normalizationTargetLufs = normalizationTargetLufs,
+                        )
+                    }
+                    else -> Unit
+                }
             }
 
             val matches = currentTracks.filter { rawSoundIdFromManagedUri(it.uri) == sound.id }
             val existingFileTrack = matches.firstOrNull { managedFileExists(appContext, it.uri) }
             if (existingFileTrack != null) {
-                if (hasValidNormalization(existingFileTrack)) {
+                if (hasValidNormalizationForTarget(existingFileTrack, normalizationTargetLufs)) {
                     normalizationMarker(existingFileTrack.uri)?.delete()
                     return@withLock Result.failure(FreesoundDuplicateException(sound.id))
                 }
@@ -137,7 +163,7 @@ class FreesoundImporter(
                 targetLufs = normalizationTargetLufs,
                 fastFreesound = true,
             )
-            awaitNormalization(workId, track.id)
+            awaitNormalization(workId, track.id, normalizationTargetLufs)
             val normalizationElapsedMs = (System.nanoTime() - normalizationStartedNanos) / 1_000_000L
             marker?.delete()
             Result.success(
@@ -155,8 +181,6 @@ class FreesoundImporter(
             throw cancelled
         } catch (error: Throwable) {
             if (shouldPreserveImportedFile(error)) {
-                // The file existed before this attempt. Keep it and report retryability without
-                // misclassifying a normalization resume as a newly downloaded asset.
                 Result.failure(
                     FreesoundImportException(
                         message = error.message ?: "Chuẩn hóa tệp Freesound cần thử lại.",
@@ -270,8 +294,6 @@ class FreesoundImporter(
                 .build()
 
             val boundedClient = httpClient.newBuilder()
-                // A healthy slow transfer may continue for the full 180-second call budget, but
-                // 20 seconds without any socket progress is treated as a stalled preview.
                 .connectTimeout(minOf(PREVIEW_STALL_TIMEOUT_MS, callTimeoutMs).coerceAtLeast(500L), TimeUnit.MILLISECONDS)
                 .readTimeout(minOf(PREVIEW_STALL_TIMEOUT_MS, callTimeoutMs).coerceAtLeast(500L), TimeUnit.MILLISECONDS)
                 .callTimeout(callTimeoutMs.coerceAtLeast(500L), TimeUnit.MILLISECONDS)
@@ -317,9 +339,10 @@ class FreesoundImporter(
 
             val uri = Uri.fromFile(finalFile).toString()
             val title = titleForImport(sound.name, "Âm thanh Freesound ${sound.id}")
+            val localSemanticDescription = semanticDescription.trim().ifBlank { sound.description.trim() }
             val tagsCsv = tagsForImport(
                 kind = kind,
-                description = sound.description,
+                description = localSemanticDescription,
                 soundId = sound.id,
                 username = sound.username,
                 license = sound.license,
@@ -339,7 +362,7 @@ class FreesoundImporter(
                 targetLufs = normalizationTargetLufs,
                 fastFreesound = true,
             )
-            awaitNormalization(workId, trackId)
+            awaitNormalization(workId, trackId, normalizationTargetLufs)
             val normalizationElapsedMs = (System.nanoTime() - normalizationStartedNanos) / 1_000_000L
             markerFile.delete()
 
@@ -387,7 +410,11 @@ class FreesoundImporter(
         }
     }
 
-    private suspend fun awaitNormalization(workId: UUID, trackId: String) {
+    private suspend fun awaitNormalization(
+        workId: UUID,
+        trackId: String,
+        normalizationTargetLufs: Float,
+    ) {
         val workManager = WorkManager.getInstance(appContext)
         val deadline = System.currentTimeMillis() + NORMALIZATION_TIMEOUT_MS
         while (true) {
@@ -400,9 +427,11 @@ class FreesoundImporter(
                 WorkInfo.State.SUCCEEDED -> {
                     val latest = repository.getSceneMusicTrack(trackId)
                         ?: throw FreesoundNormalizationException("Tệp vừa chuẩn hóa không còn trong thư viện.")
-                    if (!hasValidNormalization(latest)) {
+                    if (!hasValidNormalizationForTarget(latest, normalizationTargetLufs)) {
                         throw FreesoundNormalizationException(
-                            latest.normalizationError.ifBlank { "Chuẩn hóa kết thúc nhưng dữ liệu loudness chưa hợp lệ." },
+                            latest.normalizationError.ifBlank {
+                                "Chuẩn hóa kết thúc nhưng metadata loudness/target chưa hợp lệ."
+                            },
                         )
                     }
                     return
@@ -458,6 +487,7 @@ class FreesoundImporter(
         private const val MIN_PREVIEW_ATTEMPT_MS = 800L
         private const val NORMALIZATION_TIMEOUT_MS = 10L * 60L * 1_000L
         private const val STALE_PART_AGE_MS = 15L * 60L * 1_000L
+        private const val NORMALIZATION_TARGET_EPSILON = 0.05f
         private const val SOUND_LOCK_STRIPES = 64
         private val soundImportLocks = List(SOUND_LOCK_STRIPES) { Mutex() }
         private val managedSoundIdRegex = Regex(
@@ -476,6 +506,15 @@ class FreesoundImporter(
                 track.loudnessLufsEstimate.isFinite() &&
                 track.peakDbfs.isFinite() &&
                 track.normalizationGainDb.isFinite()
+
+        internal fun hasValidNormalizationForTarget(
+            track: SceneMusicTrackEntity,
+            targetLufs: Float,
+        ): Boolean =
+            hasValidNormalization(track) &&
+                track.normalizationTargetLufs.isFinite() &&
+                targetLufs.isFinite() &&
+                abs(track.normalizationTargetLufs - targetLufs) <= NORMALIZATION_TARGET_EPSILON
 
         internal fun shouldPreserveImportedFile(error: Throwable): Boolean =
             error is FreesoundNormalizationException && error.retryable
@@ -523,7 +562,6 @@ class FreesoundImporter(
             return if (cleanDescription.isBlank()) marker else "$marker, $cleanDescription"
         }
 
-        /** Returns a completed local Freesound id. In-progress normalization is intentionally hidden from UI duplicate checks. */
         internal fun soundIdFromManagedUri(uri: String): Int? {
             val id = rawSoundIdFromManagedUri(uri) ?: return null
             if (normalizationMarker(uri)?.isFile == true) return null
@@ -535,7 +573,6 @@ class FreesoundImporter(
             return managedSoundIdRegex.find(clean)?.groupValues?.getOrNull(1)?.toIntOrNull()
         }
 
-        /** Pure string parser so local JVM unit tests do not invoke android.net.Uri stubs. */
         private fun normalizationMarker(uri: String): File? {
             val clean = uri.substringBefore('?').substringBefore('#')
             if (!clean.startsWith("file://", ignoreCase = true)) return null

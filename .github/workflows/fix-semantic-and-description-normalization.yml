@@ -1,0 +1,657 @@
+name: Fix Semantic Matcher + Global Description Normalization
+
+on:
+  push:
+    branches:
+      - fix/mode3-resolution-quality-20260822
+    paths:
+      - '.github/workflows/fix-semantic-and-description-normalization.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-build-only:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/mode3-resolution-quality-20260822
+          fetch-depth: 0
+
+      - name: Apply four fixes and global description normalizer
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new, label):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              if old not in text:
+                  raise SystemExit(f'Missing expected source for {label}: {path}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+              print('PATCHED', label)
+
+          # ------------------------------------------------------------------
+          # 1 + 2) Source-concept accuracy and one common LOCAL/REMOTE fit scale.
+          # ------------------------------------------------------------------
+          matcher = 'app/src/main/java/vn/nghetruyen/app/freesound/Mode3LibraryAssetMatcher.kt'
+
+          replace_once(
+              matcher,
+              '''    data class RemoteFit(\n        val score: Double,\n        val coreCoverage: Double,\n        val eventCoverage: Double,\n        val qualified: Boolean,\n    )''',
+              '''    data class RemoteFit(\n        val score: Double,\n        val coreCoverage: Double,\n        val eventCoverage: Double,\n        val qualified: Boolean,\n        val sourceConceptCoverage: Double = 0.0,\n        val sourceConflictConfidence: Double = 0.0,\n    )''',
+              'remote fit common semantic fields',
+          )
+
+          old_remote = '''        val requiredConcepts = audibleConcepts(need.query)\n        val candidateConcepts = audibleConcepts(\n            buildString {\n                append(sound.name).append(' ')\n                append(sound.description).append(' ')\n                append(sound.tags.joinToString(" "))\n            },\n        )\n        val conceptCoverage = conceptCoverage(requiredConcepts, candidateConcepts)\n        val conceptConflict = requiredConcepts.isNotEmpty() && candidateConcepts.isNotEmpty() && conceptCoverage <= 0.0\n        val qualified = lexicalQualified && !conceptConflict\n        val fit = if (!qualified) {\n            0.0\n        } else if (need.kind == AudioAssetKind.SFX && event != null) {\n            // Do not require both exact source and exact event words. A strong combined lexical match\n            // is valid evidence on its own; exact core/event tokens add confidence when present.\n            ((coreCoverage * 0.24 + eventCoverage * 0.24 + lexical * 0.52) * 0.84).coerceIn(0.0, 1.0)\n        } else {\n            ((coreCoverage * 0.52 + lexical * 0.48) * 0.84).coerceIn(0.0, 1.0)\n        }\n        return RemoteFit(\n            score = fit,\n            coreCoverage = coreCoverage,\n            eventCoverage = eventCoverage,\n            qualified = qualified,\n        )'''
+          new_remote = '''        val requiredConcepts = audibleConcepts(need.query)\n        val candidateConcepts = audibleConcepts(\n            buildString {\n                append(sound.name).append(' ')\n                append(sound.description).append(' ')\n                append(sound.tags.joinToString(" "))\n            },\n        )\n        val sourceCoverage = sourceConceptCoverage(requiredConcepts, candidateConcepts)\n        val sourceConflict = sourceConflictConfidence(requiredConcepts, candidateConcepts)\n        val qualified = lexicalQualified && sourceConflict < HARD_SOURCE_CONFLICT_CONFIDENCE\n        val fit = if (!qualified) {\n            0.0\n        } else {\n            commonSemanticFit(\n                kind = need.kind,\n                lexicalCoverage = lexical,\n                coreCoverage = coreCoverage,\n                eventCoverage = eventCoverage,\n                sourceCoverage = sourceCoverage,\n                hasSourceRequirement = requiredConcepts.any(AUDIBLE_SOURCE_CONCEPTS::contains),\n                contextScore = 0.0,\n                hasStructuredContext = false,\n            )\n        }\n        return RemoteFit(\n            score = fit,\n            coreCoverage = coreCoverage,\n            eventCoverage = eventCoverage,\n            qualified = qualified,\n            sourceConceptCoverage = sourceCoverage,\n            sourceConflictConfidence = sourceConflict,\n        )'''
+          replace_once(matcher, old_remote, new_remote, 'remote common semantic fit')
+
+          old_local_concepts = '''        val requiredConcepts = profile.requiredConcepts\n        val conceptCoverage = conceptCoverage(requiredConcepts, indexed.audibleConcepts)\n        val conceptConflict = requiredConcepts.isNotEmpty() &&\n            indexed.audibleConcepts.isNotEmpty() &&\n            conceptCoverage <= 0.0'''
+          new_local_concepts = '''        val requiredConcepts = profile.requiredConcepts\n        val sourceCoverage = sourceConceptCoverage(requiredConcepts, indexed.audibleConcepts)\n        val sourceConflict = sourceConflictConfidence(requiredConcepts, indexed.audibleConcepts)'''
+          replace_once(matcher, old_local_concepts, new_local_concepts, 'local source concept confidence')
+
+          old_selection = '''        val contextEvidence = if (hintAware && semanticMetadata && contextScore > 0.0) {\n            (0.55 + contextScore * 0.45).coerceIn(0.0, 1.0)\n        } else 0.0\n        val queryEvidence = if (profile.kind == AudioAssetKind.SFX && profile.eventToken != null) {\n            (\n                coreCoverage * 0.36 +\n                    eventCoverage * 0.36 +\n                    queryCoverage * 0.23 +\n                    titleQueryCoverage * 0.05\n                ).coerceIn(0.0, 1.0)\n        } else {\n            (\n                coreCoverage * 0.52 +\n                    queryCoverage * 0.43 +\n                    titleQueryCoverage * 0.05\n                ).coerceIn(0.0, 1.0)\n        }\n        val selectionBase = if (hintAware && semanticMetadata && contextEvidence > 0.0) {\n            contextEvidence * 0.65 + queryEvidence * 0.35\n        } else {\n            // Query-only candidates use the same evidence ceiling whether they are local files\n            // or fresh Freesound results. Provenance contributes zero points.\n            queryEvidence * 0.84\n        }\n        val conceptFactor = if (requiredConcepts.isEmpty() || indexed.audibleConcepts.isEmpty()) {\n            1.0\n        } else {\n            0.80 + conceptCoverage * 0.20\n        }\n        val selectionScore = (\n            selectionBase * conceptFactor -\n                avoidCoverage * 0.48 -\n                repetitionPenalty * 0.50\n            ).coerceIn(0.0, 1.0)'''
+          new_selection = '''        // LOCAL and fresh Freesound candidates now share the exact same base fit formula.\n        // Structured Vietnamese context is only a small refinement; it no longer creates a separate\n        // lower/higher score universe depending on where the file came from.\n        val selectionBase = commonSemanticFit(\n            kind = profile.kind,\n            lexicalCoverage = queryCoverage,\n            coreCoverage = coreCoverage,\n            eventCoverage = eventCoverage,\n            sourceCoverage = sourceCoverage,\n            hasSourceRequirement = requiredConcepts.any(AUDIBLE_SOURCE_CONCEPTS::contains),\n            contextScore = contextScore,\n            hasStructuredContext = hintAware && semanticMetadata,\n        )\n        val selectionScore = (\n            selectionBase -\n                avoidCoverage * 0.48 -\n                sourceConflict * SOFT_SOURCE_CONFLICT_PENALTY -\n                repetitionPenalty * 0.50\n            ).coerceIn(0.0, 1.0)'''
+          replace_once(matcher, old_selection, new_selection, 'one source-neutral fit scale')
+
+          replace_once(
+              matcher,
+              '''            conflict = avoidCoverage,\n            conceptConflict = conceptConflict,\n        )''',
+              '''            conflict = avoidCoverage,\n            sourceConflictConfidence = sourceConflict,\n        )''',
+              'reject source conflict confidence arg',
+          )
+          replace_once(
+              matcher,
+              '''        conflict: Double,\n        conceptConflict: Boolean,\n    ): String {\n        val reasons = buildList {\n            if (conceptConflict) add("sourceConceptMismatch")''',
+              '''        conflict: Double,\n        sourceConflictConfidence: Double,\n    ): String {\n        val reasons = buildList {\n            if (sourceConflictConfidence >= HARD_SOURCE_CONFLICT_CONFIDENCE) {\n                add("sourceConceptMismatch>=${HARD_SOURCE_CONFLICT_CONFIDENCE}")\n            }''',
+              'confidence-aware source rejection',
+          )
+
+          old_helpers = '''    private fun conceptCoverage(required: Set<String>, candidate: Set<String>): Double {\n        if (required.isEmpty()) return 1.0\n        if (candidate.isEmpty()) return 0.0\n        return required.count(candidate::contains).toDouble() / required.size.toDouble()\n    }'''
+          new_helpers = '''    private fun conceptCoverage(required: Set<String>, candidate: Set<String>): Double {\n        if (required.isEmpty()) return 1.0\n        if (candidate.isEmpty()) return 0.0\n        return required.count(candidate::contains).toDouble() / required.size.toDouble()\n    }\n\n    private fun sourceConceptCoverage(required: Set<String>, candidate: Set<String>): Double {\n        val requiredSources = required.filterTo(linkedSetOf(), AUDIBLE_SOURCE_CONCEPTS::contains)\n        if (requiredSources.isEmpty()) return 1.0\n        val candidateSources = candidate.filterTo(linkedSetOf(), AUDIBLE_SOURCE_CONCEPTS::contains)\n        if (candidateSources.isEmpty()) return 0.0\n        return requiredSources.count(candidateSources::contains).toDouble() / requiredSources.size.toDouble()\n    }\n\n    /**\n     * Hard mismatch is reserved for a clear, specific audible-source contradiction. Missing concept\n     * vocabulary is not a contradiction. This prevents a high-quality classroom chatter description\n     * from being rejected merely because one alias was unknown, while rain-vs-wind or explosion-vs-sword\n     * remain strongly contradictory when both sources are explicitly present.\n     */\n    private fun sourceConflictConfidence(required: Set<String>, candidate: Set<String>): Double {\n        val requiredSources = required.filterTo(linkedSetOf(), AUDIBLE_SOURCE_CONCEPTS::contains)\n        val candidateSources = candidate.filterTo(linkedSetOf(), AUDIBLE_SOURCE_CONCEPTS::contains)\n        if (requiredSources.isEmpty() || candidateSources.isEmpty()) return 0.0\n        if (requiredSources.any(candidateSources::contains)) return 0.0\n        fun specificity(size: Int): Double = when (size) {\n            1 -> 1.0\n            2 -> 0.86\n            else -> 0.70\n        }\n        return ((specificity(requiredSources.size) + specificity(candidateSources.size)) / 2.0)\n            .coerceIn(0.0, 1.0)\n    }\n\n    private fun commonSemanticFit(\n        kind: AudioAssetKind,\n        lexicalCoverage: Double,\n        coreCoverage: Double,\n        eventCoverage: Double,\n        sourceCoverage: Double,\n        hasSourceRequirement: Boolean,\n        contextScore: Double,\n        hasStructuredContext: Boolean,\n    ): Double {\n        val lexical = lexicalCoverage.coerceIn(0.0, 1.0)\n        val core = coreCoverage.coerceIn(0.0, 1.0)\n        val event = eventCoverage.coerceIn(0.0, 1.0)\n        val source = sourceCoverage.coerceIn(0.0, 1.0)\n        val base = when (kind) {\n            AudioAssetKind.SFX -> if (hasSourceRequirement) {\n                lexical * 0.30 + core * 0.20 + event * 0.20 + source * 0.30\n            } else {\n                lexical * 0.45 + core * 0.30 + event * 0.25\n            }\n            AudioAssetKind.MUSIC, AudioAssetKind.AMBIENCE -> if (hasSourceRequirement) {\n                lexical * 0.35 + core * 0.25 + source * 0.40\n            } else {\n                lexical * 0.58 + core * 0.42\n            }\n        }\n        val contextAdjustment = if (hasStructuredContext) {\n            ((contextScore.coerceIn(0.0, 1.0) - 0.50) * 0.18).coerceIn(-0.09, 0.09)\n        } else 0.0\n        return (base + contextAdjustment).coerceIn(0.0, 1.0)\n    }'''
+          replace_once(matcher, old_helpers, new_helpers, 'shared semantic fit helpers')
+
+          replace_once(
+              matcher,
+              '''    private const val MAX_CONFLICT = 0.48\n    private const val MAX_LOCAL_TOKENS = 72''',
+              '''    private const val MAX_CONFLICT = 0.48\n    private const val HARD_SOURCE_CONFLICT_CONFIDENCE = 0.82\n    private const val SOFT_SOURCE_CONFLICT_PENALTY = 0.18\n    private const val MAX_LOCAL_TOKENS = 72''',
+              'source conflict thresholds',
+          )
+
+          replace_once(
+              matcher,
+              '''        "CROWD" to setOf("crowd", "chatter", "people", "conversation", "dam dong", "đám đông", "tro chuyen", "trò chuyện", "tieng nguoi", "tiếng người"),''',
+              '''        "CROWD" to setOf("crowd", "chatter", "people", "conversation", "talk", "talking", "students", "student", "voices", "dam dong", "đám đông", "tro chuyen", "trò chuyện", "noi chuyen", "nói chuyện", "hoc sinh", "học sinh", "tieng nguoi", "tiếng người"),''',
+              'crowd chatter aliases',
+          )
+          replace_once(
+              matcher,
+              '''        "COMBAT" to setOf("battle", "combat", "fight", "fighting", "war", "chien dau", "chiến đấu", "dai chien", "đại chiến", "giao chien", "giao chiến"),\n        "BIRD"''',
+              '''        "COMBAT" to setOf("battle", "combat", "fight", "fighting", "war", "chien dau", "chiến đấu", "dai chien", "đại chiến", "giao chien", "giao chiến"),\n        "PUNCH" to setOf("punch", "punching", "fist", "dam", "đấm", "cu dam", "cú đấm", "quyen", "quyền"),\n        "KICK" to setOf("kick", "kicking", "da", "đá", "cu da", "cú đá"),\n        "FALL" to setOf("fall", "falling", "body fall", "drop", "collapse", "nga", "ngã", "roi", "rơi", "do nguoi", "đổ người"),\n        "CLOTH" to setOf("cloth", "clothes", "clothing", "fabric", "jacket", "ao", "áo", "quan ao", "quần áo", "vai", "vải"),\n        "GRAB" to setOf("grab", "grabbing", "grip", "grasp", "nam", "nắm", "chop", "chộp", "giat", "giật"),\n        "BIRD"''',
+              'combat action/material aliases',
+          )
+          replace_once(
+              matcher,
+              '''    private val LOCAL_STOPWORDS = setOf(''',
+              '''    private val AUDIBLE_SOURCE_CONCEPTS = setOf(\n        "WIND", "RAIN", "WATER", "FIRE", "THUNDER", "LIGHTNING", "EXPLOSION",\n        "SWORD", "SHIELD", "WHOOSH", "FOOTSTEP", "DOOR", "BELL", "CROWD",\n        "TRAFFIC", "BICYCLE", "PIANO", "GUITAR", "ORCHESTRA", "STRINGS", "DRUMS",\n        "FLUTE", "VOCAL", "BIRD", "PUNCH", "KICK", "CLOTH",\n    )\n\n    private val LOCAL_STOPWORDS = setOf(''',
+              'audible source taxonomy',
+          )
+
+          # ------------------------------------------------------------------
+          # 4) Close AI auxiliary diagnostic operations with the same trace id.
+          # ------------------------------------------------------------------
+          xpk = 'app/src/main/java/vn/nghetruyen/app/ai/XpkNarrationAiServices.kt'
+          old_aux = '''    suspend fun completeAuxiliaryJson(\n        storyId: String,\n        prompt: String,\n    ): AppResult<AiAuxiliaryJsonResult> {\n        val clean = prompt.trim()\n        if (clean.isBlank()) return failure("AI_EMPTY_INPUT", "Yêu cầu AI đang trống.")\n        if (clean.length > MAX_PROMPT_CHARS) {\n            return failure("AI_INPUT_TOO_LARGE", "Yêu cầu AI vượt giới hạn gửi trong một lượt.")\n        }\n        val config = resolveConfiguration(storyId)\n        validateConfiguration(config)?.let { return it }\n        diagnostic(\n            "AI_AUXILIARY_JSON_START",\n            attributes = mapOf(\n                "storyId" to storyId,\n                "provider" to config.provider.name,\n                "model" to config.model,\n                "inputChars" to clean.length.toString(),\n            ),\n        )\n        return when (val response = chat(clean, config)) {\n            is AppResult.Failure -> response\n            is AppResult.Success -> AppResult.Success(\n                AiAuxiliaryJsonResult(\n                    content = response.value,\n                    provider = config.provider.name,\n                    model = config.model,\n                ),\n            )\n        }\n    }'''
+          new_aux = '''    suspend fun completeAuxiliaryJson(\n        storyId: String,\n        prompt: String,\n    ): AppResult<AiAuxiliaryJsonResult> {\n        val clean = prompt.trim()\n        if (clean.isBlank()) return failure("AI_EMPTY_INPUT", "Yêu cầu AI đang trống.")\n        if (clean.length > MAX_PROMPT_CHARS) {\n            return failure("AI_INPUT_TOO_LARGE", "Yêu cầu AI vượt giới hạn gửi trong một lượt.")\n        }\n        val config = resolveConfiguration(storyId)\n        validateConfiguration(config)?.let { return it }\n        val traceId = "ai-aux:${UUID.randomUUID()}"\n        val startedNanos = System.nanoTime()\n        diagnostic(\n            "AI_AUXILIARY_JSON_START",\n            DiagnosticSeverity.INFO,\n            attributes = mapOf(\n                "storyId" to storyId,\n                "provider" to config.provider.name,\n                "model" to config.model,\n                "inputChars" to clean.length.toString(),\n            ),\n            traceId = traceId,\n        )\n        return when (val response = chat(clean, config)) {\n            is AppResult.Failure -> {\n                diagnostic(\n                    "AI_AUXILIARY_JSON_FAILED",\n                    DiagnosticSeverity.WARN,\n                    attributes = mapOf(\n                        "storyId" to storyId,\n                        "provider" to config.provider.name,\n                        "model" to config.model,\n                        "elapsedMs" to ((System.nanoTime() - startedNanos) / 1_000_000L).toString(),\n                        "code" to response.code,\n                        "message" to response.message.take(300),\n                    ),\n                    traceId = traceId,\n                )\n                response\n            }\n            is AppResult.Success -> {\n                diagnostic(\n                    "AI_AUXILIARY_JSON_COMPLETED",\n                    DiagnosticSeverity.INFO,\n                    attributes = mapOf(\n                        "storyId" to storyId,\n                        "provider" to config.provider.name,\n                        "model" to config.model,\n                        "elapsedMs" to ((System.nanoTime() - startedNanos) / 1_000_000L).toString(),\n                        "outputChars" to response.value.length.toString(),\n                    ),\n                    traceId = traceId,\n                )\n                AppResult.Success(\n                    AiAuxiliaryJsonResult(\n                        content = response.value,\n                        provider = config.provider.name,\n                        model = config.model,\n                    ),\n                )\n            }\n        }\n    }'''
+          replace_once(xpk, old_aux, new_aux, 'auxiliary AI terminal diagnostics')
+
+          # ------------------------------------------------------------------
+          # 3) Recover original Freesound description by sound id when rebuilding old metadata.
+          # ------------------------------------------------------------------
+          fsclient = 'app/src/main/java/vn/nghetruyen/app/freesound/FreesoundClient.kt'
+          sound_lookup = r'''
+    /** Fetch one sound by id so legacy AI-written metadata can be rebuilt from Freesound's source description. */
+    suspend fun sound(soundId: Int): FreesoundSound? = withContext(Dispatchers.IO) {
+        if (soundId <= 0) return@withContext null
+        val apiKey = credentialStore.apiKey() ?: return@withContext null
+        awaitLocalRatePermit()
+        val url = API_BASE_URL.toHttpUrl().newBuilder()
+            .addPathSegment("sounds")
+            .addPathSegment(soundId.toString())
+            .addPathSegment("")
+            .addQueryParameter("fields", SEARCH_FIELDS)
+            .build()
+        val request = Request.Builder()
+            .url(url)
+            .header("Authorization", "Token $apiKey")
+            .header("Accept", "application/json")
+            .header("User-Agent", USER_AGENT)
+            .get()
+            .build()
+        runCatching {
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@use null
+                val item = JSONObject(response.body.string())
+                val id = item.optInt("id", -1)
+                if (id <= 0) return@use null
+                val previews = item.optJSONObject("previews")
+                FreesoundSound(
+                    id = id,
+                    name = item.optString("name").trim().ifBlank { "Sound #$id" },
+                    description = item.optString("description").trim().take(4_000),
+                    durationSeconds = item.optDouble("duration", 0.0).coerceAtLeast(0.0),
+                    previewHqMp3 = previews?.optString("preview-hq-mp3")
+                        ?.trim()?.takeIf { it.startsWith("https://", ignoreCase = true) },
+                    previewHqOgg = previews?.optString("preview-hq-ogg")
+                        ?.trim()?.takeIf { it.startsWith("https://", ignoreCase = true) },
+                    username = item.optString("username").trim().take(120),
+                    license = item.optString("license").trim().take(240),
+                    webUrl = item.optString("url").trim()
+                        .takeIf { it.startsWith("https://freesound.org/", ignoreCase = true) }.orEmpty(),
+                    tags = buildList {
+                        val array = item.optJSONArray("tags")
+                        if (array != null) for (index in 0 until array.length()) {
+                            array.optString(index).trim().takeIf(String::isNotBlank)?.let(::add)
+                        }
+                    },
+                    category = item.optString("category").trim().take(120),
+                    subcategory = item.optString("subcategory").trim().take(160),
+                    categoryCode = item.optString("category_code").trim().take(40),
+                    avgRating = item.optDouble("avg_rating", 0.0).takeIf(Double::isFinite)?.coerceIn(0.0, 5.0) ?: 0.0,
+                    numRatings = item.optInt("num_ratings", 0).coerceAtLeast(0),
+                    numDownloads = item.optInt("num_downloads", 0).coerceAtLeast(0),
+                    searchScore = item.optDouble("score", 0.0).takeIf(Double::isFinite)?.coerceAtLeast(0.0) ?: 0.0,
+                )
+            }
+        }.getOrNull()
+    }
+
+'''
+          replace_once(
+              fsclient,
+              '''    fun clearSearchCache() {''',
+              sound_lookup + '''    fun clearSearchCache() {''',
+              'Freesound source description lookup',
+          )
+
+          # ------------------------------------------------------------------
+          # Global description normalizer UI: one button for MUSIC + AMBIENCE + SFX.
+          # ------------------------------------------------------------------
+          normalizer_path = Path('app/src/main/java/vn/nghetruyen/app/ui/components/AudioDescriptionNormalizationDialog.kt')
+          normalizer_path.write_text(r'''package vn.nghetruyen.app.ui.components
+
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+import vn.nghetruyen.app.NgheTruyenApplication
+import vn.nghetruyen.app.ai.AiAuxiliaryJsonResult
+import vn.nghetruyen.app.audio.AudioAssetClassifier
+import vn.nghetruyen.app.audio.AudioAssetKind
+import vn.nghetruyen.app.core.common.AppResult
+import vn.nghetruyen.app.core.model.GLOBAL_VOICE_PROFILE_STORY_ID
+import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
+import vn.nghetruyen.app.freesound.FreesoundImporter
+import vn.nghetruyen.app.playback.PlaybackQueueStore
+import vn.nghetruyen.app.playback.ReaderPlaybackService
+
+enum class AudioDescriptionNormalizationScope {
+    MISSING_VIETNAMESE,
+    ALL_LIBRARY,
+}
+
+data class AudioDescriptionPreview(
+    val trackId: String,
+    val title: String,
+    val kind: AudioAssetKind,
+    val sourceDescription: String,
+    val convertedDescription: String,
+    val sourceRefreshed: Boolean,
+)
+
+internal fun audioDescriptionText(tagsCsv: String): String = tagsCsv
+    .replace(AUDIO_DESCRIPTION_TYPE_MARKER_REGEX, "")
+    .replace(AUDIO_DESCRIPTION_LEGACY_PROVENANCE_REGEX, "")
+    .trim().trim(',', ';').trim()
+
+internal fun audioDescriptionIsVietnameseStructured(tagsCsv: String): Boolean {
+    val value = audioDescriptionText(tagsCsv).lowercase()
+    return ("sắc thái:" in value || "sac thai:" in value) &&
+        ("dùng:" in value || "dung:" in value) &&
+        ("tránh:" in value || "tranh:" in value)
+}
+
+internal fun audioDescriptionNeedsNormalization(tagsCsv: String): Boolean =
+    audioDescriptionText(tagsCsv).isNotBlank() && !audioDescriptionIsVietnameseStructured(tagsCsv)
+
+private fun audioDescriptionTypeMarker(kind: AudioAssetKind): String = when (kind) {
+    AudioAssetKind.MUSIC -> "type:music"
+    AudioAssetKind.AMBIENCE -> "type:ambience"
+    AudioAssetKind.SFX -> "type:sfx"
+}
+
+private fun audioDescriptionTags(kind: AudioAssetKind, description: String): String {
+    val marker = audioDescriptionTypeMarker(kind)
+    val clean = description.replace(Regex("\\s+"), " ").trim().take(300)
+    return if (clean.isBlank()) marker else "$marker, $clean"
+}
+
+@Composable
+fun AudioDescriptionNormalizationDialog(
+    tracks: List<SceneMusicTrackEntity>,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    val application = context.applicationContext as NgheTruyenApplication
+    val scope = rememberCoroutineScope()
+    var mode by remember { mutableStateOf(AudioDescriptionNormalizationScope.MISSING_VIETNAMESE) }
+    var running by remember { mutableStateOf(false) }
+    var processed by remember { mutableIntStateOf(0) }
+    var total by remember { mutableIntStateOf(0) }
+    var previews by remember { mutableStateOf<List<AudioDescriptionPreview>>(emptyList()) }
+    var failures by remember { mutableStateOf<List<String>>(emptyList()) }
+    var providerModel by remember { mutableStateOf("") }
+    var applied by remember { mutableStateOf(false) }
+    var job by remember { mutableStateOf<Job?>(null) }
+
+    val missingCount = tracks.count { audioDescriptionNeedsNormalization(it.tagsCsv) }
+    val blankCount = tracks.count { audioDescriptionText(it.tagsCsv).isBlank() }
+    val normalizedCount = tracks.count(::trackHasNormalizedDescription)
+    val targetCount = when (mode) {
+        AudioDescriptionNormalizationScope.MISSING_VIETNAMESE -> missingCount
+        AudioDescriptionNormalizationScope.ALL_LIBRARY -> tracks.count { audioDescriptionText(it.tagsCsv).isNotBlank() }
+    }
+
+    fun start() {
+        if (running) return
+        running = true
+        applied = false
+        processed = 0
+        total = targetCount
+        previews = emptyList()
+        failures = emptyList()
+        providerModel = ""
+        job = scope.launch {
+            val targets = tracks.filter { track ->
+                val description = audioDescriptionText(track.tagsCsv)
+                description.isNotBlank() && when (mode) {
+                    AudioDescriptionNormalizationScope.MISSING_VIETNAMESE -> !audioDescriptionIsVietnameseStructured(track.tagsCsv)
+                    AudioDescriptionNormalizationScope.ALL_LIBRARY -> true
+                }
+            }
+            val converted = mutableListOf<AudioDescriptionPreview>()
+            val errors = mutableListOf<String>()
+            targets.chunked(DESCRIPTION_BATCH_SIZE).forEach { batch ->
+                val prepared = mutableListOf<PreparedDescription>()
+                for (track in batch) {
+                    val current = audioDescriptionText(track.tagsCsv)
+                    var source = current
+                    var refreshed = false
+                    if (
+                        mode == AudioDescriptionNormalizationScope.ALL_LIBRARY &&
+                        audioDescriptionIsVietnameseStructured(track.tagsCsv)
+                    ) {
+                        val soundId = FreesoundImporter.soundIdFromManagedUri(track.uri)
+                        if (soundId != null) {
+                            val original = application.container.freesoundClient.sound(soundId)?.description.orEmpty().trim()
+                            if (original.isNotBlank()) {
+                                source = original
+                                refreshed = true
+                            }
+                        }
+                    }
+                    if (source.isBlank()) {
+                        errors += "${track.title}: không có mô tả nguồn để chuẩn hóa."
+                    } else {
+                        prepared += PreparedDescription(
+                            track = track,
+                            kind = AudioAssetClassifier.classify(track),
+                            source = source,
+                            refreshed = refreshed,
+                        )
+                    }
+                }
+                if (prepared.isNotEmpty()) {
+                    when (val result = application.container.xpkNarrationAiServices.completeAuxiliaryJson(
+                        storyId = GLOBAL_VOICE_PROFILE_STORY_ID,
+                        prompt = descriptionBatchPrompt(prepared),
+                    )) {
+                        is AppResult.Success -> {
+                            providerModel = "${result.value.provider} / ${result.value.model}"
+                            val parsed = runCatching { parseDescriptionBatch(result.value, prepared) }
+                                .getOrElse { error ->
+                                    errors += "Lô ${processed + 1}-${processed + batch.size}: ${error.message ?: "AI trả JSON không hợp lệ."}"
+                                    emptyList()
+                                }
+                            converted += parsed
+                            val returnedIds = parsed.mapTo(hashSetOf(), AudioDescriptionPreview::trackId)
+                            prepared.filter { it.track.id !in returnedIds }.forEach { missing ->
+                                errors += "${missing.track.title}: AI không trả kết quả."
+                            }
+                        }
+                        is AppResult.Failure -> errors += "AI: ${result.message}"
+                    }
+                }
+                processed += batch.size
+                previews = converted.toList()
+                failures = errors.toList()
+            }
+            running = false
+            job = null
+        }
+    }
+
+    fun applyResults() {
+        if (running || previews.isEmpty()) return
+        running = true
+        job = scope.launch {
+            val now = System.currentTimeMillis()
+            val previewById = previews.associateBy(AudioDescriptionPreview::trackId)
+            val updated = tracks.mapNotNull { track ->
+                val preview = previewById[track.id] ?: return@mapNotNull null
+                val kind = AudioAssetClassifier.classify(track)
+                track.copy(
+                    tagsCsv = audioDescriptionTags(kind, preview.convertedDescription),
+                    updatedAt = now,
+                )
+            }
+            withContext(Dispatchers.IO) {
+                application.container.database.sceneMusicTrackDao().upsertAll(updated)
+            }
+            if (PlaybackQueueStore.state.value.isPlaying) {
+                ReaderPlaybackService.command(application, ReaderPlaybackService.ACTION_REFRESH)
+            }
+            applied = true
+            running = false
+            job = null
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = { if (!running) onDismiss() },
+        title = { Text("CHUẨN HÓA MÔ TẢ TOÀN BỘ THƯ VIỆN") },
+        text = {
+            Column(Modifier.fillMaxWidth()) {
+                Text("Áp dụng cho cùng một kho MUSIC / AMBIENCE / SFX ở cả Mode 1, 2 và 3.")
+                Text("Mô tả gốc được gửi cho cùng AI/provider/model đang dùng để phân vai. AI chỉ chuyển thành metadata tiếng Việt theo cấu trúc: Sắc thái / Dùng / Tránh; không được tự bịa nhạc cụ, vật liệu hay nguồn âm nếu mô tả gốc không nói.")
+                HorizontalDivider(Modifier.padding(vertical = 6.dp))
+                Row(Modifier.fillMaxWidth()) {
+                    Button(
+                        onClick = { if (!running) mode = AudioDescriptionNormalizationScope.MISSING_VIETNAMESE },
+                        enabled = !running,
+                        modifier = Modifier.weight(1f),
+                    ) { Text(if (mode == AudioDescriptionNormalizationScope.MISSING_VIETNAMESE) "✓ CHƯA CÓ TIẾNG VIỆT" else "CHƯA CÓ TIẾNG VIỆT") }
+                    Button(
+                        onClick = { if (!running) mode = AudioDescriptionNormalizationScope.ALL_LIBRARY },
+                        enabled = !running,
+                        modifier = Modifier.weight(1f),
+                    ) { Text(if (mode == AudioDescriptionNormalizationScope.ALL_LIBRARY) "✓ TOÀN BỘ" else "TOÀN BỘ") }
+                }
+                Text("Tổng thư viện: ${tracks.size} • Đã chuẩn: $normalizedCount • Cần chuẩn: $missingCount • Trống mô tả: $blankCount")
+                if (mode == AudioDescriptionNormalizationScope.ALL_LIBRARY) {
+                    Text("TOÀN BỘ: với file Freesound đã có tiếng Việt, ứng dụng cố lấy lại mô tả gốc bằng sound ID trước khi AI chuẩn hóa lại. File local không có nguồn gốc mạng sẽ dùng mô tả hiện tại làm nguồn.")
+                }
+                if (running || processed > 0) {
+                    Text("Đã xử lý: $processed / $total • Thành công: ${previews.size} • Cần kiểm tra: ${failures.size}")
+                }
+                if (providerModel.isNotBlank()) Text("AI: $providerModel")
+                if (previews.isNotEmpty()) {
+                    Text("KẾT QUẢ XEM TRƯỚC — chưa ghi vào thư viện:")
+                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 320.dp)) {
+                        items(previews, key = { it.trackId }) { preview ->
+                            Text("${preview.kind.name} • ${preview.title}")
+                            if (preview.sourceRefreshed) Text("Nguồn: mô tả gốc Freesound đã lấy lại")
+                            Text(preview.convertedDescription)
+                            HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                        }
+                    }
+                }
+                if (failures.isNotEmpty()) {
+                    Text("CẦN KIỂM TRA (${failures.size}):")
+                    failures.take(12).forEach { Text("• $it") }
+                    if (failures.size > 12) Text("… và ${failures.size - 12} mục khác.")
+                }
+                if (applied) Text("Đã áp dụng ${previews.size} mô tả vào thư viện chung.")
+            }
+        },
+        confirmButton = {
+            Column {
+                if (!running && previews.isEmpty() && targetCount > 0) {
+                    TextButton(onClick = ::start) { Text("BẮT ĐẦU CHUẨN HÓA ($targetCount)") }
+                }
+                if (!running && previews.isNotEmpty() && !applied) {
+                    TextButton(onClick = ::applyResults) { Text("ÁP DỤNG ${previews.size} MỤC") }
+                }
+                if (applied) TextButton(onClick = onDismiss) { Text("XONG") }
+            }
+        },
+        dismissButton = {
+            if (running) {
+                TextButton(onClick = {
+                    job?.cancel()
+                    job = null
+                    running = false
+                }) { Text("DỪNG") }
+            } else if (!applied) {
+                TextButton(onClick = onDismiss) { Text("HỦY") }
+            }
+        },
+    )
+}
+
+private data class PreparedDescription(
+    val track: SceneMusicTrackEntity,
+    val kind: AudioAssetKind,
+    val source: String,
+    val refreshed: Boolean,
+)
+
+private fun trackHasNormalizedDescription(track: SceneMusicTrackEntity): Boolean =
+    audioDescriptionIsVietnameseStructured(track.tagsCsv)
+
+private fun descriptionBatchPrompt(items: List<PreparedDescription>): String {
+    val payload = JSONArray().also { array ->
+        items.forEach { item ->
+            array.put(
+                JSONObject()
+                    .put("id", item.track.id)
+                    .put("kind", item.kind.name)
+                    .put("title", item.track.title.take(160))
+                    .put("original_description", item.source.take(4_000)),
+            )
+        }
+    }
+    return """
+Bạn là bộ chuẩn hóa metadata âm thanh cho ứng dụng đọc truyện.
+
+ĐẦU VÀO là JSON chứa id, kind, title và original_description. original_description là nguồn thông tin chính về âm thanh. title chỉ là tín hiệu hỗ trợ.
+
+Với MỖI mục, hãy mô tả bằng tiếng Việt đúng âm thanh thực sự nghe được, không mô tả cốt truyện. Không được tự khẳng định nhạc cụ, vật liệu, hành động, không gian hay nguồn âm nếu original_description không hỗ trợ. Nếu title và original_description mâu thuẫn, ưu tiên original_description.
+
+Mỗi description phải ngắn gọn, tối đa 300 ký tự và đúng một dòng theo mẫu:
+Sắc thái: <nguồn âm/vật liệu/hành động/cường độ/nhịp/không gian nghe được>; Dùng: <cảnh/tình huống phù hợp>; Tránh: <những âm hoặc tình huống gần giống nhưng không đúng>
+
+Đặc biệt:
+- MUSIC: nêu nhạc cụ/texture chỉ khi nguồn nói rõ; ưu tiên cảm xúc, nhịp, cường độ và kiểu phối khí.
+- AMBIENCE: phân biệt chính xác gió/mưa/nước/biển/đám đông/giao thông/rừng/phòng trong nhà...
+- SFX: phân biệt nguồn + hành động + vật liệu, ví dụ đấm/đá/kiếm/nổ/vỡ/quần áo/rơi/ngã/va chạm.
+- Không thêm tên truyện, nhân vật, ID hay tên file vào description.
+
+Chỉ trả JSON hợp lệ, không markdown:
+{"items":[{"id":"...","description":"Sắc thái: ...; Dùng: ...; Tránh: ..."}]}
+
+INPUT:
+${payload}
+""".trimIndent()
+}
+
+private fun parseDescriptionBatch(
+    result: AiAuxiliaryJsonResult,
+    prepared: List<PreparedDescription>,
+): List<AudioDescriptionPreview> {
+    val clean = result.content.trim()
+        .removePrefix("```json").removePrefix("```")
+        .removeSuffix("```").trim()
+    val root = JSONObject(clean)
+    val array = root.optJSONArray("items") ?: error("Thiếu mảng items.")
+    val preparedById = prepared.associateBy { it.track.id }
+    val output = mutableListOf<AudioDescriptionPreview>()
+    for (index in 0 until array.length()) {
+        val row = array.optJSONObject(index) ?: continue
+        val id = row.optString("id").trim()
+        val source = preparedById[id] ?: continue
+        val description = row.optString("description").replace(Regex("\\s+"), " ").trim().take(300)
+        val lower = description.lowercase()
+        val valid = ("sắc thái:" in lower || "sac thai:" in lower) &&
+            ("dùng:" in lower || "dung:" in lower) &&
+            ("tránh:" in lower || "tranh:" in lower)
+        if (!valid) continue
+        output += AudioDescriptionPreview(
+            trackId = id,
+            title = source.track.title,
+            kind = source.kind,
+            sourceDescription = source.source,
+            convertedDescription = description,
+            sourceRefreshed = source.refreshed,
+        )
+    }
+    return output.distinctBy(AudioDescriptionPreview::trackId)
+}
+
+private const val DESCRIPTION_BATCH_SIZE = 12
+
+private val AUDIO_DESCRIPTION_TYPE_MARKER_REGEX = Regex(
+    """(?i)(?:type\\s*[:=]\\s*(?:sfx[_-]?continuous|continuous|sfx|sound[_-]?effect|ambience|environment|music)|\\[(?:continuous|sfx[_-]?continuous|sfx|ambience|environment|music)])""",
+)
+private val AUDIO_DESCRIPTION_LEGACY_PROVENANCE_REGEX = Regex(
+    """(?i)(?:^|[,;]\\s*)freesound_(?:id|user|license|url)\\s*:[^,;]*""",
+)
+''', encoding='utf-8')
+          print('CREATED global description normalizer')
+
+          # Move description normalization outside per-file menu.
+          manager = 'app/src/main/java/vn/nghetruyen/app/ui/components/UnifiedAudioAssetManagerDialog.kt'
+          per_file_button = '''                        UnifiedAssetActionButton("CHUYỂN HÓA MÔ TẢ") {\n                            val original = description.trim()\n                            if (original.isBlank()) {\n                                notify("Tệp này chưa có mô tả để chuyển hóa.")\n                            } else {\n                                stopPreview()\n                                convertingTrack = track\n                                conversionOriginal = original\n                                conversionPreview = ""\n                                conversionError = ""\n                                conversionProviderModel = ""\n                                conversionBusy = true\n                                selectedTrackId = null\n                                scope.launch {\n                                    when (val result = application.container.xpkNarrationAiServices.completeAuxiliaryJson(\n                                        storyId = GLOBAL_VOICE_PROFILE_STORY_ID,\n                                        prompt = audioDescriptionConversionPrompt(kind, track.title, original),\n                                    )) {\n                                        is AppResult.Success -> {\n                                            runCatching { parseConvertedAudioDescription(result.value.content) }\n                                                .onSuccess { converted ->\n                                                    conversionPreview = converted\n                                                    conversionProviderModel = "${result.value.provider} / ${result.value.model}"\n                                                }\n                                                .onFailure { error ->\n                                                    conversionError = error.message ?: "AI trả mô tả không đúng định dạng."\n                                                }\n                                        }\n                                        is AppResult.Failure -> {\n                                            conversionError = result.message.ifBlank { "Không chuyển hóa được mô tả bằng AI." }\n                                        }\n                                    }\n                                    conversionBusy = false\n                                }\n                            }\n                        }\n'''
+          replace_once(manager, per_file_button, '', 'remove per-file description conversion button')
+
+          # Add one global button beside whole-library loudness normalization in all three modes.
+          switches = 'app/src/main/java/vn/nghetruyen/app/ui/components/AudioDirectionLayerSwitches.kt'
+          replace_once(
+              switches,
+              '''    var managerKind by remember { mutableStateOf<AudioAssetKind?>(null) }\n\n    var showNormalizationDialog''',
+              '''    var managerKind by remember { mutableStateOf<AudioAssetKind?>(null) }\n    var showDescriptionNormalizationDialog by remember { mutableStateOf(false) }\n\n    var showNormalizationDialog''',
+              'description normalizer state',
+          )
+          replace_once(
+              switches,
+              '''    @Composable\n    fun SharedLibraryManagementButtons() {''',
+              '''    val pendingDescriptionCount = tracks.count { audioDescriptionNeedsNormalization(it.tagsCsv) }\n\n    @Composable\n    fun SharedLibraryMaintenanceButtons() {\n        AudioManagerButton(\n            label = "CHUẨN HÓA TOÀN BỘ THƯ VIỆN",\n            enabled = tracks.isNotEmpty(),\n            onClick = { openNormalization(AudioAssetKind.entries.toSet()) },\n        )\n        AudioManagerButton(\n            label = "CHUẨN HÓA MÔ TẢ ($pendingDescriptionCount CẦN XỬ LÝ)",\n            enabled = tracks.any { audioDescriptionText(it.tagsCsv).isNotBlank() },\n            onClick = { showDescriptionNormalizationDialog = true },\n        )\n    }\n\n    @Composable\n    fun SharedLibraryManagementButtons() {''',
+              'shared library maintenance buttons',
+          )
+
+          # Mode 1
+          replace_once(
+              switches,
+              '''                SharedLibraryManagementButtons()\n                AudioManagerButton(\n                    label = "CHUẨN HÓA TOÀN BỘ THƯ VIỆN",\n                    enabled = tracks.isNotEmpty(),\n                    onClick = { openNormalization(AudioAssetKind.entries.toSet()) },\n                )''',
+              '''                SharedLibraryManagementButtons()\n                SharedLibraryMaintenanceButtons()''',
+              'mode1 global description normalizer',
+          )
+          # Mode 2
+          replace_once(
+              switches,
+              '''                AudioManagerButton(\n                    label = "CHUẨN HÓA TOÀN BỘ THƯ VIỆN",\n                    enabled = tracks.isNotEmpty(),\n                    onClick = { openNormalization(AudioAssetKind.entries.toSet()) },\n                )\n                SharedLibraryManagementButtons()''',
+              '''                SharedLibraryMaintenanceButtons()\n                SharedLibraryManagementButtons()''',
+              'mode2 global description normalizer',
+          )
+          # Mode 3 (same snippet occurs once more after mode2 replacement)
+          replace_once(
+              switches,
+              '''                AudioManagerButton(\n                    label = "CHUẨN HÓA TOÀN BỘ THƯ VIỆN",\n                    enabled = tracks.isNotEmpty(),\n                    onClick = { openNormalization(AudioAssetKind.entries.toSet()) },\n                )\n                SharedLibraryManagementButtons()''',
+              '''                SharedLibraryMaintenanceButtons()\n                SharedLibraryManagementButtons()''',
+              'mode3 global description normalizer',
+          )
+
+          replace_once(
+              switches,
+              '''    if (showNormalizationDialog) {''',
+              '''    if (showDescriptionNormalizationDialog) {\n        AudioDescriptionNormalizationDialog(\n            tracks = tracks,\n            onDismiss = { showDescriptionNormalizationDialog = false },\n        )\n    }\n\n    if (showNormalizationDialog) {''',
+              'global description normalizer dialog',
+          )
+
+          print('ALL PATCHES APPLIED')
+          PY
+
+      - name: Commit fixed source
+        shell: bash
+        run: |
+          git config user.name "chatgpt-build-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add app/src/main/java/vn/nghetruyen/app .github/workflows/fix-semantic-and-description-normalization.yml
+          git commit -m "fix: improve semantic matching and normalize descriptions globally" || true
+          git push origin HEAD:fix/mode3-resolution-quality-20260822
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          if [ -f .sdk-packages ]; then xargs -r sdkmanager < .sdk-packages; fi
+
+      - name: Build APK only
+        shell: bash
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleDebug
+
+      - name: Package APK
+        shell: bash
+        run: |
+          APK=$(find app/build/outputs/apk/debug -name '*.apk' -type f | head -n 1)
+          test -n "$APK"
+          cp "$APK" NgheTruyen-Semantic-Description-Normalization.apk
+          sha256sum NgheTruyen-Semantic-Description-Normalization.apk > NgheTruyen-Semantic-Description-Normalization.apk.sha256
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NgheTruyen-Semantic-Description-Normalization
+          path: |
+            NgheTruyen-Semantic-Description-Normalization.apk
+            NgheTruyen-Semantic-Description-Normalization.apk.sha256
+          retention-days: 30

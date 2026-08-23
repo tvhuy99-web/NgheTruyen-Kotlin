@@ -20,6 +20,16 @@ jobs:
           ref: fix/mode3-resolution-quality-20260822
           fetch-depth: 0
 
+      - name: Record build run id
+        shell: bash
+        run: |
+          printf '%s\n' "$GITHUB_RUN_ID" > .mode3-unified-last-run
+          git config user.name "chatgpt-build-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add .mode3-unified-last-run
+          git commit -m "chore: record unified library build run" || true
+          git push origin HEAD:fix/mode3-resolution-quality-20260822
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -59,14 +69,3 @@ jobs:
             NgheTruyen-Mode3-Unified-Library.apk
             NgheTruyen-Mode3-Unified-Library.apk.sha256
           retention-days: 30
-
-      - name: Record build run id
-        if: always()
-        shell: bash
-        run: |
-          printf '%s\n' "$GITHUB_RUN_ID" > .mode3-unified-last-run
-          git config user.name "chatgpt-build-bot"
-          git config user.email "actions@users.noreply.github.com"
-          git add .mode3-unified-last-run
-          git commit -m "chore: record unified library build run" || exit 0
-          git push origin HEAD:fix/mode3-resolution-quality-20260822

@@ -1,0 +1,368 @@
+name: Temporary E5 System Downloader Build
+
+on:
+  push:
+    branches:
+      - fix/mode3-resolution-quality-20260822
+
+permissions:
+  contents: write
+
+jobs:
+  build-only:
+    if: ${{ !contains(github.event.head_commit.message, '[skip e5-dm-build]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/mode3-resolution-quality-20260822
+          fetch-depth: 0
+
+      - name: Replace UI download paths with DownloadManager
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new, label):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected 1 match, got {count}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          main = Path('app/src/main/java/vn/nghetruyen/app/MainActivity.kt')
+          text = main.read_text(encoding='utf-8')
+          text = text.replace('import kotlinx.coroutines.launch\n', 'import kotlinx.coroutines.delay\nimport kotlinx.coroutines.launch\n', 1)
+          text = text.replace(
+              'import vn.nghetruyen.app.freesound.Mode3E5SemanticEngine\n',
+              'import vn.nghetruyen.app.freesound.Mode3E5SemanticEngine\nimport vn.nghetruyen.app.freesound.Mode3E5SystemDownloader\n',
+              1,
+          )
+          text = text.replace(
+              '    private var semanticModelPromptShown = false\n',
+              '    private var semanticModelPromptShown = false\n    private var semanticDownloadMonitorRunning = false\n',
+              1,
+          )
+          old = '''    private fun prepareSemanticModel() {
+        val status = Mode3E5SemanticEngine.status()
+        if (status.installed) return
+        if (semanticModelPromptShown || isFinishing) return
+        semanticModelPromptShown = true
+        AlertDialog.Builder(this)
+            .setTitle("TẢI MÔ HÌNH TÌM KIẾM NGỮ NGHĨA")
+            .setMessage(
+                "Multilingual E5 Small INT8, khoảng 136 MB. " +
+                    "Mô hình được tải một lần và lưu riêng trong dữ liệu ứng dụng; " +
+                    "cập nhật APK sau này không cần tải lại nếu phiên bản mô hình không đổi.",
+            )
+            .setPositiveButton("TẢI XUỐNG") { _, _ -> downloadSemanticModel() }
+            .setNegativeButton("ĐỂ SAU", null)
+            .show()
+    }
+
+    private fun downloadSemanticModel() {
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("ĐANG TẢI MÔ HÌNH NGỮ NGHĨA")
+            .setMessage("Đang chuẩn bị tải…")
+            .setCancelable(false)
+            .create()
+        dialog.show()
+        lifecycleScope.launch {
+            val result = Mode3E5SemanticEngine.install { progress ->
+                val downloadedMb = progress.downloadedBytes / (1024.0 * 1024.0)
+                val totalMb = progress.totalBytes / (1024.0 * 1024.0)
+                val percent = (progress.fraction * 100.0).toInt().coerceIn(0, 100)
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed && dialog.isShowing) {
+                        dialog.setMessage(
+                            "${progress.currentFile}\\n$percent% • %.1f / %.1f MB".format(
+                                Locale.ROOT, downloadedMb, totalMb,
+                            ),
+                        )
+                    }
+                }
+            }
+            if (!isFinishing && !isDestroyed && dialog.isShowing) dialog.dismiss()
+            if (isFinishing || isDestroyed) return@launch
+            result.onSuccess {
+                if (!isFinishing && !isDestroyed) {
+                    AlertDialog.Builder(this@MainActivity)
+                        .setTitle("ĐÃ TẢI MÔ HÌNH NGỮ NGHĨA")
+                        .setMessage(
+                            "Multilingual E5 Small đã được tải và kiểm tra toàn vẹn. " +
+                                "Mô hình chỉ được nạp khi Mode 3 thực sự cần, để tránh tăng RAM ngay sau khi tải.",
+                        )
+                        .setPositiveButton("OK", null)
+                        .show()
+                }
+            }.onFailure { error ->
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle("KHÔNG TẢI ĐƯỢC MÔ HÌNH")
+                    .setMessage(error.message ?: "Lỗi không xác định. Tìm kiếm ngữ nghĩa sẽ không hoạt động cho đến khi mô hình được tải thành công.")
+                    .setPositiveButton("THỬ LẠI") { _, _ -> downloadSemanticModel() }
+                    .setNegativeButton("ĐỂ SAU", null)
+                    .show()
+            }
+        }
+    }
+'''
+          new = '''    private fun prepareSemanticModel() {
+        lifecycleScope.launch {
+            val finalized = Mode3E5SystemDownloader.finalizeIfComplete(this@MainActivity)
+            if (finalized.getOrNull() == true || Mode3E5SemanticEngine.status().installed) return@launch
+            if (Mode3E5SystemDownloader.hasPending(this@MainActivity)) {
+                monitorSemanticModelDownload()
+                return@launch
+            }
+            if (semanticModelPromptShown || isFinishing || isDestroyed) return@launch
+            semanticModelPromptShown = true
+            AlertDialog.Builder(this@MainActivity)
+                .setTitle("TẢI MÔ HÌNH TÌM KIẾM NGỮ NGHĨA")
+                .setMessage(
+                    "Multilingual E5 Small INT8, khoảng 136 MB. Android sẽ tải mô hình bằng trình tải hệ thống; " +
+                        "ứng dụng không giữ kết nối tải lớn trong bộ nhớ. Mô hình chỉ cần tải một lần.",
+                )
+                .setPositiveButton("TẢI XUỐNG") { _, _ -> downloadSemanticModel() }
+                .setNegativeButton("ĐỂ SAU", null)
+                .show()
+        }
+    }
+
+    private fun downloadSemanticModel() {
+        Mode3E5SystemDownloader.enqueue(this)
+            .onSuccess {
+                if (!isFinishing && !isDestroyed) {
+                    AlertDialog.Builder(this)
+                        .setTitle("ĐÃ BẮT ĐẦU TẢI")
+                        .setMessage(
+                            "Android DownloadManager đang tải mô hình ở nền. Bạn có thể tiếp tục dùng ứng dụng; " +
+                                "khi tải xong ứng dụng sẽ kiểm tra SHA-256 rồi cài mô hình.",
+                        )
+                        .setPositiveButton("OK", null)
+                        .show()
+                }
+                monitorSemanticModelDownload()
+            }
+            .onFailure { error ->
+                if (!isFinishing && !isDestroyed) {
+                    AlertDialog.Builder(this)
+                        .setTitle("KHÔNG BẮT ĐẦU ĐƯỢC TẢI")
+                        .setMessage(error.message ?: "Android không thể tạo tác vụ tải mô hình.")
+                        .setPositiveButton("THỬ LẠI") { _, _ -> downloadSemanticModel() }
+                        .setNegativeButton("ĐỂ SAU", null)
+                        .show()
+                }
+            }
+    }
+
+    private fun monitorSemanticModelDownload() {
+        if (semanticDownloadMonitorRunning) return
+        semanticDownloadMonitorRunning = true
+        lifecycleScope.launch {
+            try {
+                while (!isFinishing && !isDestroyed) {
+                    delay(2500)
+                    val finalized = Mode3E5SystemDownloader.finalizeIfComplete(this@MainActivity)
+                    finalized.onFailure { error ->
+                        if (!isFinishing && !isDestroyed) {
+                            AlertDialog.Builder(this@MainActivity)
+                                .setTitle("KHÔNG CÀI ĐƯỢC MÔ HÌNH")
+                                .setMessage(error.message ?: "Không hoàn tất được mô hình đã tải.")
+                                .setPositiveButton("OK", null)
+                                .show()
+                        }
+                        return@launch
+                    }
+                    if (finalized.getOrNull() == true) {
+                        if (!isFinishing && !isDestroyed) {
+                            AlertDialog.Builder(this@MainActivity)
+                                .setTitle("ĐÃ CÀI MÔ HÌNH NGỮ NGHĨA")
+                                .setMessage("Multilingual E5 Small đã được tải, kiểm tra SHA-256 và cài thành công.")
+                                .setPositiveButton("OK", null)
+                                .show()
+                        }
+                        return@launch
+                    }
+                    if (!Mode3E5SystemDownloader.hasPending(this@MainActivity)) return@launch
+                }
+            } finally {
+                semanticDownloadMonitorRunning = false
+            }
+        }
+    }
+'''
+          if old not in text:
+              raise SystemExit('MainActivity download block not found')
+          text = text.replace(old, new, 1)
+          main.write_text(text, encoding='utf-8')
+
+          card = Path('app/src/main/java/vn/nghetruyen/app/ui/components/FreesoundSettingsCard.kt')
+          text = card.read_text(encoding='utf-8')
+          text = text.replace('import kotlinx.coroutines.launch\n', 'import kotlinx.coroutines.delay\nimport kotlinx.coroutines.launch\n', 1)
+          text = text.replace(
+              'import vn.nghetruyen.app.freesound.Mode3E5SemanticEngine\n',
+              'import vn.nghetruyen.app.freesound.Mode3E5SemanticEngine\nimport vn.nghetruyen.app.freesound.Mode3E5SystemDownloader\n',
+              1,
+          )
+          text = text.replace(
+              '    var semanticProgress by remember { mutableStateOf<String?>(null) }\n',
+              '    var semanticProgress by remember { mutableStateOf<String?>(null) }\n    var semanticDownloading by remember { mutableStateOf(Mode3E5SystemDownloader.hasPending(context)) }\n',
+              1,
+          )
+          anchor = '''    LaunchedEffect(statusMessage) {
+        statusMessage?.takeIf(String::isNotBlank)?.let(view::announceForAccessibility)
+    }
+'''
+          extra = anchor + '''
+    LaunchedEffect(semanticDownloading) {
+        while (semanticDownloading) {
+            val finalized = Mode3E5SystemDownloader.finalizeIfComplete(context)
+            if (finalized.isFailure) {
+                semanticProgress = finalized.exceptionOrNull()?.message ?: "Không hoàn tất được mô hình đã tải."
+                semanticDownloading = false
+                break
+            }
+            if (finalized.getOrNull() == true) {
+                semanticStatus = Mode3E5SemanticEngine.status()
+                semanticProgress = "Đã tải và kiểm tra mô hình thành công."
+                semanticDownloading = false
+                break
+            }
+            delay(2500)
+            semanticDownloading = Mode3E5SystemDownloader.hasPending(context)
+        }
+    }
+'''
+          if anchor not in text:
+              raise SystemExit('settings LaunchedEffect anchor not found')
+          text = text.replace(anchor, extra, 1)
+          text = text.replace(
+              '                    semanticBusy -> "Trạng thái: Đang xử lý"\n',
+              '                    semanticDownloading -> "Trạng thái: Android đang tải mô hình"\n                    semanticBusy -> "Trạng thái: Đang xử lý"\n',
+              1,
+          )
+          old_button = '''                Button(
+                    onClick = {
+                        semanticBusy = true
+                        semanticProgress = "Đang bắt đầu tải…"
+                        scope.launch {
+                            val result = Mode3E5SemanticEngine.install { progress ->
+                                val percent = (progress.fraction * 100.0).toInt().coerceIn(0, 100)
+                                semanticProgress = "$percent% • ${progress.currentFile}"
+                            }
+                            semanticBusy = false
+                            semanticStatus = Mode3E5SemanticEngine.status()
+                            result.onSuccess {
+                                semanticProgress = "Đã tải xong. Đang lập chỉ mục mô tả âm thanh ở nền."
+                                val tracks = application.container.database.sceneMusicTrackDao().listAll()
+                                Mode3LibraryAssetMatcher.prewarmSemanticIndex(tracks)
+                            }.onFailure { semanticProgress = it.message ?: "Không tải được mô hình." }
+                        }
+                    },
+                    enabled = !semanticBusy,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("TẢI MÔ HÌNH NGỮ NGHĨA") }
+'''
+          new_button = '''                Button(
+                    onClick = {
+                        Mode3E5SystemDownloader.enqueue(context)
+                            .onSuccess {
+                                semanticDownloading = true
+                                semanticProgress = "Android DownloadManager đang tải mô hình ở nền."
+                            }
+                            .onFailure { semanticProgress = it.message ?: "Không bắt đầu được tải mô hình." }
+                    },
+                    enabled = !semanticBusy && !semanticDownloading,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(if (semanticDownloading) "ĐANG TẢI MÔ HÌNH…" else "TẢI MÔ HÌNH NGỮ NGHĨA") }
+'''
+          if old_button not in text:
+              raise SystemExit('settings download button block not found')
+          text = text.replace(old_button, new_button, 1)
+          card.write_text(text, encoding='utf-8')
+          PY
+
+          git diff --check
+          ! git grep -n 'Mode3E5SemanticEngine.install' -- app/src/main/java/vn/nghetruyen/app/MainActivity.kt app/src/main/java/vn/nghetruyen/app/ui/components/FreesoundSettingsCard.kt
+          git grep -n 'Mode3E5SystemDownloader.enqueue' -- app/src/main/java/vn/nghetruyen/app/MainActivity.kt app/src/main/java/vn/nghetruyen/app/ui/components/FreesoundSettingsCard.kt
+
+      - name: Commit source fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/vn/nghetruyen/app/MainActivity.kt app/src/main/java/vn/nghetruyen/app/ui/components/FreesoundSettingsCard.kt app/src/main/java/vn/nghetruyen/app/freesound/Mode3E5SystemDownloader.kt
+          git commit -m "fix(mode3): route E5 downloads through Android DownloadManager [skip e5-dm-build]"
+          git push origin HEAD:fix/mode3-resolution-quality-20260822
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: true
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Bootstrap Gradle Wrapper
+        shell: bash
+        run: |
+          chmod +x gradlew scripts/bootstrap-wrapper.sh
+          ./scripts/bootstrap-wrapper.sh
+
+      - name: Build debug APK without tests
+        shell: bash
+        run: |
+          FINAL_SHA="$(git rev-parse HEAD)"
+          env -u GITHUB_SHA NGHETRUYEN_BUILD_SHA="$FINAL_SHA" ./gradlew --no-daemon --stacktrace :app:assembleDebug
+
+      - name: Package APK
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk dist/NgheTruyen-Mode3-E5-SystemDownload-Fix-20260824.apk
+          sha256sum dist/NgheTruyen-Mode3-E5-SystemDownload-Fix-20260824.apk > dist/NgheTruyen-Mode3-E5-SystemDownload-Fix-20260824.apk.sha256
+          stat -c '%s' dist/NgheTruyen-Mode3-E5-SystemDownload-Fix-20260824.apk > dist/apk-size-bytes.txt
+          git rev-parse HEAD > dist/source-commit.txt
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NgheTruyen-Mode3-E5-SystemDownload-Fix-apk
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            dist/NgheTruyen-Mode3-E5-SystemDownload-Fix-20260824.apk
+            dist/NgheTruyen-Mode3-E5-SystemDownload-Fix-20260824.apk.sha256
+            dist/apk-size-bytes.txt
+            dist/source-commit.txt
+
+      - name: Remove temporary workflow
+        if: always()
+        shell: bash
+        run: |
+          git fetch origin fix/mode3-resolution-quality-20260822
+          git reset --hard origin/fix/mode3-resolution-quality-20260822
+          rm -f .github/workflows/tmp-mode3-e5-downloadmanager-build.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A .github/workflows/tmp-mode3-e5-downloadmanager-build.yml
+          if ! git diff --cached --quiet; then
+            git commit -m "ci: remove temporary E5 DownloadManager workflow [skip e5-dm-build]"
+            git push origin HEAD:fix/mode3-resolution-quality-20260822
+          fi

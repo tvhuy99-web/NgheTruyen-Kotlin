@@ -40,6 +40,56 @@ jobs:
           else
             echo 'Semantic/description source already patched; skip duplicate patch.'
           fi
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new, label):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              if old in text:
+                  p.write_text(text.replace(old, new, 1), encoding='utf-8')
+                  print('PATCHED', label)
+              elif new in text:
+                  print('ALREADY PATCHED', label)
+              else:
+                  raise SystemExit(f'Missing expected source for {label}')
+
+          dialog = 'app/src/main/java/vn/nghetruyen/app/ui/components/AudioDescriptionNormalizationDialog.kt'
+          replace_once(
+              dialog,
+              '''internal fun audioDescriptionNeedsNormalization(tagsCsv: String): Boolean =\n    audioDescriptionText(tagsCsv).isNotBlank() && !audioDescriptionIsVietnameseStructured(tagsCsv)''',
+              '''internal fun audioDescriptionNeedsNormalization(tagsCsv: String): Boolean =\n    !audioDescriptionIsVietnameseStructured(tagsCsv)''',
+              'blank descriptions count as pending',
+          )
+          replace_once(
+              dialog,
+              '''        AudioDescriptionNormalizationScope.ALL_LIBRARY -> tracks.count { audioDescriptionText(it.tagsCsv).isNotBlank() }''',
+              '''        AudioDescriptionNormalizationScope.ALL_LIBRARY -> tracks.size''',
+              'all library includes blank rows',
+          )
+          replace_once(
+              dialog,
+              '''            val targets = tracks.filter { track ->\n                val description = audioDescriptionText(track.tagsCsv)\n                description.isNotBlank() && when (mode) {\n                    AudioDescriptionNormalizationScope.MISSING_VIETNAMESE -> !audioDescriptionIsVietnameseStructured(track.tagsCsv)\n                    AudioDescriptionNormalizationScope.ALL_LIBRARY -> true\n                }\n            }''',
+              '''            val targets = tracks.filter { track ->\n                when (mode) {\n                    AudioDescriptionNormalizationScope.MISSING_VIETNAMESE -> !audioDescriptionIsVietnameseStructured(track.tagsCsv)\n                    AudioDescriptionNormalizationScope.ALL_LIBRARY -> true\n                }\n            }''',
+              'normalization targets include blank rows',
+          )
+          replace_once(
+              dialog,
+              '''                    if (\n                        mode == AudioDescriptionNormalizationScope.ALL_LIBRARY &&\n                        audioDescriptionIsVietnameseStructured(track.tagsCsv)\n                    ) {''',
+              '''                    if (\n                        source.isBlank() ||\n                        (mode == AudioDescriptionNormalizationScope.ALL_LIBRARY &&\n                            audioDescriptionIsVietnameseStructured(track.tagsCsv))\n                    ) {''',
+              'blank Freesound rows refetch source description',
+          )
+
+          switches = 'app/src/main/java/vn/nghetruyen/app/ui/components/AudioDirectionLayerSwitches.kt'
+          replace_once(
+              switches,
+              '''            enabled = tracks.any { audioDescriptionText(it.tagsCsv).isNotBlank() },''',
+              '''            enabled = tracks.isNotEmpty(),''',
+              'description normalizer enabled for blank metadata',
+          )
+          PY
+
           printf '%s\n' "$GITHUB_RUN_ID" > .mode3-semantic-description-last-run
 
       - name: Commit fixed source
@@ -49,7 +99,7 @@ jobs:
           git config user.email "actions@users.noreply.github.com"
           git add app/src/main/java/vn/nghetruyen/app \
                   .mode3-semantic-description-last-run
-          git commit -m "fix: semantic accuracy and global description normalization [skip ci]" || true
+          git commit -m "fix: include blank source descriptions in normalization [skip ci]" || true
           git push origin HEAD:fix/mode3-resolution-quality-20260822
 
       - name: Set up JDK 17

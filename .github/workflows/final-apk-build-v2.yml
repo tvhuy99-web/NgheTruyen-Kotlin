@@ -1,4 +1,5 @@
 name: Build NgheTruyen APK
+# Temporary PR build trigger for the semantic-audio fixed branch; restored after artifact collection.
 
 on:
   workflow_dispatch:

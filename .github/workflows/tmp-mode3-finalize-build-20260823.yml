@@ -1,0 +1,95 @@
+name: Temporary Mode3 Finalize And Build
+
+on:
+  push:
+    branches:
+      - fix/mode3-resolution-quality-20260822
+    paths:
+      - '.github/workflows/tmp-mode3-finalize-build-20260823.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  finalize-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout target branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/mode3-resolution-quality-20260822
+          fetch-depth: 0
+
+      - name: Preserve acoustic action in retry query
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt')
+          text = path.read_text(encoding='utf-8')
+          old = '"crumble", "crash", "break", "shatter", "roar", "growl", "rush", "suction", "suck",'
+          new = '"crumble", "crash", "break", "shatter", "roar", "growl", "suction", "suck",'
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one retry action row, found {text.count(old)}')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+          git diff --check
+          grep -q '"roar", "growl", "suction"' app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install required Android SDK packages
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Bootstrap Gradle Wrapper
+        shell: bash
+        run: |
+          chmod +x gradlew scripts/bootstrap-wrapper.sh
+          ./scripts/bootstrap-wrapper.sh
+
+      - name: Build debug APK only - no tests
+        run: ./gradlew --no-daemon --stacktrace :app:assembleDebug
+
+      - name: Remove temporary workflow and commit final source
+        shell: bash
+        run: |
+          rm -f .github/workflows/tmp-mode3-finalize-build-20260823.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A \
+            app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt \
+            .github/workflows/tmp-mode3-finalize-build-20260823.yml
+          git diff --cached --check
+          git commit -m "fix: preserve acoustic action in Mode 3 retries"
+          git push origin HEAD:fix/mode3-resolution-quality-20260822
+
+      - name: Package APK
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk dist/NgheTruyen-Mode3-local-semantic-priority-20260823.apk
+          sha256sum dist/NgheTruyen-Mode3-local-semantic-priority-20260823.apk > dist/NgheTruyen-Mode3-local-semantic-priority-20260823.apk.sha256
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NgheTruyen-Mode3-local-semantic-priority-apk
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            dist/NgheTruyen-Mode3-local-semantic-priority-20260823.apk
+            dist/NgheTruyen-Mode3-local-semantic-priority-20260823.apk.sha256

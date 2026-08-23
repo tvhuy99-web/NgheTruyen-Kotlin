@@ -978,8 +978,17 @@ private fun stripAssetTypeMarkers(value: String): String =
         .trim(',', ';')
         .trim()
 
+private val legacyFreesoundProvenanceRegex = Regex(
+    """(?i)(?:^|[,;]\s*)freesound_(?:id|user|license|url)\s*:[^,;]*""",
+)
+
 @Suppress("UNUSED_PARAMETER")
-private fun assetDescription(kind: AudioAssetKind, tagsCsv: String): String = stripAssetTypeMarkers(tagsCsv)
+private fun assetDescription(kind: AudioAssetKind, tagsCsv: String): String =
+    stripAssetTypeMarkers(tagsCsv)
+        .replace(legacyFreesoundProvenanceRegex, "")
+        .trim()
+        .trim(',', ';')
+        .trim()
 
 private fun tagsWithDescription(kind: AudioAssetKind, description: String): String {
     val marker = typeMarker(kind)

@@ -505,6 +505,7 @@ class FreesoundImporter(
             return withoutExtension.ifBlank { fallback }.take(120)
         }
 
+        @Suppress("UNUSED_PARAMETER")
         internal fun tagsForImport(
             kind: AudioAssetKind,
             description: String,
@@ -518,15 +519,8 @@ class FreesoundImporter(
                 AudioAssetKind.AMBIENCE -> "type:ambience"
                 AudioAssetKind.SFX -> "type:sfx"
             }
-            val pieces = mutableListOf(marker)
-            description.trim().take(300).takeIf(String::isNotBlank)?.let(pieces::add)
-            soundId?.takeIf { it > 0 }?.let { pieces += "freesound_id:$it" }
-            username.trim().take(120).takeIf(String::isNotBlank)?.let { pieces += "freesound_user:$it" }
-            license.trim().take(240).takeIf(String::isNotBlank)?.let { pieces += "freesound_license:$it" }
-            sourceUrl.trim()
-                .takeIf { it.startsWith("https://freesound.org/", ignoreCase = true) }
-                ?.let { pieces += "freesound_url:$it" }
-            return pieces.joinToString(", ")
+            val cleanDescription = description.trim().take(300)
+            return if (cleanDescription.isBlank()) marker else "$marker, $cleanDescription"
         }
 
         /** Returns a completed local Freesound id. In-progress normalization is intentionally hidden from UI duplicate checks. */

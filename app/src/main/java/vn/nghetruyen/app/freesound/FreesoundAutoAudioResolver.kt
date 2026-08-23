@@ -416,6 +416,58 @@ class FreesoundAutoAudioResolver(
         val usableTracksByKind = AudioAssetKind.entries.associateWith { kind ->
             knownTracks.filter { isUsableLibraryTrack(it, kind) }
         }
+        if (completedCycleReuse) {
+            val completedResolutions = needs.mapNotNull { need ->
+                val lockedId = resolvedTrackIdsByNeed[failedSoundKey(need)] ?: return@mapNotNull null
+                val lockedTrack = usableTracksByKind[need.kind].orEmpty().firstOrNull { it.id == lockedId }
+                    ?: return@mapNotNull null
+                FreesoundAutoResolvedNeed(
+                    need = need,
+                    trackId = lockedTrack.id,
+                    source = if (isManagedFreesoundTrack(lockedTrack)) {
+                        FreesoundAutoResolutionSource.FREESOUND.name
+                    } else {
+                        FreesoundAutoResolutionSource.LIBRARY.name
+                    },
+                )
+            }
+            if (completedResolutions.size == needs.size) {
+                val elapsedMs = (System.nanoTime() - startedNanos) / 1_000_000L
+                val importedForTransaction = activeResolutionImportedTrackIds.toSet()
+                diagnostics += "COMPLETED_CYCLE_REUSE resolved=${completedResolutions.size} networkNeeds=0 imported=${importedForTransaction.size} elapsedMs=$elapsedMs"
+                liveDiagnostic(
+                    traceId,
+                    "FREESOUND_COMPLETED_CYCLE_REUSED",
+                    attributes = baseAttributes + mapOf(
+                        "resolved" to completedResolutions.size.toString(),
+                        "networkNeeds" to "0",
+                        "imported" to importedForTransaction.size.toString(),
+                        "elapsedMs" to elapsedMs.toString(),
+                    ),
+                )
+                liveDiagnostic(
+                    traceId,
+                    "FREESOUND_RESOLVE_DONE",
+                    attributes = baseAttributes + mapOf(
+                        "resolved" to completedResolutions.size.toString(),
+                        "unresolved" to "0",
+                        "networkNeeds" to "0",
+                        "completedCycleReuse" to "true",
+                        "imported" to importedForTransaction.size.toString(),
+                        "importedThisCall" to "0",
+                        "elapsedMs" to elapsedMs.toString(),
+                    ),
+                )
+                return FreesoundAutoResolveResult(
+                    resolved = completedResolutions,
+                    warnings = emptyList(),
+                    importedTrackIds = importedForTransaction,
+                    retryableFailure = false,
+                    diagnostics = diagnostics.distinct(),
+                )
+            }
+            activeResolutionCycleComplete = false
+        }
         val prepared = needs.mapIndexed { index, need ->
             val localHints = need.usages.asSequence()
                 .map(FreesoundAutoRequirement::localContext)

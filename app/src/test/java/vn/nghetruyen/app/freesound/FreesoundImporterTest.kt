@@ -75,10 +75,13 @@ class FreesoundImporterTest {
             license = "Creative Commons 0",
             sourceUrl = "https://freesound.org/people/fieldrecorder/sounds/123/",
         )
-        assertTrue(provenance.contains("freesound_id:123"))
-        assertTrue(provenance.contains("freesound_user:fieldrecorder"))
-        assertTrue(provenance.contains("freesound_license:Creative Commons 0"))
-        assertTrue(provenance.contains("freesound_url:https://freesound.org/people/fieldrecorder/sounds/123/"))
+        assertEquals("type:sfx, Close thunder", provenance)
+        assertFalse(provenance.contains("freesound_id:"))
+        assertFalse(provenance.contains("freesound_user:"))
+        assertFalse(provenance.contains("freesound_license:"))
+        assertFalse(provenance.contains("freesound_url:"))
+        assertFalse(provenance.contains("creativecommons", ignoreCase = true))
+        assertFalse(provenance.contains("https://", ignoreCase = true))
 
         val longDescription = "x".repeat(500)
         val tags = FreesoundImporter.tagsForImport(AudioAssetKind.SFX, longDescription)

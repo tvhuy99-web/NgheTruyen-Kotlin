@@ -1,0 +1,35 @@
+name: Apply Mode3 Followup Patch
+
+on:
+  push:
+    branches:
+      - fix/mode3-resolution-quality-20260822
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/mode3-resolution-quality-20260822
+          fetch-depth: 0
+      - name: Apply patch
+        run: python3 scripts/patch_mode3_unlimited_dedupe.py
+      - name: Verify changes
+        run: |
+          grep -q 'COMPLETED_CYCLE_REUSE' app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt
+          ! grep -q 'draft.size < 500' app/src/main/java/vn/nghetruyen/app/ui/components/UnifiedAudioAssetManagerDialog.kt
+          ! grep -q 'draft.size > 500' app/src/main/java/vn/nghetruyen/app/ui/components/UnifiedAudioAssetManagerDialog.kt
+          ! grep -q 'take(500)' app/src/main/java/vn/nghetruyen/app/ui/components/UnifiedAudioAssetManagerDialog.kt
+      - name: Commit patch and remove helper files
+        run: |
+          rm -f scripts/patch_mode3_unlimited_dedupe.py .github/workflows/apply-mode3-followup-patch.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix(mode3): remove audio caps and reuse completed resolver cycles'
+          git push origin HEAD:fix/mode3-resolution-quality-20260822

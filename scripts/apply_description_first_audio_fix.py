@@ -68,6 +68,28 @@ replace_once(
     'remote phrase bonus description-name-tags',
 )
 
+# The old scorer can exceed 1.0 before clamping, which erases field priority for strong hits.
+# Normalize by the theoretical maximum (1.38) so description/name/tag differences remain visible.
+# Lower the acceptance threshold by the same factor to preserve the previous effective strictness.
+replace_once(
+    resolver,
+    'private const val REMOTE_MIN_SCORE = 0.22',
+    'private const val REMOTE_MIN_SCORE = 0.16\n        private const val REMOTE_SCORE_NORMALIZER = 1.38',
+    'remote score threshold normalized',
+)
+replace_once(
+    resolver,
+    '''            return (
+                lexicalCoverage * 0.62 + phraseBonus + categoryBonus + durationBonus +
+                    ratingBonus + downloadsBonus + apiScoreBonus + rankBonus
+                ).coerceIn(0.0, 1.0)''',
+    '''            return (
+                (lexicalCoverage * 0.62 + phraseBonus + categoryBonus + durationBonus +
+                    ratingBonus + downloadsBonus + apiScoreBonus + rankBonus) / REMOTE_SCORE_NORMALIZER
+                ).coerceIn(0.0, 1.0)''',
+    'remote score normalization prevents saturation',
+)
+
 # Guards against accidental policy drift in this patch run.
 m = matcher.read_text(encoding='utf-8')
 r = resolver.read_text(encoding='utf-8')
@@ -77,4 +99,7 @@ assert 'return max(descriptionCoverage, max(titleCoverage * 0.85, tagCoverage * 
 assert 'descriptionNorm.contains(queryNorm) -> 0.20' in r
 assert 'titleNorm.contains(queryNorm) -> 0.12' in r
 assert 'tagNorm.contains(queryNorm) -> 0.08' in r
+assert 'private const val REMOTE_MIN_SCORE = 0.16' in r
+assert 'private const val REMOTE_SCORE_NORMALIZER = 1.38' in r
+assert '/ REMOTE_SCORE_NORMALIZER' in r
 print('Description-first audio matching policy applied successfully.')

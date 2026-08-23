@@ -137,6 +137,7 @@ class NarrationPlanCoordinator(
         activeTrackId: String?,
     ): Result {
         val warnings = mutableListOf<String>()
+        if (force) freesoundResolver.clearResolutionCaches()
         val sourceMode = storyAudioModeStore.get()
         val audioSettings = AudioDirectionPreferences.currentSnapshot()
         val enabledAssets = library.listEnabledSceneMusicTracks()

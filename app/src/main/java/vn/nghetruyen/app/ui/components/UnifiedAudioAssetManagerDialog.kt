@@ -231,7 +231,7 @@ fun UnifiedAudioAssetManagerDialog(
                 notify("Đã bỏ ${duplicateRows.size} tệp mới trùng tên với thư viện.")
             }
             if (accepted.isNotEmpty()) {
-                draft = (draft + accepted).take(500).mapIndexed { index, row -> row.copy(orderIndex = index) }
+                draft = (draft + accepted).mapIndexed { index, row -> row.copy(orderIndex = index) }
             }
         }
     }
@@ -298,7 +298,6 @@ fun UnifiedAudioAssetManagerDialog(
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         Button(
                             onClick = { launcher.launch(arrayOf("audio/*")) },
-                            enabled = draft.size < 500,
                             modifier = Modifier.weight(1f),
                         ) { Text("THÊM TỆP") }
                         Button(
@@ -375,10 +374,7 @@ fun UnifiedAudioAssetManagerDialog(
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     TextButton(
                         onClick = {
-                            if (draft.size > 500) {
-                                notify("Danh sách vượt giới hạn 500 tệp.")
-                            } else {
-                                stopPreview()
+                            stopPreview()
                                 scope.launch {
                                     val dao = application.container.database.sceneMusicTrackDao()
                                     val existing = dao.listAll()
@@ -421,7 +417,6 @@ fun UnifiedAudioAssetManagerDialog(
                                     notify("Đã lưu ${kindDisplayName(kind).lowercase()}.")
                                     onDismiss()
                                 }
-                            }
                         },
                         modifier = Modifier.weight(1f),
                     ) { Text("LƯU DANH SÁCH") }

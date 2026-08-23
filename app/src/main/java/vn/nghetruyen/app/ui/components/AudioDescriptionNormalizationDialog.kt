@@ -36,10 +36,11 @@ import vn.nghetruyen.app.audio.AudioAssetKind
 import vn.nghetruyen.app.core.common.AppResult
 import vn.nghetruyen.app.core.model.GLOBAL_VOICE_PROFILE_STORY_ID
 import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
-import vn.nghetruyen.app.freesound.FreesoundImporter
 import vn.nghetruyen.app.playback.PlaybackQueueStore
 import vn.nghetruyen.app.playback.ReaderPlaybackService
 import vn.nghetruyen.source.diagnostics.DiagnosticCategory
+import vn.nghetruyen.source.diagnostics.DiagnosticOperationContract
+import vn.nghetruyen.source.diagnostics.DiagnosticOperationState
 import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
 
 enum class AudioDescriptionNormalizationScope {
@@ -108,6 +109,44 @@ fun AudioDescriptionNormalizationDialog(
         attributes: Map<String, String> = emptyMap(),
     ) {
         val traceId = diagnosticTraceId.ifBlank { "audio-description:${UUID.randomUUID()}" }
+        val operationAttributes = when (name) {
+            "AUDIO_DESCRIPTION_NORMALIZATION_START" -> DiagnosticOperationContract.attributes(
+                id = traceId,
+                kind = "AUDIO_DESCRIPTION_NORMALIZATION",
+                flow = "runtime",
+                state = DiagnosticOperationState.STARTED,
+                stage = name,
+            )
+            "AUDIO_DESCRIPTION_NORMALIZATION_DONE" -> DiagnosticOperationContract.attributes(
+                id = traceId,
+                kind = "AUDIO_DESCRIPTION_NORMALIZATION",
+                flow = "runtime",
+                state = DiagnosticOperationState.COMPLETED,
+                stage = name,
+            )
+            "AUDIO_DESCRIPTION_NORMALIZATION_CANCELLED" -> DiagnosticOperationContract.attributes(
+                id = traceId,
+                kind = "AUDIO_DESCRIPTION_NORMALIZATION",
+                flow = "runtime",
+                state = DiagnosticOperationState.FAILED,
+                stage = name,
+            )
+            "AUDIO_DESCRIPTION_APPLY_START" -> DiagnosticOperationContract.attributes(
+                id = traceId,
+                kind = "AUDIO_DESCRIPTION_APPLY",
+                flow = "runtime",
+                state = DiagnosticOperationState.STARTED,
+                stage = name,
+            )
+            "AUDIO_DESCRIPTION_APPLY_DONE" -> DiagnosticOperationContract.attributes(
+                id = traceId,
+                kind = "AUDIO_DESCRIPTION_APPLY",
+                flow = "runtime",
+                state = DiagnosticOperationState.COMPLETED,
+                stage = name,
+            )
+            else -> emptyMap()
+        }
         runCatching {
             application.container.sourceDiagnostics.mark(
                 name = name,
@@ -115,7 +154,7 @@ fun AudioDescriptionNormalizationDialog(
                 severity = severity,
                 sourceId = "audio-description",
                 traceId = traceId,
-                attributes = attributes,
+                attributes = operationAttributes + attributes,
             )
         }
     }
@@ -147,6 +186,7 @@ fun AudioDescriptionNormalizationDialog(
                 "ambience" to tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.AMBIENCE }.toString(),
                 "sfx" to tracks.count { AudioAssetClassifier.classify(it) == AudioAssetKind.SFX }.toString(),
                 "blankSourceDescriptions" to blankCount.toString(),
+                "inputPolicy" to "TITLE_PLUS_STORED_DESCRIPTION_OFFLINE",
             ),
         )
         job = scope.launch {
@@ -159,56 +199,32 @@ fun AudioDescriptionNormalizationDialog(
             val converted = mutableListOf<AudioDescriptionPreview>()
             val errors = mutableListOf<String>()
             targets.chunked(DESCRIPTION_BATCH_SIZE).forEach { batch ->
-                val prepared = mutableListOf<PreparedDescription>()
-                for (track in batch) {
-                    val current = audioDescriptionText(track.tagsCsv)
-                    var source = current
-                    var refreshed = false
-                    if (
-                        source.isBlank() ||
-                        (mode == AudioDescriptionNormalizationScope.ALL_LIBRARY &&
-                            audioDescriptionIsVietnameseStructured(track.tagsCsv))
-                    ) {
-                        val soundId = FreesoundImporter.soundIdFromManagedUri(track.uri)
-                        if (soundId != null) {
-                            val original = application.container.freesoundClient.sound(soundId)?.description.orEmpty().trim()
-                            if (original.isNotBlank()) {
-                                source = original
-                                refreshed = true
-                            }
-                        }
-                    }
-                    if (source.isBlank()) {
-                        errors += "${track.title}: không có mô tả nguồn để chuẩn hóa."
-                    } else {
-                        prepared += PreparedDescription(
-                            track = track,
-                            kind = AudioAssetClassifier.classify(track),
-                            source = source,
-                            refreshed = refreshed,
-                        )
-                    }
+                val prepared = batch.map { track ->
+                    PreparedDescription(
+                        track = track,
+                        kind = AudioAssetClassifier.classify(track),
+                        source = audioDescriptionText(track.tagsCsv),
+                        refreshed = false,
+                    )
                 }
-                if (prepared.isNotEmpty()) {
-                    when (val result = application.container.xpkNarrationAiServices.completeAuxiliaryJson(
-                        storyId = GLOBAL_VOICE_PROFILE_STORY_ID,
-                        prompt = descriptionBatchPrompt(prepared),
-                    )) {
-                        is AppResult.Success -> {
-                            providerModel = "${result.value.provider} / ${result.value.model}"
-                            val parsed = runCatching { parseDescriptionBatch(result.value, prepared) }
-                                .getOrElse { error ->
-                                    errors += "Lô ${processed + 1}-${processed + batch.size}: ${error.message ?: "AI trả JSON không hợp lệ."}"
-                                    emptyList()
-                                }
-                            converted += parsed
-                            val returnedIds = parsed.mapTo(hashSetOf(), AudioDescriptionPreview::trackId)
-                            prepared.filter { it.track.id !in returnedIds }.forEach { missing ->
-                                errors += "${missing.track.title}: AI không trả kết quả."
+                when (val result = application.container.xpkNarrationAiServices.completeAuxiliaryJson(
+                    storyId = GLOBAL_VOICE_PROFILE_STORY_ID,
+                    prompt = descriptionBatchPrompt(prepared),
+                )) {
+                    is AppResult.Success -> {
+                        providerModel = "${result.value.provider} / ${result.value.model}"
+                        val parsed = runCatching { parseDescriptionBatch(result.value, prepared) }
+                            .getOrElse { error ->
+                                errors += "Lô ${processed + 1}-${processed + batch.size}: ${error.message ?: "AI trả JSON không hợp lệ."}"
+                                emptyList()
                             }
+                        converted += parsed
+                        val returnedIds = parsed.mapTo(hashSetOf(), AudioDescriptionPreview::trackId)
+                        prepared.filter { it.track.id !in returnedIds }.forEach { missing ->
+                            errors += "${missing.track.title}: AI không trả kết quả hợp lệ."
                         }
-                        is AppResult.Failure -> errors += "AI: ${result.message}"
                     }
+                    is AppResult.Failure -> errors += "AI: ${result.message}"
                 }
                 processed += batch.size
                 previews = converted.toList()
@@ -222,7 +238,7 @@ fun AudioDescriptionNormalizationDialog(
                         "prepared" to prepared.size.toString(),
                         "convertedTotal" to converted.size.toString(),
                         "failuresTotal" to errors.size.toString(),
-                        "sourceRefetchedTotal" to converted.count(AudioDescriptionPreview::sourceRefreshed).toString(),
+                        "sourceRefetchedTotal" to "0",
                     ),
                 )
             }
@@ -233,7 +249,16 @@ fun AudioDescriptionNormalizationDialog(
                     "processed" to processed.toString(),
                     "converted" to converted.size.toString(),
                     "failures" to errors.size.toString(),
-                    "sourceRefetched" to converted.count(AudioDescriptionPreview::sourceRefreshed).toString(),
+                    "sourceRefetched" to "0",
+                ),
+            )
+            diagnostic(
+                "AUDIO_DESCRIPTION_NORMALIZATION_DONE",
+                attributes = mapOf(
+                    "scope" to mode.name,
+                    "processed" to processed.toString(),
+                    "converted" to converted.size.toString(),
+                    "failures" to errors.size.toString(),
                 ),
             )
             running = false
@@ -265,16 +290,15 @@ fun AudioDescriptionNormalizationDialog(
             if (PlaybackQueueStore.state.value.isPlaying) {
                 ReaderPlaybackService.command(application, ReaderPlaybackService.ACTION_REFRESH)
             }
-            diagnostic(
-                "AUDIO_DESCRIPTION_APPLIED",
-                attributes = mapOf(
-                    "items" to updated.size.toString(),
-                    "music" to updated.count { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }.toString(),
-                    "ambience" to updated.count { AudioAssetClassifier.classify(it) == AudioAssetKind.AMBIENCE }.toString(),
-                    "sfx" to updated.count { AudioAssetClassifier.classify(it) == AudioAssetKind.SFX }.toString(),
-                    "sourceRefetched" to previews.count(AudioDescriptionPreview::sourceRefreshed).toString(),
-                ),
+            val applyAttributes = mapOf(
+                "items" to updated.size.toString(),
+                "music" to updated.count { AudioAssetClassifier.classify(it) == AudioAssetKind.MUSIC }.toString(),
+                "ambience" to updated.count { AudioAssetClassifier.classify(it) == AudioAssetKind.AMBIENCE }.toString(),
+                "sfx" to updated.count { AudioAssetClassifier.classify(it) == AudioAssetKind.SFX }.toString(),
+                "sourceRefetched" to "0",
             )
+            diagnostic("AUDIO_DESCRIPTION_APPLIED", attributes = applyAttributes)
+            diagnostic("AUDIO_DESCRIPTION_APPLY_DONE", attributes = applyAttributes)
             applied = true
             running = false
             job = null
@@ -287,7 +311,7 @@ fun AudioDescriptionNormalizationDialog(
         text = {
             Column(Modifier.fillMaxWidth()) {
                 Text("Áp dụng cho cùng một kho MUSIC / AMBIENCE / SFX ở cả Mode 1, 2 và 3.")
-                Text("Mô tả gốc được gửi cho cùng AI/provider/model đang dùng để phân vai. AI chỉ chuyển thành metadata tiếng Việt theo cấu trúc: Sắc thái / Dùng / Tránh; không được tự bịa nhạc cụ, vật liệu hay nguồn âm nếu mô tả gốc không nói.")
+                Text("AI dùng tên + mô tả hiện có để viết lại theo Sắc thái / Dùng / Tránh, ưu tiên điểm phân biệt thật giữa các âm gần nhau. Chức năng này không tìm Internet và không tự bịa chi tiết khi cả tên lẫn mô tả đều không hỗ trợ.")
                 HorizontalDivider(Modifier.padding(vertical = 6.dp))
                 Row(Modifier.fillMaxWidth()) {
                     Button(
@@ -303,7 +327,7 @@ fun AudioDescriptionNormalizationDialog(
                 }
                 Text("Tổng thư viện: ${tracks.size} • Đã chuẩn: $normalizedCount • Cần chuẩn: $missingCount • Trống mô tả: $blankCount")
                 if (mode == AudioDescriptionNormalizationScope.ALL_LIBRARY) {
-                    Text("TOÀN BỘ: với file Freesound, ứng dụng cố lấy lại mô tả gốc bằng sound ID trước khi AI chuẩn hóa lại. File local không có mô tả nguồn sẽ được liệt kê để bổ sung, không cho AI đoán từ tên.")
+                    Text("TOÀN BỘ: AI xem lại cả tên và mô tả đang lưu của từng file. Mục mô tả trống vẫn được xử lý thận trọng từ tên; nếu tên cũng mơ hồ, mô tả phải giữ mức khái quát và không khẳng định chi tiết chưa biết.")
                 }
                 if (running || processed > 0) {
                     Text("Đã xử lý: $processed / $total • Thành công: ${previews.size} • Cần kiểm tra: ${failures.size}")
@@ -314,7 +338,6 @@ fun AudioDescriptionNormalizationDialog(
                     LazyColumn(Modifier.fillMaxWidth().heightIn(max = 320.dp)) {
                         items(previews, key = { it.trackId }) { preview ->
                             Text("${preview.kind.name} • ${preview.title}")
-                            if (preview.sourceRefreshed) Text("Nguồn: mô tả gốc Freesound đã lấy lại")
                             Text(preview.convertedDescription)
                             HorizontalDivider(Modifier.padding(vertical = 4.dp))
                         }
@@ -379,28 +402,39 @@ private fun descriptionBatchPrompt(items: List<PreparedDescription>): String {
                     .put("id", item.track.id)
                     .put("kind", item.kind.name)
                     .put("title", item.track.title.take(160))
-                    .put("original_description", item.source.take(4_000)),
+                    .put("existing_description", item.source.take(4_000)),
             )
         }
     }
     return """
-Bạn là bộ chuẩn hóa metadata âm thanh cho ứng dụng đọc truyện.
+Bạn là biên tập viên metadata âm thanh cho bộ chọn semantic của ứng dụng đọc truyện.
 
-ĐẦU VÀO là JSON chứa id, kind, title và original_description. original_description là nguồn thông tin chính về âm thanh. title chỉ là tín hiệu hỗ trợ.
+Bạn KHÔNG có Internet và KHÔNG được giả vờ đã nghe file. Với mỗi mục, chỉ dùng hai bằng chứng được cung cấp: title và existing_description. Cả hai đều là manh mối. Mô tả hiện có có thể đúng, quá chung, trùng mẫu hoặc sai một phần, vì vậy không được mặc định tin tuyệt đối một trường.
 
-Với MỖI mục, hãy mô tả bằng tiếng Việt đúng âm thanh thực sự nghe được, không mô tả cốt truyện. Không được tự khẳng định nhạc cụ, vật liệu, hành động, không gian hay nguồn âm nếu original_description không hỗ trợ. Nếu title và original_description mâu thuẫn, ưu tiên original_description.
+MỤC TIÊU QUAN TRỌNG: description sau khi viết phải tự đứng độc lập vì bộ chọn LOCAL KHÔNG dùng title để matching. Description phải giúp phân biệt file này với các file gần giống cùng nhóm, không chỉ lặp một mẫu chung.
 
-Mỗi description phải ngắn gọn, tối đa 300 ký tự và đúng một dòng theo mẫu:
-Sắc thái: <nguồn âm/vật liệu/hành động/cường độ/nhịp/không gian nghe được>; Dùng: <cảnh/tình huống phù hợp>; Tránh: <những âm hoặc tình huống gần giống nhưng không đúng>
+Cách làm cho MỖI mục:
+1. Xác định loại âm cần mô tả từ kind.
+2. Từ title + existing_description, rút ra các đặc điểm đáng tin: nguồn âm/nhạc cụ/vật liệu/hành động, cường độ, nhịp, khoảng cách, môi trường hoặc cấu trúc thời gian.
+3. Giữ 1-3 đặc điểm PHÂN BIỆT nhất so với các âm gần loại. Ví dụ: gần/xa, nhẹ/mạnh, một phát/chuỗi/loop, gió thường/gió qua cáp, đấm vật lý/đấm ma thuật, orchestral heroic/orchestral dark, mưa trên kính/mưa ngoài rừng.
+4. Dùng trường Dùng cho tình huống phù hợp thật sự; không viết quá rộng tới mức mọi file cùng loại đều giống nhau.
+5. Dùng trường Tránh để nêu các biến thể dễ bị chọn nhầm nhưng khác file này. Không nhồi từ khóa và không mô tả cốt truyện.
+6. Nếu existing_description đã tốt và cụ thể, giữ thông tin đúng rồi chỉ làm gọn/chuẩn hơn; không thay đổi chỉ để khác câu chữ.
+7. Nếu title rất cụ thể còn mô tả cũ chung chung, được dùng title để làm mô tả chính xác hơn. Nếu title chung chung còn mô tả cụ thể, ưu tiên chi tiết cụ thể của mô tả.
+8. Nếu title và existing_description mâu thuẫn, không chọn máy móc một bên. Chỉ giữ phần có cơ sở mạnh hơn; nếu chưa đủ chắc chắn thì mô tả bảo thủ hơn.
+9. Nếu cả title và mô tả đều không xác định được một chi tiết, tuyệt đối không tự khẳng định chi tiết đó.
 
-Đặc biệt:
-- MUSIC: nêu nhạc cụ/texture chỉ khi nguồn nói rõ; ưu tiên cảm xúc, nhịp, cường độ và kiểu phối khí.
-- AMBIENCE: phân biệt chính xác gió/mưa/nước/biển/đám đông/giao thông/rừng/phòng trong nhà...
-- SFX: phân biệt nguồn + hành động + vật liệu, ví dụ đấm/đá/kiếm/nổ/vỡ/quần áo/rơi/ngã/va chạm.
-- Không thêm tên truyện, nhân vật, ID hay tên file vào description.
-- Trong trường Tránh, hãy nêu trực tiếp loại âm khác cần tránh; hạn chế cấu trúc phủ định kiểu “X không có Y” vì metadata này được dùng để đối chiếu semantic.
+Quy tắc theo kind:
+- MUSIC: ưu tiên cảm xúc, nhịp/cường độ, hướng phát triển và kiểu phối khí; chỉ nêu nhạc cụ khi title hoặc mô tả hỗ trợ. Phân biệt rõ heroic/dark/sad/romantic/tension/action/fantasy/chill và buildup/loop/đột ngột khi có bằng chứng.
+- AMBIENCE: ưu tiên nguồn môi trường vật lý + nơi chốn + thời điểm/thời tiết + khoảng cách/mật độ. Phân biệt gió/mưa/nước/biển/rừng/côn trùng/đám đông/giao thông/nội thất và field-recording với sound-design khi có bằng chứng.
+- SFX: ưu tiên nguồn + hành động + vật liệu + cường độ/cấu trúc. Phân biệt đấm/đá/ngã/rơi, kiếm vung/va/chém trúng, điện hum/zap/arc, nổ thường/cinematic/phép, whoosh nhanh/dài/nặng, kính nứt/vỡ, đá va/lăn/sạt.
 
-Chỉ trả JSON hợp lệ, không markdown:
+Mỗi description phải là MỘT DÒNG, tối đa 280 ký tự để luôn an toàn dưới giới hạn lưu 300 ký tự, đúng cấu trúc:
+Sắc thái: <đặc điểm nghe được và điểm phân biệt>; Dùng: <tình huống phù hợp>; Tránh: <biến thể gần giống nhưng không đúng>
+
+Không thêm ID, tên file, tên truyện, nhân vật, lời quảng cáo, nguồn tải hay giải thích ngoài ba trường. Không dùng markdown.
+
+Chỉ trả JSON hợp lệ:
 {"items":[{"id":"...","description":"Sắc thái: ...; Dùng: ...; Tránh: ..."}]}
 
 INPUT:
@@ -423,7 +457,8 @@ private fun parseDescriptionBatch(
         val row = array.optJSONObject(index) ?: continue
         val id = row.optString("id").trim()
         val source = preparedById[id] ?: continue
-        val description = row.optString("description").replace(Regex("\\s+"), " ").trim().take(300)
+        val description = row.optString("description").replace(Regex("\\s+"), " ").trim()
+        if (description.length > 300) continue
         val lower = description.lowercase()
         val valid = ("sắc thái:" in lower || "sac thai:" in lower) &&
             ("dùng:" in lower || "dung:" in lower) &&
@@ -435,7 +470,7 @@ private fun parseDescriptionBatch(
             kind = source.kind,
             sourceDescription = source.source,
             convertedDescription = description,
-            sourceRefreshed = source.refreshed,
+            sourceRefreshed = false,
         )
     }
     return output.distinctBy(AudioDescriptionPreview::trackId)

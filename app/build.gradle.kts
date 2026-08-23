@@ -138,11 +138,14 @@ android {
     sourceSets["androidTest"].assets.srcDir("$projectDir/schemas")
 
     packaging {
+        jniLibs.useLegacyPackaging = true
         resources.excludes += setOf(
             "/META-INF/{AL2.0,LGPL2.1}",
             "META-INF/DEPENDENCIES",
             "META-INF/LICENSE*",
             "META-INF/NOTICE*",
+            "native/lib/**",
+            "com/sun/jna/**/libjnidispatch.*",
         )
     }
 }

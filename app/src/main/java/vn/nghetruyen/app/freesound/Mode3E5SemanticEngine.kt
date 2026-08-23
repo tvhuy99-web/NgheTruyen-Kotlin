@@ -87,9 +87,6 @@ internal object Mode3E5SemanticEngine {
 
     fun initialize(context: Context) {
         applicationContext = context.applicationContext
-        if (isInstalled()) {
-            backgroundScope.launch { ensureRuntime() }
-        }
     }
 
     fun status(): Status = Status(
@@ -154,7 +151,7 @@ internal object Mode3E5SemanticEngine {
             )
             writeManifest(directory)
             closeRuntime()
-            requireNotNull(ensureRuntime()) { lastError ?: "Không khởi tạo được mô hình ngữ nghĩa." }
+            synchronized(memoryLock) { memoryCache.clear() }
             lastError = null
         }.onFailure { error ->
             lastError = error.message ?: error.javaClass.simpleName
@@ -258,7 +255,7 @@ internal object Mode3E5SemanticEngine {
                 )
                 val environment = OrtEnvironment.getEnvironment()
                 val options = OrtSession.SessionOptions().apply {
-                    setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+                    setOptimizationLevel(OrtSession.SessionOptions.OptLevel.BASIC_OPT)
                 }
                 val session = environment.createSession(File(modelDirectory(context), MODEL_FILE).absolutePath, options)
                 Runtime(environment, session, tokenizer).also {
@@ -552,8 +549,8 @@ internal object Mode3E5SemanticEngine {
     private const val APPROXIMATE_PACK_BYTES = 136_000_000L
     private const val TOKENIZER_APPROXIMATE_BYTES = 17_082_730L
     private const val EMBEDDING_DIMENSIONS = 384
-    private const val MAX_TOKENS = 512
-    private const val PREWARM_BATCH_SIZE = 12
+    private const val MAX_TOKENS = 192
+    private const val PREWARM_BATCH_SIZE = 4
     private const val MEMORY_CACHE_ENTRIES = 768
     private const val DOWNLOAD_BUFFER_BYTES = 128 * 1024
     private const val CACHE_MAGIC = 0x4535534D

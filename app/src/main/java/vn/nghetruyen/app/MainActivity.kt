@@ -28,7 +28,6 @@ import vn.nghetruyen.app.core.model.AudioExportFormat
 import vn.nghetruyen.app.core.model.ReaderMode
 import vn.nghetruyen.app.following.FollowingUpdateWorker
 import vn.nghetruyen.app.freesound.Mode3E5SemanticEngine
-import vn.nghetruyen.app.freesound.Mode3LibraryAssetMatcher
 import vn.nghetruyen.app.playback.ReaderVolumeKeyPolicy
 import vn.nghetruyen.app.sourceplatform.installExtensionHostKernel
 import vn.nghetruyen.app.startup.StartupWorkGate
@@ -313,10 +312,7 @@ class MainActivity : ComponentActivity() {
 
     private fun prepareSemanticModel() {
         val status = Mode3E5SemanticEngine.status()
-        if (status.installed) {
-            lifecycleScope.launch { prewarmSemanticLibrary() }
-            return
-        }
+        if (status.installed) return
         if (semanticModelPromptShown || isFinishing) return
         semanticModelPromptShown = true
         AlertDialog.Builder(this)
@@ -344,7 +340,7 @@ class MainActivity : ComponentActivity() {
                 val totalMb = progress.totalBytes / (1024.0 * 1024.0)
                 val percent = (progress.fraction * 100.0).toInt().coerceIn(0, 100)
                 runOnUiThread {
-                    if (dialog.isShowing) {
+                    if (!isFinishing && !isDestroyed && dialog.isShowing) {
                         dialog.setMessage(
                             "${progress.currentFile}\n$percent% • %.1f / %.1f MB".format(
                                 Locale.ROOT, downloadedMb, totalMb,
@@ -353,17 +349,19 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
-            dialog.dismiss()
+            if (!isFinishing && !isDestroyed && dialog.isShowing) dialog.dismiss()
+            if (isFinishing || isDestroyed) return@launch
             result.onSuccess {
-                AlertDialog.Builder(this@MainActivity)
-                    .setTitle("ĐÃ CÀI MÔ HÌNH NGỮ NGHĨA")
-                    .setMessage(
-                        "Multilingual E5 Small đã sẵn sàng. Ứng dụng sẽ lập chỉ mục mô tả âm thanh ở nền; " +
-                            "những lần cập nhật APK sau không cần tải lại mô hình này.",
-                    )
-                    .setPositiveButton("OK", null)
-                    .show()
-                prewarmSemanticLibrary()
+                if (!isFinishing && !isDestroyed) {
+                    AlertDialog.Builder(this@MainActivity)
+                        .setTitle("ĐÃ TẢI MÔ HÌNH NGỮ NGHĨA")
+                        .setMessage(
+                            "Multilingual E5 Small đã được tải và kiểm tra toàn vẹn. " +
+                                "Mô hình chỉ được nạp khi Mode 3 thực sự cần, để tránh tăng RAM ngay sau khi tải.",
+                        )
+                        .setPositiveButton("OK", null)
+                        .show()
+                }
             }.onFailure { error ->
                 AlertDialog.Builder(this@MainActivity)
                     .setTitle("KHÔNG TẢI ĐƯỢC MÔ HÌNH")
@@ -375,11 +373,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private suspend fun prewarmSemanticLibrary() {
-        val container = (application as NgheTruyenApplication).container
-        val tracks = container.database.sceneMusicTrackDao().listAll()
-        Mode3LibraryAssetMatcher.prewarmSemanticIndex(tracks)
-    }
 
     private fun handleBackupRestoreSelection(uri: Uri) {
         val container = (application as NgheTruyenApplication).container

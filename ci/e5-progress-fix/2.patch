@@ -1,0 +1,79 @@
+--- a/app/src/main/java/vn/nghetruyen/app/ai/XpkNarrationAiServices.kt
++++ b/app/src/main/java/vn/nghetruyen/app/ai/XpkNarrationAiServices.kt
+@@ -2,14 +2,19 @@
+ 
+ import android.content.Context
+ import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.suspendCancellableCoroutine
+ import kotlinx.coroutines.withContext
++import okhttp3.Call
++import okhttp3.Callback
+ import okhttp3.MediaType.Companion.toMediaType
+ import okhttp3.OkHttpClient
+ import okhttp3.Request
+ import okhttp3.RequestBody.Companion.toRequestBody
++import okhttp3.Response
+ import org.json.JSONArray
+ import org.json.JSONObject
+ import vn.nghetruyen.app.NgheTruyenApplication
++import vn.nghetruyen.app.audio.AudioPipelineJournal
+ import vn.nghetruyen.app.core.common.AppResult
+ import vn.nghetruyen.app.core.model.GLOBAL_VOICE_PROFILE_STORY_ID
+ import vn.nghetruyen.app.data.local.VoiceRoleEntity
+@@ -449,7 +454,7 @@
+                     .apply { requestData.headers.forEach { (name, value) -> header(name, value) } }
+                     .post(requestData.body.toRequestBody(JSON_MEDIA_TYPE))
+                     .build()
+-                val response = callClient.newCall(request).execute()
++                val response = executeCancellable(callClient, request)
+                 response.use {
+                     if (response.isRedirect) {
+                         lastFailure = failure("AI_REDIRECT_BLOCKED", "Endpoint AI trả redirect; yêu cầu URL API trực tiếp.")
+@@ -497,6 +502,24 @@
+         result
+     }
+ 
++    private suspend fun executeCancellable(client: OkHttpClient, request: Request): Response =
++        suspendCancellableCoroutine { continuation ->
++            val call = client.newCall(request)
++            continuation.invokeOnCancellation { call.cancel() }
++            call.enqueue(
++                object : Callback {
++                    override fun onFailure(call: Call, error: IOException) {
++                        if (continuation.isActive) continuation.resumeWith(Result.failure(error))
++                    }
++
++                    override fun onResponse(call: Call, response: Response) {
++                        if (continuation.isActive) continuation.resumeWith(Result.success(response))
++                        else response.close()
++                    }
++                },
++            )
++        }
++
+     private fun buildRequests(config: EffectiveConfig, apiKey: String, prompt: String): List<AiRequest> = when (config.provider) {
+         AiProvider.GEMINI -> {
+             val model = config.model.removePrefix("models/").trim()
+@@ -654,12 +677,21 @@
+         attributes: Map<String, String> = emptyMap(),
+         traceId: String? = null,
+     ) {
++        val resolvedTraceId = traceId ?: "app:${UUID.randomUUID()}"
++        AudioPipelineJournal.record(
++            context = appContext,
++            name = name,
++            sourceId = "ai",
++            traceId = resolvedTraceId,
++            severity = severity.name,
++            attributes = attributes,
++        )
+         (appContext as? NgheTruyenApplication)?.container?.sourceDiagnostics?.mark(
+             name = name,
+             category = DiagnosticCategory.RUNTIME,
+             severity = severity,
+             sourceId = "ai",
+-            traceId = traceId ?: "app:${UUID.randomUUID()}",
++            traceId = resolvedTraceId,
+             attributes = attributes,
+         )
+     }

@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   export-cache:
@@ -17,6 +17,8 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -48,6 +50,7 @@ jobs:
           ./gradlew --no-daemon --stacktrace :app:assembleDebug -x test -x connectedAndroidTest -x lint
 
       - name: Pack reusable Gradle cache
+        if: success()
         shell: bash
         run: |
           mkdir -p dist/cache-root/.gradle/caches dist/cache-root/.gradle/wrapper
@@ -68,6 +71,7 @@ jobs:
           du -h dist/NgheTruyen-Gradle-Cache-20260824.tar.gz
 
       - name: Upload Gradle cache artifact
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: NgheTruyen-Gradle-Cache-20260824
@@ -77,3 +81,19 @@ jobs:
           path: |
             dist/NgheTruyen-Gradle-Cache-20260824.tar.gz
             dist/NgheTruyen-Gradle-Cache-20260824.tar.gz.sha256
+
+      - name: Publish export run metadata
+        if: always()
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git switch --detach origin/main
+          git switch -C gradle-cache-export-meta
+          printf '%s\n' "$GITHUB_RUN_ID" > .gradle-cache-export-run-id
+          printf '%s\n' "$GITHUB_RUN_ATTEMPT" > .gradle-cache-export-run-attempt
+          printf '%s\n' "$GITHUB_SHA" > .gradle-cache-export-source-sha
+          git add .gradle-cache-export-run-id .gradle-cache-export-run-attempt .gradle-cache-export-source-sha
+          git commit -m "ci: record local Gradle cache export run $GITHUB_RUN_ID" || true
+          git push --force origin HEAD:gradle-cache-export-meta

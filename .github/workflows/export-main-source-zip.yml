@@ -1,0 +1,42 @@
+name: Export Main Source ZIP
+
+on:
+  push:
+    branches:
+      - build/main-source-zip-20260824
+    paths:
+      - .github/workflows/export-main-source-zip.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact main commit
+        uses: actions/checkout@v4
+        with:
+          ref: fbe1650ca755e0c039a9eca2b1a751b7c9a0ca3e
+          fetch-depth: 0
+
+      - name: Verify commit and create source ZIP
+        run: |
+          test "$(git rev-parse HEAD)" = "fbe1650ca755e0c039a9eca2b1a751b7c9a0ca3e"
+          git archive \
+            --format=zip \
+            --prefix=NgheTruyen-Kotlin-main/ \
+            --output=NgheTruyen-Kotlin-main-full-project.zip \
+            fbe1650ca755e0c039a9eca2b1a751b7c9a0ca3e
+          sha256sum NgheTruyen-Kotlin-main-full-project.zip > NgheTruyen-Kotlin-main-full-project.sha256
+          ls -lh NgheTruyen-Kotlin-main-full-project.zip
+
+      - name: Upload source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: NgheTruyen-Kotlin-main-full-project
+          path: |
+            NgheTruyen-Kotlin-main-full-project.zip
+            NgheTruyen-Kotlin-main-full-project.sha256
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,126 @@
+--- a/app/src/main/java/vn/nghetruyen/app/ui/components/FreesoundSettingsCard.kt
++++ b/app/src/main/java/vn/nghetruyen/app/ui/components/FreesoundSettingsCard.kt
+@@ -5,6 +5,7 @@
+ import androidx.compose.foundation.layout.Row
+ import androidx.compose.foundation.layout.fillMaxWidth
+ import androidx.compose.foundation.layout.padding
++import androidx.compose.material3.AlertDialog
+ import androidx.compose.material3.Button
+ import androidx.compose.material3.Card
+ import androidx.compose.material3.MaterialTheme
+@@ -46,6 +47,37 @@
+     var semanticStatus by remember { mutableStateOf(Mode3E5SemanticEngine.status()) }
+     var semanticBusy by remember { mutableStateOf(false) }
+     var semanticProgress by remember { mutableStateOf<String?>(null) }
++    var showSemanticIndexDialog by remember { mutableStateOf(false) }
++    var semanticIndexProgress by remember { mutableStateOf<Mode3E5SemanticEngine.IndexProgress?>(null) }
++    var semanticIndexError by remember { mutableStateOf<String?>(null) }
++    var semanticIndexSummary by remember { mutableStateOf<String?>(null) }
++
++    fun startSemanticIndexing() {
++        semanticBusy = true
++        showSemanticIndexDialog = true
++        semanticIndexProgress = null
++        semanticIndexError = null
++        semanticIndexSummary = null
++        scope.launch {
++            val tracks = application.container.database.sceneMusicTrackDao().listAll()
++            val result = Mode3LibraryAssetMatcher.prewarmSemanticIndexAwait(tracks) { progress ->
++                semanticIndexProgress = progress
++            }
++            semanticBusy = false
++            semanticStatus = Mode3E5SemanticEngine.status()
++            result.onSuccess { summary ->
++                semanticIndexSummary = if (summary.total <= 0) {
++                    "Không có mô tả âm thanh hợp lệ cần lập chỉ mục."
++                } else {
++                    "Hoàn tất ${summary.total}/${summary.total} • mới ${summary.indexedThisRun} • có sẵn ${summary.cachedAtStart}."
++                }
++                semanticProgress = "Chỉ mục ngữ nghĩa đã sẵn sàng."
++            }.onFailure { error ->
++                semanticIndexError = error.message ?: "Không lập được chỉ mục ngữ nghĩa."
++                semanticProgress = "Lập chỉ mục thất bại; mở hộp thoại để xem lỗi."
++            }
++        }
++    }
+ 
+     LaunchedEffect(statusMessage) {
+         statusMessage?.takeIf(String::isNotBlank)?.let(view::announceForAccessibility)
+@@ -147,13 +179,14 @@
+                                 val percent = (progress.fraction * 100.0).toInt().coerceIn(0, 100)
+                                 semanticProgress = "$percent% • ${progress.currentFile}"
+                             }
+-                            semanticBusy = false
+                             semanticStatus = Mode3E5SemanticEngine.status()
+                             result.onSuccess {
+-                                semanticProgress = "Đã tải xong. Đang lập chỉ mục mô tả âm thanh ở nền."
+-                                val tracks = application.container.database.sceneMusicTrackDao().listAll()
+-                                Mode3LibraryAssetMatcher.prewarmSemanticIndex(tracks)
+-                            }.onFailure { semanticProgress = it.message ?: "Không tải được mô hình." }
++                                semanticProgress = "Đã tải xong. Bắt đầu lập chỉ mục ngữ nghĩa."
++                                startSemanticIndexing()
++                            }.onFailure {
++                                semanticBusy = false
++                                semanticProgress = it.message ?: "Không tải được mô hình."
++                            }
+                         }
+                     },
+                     enabled = !semanticBusy,
+@@ -162,17 +195,7 @@
+             } else {
+                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                     Button(
+-                        onClick = {
+-                            scope.launch {
+-                                semanticBusy = true
+-                                semanticProgress = "Đang lập chỉ mục các mô tả còn thiếu…"
+-                                val tracks = application.container.database.sceneMusicTrackDao().listAll()
+-                                Mode3LibraryAssetMatcher.prewarmSemanticIndex(tracks)
+-                                semanticBusy = false
+-                                semanticStatus = Mode3E5SemanticEngine.status()
+-                                semanticProgress = "Đã yêu cầu lập chỉ mục ở nền."
+-                            }
+-                        },
++                        onClick = { startSemanticIndexing() },
+                         enabled = !semanticBusy,
+                         modifier = Modifier.weight(1f),
+                     ) { Text("LẬP CHỈ MỤC") }
+@@ -191,4 +214,38 @@
+             }
+         }
+     }
++
++    if (showSemanticIndexDialog) {
++        AlertDialog(
++            onDismissRequest = { if (!semanticBusy) showSemanticIndexDialog = false },
++            title = { Text("CHUẨN HÓA / LẬP CHỈ MỤC NGỮ NGHĨA") },
++            text = {
++                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
++                    Text("Multilingual E5 Small INT8")
++                    semanticIndexProgress?.let { progress ->
++                        Text("Tiến độ: ${progress.percent}%")
++                        Text("Đã xong: ${progress.completed} / ${progress.total}")
++                        Text("Còn chờ: ${progress.pending}")
++                        Text("Có sẵn: ${progress.cachedAtStart} • Mới xử lý: ${progress.indexedThisRun}")
++                        Text(
++                            when (progress.phase) {
++                                "LOADING_MODEL" -> "Trạng thái: Đang nạp mô hình"
++                                "INDEXING" -> "Trạng thái: Đang tạo embedding"
++                                "DONE" -> "Trạng thái: Hoàn tất"
++                                else -> "Trạng thái: ${progress.phase}"
++                            },
++                        )
++                    } ?: Text("Đang đọc thư viện và chuẩn bị mô hình…")
++                    semanticIndexSummary?.let { Text(it) }
++                    semanticIndexError?.let { Text("Lỗi: $it") }
++                    if (semanticBusy) Text("Quá trình đang chạy; trạng thái sẽ tự cập nhật trong hộp thoại này.")
++                }
++            },
++            confirmButton = {
++                if (!semanticBusy) {
++                    TextButton(onClick = { showSemanticIndexDialog = false }) { Text("ĐÓNG") }
++                }
++            },
++        )
++    }
+ }

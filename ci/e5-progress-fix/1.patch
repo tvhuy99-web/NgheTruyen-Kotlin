@@ -1,0 +1,96 @@
+--- a/app/src/main/java/vn/nghetruyen/app/MainActivity.kt
++++ b/app/src/main/java/vn/nghetruyen/app/MainActivity.kt
+@@ -28,6 +28,7 @@
+ import vn.nghetruyen.app.core.model.ReaderMode
+ import vn.nghetruyen.app.following.FollowingUpdateWorker
+ import vn.nghetruyen.app.freesound.Mode3E5SemanticEngine
++import vn.nghetruyen.app.freesound.Mode3LibraryAssetMatcher
+ import vn.nghetruyen.app.playback.ReaderVolumeKeyPolicy
+ import vn.nghetruyen.app.sourceplatform.installExtensionHostKernel
+ import vn.nghetruyen.app.startup.StartupWorkGate
+@@ -353,14 +354,7 @@
+             if (isFinishing || isDestroyed) return@launch
+             result.onSuccess {
+                 if (!isFinishing && !isDestroyed) {
+-                    AlertDialog.Builder(this@MainActivity)
+-                        .setTitle("ĐÃ TẢI MÔ HÌNH NGỮ NGHĨA")
+-                        .setMessage(
+-                            "Multilingual E5 Small đã được tải và kiểm tra toàn vẹn. " +
+-                                "Mô hình chỉ được nạp khi Mode 3 thực sự cần, để tránh tăng RAM ngay sau khi tải.",
+-                        )
+-                        .setPositiveButton("OK", null)
+-                        .show()
++                    indexSemanticLibraryAfterDownload()
+                 }
+             }.onFailure { error ->
+                 AlertDialog.Builder(this@MainActivity)
+@@ -371,6 +365,69 @@
+                     .show()
+             }
+         }
++    }
++
++
++    private fun indexSemanticLibraryAfterDownload() {
++        if (isFinishing || isDestroyed) return
++        val dialog = AlertDialog.Builder(this)
++            .setTitle("ĐANG CHUẨN HÓA / LẬP CHỈ MỤC NGỮ NGHĨA")
++            .setMessage("Đang đọc thư viện và nạp Multilingual E5 Small…")
++            .setCancelable(false)
++            .create()
++        dialog.show()
++        lifecycleScope.launch {
++            val tracks = (application as NgheTruyenApplication).container.database.sceneMusicTrackDao().listAll()
++            val result = Mode3LibraryAssetMatcher.prewarmSemanticIndexAwait(tracks) { progress ->
++                runOnUiThread {
++                    if (!isFinishing && !isDestroyed && dialog.isShowing) {
++                        dialog.setMessage(
++                            buildString {
++                                append("Multilingual E5 Small INT8\n")
++                                append("Thư viện: ${tracks.size} tệp\n")
++                                append("Tiến độ: ${progress.percent}%\n")
++                                append("Đã xong: ${progress.completed} / ${progress.total} mục ngữ nghĩa\n")
++                                append("Còn chờ: ${progress.pending}\n")
++                                append("Đã có sẵn: ${progress.cachedAtStart} • Mới xử lý: ${progress.indexedThisRun}\n")
++                                append(
++                                    when (progress.phase) {
++                                        "LOADING_MODEL" -> "Trạng thái: Đang nạp mô hình…"
++                                        "INDEXING" -> "Trạng thái: Đang tạo embedding…"
++                                        "DONE" -> "Trạng thái: Hoàn tất"
++                                        else -> "Trạng thái: ${progress.phase}"
++                                    },
++                                )
++                            },
++                        )
++                    }
++                }
++            }
++            if (!isFinishing && !isDestroyed && dialog.isShowing) dialog.dismiss()
++            if (isFinishing || isDestroyed) return@launch
++            result.onSuccess { summary ->
++                AlertDialog.Builder(this@MainActivity)
++                    .setTitle("MÔ HÌNH NGỮ NGHĨA ĐÃ SẴN SÀNG")
++                    .setMessage(
++                        if (summary.total <= 0) {
++                            "Multilingual E5 Small đã được tải và nạp thành công. Hiện chưa có mô tả âm thanh hợp lệ để lập chỉ mục."
++                        } else {
++                            "Đã hoàn tất ${summary.total}/${summary.total} mục ngữ nghĩa. " +
++                                "Mới tạo ${summary.indexedThisRun}, đã có sẵn ${summary.cachedAtStart}."
++                        },
++                    )
++                    .setPositiveButton("OK", null)
++                    .show()
++            }.onFailure { error ->
++                AlertDialog.Builder(this@MainActivity)
++                    .setTitle("LỖI LẬP CHỈ MỤC NGỮ NGHĨA")
++                    .setMessage(
++                        (error.message ?: "Không lập được chỉ mục Multilingual E5 Small.") +
++                            "\n\nMô hình vẫn được giữ trên thiết bị. Bạn có thể thử lại trong Cài đặt > Freesound.",
++                    )
++                    .setPositiveButton("OK", null)
++                    .show()
++            }
++        }
+     }
+ 
+ 

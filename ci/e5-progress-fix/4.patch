@@ -1,0 +1,268 @@
+--- a/app/src/main/java/vn/nghetruyen/app/freesound/FreesoundImporter.kt
++++ b/app/src/main/java/vn/nghetruyen/app/freesound/FreesoundImporter.kt
+@@ -21,12 +21,16 @@
+ import kotlinx.coroutines.withContext
+ import okhttp3.OkHttpClient
+ import okhttp3.Request
++import vn.nghetruyen.app.NgheTruyenApplication
+ import vn.nghetruyen.app.audio.AudioAssetClassifier
+ import vn.nghetruyen.app.audio.AudioAssetKind
++import vn.nghetruyen.app.audio.AudioPipelineJournal
+ import vn.nghetruyen.app.audio.PcmLoudnessEstimator
+ import vn.nghetruyen.app.audio.SceneMusicAnalysisWorker
+ import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
+ import vn.nghetruyen.app.data.repository.LibraryRepository
++import vn.nghetruyen.source.diagnostics.DiagnosticCategory
++import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
+ 
+ data class FreesoundImportResult(
+     val trackId: String,
+@@ -69,6 +73,17 @@
+         normalizationTargetLufs: Float,
+         semanticDescription: String = "",
+     ): Result<FreesoundImportResult> = withContext(Dispatchers.IO) {
++        val traceId = "freesound-import:${sound.id}:${UUID.randomUUID()}"
++        diagnostic(
++            name = "FREESOUND_IMPORTER_START",
++            traceId = traceId,
++            attributes = mapOf(
++                "soundId" to sound.id.toString(),
++                "kind" to kind.name,
++                "targetLufs" to normalizationTargetLufs.toString(),
++                "candidateCount" to previewCandidatesForImport(sound).size.toString(),
++            ),
++        )
+         soundImportLock(sound.id).withLock {
+             cleanupStalePartFiles(appContext)
+             val duplicateCheck = runCatching { existingTracksProvider() }
+@@ -121,6 +136,7 @@
+                         return@withLock resumeExistingNormalization(
+                             track = exactTitleTrack,
+                             normalizationTargetLufs = normalizationTargetLufs,
++                            traceId = traceId,
+                         )
+                     }
+                     else -> Unit
+@@ -137,6 +153,7 @@
+                 return@withLock resumeExistingNormalization(
+                     track = existingFileTrack,
+                     normalizationTargetLufs = normalizationTargetLufs,
++                    traceId = traceId,
+                 )
+             }
+             matches.forEach { stale ->
+@@ -144,19 +161,34 @@
+                 deleteManagedFile(appContext, stale.uri)
+             }
+ 
+-            importPreviewLocked(sound, kind, normalizationTargetLufs, semanticDescription)
++            importPreviewLocked(sound, kind, normalizationTargetLufs, semanticDescription, traceId)
+         }
+     }
+ 
+     private suspend fun resumeExistingNormalization(
+         track: SceneMusicTrackEntity,
+         normalizationTargetLufs: Float,
++        traceId: String,
+     ): Result<FreesoundImportResult> {
+         val marker = normalizationMarker(track.uri)
++        diagnostic(
++            name = "FREESOUND_NORMALIZATION_RESUME_START",
++            traceId = traceId,
++            attributes = mapOf("trackId" to track.id, "title" to track.title.take(160)),
++        )
+         return try {
+             marker?.parentFile?.mkdirs()
+             marker?.writeText("normalizing", Charsets.UTF_8)
+             val normalizationStartedNanos = System.nanoTime()
++            diagnostic(
++                name = "FREESOUND_NORMALIZATION_START",
++                traceId = traceId,
++                attributes = buildMap {
++                    put("trackId", track.id)
++                    put("targetLufs", normalizationTargetLufs.toString())
++                    rawSoundIdFromManagedUri(track.uri)?.let { put("soundId", it.toString()) }
++                },
++            )
+             val workId = SceneMusicAnalysisWorker.enqueue(
+                 context = appContext,
+                 trackId = track.id,
+@@ -166,6 +198,14 @@
+             awaitNormalization(workId, track.id, normalizationTargetLufs)
+             val normalizationElapsedMs = (System.nanoTime() - normalizationStartedNanos) / 1_000_000L
+             marker?.delete()
++            diagnostic(
++                name = "FREESOUND_NORMALIZATION_RESUME_DONE",
++                traceId = traceId,
++                attributes = mapOf(
++                    "trackId" to track.id,
++                    "elapsedMs" to normalizationElapsedMs.toString(),
++                ),
++            )
+             Result.success(
+                 FreesoundImportResult(
+                     trackId = track.id,
+@@ -204,6 +244,7 @@
+         kind: AudioAssetKind,
+         normalizationTargetLufs: Float,
+         semanticDescription: String,
++        traceId: String,
+     ): Result<FreesoundImportResult> {
+         val candidates = previewCandidatesForImport(sound)
+         if (candidates.isEmpty()) {
+@@ -236,6 +277,8 @@
+                 previewUrl = previewUrl,
+                 directory = directory,
+                 callTimeoutMs = remainingMs.coerceAtMost(PER_PREVIEW_MAX_CALL_MS),
++                traceId = traceId,
++                attemptNumber = attempted,
+             )
+             if (attempt.isSuccess) return attempt
+             val error = attempt.exceptionOrNull()
+@@ -270,11 +313,24 @@
+         previewUrl: String,
+         directory: File,
+         callTimeoutMs: Long,
++        traceId: String,
++        attemptNumber: Int,
+     ): Result<FreesoundImportResult> {
+         if (!previewUrl.startsWith("https://", ignoreCase = true)) {
+             return Result.failure(IllegalArgumentException("Địa chỉ preview Freesound không an toàn."))
+         }
+ 
++        diagnostic(
++            name = "FREESOUND_DOWNLOAD_START",
++            traceId = traceId,
++            attributes = mapOf(
++                "soundId" to sound.id.toString(),
++                "attempt" to attemptNumber.toString(),
++                "format" to extensionForPreviewUrl(previewUrl),
++                "callTimeoutMs" to callTimeoutMs.toString(),
++            ),
++        )
++
+         val extension = extensionForPreviewUrl(previewUrl)
+         val finalFile = File(
+             directory,
+@@ -298,6 +354,7 @@
+                 .readTimeout(minOf(PREVIEW_STALL_TIMEOUT_MS, callTimeoutMs).coerceAtLeast(500L), TimeUnit.MILLISECONDS)
+                 .callTimeout(callTimeoutMs.coerceAtLeast(500L), TimeUnit.MILLISECONDS)
+                 .build()
++            var lastJournalBytes = 0L
+             boundedClient.newCall(request).execute().use { response ->
+                 if (!response.isSuccessful) {
+                     throw IllegalStateException("Không tải được preview Freesound (HTTP ${response.code}).")
+@@ -321,6 +378,19 @@
+                                 throw IllegalStateException("Preview Freesound vượt giới hạn dung lượng cho phép.")
+                             }
+                             output.write(buffer, 0, read)
++                            if (total - lastJournalBytes >= DOWNLOAD_JOURNAL_STEP_BYTES) {
++                                lastJournalBytes = total
++                                diagnostic(
++                                    name = "FREESOUND_DOWNLOAD_PROGRESS",
++                                    traceId = traceId,
++                                    attributes = mapOf(
++                                        "soundId" to sound.id.toString(),
++                                        "attempt" to attemptNumber.toString(),
++                                        "downloadedBytes" to total.toString(),
++                                        "declaredBytes" to declaredLength.toString(),
++                                    ),
++                                )
++                            }
+                         }
+                     }
+                 }
+@@ -335,6 +405,16 @@
+             }
+             validateDownloadedAudio(finalFile)
+             val downloadElapsedMs = (System.nanoTime() - downloadStartedNanos) / 1_000_000L
++            diagnostic(
++                name = "FREESOUND_DOWNLOAD_DONE",
++                traceId = traceId,
++                attributes = mapOf(
++                    "soundId" to sound.id.toString(),
++                    "attempt" to attemptNumber.toString(),
++                    "bytes" to finalFile.length().toString(),
++                    "elapsedMs" to downloadElapsedMs.toString(),
++                ),
++            )
+             markerFile.writeText("normalizing", Charsets.UTF_8)
+ 
+             val uri = Uri.fromFile(finalFile).toString()
+@@ -365,6 +445,15 @@
+             awaitNormalization(workId, trackId, normalizationTargetLufs)
+             val normalizationElapsedMs = (System.nanoTime() - normalizationStartedNanos) / 1_000_000L
+             markerFile.delete()
++            diagnostic(
++                name = "FREESOUND_NORMALIZATION_DONE",
++                traceId = traceId,
++                attributes = mapOf(
++                    "soundId" to sound.id.toString(),
++                    "trackId" to trackId,
++                    "elapsedMs" to normalizationElapsedMs.toString(),
++                ),
++            )
+ 
+             Result.success(
+                 FreesoundImportResult(
+@@ -406,6 +495,18 @@
+                 )
+                 else -> error
+             }
++            diagnostic(
++                name = "FREESOUND_IMPORTER_FAILED",
++                traceId = traceId,
++                severity = DiagnosticSeverity.WARN,
++                attributes = mapOf(
++                    "soundId" to sound.id.toString(),
++                    "attempt" to attemptNumber.toString(),
++                    "errorType" to surfaced.javaClass.simpleName,
++                    "error" to surfaced.message.orEmpty().take(300),
++                    "preserveFile" to preserve.toString(),
++                ),
++            )
+             Result.failure(surfaced)
+         }
+     }
+@@ -459,6 +560,33 @@
+         }
+     }
+ 
++    private fun diagnostic(
++        name: String,
++        traceId: String,
++        severity: DiagnosticSeverity = DiagnosticSeverity.INFO,
++        attributes: Map<String, String> = emptyMap(),
++    ) {
++        AudioPipelineJournal.record(
++            context = appContext,
++            name = name,
++            sourceId = "freesound-importer",
++            traceId = traceId,
++            severity = severity.name,
++            attributes = attributes,
++        )
++        val application = appContext as? NgheTruyenApplication ?: return
++        runCatching {
++            application.container.sourceDiagnostics.mark(
++                name = name,
++                category = DiagnosticCategory.RUNTIME,
++                severity = severity,
++                sourceId = "freesound",
++                traceId = traceId,
++                attributes = attributes,
++            )
++        }
++    }
++
+     companion object {
+         internal fun duplicateTitleKey(value: String): String = java.text.Normalizer
+             .normalize(
+@@ -481,6 +609,7 @@
+         private const val UNKNOWN_LENGTH_REQUIRED_BYTES = 12L * 1024L * 1024L
+         private const val NORMALIZATION_POLL_MS = 120L
+         private const val DOWNLOAD_BUFFER_BYTES = 64 * 1024
++        private const val DOWNLOAD_JOURNAL_STEP_BYTES = 1L * 1024L * 1024L
+         internal const val PREVIEW_IMPORT_BUDGET_MS = 180_000L
+         private const val PER_PREVIEW_MAX_CALL_MS = 180_000L
+         private const val PREVIEW_STALL_TIMEOUT_MS = 20_000L

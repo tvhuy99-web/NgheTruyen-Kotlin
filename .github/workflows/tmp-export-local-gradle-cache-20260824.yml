@@ -5,6 +5,10 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/tmp-export-local-gradle-cache-20260824.yml'
+  pull_request:
+    types: [opened, reopened, synchronize]
+    paths:
+      - '.gradle-cache-export-trigger'
   workflow_dispatch:
 
 permissions:
@@ -81,19 +85,3 @@ jobs:
           path: |
             dist/NgheTruyen-Gradle-Cache-20260824.tar.gz
             dist/NgheTruyen-Gradle-Cache-20260824.tar.gz.sha256
-
-      - name: Publish export run metadata
-        if: always()
-        shell: bash
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch origin main
-          git switch --detach origin/main
-          git switch -C gradle-cache-export-meta
-          printf '%s\n' "$GITHUB_RUN_ID" > .gradle-cache-export-run-id
-          printf '%s\n' "$GITHUB_RUN_ATTEMPT" > .gradle-cache-export-run-attempt
-          printf '%s\n' "$GITHUB_SHA" > .gradle-cache-export-source-sha
-          git add .gradle-cache-export-run-id .gradle-cache-export-run-attempt .gradle-cache-export-source-sha
-          git commit -m "ci: record local Gradle cache export run $GITHUB_RUN_ID" || true
-          git push --force origin HEAD:gradle-cache-export-meta

@@ -1,0 +1,113 @@
+--- a/app/src/main/java/vn/nghetruyen/app/freesound/Mode3LibraryAssetMatcher.kt
++++ b/app/src/main/java/vn/nghetruyen/app/freesound/Mode3LibraryAssetMatcher.kt
+@@ -8,6 +8,7 @@
+ import vn.nghetruyen.app.NgheTruyenApplication
+ import vn.nghetruyen.app.audio.AudioAssetClassifier
+ import vn.nghetruyen.app.audio.AudioAssetKind
++import vn.nghetruyen.app.audio.AudioPipelineJournal
+ import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
+ import vn.nghetruyen.source.diagnostics.DiagnosticCategory
+ import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
+@@ -125,15 +126,23 @@
+         Mode3E5SemanticEngine.initialize(context.applicationContext)
+     }
+ 
++    private fun semanticPassagesFor(tracks: List<SceneMusicTrackEntity>): List<String> = tracks.asSequence()
++        .filter { it.enabled }
++        .map { indexTrackCached(it).first.sections }
++        .flatMap { sections -> sections.semanticPassages() }
++        .distinct()
++        .toList()
++
+     fun prewarmSemanticIndex(tracks: List<SceneMusicTrackEntity>) {
+-        val passages = tracks.asSequence()
+-            .filter { it.enabled }
+-            .map { indexTrackCached(it).first.sections }
+-            .flatMap { sections -> sections.semanticPassages() }
+-            .toList()
+-        Mode3E5SemanticEngine.requestPrewarm(passages)
++        Mode3E5SemanticEngine.requestPrewarm(semanticPassagesFor(tracks))
+     }
+ 
++    suspend fun prewarmSemanticIndexAwait(
++        tracks: List<SceneMusicTrackEntity>,
++        progress: ((Mode3E5SemanticEngine.IndexProgress) -> Unit)? = null,
++    ): Result<Mode3E5SemanticEngine.IndexResult> =
++        Mode3E5SemanticEngine.prewarmPassagesTracked(semanticPassagesFor(tracks), progress)
++
+     fun bestMatch(
+         need: FreesoundAutoSearchNeed,
+         tracks: List<SceneMusicTrackEntity>,
+@@ -161,11 +170,20 @@
+             .flatMap { it.sections.semanticPassages() }
+             .distinct()
+             .toList()
+-        val e5Ready = Mode3E5SemanticEngine.status().ready
++        val e5Status = Mode3E5SemanticEngine.status()
++        val e5Ready = e5Status.ready
+         val fullyIndexed = e5Ready && semanticPassages.isNotEmpty() &&
+             Mode3E5SemanticEngine.allPassagesCached(semanticPassages)
+         if (!fullyIndexed) {
+-            if (semanticPassages.isNotEmpty()) Mode3E5SemanticEngine.requestPrewarm(semanticPassages)
++            if (semanticPassages.isNotEmpty()) {
++                recordE5NotReady(
++                    need = need,
++                    totalPassages = semanticPassages.size,
++                    cachedPassages = Mode3E5SemanticEngine.cachedPassageCount(semanticPassages),
++                    status = e5Status,
++                )
++                Mode3E5SemanticEngine.requestPrewarm(semanticPassages)
++            }
+             val evaluation = Evaluation(
+                 accepted = null,
+                 topCandidates = emptyList(),
+@@ -830,6 +848,34 @@
+         return (playPenalty + recencyPenalty).coerceAtMost(0.10)
+     }
+ 
++    private fun recordE5NotReady(
++        need: FreesoundAutoSearchNeed,
++        totalPassages: Int,
++        cachedPassages: Int,
++        status: Mode3E5SemanticEngine.Status,
++    ) {
++        val context = appContext as? NgheTruyenApplication ?: return
++        val traceId = "mode3-e5-not-ready:${UUID.randomUUID()}"
++        mark(
++            context = context,
++            name = "MODE3_E5_INDEX_NOT_READY",
++            traceId = traceId,
++            attributes = mapOf(
++                "kind" to need.kind.name,
++                "query" to need.query.take(180),
++                "totalPassages" to totalPassages.toString(),
++                "cachedPassages" to cachedPassages.toString(),
++                "pendingPassages" to (totalPassages - cachedPassages).coerceAtLeast(0).toString(),
++                "installed" to status.installed.toString(),
++                "ready" to status.ready.toString(),
++                "prewarming" to status.prewarming.toString(),
++                "backend" to status.backend,
++                "lastError" to status.lastError.orEmpty().take(240),
++                "selectionAction" to "SKIP_LOCAL_SEMANTIC_MATCH_AND_REQUEST_INDEX",
++            ),
++        )
++    }
++
+     private fun emitDiagnostics(need: FreesoundAutoSearchNeed, evaluation: Evaluation) {
+         val context = appContext as? NgheTruyenApplication ?: return
+         val hintText = need.usages.asSequence()
+@@ -915,6 +961,14 @@
+         traceId: String,
+         attributes: Map<String, String>,
+     ) {
++        AudioPipelineJournal.record(
++            context = context,
++            name = name,
++            sourceId = "mode3-local-selection",
++            traceId = traceId,
++            severity = DiagnosticSeverity.INFO.name,
++            attributes = attributes,
++        )
+         runCatching {
+             context.container.sourceDiagnostics.mark(
+                 name = name,

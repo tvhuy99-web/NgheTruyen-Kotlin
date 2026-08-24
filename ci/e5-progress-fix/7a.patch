@@ -1,0 +1,268 @@
+--- a/app/src/main/java/vn/nghetruyen/app/ui/components/AudioDescriptionNormalizationDialog.kt
++++ b/app/src/main/java/vn/nghetruyen/app/ui/components/AudioDescriptionNormalizationDialog.kt
+@@ -22,10 +22,13 @@
+ import androidx.compose.ui.Modifier
+ import androidx.compose.ui.platform.LocalContext
+ import androidx.compose.ui.unit.dp
++import kotlinx.coroutines.CancellationException
+ import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.Job
++import kotlinx.coroutines.TimeoutCancellationException
+ import kotlinx.coroutines.launch
+ import kotlinx.coroutines.withContext
++import kotlinx.coroutines.withTimeout
+ import java.util.UUID
+ import org.json.JSONArray
+ import org.json.JSONObject
+@@ -33,6 +36,7 @@
+ import vn.nghetruyen.app.ai.AiAuxiliaryJsonResult
+ import vn.nghetruyen.app.audio.AudioAssetClassifier
+ import vn.nghetruyen.app.audio.AudioAssetKind
++import vn.nghetruyen.app.audio.AudioPipelineJournal
+ import vn.nghetruyen.app.core.common.AppResult
+ import vn.nghetruyen.app.core.model.GLOBAL_VOICE_PROFILE_STORY_ID
+ import vn.nghetruyen.app.data.local.SceneMusicTrackEntity
+@@ -102,6 +106,9 @@
+     var applied by remember { mutableStateOf(false) }
+     var job by remember { mutableStateOf<Job?>(null) }
+     var diagnosticTraceId by remember { mutableStateOf("") }
++    var currentBatch by remember { mutableIntStateOf(0) }
++    var batchCount by remember { mutableIntStateOf(0) }
++    var progressStage by remember { mutableStateOf("") }
+ 
+     fun diagnostic(
+         name: String,
+@@ -147,6 +154,15 @@
+             )
+             else -> emptyMap()
+         }
++        val mergedAttributes = operationAttributes + attributes
++        AudioPipelineJournal.record(
++            context = application,
++            name = name,
++            sourceId = "audio-description",
++            traceId = traceId,
++            severity = severity.name,
++            attributes = mergedAttributes,
++        )
+         runCatching {
+             application.container.sourceDiagnostics.mark(
+                 name = name,
+@@ -154,7 +170,7 @@
+                 severity = severity,
+                 sourceId = "audio-description",
+                 traceId = traceId,
+-                attributes = operationAttributes + attributes,
++                attributes = mergedAttributes,
+             )
+         }
+     }
+@@ -177,6 +193,9 @@
+         previews = emptyList()
+         failures = emptyList()
+         providerModel = ""
++        currentBatch = 0
++        batchCount = (targetCount + DESCRIPTION_BATCH_SIZE - 1) / DESCRIPTION_BATCH_SIZE
++        progressStage = "Đang chuẩn bị danh sách…"
+         diagnostic(
+             "AUDIO_DESCRIPTION_NORMALIZATION_START",
+             attributes = mapOf(
+@@ -196,73 +215,146 @@
+                     AudioDescriptionNormalizationScope.ALL_LIBRARY -> true
+                 }
+             }
++            val batches = targets.chunked(DESCRIPTION_BATCH_SIZE)
++            batchCount = batches.size
+             val converted = mutableListOf<AudioDescriptionPreview>()
+             val errors = mutableListOf<String>()
+-            targets.chunked(DESCRIPTION_BATCH_SIZE).forEach { batch ->
+-                val prepared = batch.map { track ->
+-                    PreparedDescription(
+-                        track = track,
+-                        kind = AudioAssetClassifier.classify(track),
+-                        source = audioDescriptionText(track.tagsCsv),
+-                        refreshed = false,
++            try {
++                batches.forEachIndexed { batchIndex, batch ->
++                    currentBatch = batchIndex + 1
++                    progressStage = "Đang gửi lô $currentBatch/$batchCount cho AI…"
++                    val prepared = batch.map { track ->
++                        PreparedDescription(
++                            track = track,
++                            kind = AudioAssetClassifier.classify(track),
++                            source = audioDescriptionText(track.tagsCsv),
++                            refreshed = false,
++                        )
++                    }
++                    val batchStartedMs = System.currentTimeMillis()
++                    diagnostic(
++                        "AUDIO_DESCRIPTION_BATCH_START",
++                        attributes = mapOf(
++                            "batch" to currentBatch.toString(),
++                            "batchCount" to batchCount.toString(),
++                            "batchSize" to batch.size.toString(),
++                            "processedBefore" to processed.toString(),
++                            "pendingBefore" to (total - processed).coerceAtLeast(0).toString(),
++                            "timeoutMs" to DESCRIPTION_BATCH_TIMEOUT_MS.toString(),
++                        ),
+                     )
+-                }
+-                when (val result = application.container.xpkNarrationAiServices.completeAuxiliaryJson(
+-                    storyId = GLOBAL_VOICE_PROFILE_STORY_ID,
+-                    prompt = descriptionBatchPrompt(prepared),
+-                )) {
+-                    is AppResult.Success -> {
+-                        providerModel = "${result.value.provider} / ${result.value.model}"
+-                        val parsed = runCatching { parseDescriptionBatch(result.value, prepared) }
+-                            .getOrElse { error ->
+-                                errors += "Lô ${processed + 1}-${processed + batch.size}: ${error.message ?: "AI trả JSON không hợp lệ."}"
+-                                emptyList()
++                    try {
++                        val result = withTimeout(DESCRIPTION_BATCH_TIMEOUT_MS) {
++                            application.container.xpkNarrationAiServices.completeAuxiliaryJson(
++                                storyId = GLOBAL_VOICE_PROFILE_STORY_ID,
++                                prompt = descriptionBatchPrompt(prepared),
++                            )
++                        }
++                        progressStage = "Đang kiểm tra kết quả lô $currentBatch/$batchCount…"
++                        when (result) {
++                            is AppResult.Success -> {
++                                providerModel = "${result.value.provider} / ${result.value.model}"
++                                val parsed = runCatching { parseDescriptionBatch(result.value, prepared) }
++                                    .getOrElse { error ->
++                                        errors += "Lô ${processed + 1}-${processed + batch.size}: ${error.message ?: "AI trả JSON không hợp lệ."}"
++                                        emptyList()
++                                    }
++                                converted += parsed
++                                val returnedIds = parsed.mapTo(hashSetOf(), AudioDescriptionPreview::trackId)
++                                prepared.filter { it.track.id !in returnedIds }.forEach { missing ->
++                                    errors += "${missing.track.title}: AI không trả kết quả hợp lệ."
++                                }
+                             }
+-                        converted += parsed
+-                        val returnedIds = parsed.mapTo(hashSetOf(), AudioDescriptionPreview::trackId)
+-                        prepared.filter { it.track.id !in returnedIds }.forEach { missing ->
+-                            errors += "${missing.track.title}: AI không trả kết quả hợp lệ."
++                            is AppResult.Failure -> errors += "Lô $currentBatch/$batchCount: ${result.message}"
+                         }
++                    } catch (timeout: TimeoutCancellationException) {
++                        val message = "Lô $currentBatch/$batchCount quá ${DESCRIPTION_BATCH_TIMEOUT_MS / 1000} giây; đã bỏ qua lô này để không treo toàn bộ quá trình."
++                        errors += message
++                        diagnostic(
++                            "AUDIO_DESCRIPTION_BATCH_TIMEOUT",
++                            severity = DiagnosticSeverity.WARN,
++                            attributes = mapOf(
++                                "batch" to currentBatch.toString(),
++                                "batchCount" to batchCount.toString(),
++                                "batchSize" to batch.size.toString(),
++                                "elapsedMs" to (System.currentTimeMillis() - batchStartedMs).toString(),
++                                "action" to "SKIP_BATCH_AND_CONTINUE",
++                            ),
++                        )
+                     }
+-                    is AppResult.Failure -> errors += "AI: ${result.message}"
++                    processed += batch.size
++                    previews = converted.toList()
++                    failures = errors.toList()
++                    progressStage = if (processed >= total) "Đã xử lý xong." else "Đã xong lô $currentBatch/$batchCount; chuyển sang lô kế tiếp…"
++                    diagnostic(
++                        "AUDIO_DESCRIPTION_BATCH_PARSED",
++                        attributes = mapOf(
++                            "batch" to currentBatch.toString(),
++                            "batchCount" to batchCount.toString(),
++                            "batchSize" to batch.size.toString(),
++                            "processed" to processed.toString(),
++                            "total" to total.toString(),
++                            "pending" to (total - processed).coerceAtLeast(0).toString(),
++                            "percent" to if (total <= 0) "100" else ((processed * 100) / total).coerceIn(0, 100).toString(),
++                            "prepared" to prepared.size.toString(),
++                            "convertedTotal" to converted.size.toString(),
++                            "failuresTotal" to errors.size.toString(),
++                            "sourceRefetchedTotal" to "0",
++                            "batchElapsedMs" to (System.currentTimeMillis() - batchStartedMs).toString(),
++                        ),
++                    )
+                 }
+-                processed += batch.size
+-                previews = converted.toList()
++                diagnostic(
++                    "AUDIO_DESCRIPTION_PREVIEW_READY",
++                    attributes = mapOf(
++                        "scope" to mode.name,
++                        "processed" to processed.toString(),
++                        "converted" to converted.size.toString(),
++                        "failures" to errors.size.toString(),
++                        "sourceRefetched" to "0",
++                    ),
++                )
++                diagnostic(
++                    "AUDIO_DESCRIPTION_NORMALIZATION_DONE",
++                    attributes = mapOf(
++                        "scope" to mode.name,
++                        "processed" to processed.toString(),
++                        "converted" to converted.size.toString(),
++                        "failures" to errors.size.toString(),
++                    ),
++                )
++            } catch (cancelled: CancellationException) {
++                progressStage = "Đã dừng theo yêu cầu."
++                diagnostic(
++                    "AUDIO_DESCRIPTION_NORMALIZATION_CANCELLED",
++                    severity = DiagnosticSeverity.WARN,
++                    attributes = mapOf(
++                        "processed" to processed.toString(),
++                        "total" to total.toString(),
++                        "pending" to (total - processed).coerceAtLeast(0).toString(),
++                        "converted" to converted.size.toString(),
++                    ),
++                )
++                throw cancelled
++            } catch (error: Throwable) {
++                errors += "Lỗi chuẩn hóa: ${error.message ?: error.javaClass.simpleName}"
+                 failures = errors.toList()
++                progressStage = "Đã dừng vì lỗi."
+                 diagnostic(
+-                    "AUDIO_DESCRIPTION_BATCH_PARSED",
++                    "AUDIO_DESCRIPTION_NORMALIZATION_FAILED",
++                    severity = DiagnosticSeverity.ERROR,
+                     attributes = mapOf(
+-                        "batchSize" to batch.size.toString(),
+                         "processed" to processed.toString(),
+                         "total" to total.toString(),
+-                        "prepared" to prepared.size.toString(),
+-                        "convertedTotal" to converted.size.toString(),
+-                        "failuresTotal" to errors.size.toString(),
+-                        "sourceRefetchedTotal" to "0",
++                        "pending" to (total - processed).coerceAtLeast(0).toString(),
++                        "errorType" to error.javaClass.simpleName,
++                        "error" to (error.message ?: error.javaClass.simpleName).take(300),
+                     ),
+                 )
++            } finally {
++                running = false
++                job = null
+             }
+-            diagnostic(
+-                "AUDIO_DESCRIPTION_PREVIEW_READY",
+-                attributes = mapOf(
+-                    "scope" to mode.name,
+-                    "processed" to processed.toString(),
+-                    "converted" to converted.size.toString(),
+-                    "failures" to errors.size.toString(),
+-                    "sourceRefetched" to "0",
+-                ),
+-            )
+-            diagnostic(
+-                "AUDIO_DESCRIPTION_NORMALIZATION_DONE",
+-                attributes = mapOf(
+-                    "scope" to mode.name,
+-                    "processed" to processed.toString(),
+-                    "converted" to converted.size.toString(),
+-                    "failures" to errors.size.toString(),
+-                ),
+-            )
+-            running = false
+-            job = null
+         }
+     }
+ 

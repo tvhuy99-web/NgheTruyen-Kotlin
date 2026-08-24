@@ -1,0 +1,373 @@
+--- a/app/src/main/java/vn/nghetruyen/app/freesound/Mode3E5SemanticEngine.kt
++++ b/app/src/main/java/vn/nghetruyen/app/freesound/Mode3E5SemanticEngine.kt
+@@ -17,6 +17,7 @@
+ import java.util.LinkedHashMap
+ import java.util.Locale
+ import java.util.Properties
++import java.util.UUID
+ import java.util.concurrent.atomic.AtomicBoolean
+ import kotlin.math.sqrt
+ import kotlinx.coroutines.CoroutineScope
+@@ -28,6 +29,10 @@
+ import kotlinx.coroutines.launch
+ import okhttp3.OkHttpClient
+ import okhttp3.Request
++import vn.nghetruyen.app.NgheTruyenApplication
++import vn.nghetruyen.app.audio.AudioPipelineJournal
++import vn.nghetruyen.source.diagnostics.DiagnosticCategory
++import vn.nghetruyen.source.diagnostics.DiagnosticSeverity
+ 
+ internal object Mode3E5SemanticEngine {
+     data class DownloadProgress(
+@@ -39,6 +44,28 @@
+             get() = if (totalBytes <= 0L) 0.0 else (downloadedBytes.toDouble() / totalBytes.toDouble()).coerceIn(0.0, 1.0)
+     }
+ 
++    data class IndexProgress(
++        val total: Int,
++        val completed: Int,
++        val pending: Int,
++        val cachedAtStart: Int,
++        val indexedThisRun: Int,
++        val phase: String,
++    ) {
++        val fraction: Double
++            get() = if (total <= 0) 1.0 else (completed.toDouble() / total.toDouble()).coerceIn(0.0, 1.0)
++
++        val percent: Int
++            get() = (fraction * 100.0).toInt().coerceIn(0, 100)
++    }
++
++    data class IndexResult(
++        val total: Int,
++        val cachedAtStart: Int,
++        val indexedThisRun: Int,
++        val elapsedMs: Long,
++    )
++
+     data class Status(
+         val installed: Boolean,
+         val ready: Boolean,
+@@ -126,11 +153,36 @@
+     }
+ 
+     suspend fun install(progress: (DownloadProgress) -> Unit = {}): Result<Unit> = withContext(Dispatchers.IO) {
++        val traceId = "mode3-e5-download:${UUID.randomUUID()}"
++        val startedNanos = System.nanoTime()
++        var lastLoggedPercent = -10
++        diagnostic(
++            name = "MODE3_E5_DOWNLOAD_START",
++            traceId = traceId,
++            attributes = mapOf("approximateBytes" to APPROXIMATE_PACK_BYTES.toString()),
++        )
+         runCatching {
+             val context = requireNotNull(applicationContext) { "Semantic engine chưa được khởi tạo." }
+             val directory = modelDirectory(context).apply { mkdirs() }
+             val model = File(directory, MODEL_FILE)
+             val tokenizer = File(directory, TOKENIZER_FILE)
++            val trackedProgress: (DownloadProgress) -> Unit = { state ->
++                progress(state)
++                val percent = (state.fraction * 100.0).toInt().coerceIn(0, 100)
++                if (percent >= lastLoggedPercent + 10 || percent == 100) {
++                    lastLoggedPercent = percent
++                    diagnostic(
++                        name = "MODE3_E5_DOWNLOAD_PROGRESS",
++                        traceId = traceId,
++                        attributes = mapOf(
++                            "file" to state.currentFile,
++                            "downloadedBytes" to state.downloadedBytes.toString(),
++                            "totalBytes" to state.totalBytes.toString(),
++                            "percent" to percent.toString(),
++                        ),
++                    )
++                }
++            }
+             downloadVerified(
+                 url = MODEL_URL,
+                 destination = model,
+@@ -138,7 +190,7 @@
+                 baseCompletedBytes = 0L,
+                 overallTotalBytes = APPROXIMATE_PACK_BYTES,
+                 label = "Mô hình E5 INT8",
+-                progress = progress,
++                progress = trackedProgress,
+             )
+             downloadVerified(
+                 url = TOKENIZER_URL,
+@@ -147,14 +199,34 @@
+                 baseCompletedBytes = model.length(),
+                 overallTotalBytes = maxOf(APPROXIMATE_PACK_BYTES, model.length() + TOKENIZER_APPROXIMATE_BYTES),
+                 label = "Tokenizer Hugging Face",
+-                progress = progress,
++                progress = trackedProgress,
+             )
+             writeManifest(directory)
+             closeRuntime()
+             synchronized(memoryLock) { memoryCache.clear() }
+             lastError = null
++            diagnostic(
++                name = "MODE3_E5_DOWNLOAD_DONE",
++                traceId = traceId,
++                attributes = mapOf(
++                    "elapsedMs" to ((System.nanoTime() - startedNanos) / 1_000_000L).toString(),
++                    "modelBytes" to model.length().toString(),
++                    "tokenizerBytes" to tokenizer.length().toString(),
++                    "verified" to "true",
++                ),
++            )
+         }.onFailure { error ->
+             lastError = error.message ?: error.javaClass.simpleName
++            diagnostic(
++                name = "MODE3_E5_DOWNLOAD_FAILED",
++                traceId = traceId,
++                severity = DiagnosticSeverity.ERROR,
++                attributes = mapOf(
++                    "errorType" to error.javaClass.simpleName,
++                    "error" to lastError.orEmpty().take(300),
++                    "elapsedMs" to ((System.nanoTime() - startedNanos) / 1_000_000L).toString(),
++                ),
++            )
+         }
+     }
+ 
+@@ -179,46 +251,164 @@
+ 
+     fun requestPrewarm(texts: Collection<String>) {
+         if (texts.isEmpty() || !isInstalled()) return
+-        val normalized = texts.asSequence().map(::semanticText).filter(String::isNotBlank).distinct().toList()
++        val normalized = normalizedPassages(texts)
+         if (normalized.isEmpty()) return
+         if (!prewarmScheduled.compareAndSet(false, true)) return
+         backgroundScope.launch {
+             try {
+-                prewarmPassages(normalized)
++                prewarmPassagesTracked(normalized)
+             } finally {
+                 prewarmScheduled.set(false)
+             }
+         }
+     }
+ 
++    fun cachedPassageCount(texts: Collection<String>): Int =
++        normalizedPassages(texts).count(::hasPassageCache)
++
+     suspend fun prewarmPassages(
+         texts: Collection<String>,
+         progress: ((done: Int, total: Int) -> Unit)? = null,
+-    ): Int = withContext(Dispatchers.IO) {
+-        prewarmMutex.withLock {
+-            val rt = ensureRuntime() ?: return@withLock 0
+-            val missing = texts.asSequence()
+-                .map(::semanticText)
+-                .filter(String::isNotBlank)
+-                .distinct()
+-                .filterNot(::hasPassageCache)
+-                .toList()
+-            if (missing.isEmpty()) return@withLock 0
+-            prewarming = true
+-            try {
+-                var completed = 0
+-                missing.chunked(PREWARM_BATCH_SIZE).forEach { chunk ->
+-                    val vectors = embedBatch(rt, chunk.map { "$PASSAGE_PREFIX$it" })
+-                    chunk.zip(vectors).forEach { (text, vector) ->
+-                        savePassage(text, vector)
++    ): Int {
++        return prewarmPassagesTracked(texts) { state ->
++            progress?.invoke(state.indexedThisRun, (state.total - state.cachedAtStart).coerceAtLeast(0))
++        }.getOrNull()?.indexedThisRun ?: 0
++    }
++
++    suspend fun prewarmPassagesTracked(
++        texts: Collection<String>,
++        progress: ((IndexProgress) -> Unit)? = null,
++    ): Result<IndexResult> = withContext(Dispatchers.IO) {
++        val normalized = normalizedPassages(texts)
++        val traceId = "mode3-e5-index:${UUID.randomUUID()}"
++        val startedNanos = System.nanoTime()
++        runCatching {
++            prewarmMutex.withLock {
++                val total = normalized.size
++                val cachedAtStart = normalized.count(::hasPassageCache)
++                val missing = normalized.filterNot(::hasPassageCache)
++                progress?.invoke(
++                    IndexProgress(
++                        total = total,
++                        completed = cachedAtStart,
++                        pending = missing.size,
++                        cachedAtStart = cachedAtStart,
++                        indexedThisRun = 0,
++                        phase = if (missing.isEmpty()) "LOADING_MODEL" else "LOADING_MODEL",
++                    ),
++                )
++                diagnostic(
++                    name = "MODE3_E5_INDEX_START",
++                    traceId = traceId,
++                    attributes = mapOf(
++                        "totalPassages" to total.toString(),
++                        "cachedAtStart" to cachedAtStart.toString(),
++                        "pending" to missing.size.toString(),
++                        "modelInstalled" to isInstalled().toString(),
++                        "runtimeReady" to (runtime != null).toString(),
++                    ),
++                )
++
++                // Query embeddings still require the runtime after an app restart even if all passage
++                // vectors already exist on disk. The old fast path skipped this and could leave semantic
++                // matching permanently reporting “not ready”.
++                val runtimeStartedNanos = System.nanoTime()
++                val rt = ensureRuntime() ?: error(lastError ?: "Không khởi tạo được Multilingual E5 Small.")
++                diagnostic(
++                    name = "MODE3_E5_RUNTIME_READY",
++                    traceId = traceId,
++                    attributes = mapOf(
++                        "elapsedMs" to ((System.nanoTime() - runtimeStartedNanos) / 1_000_000L).toString(),
++                        "backend" to backendName(),
++                    ),
++                )
++
++                if (missing.isEmpty()) {
++                    val result = IndexResult(
++                        total = total,
++                        cachedAtStart = cachedAtStart,
++                        indexedThisRun = 0,
++                        elapsedMs = (System.nanoTime() - startedNanos) / 1_000_000L,
++                    )
++                    progress?.invoke(
++                        IndexProgress(total, total, 0, cachedAtStart, 0, "DONE"),
++                    )
++                    diagnostic(
++                        name = "MODE3_E5_INDEX_DONE",
++                        traceId = traceId,
++                        attributes = mapOf(
++                            "totalPassages" to total.toString(),
++                            "cachedAtStart" to cachedAtStart.toString(),
++                            "indexedThisRun" to "0",
++                            "elapsedMs" to result.elapsedMs.toString(),
++                            "runtimeLoaded" to "true",
++                        ),
++                    )
++                    return@withLock result
++                }
++
++                prewarming = true
++                try {
++                    var indexedThisRun = 0
++                    progress?.invoke(IndexProgress(total, cachedAtStart, missing.size, cachedAtStart, 0, "INDEXING"))
++                    missing.chunked(PREWARM_BATCH_SIZE).forEachIndexed { batchIndex, chunk ->
++                        val batchStartedNanos = System.nanoTime()
++                        val vectors = embedBatch(rt, chunk.map { "$PASSAGE_PREFIX$it" })
++                        check(vectors.size == chunk.size) { "E5 trả ${vectors.size} vector cho ${chunk.size} mô tả." }
++                        chunk.zip(vectors).forEach { (text, vector) -> savePassage(text, vector) }
++                        indexedThisRun += chunk.size
++                        val completed = (cachedAtStart + indexedThisRun).coerceAtMost(total)
++                        val pending = (total - completed).coerceAtLeast(0)
++                        val state = IndexProgress(total, completed, pending, cachedAtStart, indexedThisRun, "INDEXING")
++                        progress?.invoke(state)
++                        diagnostic(
++                            name = "MODE3_E5_INDEX_BATCH",
++                            traceId = traceId,
++                            attributes = mapOf(
++                                "batch" to (batchIndex + 1).toString(),
++                                "batchSize" to chunk.size.toString(),
++                                "completed" to completed.toString(),
++                                "pending" to pending.toString(),
++                                "percent" to state.percent.toString(),
++                                "batchElapsedMs" to ((System.nanoTime() - batchStartedNanos) / 1_000_000L).toString(),
++                            ),
++                        )
+                     }
+-                    completed += chunk.size
+-                    progress?.invoke(completed, missing.size)
++                    val result = IndexResult(
++                        total = total,
++                        cachedAtStart = cachedAtStart,
++                        indexedThisRun = indexedThisRun,
++                        elapsedMs = (System.nanoTime() - startedNanos) / 1_000_000L,
++                    )
++                    progress?.invoke(IndexProgress(total, total, 0, cachedAtStart, indexedThisRun, "DONE"))
++                    diagnostic(
++                        name = "MODE3_E5_INDEX_DONE",
++                        traceId = traceId,
++                        attributes = mapOf(
++                            "totalPassages" to total.toString(),
++                            "cachedAtStart" to cachedAtStart.toString(),
++                            "indexedThisRun" to indexedThisRun.toString(),
++                            "elapsedMs" to result.elapsedMs.toString(),
++                        ),
++                    )
++                    result
++                } finally {
++                    prewarming = false
+                 }
+-                completed
+-            } finally {
+-                prewarming = false
+             }
++        }.onFailure { error ->
++            prewarming = false
++            lastError = error.message ?: error.javaClass.simpleName
++            diagnostic(
++                name = "MODE3_E5_INDEX_FAILED",
++                traceId = traceId,
++                severity = DiagnosticSeverity.ERROR,
++                attributes = mapOf(
++                    "errorType" to error.javaClass.simpleName,
++                    "error" to lastError.orEmpty().take(300),
++                    "elapsedMs" to ((System.nanoTime() - startedNanos) / 1_000_000L).toString(),
++                ),
++            )
+         }
+     }
+ 
+@@ -434,6 +624,12 @@
+     private fun passageFile(context: Context, text: String): File =
+         File(embeddingDirectory(context), "${sha256Text("$PASSAGE_PREFIX${semanticText(text)}")}.e5")
+ 
++    private fun normalizedPassages(texts: Collection<String>): List<String> = texts.asSequence()
++        .map(::semanticText)
++        .filter(String::isNotBlank)
++        .distinct()
++        .toList()
++
+     private fun semanticText(value: String): String = value
+         .replace(Regex("\\s+"), " ")
+         .trim()
+@@ -537,6 +733,38 @@
+         return digest.joinToString("") { "%02x".format(Locale.ROOT, it) }
+     }
+ 
++    private fun diagnostic(
++        name: String,
++        traceId: String,
++        severity: DiagnosticSeverity = DiagnosticSeverity.INFO,
++        attributes: Map<String, String> = emptyMap(),
++    ) {
++        val application = applicationContext as? NgheTruyenApplication ?: return
++        val mergedAttributes = mapOf(
++            "modelId" to MODEL_ID,
++            "packVersion" to PACK_VERSION.toString(),
++            "backend" to backendName(),
++        ) + attributes
++        AudioPipelineJournal.record(
++            context = application,
++            name = name,
++            sourceId = "mode3-e5",
++            traceId = traceId,
++            severity = severity.name,
++            attributes = mergedAttributes,
++        )
++        runCatching {
++            application.container.sourceDiagnostics.mark(
++                name = name,
++                category = DiagnosticCategory.RUNTIME,
++                severity = severity,
++                sourceId = "mode3-e5",
++                traceId = traceId,
++                attributes = mergedAttributes,
++            )
++        }
++    }
++
+     private const val MODEL_ID = "multilingual-e5-small"
+     private const val PACK_VERSION = 2
+     private const val MODEL_FILE = "model_int8.onnx"

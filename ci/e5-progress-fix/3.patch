@@ -1,0 +1,34 @@
+--- a/app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt
++++ b/app/src/main/java/vn/nghetruyen/app/freesound/FreesoundAutoAudioResolver.kt
+@@ -19,6 +19,7 @@
+ import vn.nghetruyen.app.audio.AmbienceScene
+ import vn.nghetruyen.app.audio.AudioAssetClassifier
+ import vn.nghetruyen.app.audio.AudioAssetKind
++import vn.nghetruyen.app.audio.AudioPipelineJournal
+ import vn.nghetruyen.app.audio.AudioDirectionLimits
+ import vn.nghetruyen.app.audio.AudioDirectionPreferences
+ import vn.nghetruyen.app.audio.SoundEffectCue
+@@ -284,13 +285,22 @@
+             state = operationState,
+             stage = name,
+         )
++        val mergedAttributes = operationAttributes + attributes
++        AudioPipelineJournal.record(
++            context = appContext,
++            name = name,
++            sourceId = "freesound-resolver",
++            traceId = traceId,
++            severity = severity.name,
++            attributes = mergedAttributes,
++        )
+         (appContext as? NgheTruyenApplication)?.container?.sourceDiagnostics?.mark(
+             name = name,
+             category = DiagnosticCategory.RUNTIME,
+             severity = severity,
+             sourceId = "freesound",
+             traceId = traceId,
+-            attributes = operationAttributes + attributes,
++            attributes = mergedAttributes,
+         )
+     }
+ 

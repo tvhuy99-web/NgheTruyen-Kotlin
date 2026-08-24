@@ -4,10 +4,12 @@ on:
   push:
     branches:
       - build/e5-progress-fix-20260824
+    paths-ignore:
+      - "ci/e5-progress-fix/latest-run.txt"
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: e5-progress-fix-${{ github.ref }}
@@ -68,12 +70,14 @@ jobs:
           git diff --check
 
       - name: Build debug APK
+        id: build
         shell: bash
         run: |
           BUILD_SHA="$(git rev-parse HEAD)"
           env -u GITHUB_SHA NGHETRUYEN_BUILD_SHA="$BUILD_SHA" ./gradlew --no-daemon --stacktrace :app:assembleDebug
 
       - name: Package APK
+        if: steps.build.outcome == 'success'
         shell: bash
         run: |
           mkdir -p dist
@@ -83,6 +87,8 @@ jobs:
           git rev-parse HEAD > dist/source-commit.txt
 
       - name: Upload APK
+        id: upload
+        if: steps.build.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: NgheTruyen-E5-Progress-Normalization-Fix-apk
@@ -93,3 +99,26 @@ jobs:
             dist/NgheTruyen-E5-Progress-Normalization-Fix-20260824.apk.sha256
             dist/apk-size-bytes.txt
             dist/source-commit.txt
+
+      - name: Publish run id and result
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p ci/e5-progress-fix
+          {
+            echo "RUN_ID=${GITHUB_RUN_ID}"
+            echo "RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT}"
+            echo "SOURCE_SHA=${GITHUB_SHA}"
+            echo "BUILD_OUTCOME=${{ steps.build.outcome }}"
+            echo "UPLOAD_OUTCOME=${{ steps.upload.outcome }}"
+          } > ci/e5-progress-fix/latest-run.txt
+          git reset
+          git checkout -- . || true
+          git clean -fd -e ci/e5-progress-fix/latest-run.txt || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f ci/e5-progress-fix/latest-run.txt
+          if ! git diff --cached --quiet; then
+            git commit -m "ci: record E5 build run ${GITHUB_RUN_ID} [skip ci]"
+            git push origin HEAD:build/e5-progress-fix-20260824
+          fi

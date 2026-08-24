@@ -1,0 +1,44 @@
+--- a/app/src/main/java/vn/nghetruyen/app/ui/components/AudioDescriptionNormalizationDialog.kt
++++ b/app/src/main/java/vn/nghetruyen/app/ui/components/AudioDescriptionNormalizationDialog.kt
+@@ -330,7 +422,13 @@
+                     Text("TOÀN BỘ: AI xem lại cả tên và mô tả đang lưu của từng file. Mục mô tả trống vẫn được xử lý thận trọng từ tên; nếu tên cũng mơ hồ, mô tả phải giữ mức khái quát và không khẳng định chi tiết chưa biết.")
+                 }
+                 if (running || processed > 0) {
+-                    Text("Đã xử lý: $processed / $total • Thành công: ${previews.size} • Cần kiểm tra: ${failures.size}")
++                    val percent = if (total <= 0) 100 else ((processed * 100) / total).coerceIn(0, 100)
++                    val pending = (total - processed).coerceAtLeast(0)
++                    Text("Tiến độ: $percent%")
++                    Text("Đã xong: $processed / $total • Còn chờ: $pending")
++                    if (batchCount > 0) Text("Lô: ${currentBatch.coerceAtLeast(1)} / $batchCount • tối đa ${DESCRIPTION_BATCH_TIMEOUT_MS / 1000} giây/lô")
++                    if (progressStage.isNotBlank()) Text(progressStage)
++                    Text("Thành công: ${previews.size} • Cần kiểm tra: ${failures.size}")
+                 }
+                 if (providerModel.isNotBlank()) Text("AI: $providerModel")
+                 if (previews.isNotEmpty()) {
+@@ -365,17 +463,8 @@
+         dismissButton = {
+             if (running) {
+                 TextButton(onClick = {
++                    progressStage = "Đang dừng…"
+                     job?.cancel()
+-                    diagnostic(
+-                        "AUDIO_DESCRIPTION_NORMALIZATION_CANCELLED",
+-                        attributes = mapOf(
+-                            "processed" to processed.toString(),
+-                            "total" to total.toString(),
+-                            "converted" to previews.size.toString(),
+-                        ),
+-                    )
+-                    job = null
+-                    running = false
+                 }) { Text("DỪNG") }
+             } else if (!applied) {
+                 TextButton(onClick = onDismiss) { Text("HỦY") }
+@@ -477,6 +566,7 @@
+ }
+ 
+ private const val DESCRIPTION_BATCH_SIZE = 12
++private const val DESCRIPTION_BATCH_TIMEOUT_MS = 120_000L
+ 
+ private val AUDIO_DESCRIPTION_TYPE_MARKER_REGEX = Regex(
+     """(?i)(?:type\s*[:=]\s*(?:sfx[_-]?continuous|continuous|sfx|sound[_-]?effect|ambience|environment|music)|\[(?:continuous|sfx[_-]?continuous|sfx|ambience|environment|music)])""",

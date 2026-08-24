@@ -1,9 +1,8 @@
 name: Export Main Source ZIP
 
 on:
-  push:
-    branches:
-      - build/main-source-zip-20260824
+  pull_request:
+    branches: [main]
     paths:
       - .github/workflows/export-main-source-zip.yml
 
